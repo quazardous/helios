@@ -1485,6 +1485,10 @@ impl Shell {
             .borrow_mut()
             .set_app(shell.core.app.handle().clone());
         shell.listen_decisions();
+        // Every command run passes Helios's policy first (`command.run`).
+        if let Err(e) = crate::command_policy::listen(&*shell.core.app.handle().bus()) {
+            log::error!(target: "helios", "{}: {e}", crate::command_policy::POLICY);
+        }
         if has(&shell, crate::log_panel::PANEL) {
             let log = shell.core.log.clone();
             shell.set_content(crate::log_panel::PANEL, move |ui| {
@@ -1513,21 +1517,26 @@ impl Shell {
             });
         }
         for (panel, view) in [
-            ("helios.vault", 0),
+            (crate::library::RESULTS_PANEL, 0),
             ("helios.filmstrip", 1),
             ("helios.compare", 2),
+            (crate::library::FILTERS_PANEL, 3),
         ] {
             if has(&shell, panel) {
                 let library = shell.focus.library.clone();
                 let comparison = shell.focus.comparison.clone();
                 let window = shell.library_focus.state.clone();
                 shell.set_content(panel, move |ui| {
-                    if view == 0 && library_focus::in_main_window(&window, ui.ctx()) {
+                    if (view == 0 || view == 3) && library_focus::in_main_window(&window, ui.ctx())
+                    {
                         return library_focus::elsewhere_ui(ui);
                     }
                     let mut library = library.borrow_mut();
                     match view {
-                        0 => library.show(ui, &crate::library::GalleryOptions::MAIN_PANEL),
+                        // The main explorer: its Filters feed its Results,
+                        // both drawing the main gallery.
+                        0 => library.show(ui, &crate::library::GalleryOptions::RESULTS_PANEL),
+                        3 => library.show(ui, &crate::library::GalleryOptions::FILTERS_PANEL),
                         1 => library.filmstrip(ui),
                         _ => library.compare_ui(ui, &mut comparison.borrow_mut()),
                     }
@@ -1538,6 +1547,8 @@ impl Shell {
         // cascaded over the image; a loaded layout keeps its own.
         let mut layout = shell.core.app.handle().layout();
         if let Some(lead) = crate::workbench::gather_palettes(&mut layout) {
+            // And the Library's Filters above its Results.
+            crate::workbench::split_filters(&mut layout);
             let notes = shell.core.app.handle().set_layout(layout);
             shell.notes.extend(notes);
             shell.focus.palettes_to_place = Some(lead);
@@ -2025,7 +2036,7 @@ impl Shell {
         let listened = bus.listen_local::<AnswerDecision>(
             crate::decisions::ANSWERED_BY,
             egui_pop::api::bus::bus_contract::ListenOpts::new().owner(crate::decisions::BUS_OWNER),
-            crate::request::listener(crate::decisions::ANSWERED_BY, move |r: &Request, _| {
+            move |r: &Request, (): &mut ()| {
                 answer_decision_on(&viewport, &decisions, r.clone(), "user")
                     .map(|_| ())
                     .inspect_err(|e| {
@@ -2037,7 +2048,8 @@ impl Shell {
                             );
                         }
                     })
-            }),
+                    .map_err(egui_pop::api::bus::bus_contract::HookError::refuse)
+            },
         );
         if let Err(e) = listened {
             log::error!(target: "helios", "{ANSWER}: {e}");
@@ -3527,7 +3539,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "vault.autoAdvance",
-                "Culling: move to the next image after each mark (`on`; toggled when absent)",
+                "Culling: move to the next image after each mark, in the Library view in use (`on`; toggled when absent)",
                 "Library",
             ),
             Box::new(|a, _| Ok(Action::AutoAdvance(a.get("on").and_then(Value::as_bool)))),
@@ -5133,18 +5145,29 @@ impl Shell {
         self.focus.import_source.replace(l.import.clone());
         self.focus.open_in_compare = l.compare;
         let mut lib = self.focus.library.borrow_mut();
-        lib.auto_advance = l.auto_advance;
         lib.import_offered = l.import.is_some();
         if let Some(sort) = crate::library::sort_of(l.sort.as_ref()) {
             lib.set_sort(sort);
         }
         // Each view its own: the main panel's at the top, the others'
         // under `views`.
-        let ids = std::iter::once(crate::library::MAIN_GALLERY.to_string())
-            .chain(l.views.keys().cloned());
+        let mut ids = vec![
+            crate::library::MAIN_GALLERY.to_string(),
+            crate::library::WINDOW_GALLERY.to_string(),
+        ];
+        ids.extend(
+            l.views
+                .keys()
+                .filter(|k| !ids.contains(k))
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         for id in ids {
             let view = crate::library::view_of(Some(l), &id);
+            let advance = crate::library::auto_advance_of(Some(l), &id);
             lib.with_gallery(&id, |lib| {
+                lib.set_auto_advance(advance);
+                lib.set_results(&view.results.clone().unwrap_or_default());
                 if let Some(q) = &view.query {
                     lib.set_filter(crate::library::filter_of(q));
                 }
@@ -5156,6 +5179,54 @@ impl Shell {
                 }
             });
         }
+    }
+
+    /// Culling's auto-advance on or off in the Library view the user
+    /// works in (`vault.autoAdvance`): the other views keep theirs. Kept
+    /// with that view in the workspace (one undo step) when one is open.
+    fn auto_advance_library(&mut self, on: bool, origin: &Origin) -> Result<(), String> {
+        let gallery = self.focus.library.borrow().gallery_id().to_string();
+        if let Some(state) = self.workspace_state() {
+            let mut library = state.bundle.template.library.unwrap_or_default();
+            crate::library::set_auto_advance(&mut library, &gallery, on);
+            // An empty library section is none at all.
+            let library = (library != helios_template::LibraryDesc::default()).then_some(library);
+            if library
+                != self
+                    .workspace_state()
+                    .and_then(|s| s.bundle.template.library)
+            {
+                self.edit_workspace(&json!({ "library": library }), origin)?;
+            }
+        }
+        self.focus.library.borrow_mut().set_auto_advance(on);
+        Ok(())
+    }
+
+    /// Keeps how a Library view shows its results (thumbnails at a size,
+    /// or a list) with that view in the workspace, when one is open: the
+    /// view menu's choice, a zoom.
+    pub fn keep_library_results(
+        &mut self,
+        gallery: &str,
+        results: helios_template::ResultsDesc,
+    ) -> Result<(), String> {
+        let Some(state) = self.workspace_state() else {
+            return Ok(());
+        };
+        let mut library = state.bundle.template.library.unwrap_or_default();
+        let mut view = crate::library::view_of(Some(&library), gallery);
+        view.results = (results != helios_template::ResultsDesc::default()).then_some(results);
+        crate::library::set_view(&mut library, gallery, view);
+        let library = (library != helios_template::LibraryDesc::default()).then_some(library);
+        if library
+            != self
+                .workspace_state()
+                .and_then(|s| s.bundle.template.library)
+        {
+            self.edit_workspace(&json!({ "library": library }), &Origin::User)?;
+        }
+        Ok(())
     }
 
     /// `library.sort`: sorts this window's library, and keeps the sort
@@ -6672,8 +6743,8 @@ impl Shell {
                 .flag(flag)
                 .map_err(|e| format!("vault.flag: {e}"))?,
             Action::AutoAdvance(on) => {
-                let mut library = self.focus.library.borrow_mut();
-                library.auto_advance = on.unwrap_or(!library.auto_advance);
+                let on = on.unwrap_or(!self.focus.library.borrow().auto_advance());
+                self.auto_advance_library(on, &Origin::User)?;
             }
             Action::Place(frame) => {
                 let payload = if frame == crate::contexts::WORKSPACE {

@@ -154,7 +154,7 @@ fn the_library_settings_are_edited_after_creation() {
         ("folder", "copy")
     );
     assert!(h.state().suggests_stacks());
-    assert!(h.state().library().auto_advance);
+    assert!(h.state().library().auto_advance());
     let kept = files.load().unwrap().bundle.template.library.unwrap();
     assert!(kept.auto_advance);
     // Not asked to open in Compare, it does not.
@@ -165,7 +165,7 @@ fn the_library_settings_are_edited_after_creation() {
         &Origin::User,
     );
     assert!(refused.unwrap_err().contains("only a copy is renamed"));
-    assert!(h.state().library().auto_advance);
+    assert!(h.state().library().auto_advance());
     std::fs::remove_dir_all(&root).unwrap();
 }
 

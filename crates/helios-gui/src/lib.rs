@@ -11,6 +11,7 @@ pub mod calibrate;
 pub mod caption;
 pub mod catalogue;
 pub mod clipboard;
+pub mod command_policy;
 pub mod comparison;
 pub mod config;
 pub mod contexts;
@@ -75,7 +76,6 @@ pub mod quit;
 pub mod recent_filters;
 pub mod relay;
 pub mod report;
-pub mod request;
 pub mod rule_editor;
 pub mod rule_editor_ui;
 pub mod scopes;
@@ -127,6 +127,7 @@ pub const PANEL_ICONS: &[(&str, &str)] = &[
     ("helios.viewport", "phosphor:image"),
     ("helios.graph", "phosphor:graph"),
     ("helios.vault", "phosphor:images-square"),
+    ("helios.filters", "phosphor:funnel"),
     ("helios.modules", "phosphor:puzzle-piece"),
     ("helios.masks", "phosphor:selection"),
     ("helios.navigator", "phosphor:compass"),
@@ -171,6 +172,7 @@ pub fn helios_panels_with(experimental: Experimental) -> Vec<PanelSpec> {
         ("helios.viewport", "Image", Center, &[Center][..], true),
         ("helios.graph", "Graph", Center, &[Center][..], true),
         ("helios.vault", "Library", StartSide, &anywhere[..], true),
+        ("helios.filters", "Filters", StartSide, &sides[..], true),
         ("helios.modules", "Modules", StartSide, &sides[..], true),
         ("helios.masks", "Masks", StartSide, &sides[..], true),
         (

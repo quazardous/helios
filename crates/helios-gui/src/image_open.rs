@@ -12,10 +12,11 @@
 //! stay). Only a request that went through is acted on: the
 //! next image loads (its saved edit, the viewport's network: pixels, the
 //! listed exception), and `image.closed` / `image.opened` are said on the
-//! journal with the listeners that ran (`ran`). Both requests are
-//! fail-closed ([`crate::request`]): a listener that fails (an error, a
-//! panic, past its deadline: [`SAVE_DEADLINE`] for the save) refuses the
-//! request, and the listeners after it do not run.
+//! journal with the listeners that ran (`ran`). A listener refuses with
+//! `HookError::refuse(reason)` and the request stops there. Both points
+//! are declared fail-closed (bus-contract's veto): a listener that fails
+//! (an error, a panic, past its deadline: [`SAVE_DEADLINE`] for the save)
+//! refuses the request too, and the listeners after it do not run.
 //!
 //! Before, the order lived in a comment at the one place that switched
 //! images (`persist.close_image` first, "what is drawn now is not saved
@@ -105,28 +106,21 @@ pub struct Switch {
     pub at: f64,
 }
 
-pub use crate::request::Refusal;
+pub use bus_contract::Refusal;
 
 /// What the listeners did, in order; once one refused, the others are
 /// not run.
 #[derive(Clone, Debug, Default)]
 pub struct Switched {
-    /// The listeners that ran, in their order.
+    /// The listeners that went through, in their order (one that
+    /// refused is named by [`Switched::refused`], not here).
     pub ran: Vec<String>,
-    /// The request was refused, by whom and why.
+    /// The request was refused: the listener, why, and whether it
+    /// failed rather than refused (the bus's [`Refusal`]).
     pub refused: Option<Refusal>,
     /// The step `edit.save` wrote: the image, and whether its edit
     /// changes it from its original.
     pub saved: Option<(String, bool)>,
-}
-
-impl crate::request::Refusable for Switched {
-    fn ran(&mut self) -> &mut Vec<String> {
-        &mut self.ran
-    }
-    fn refusal(&mut self) -> &mut Option<Refusal> {
-        &mut self.refused
-    }
 }
 
 /// The request to open an image in the darkroom.
@@ -192,10 +186,12 @@ impl Point for ImageClosed {
 pub const POINTS: &[PointDecl] = &[
     PointDecl::of::<ImageOpen>(
         "Open an image in the darkroom: the edit open saved first; a failed save refuses",
-    ),
+    )
+    .fail_closed(),
     PointDecl::of::<ImageClose>(
         "Close the image open in the darkroom: its edit saved first; a failed save refuses",
-    ),
+    )
+    .fail_closed(),
     PointDecl::of::<ImageOpened>(
         "An image is open in the darkroom: what follows the image open, once, in order",
     ),
@@ -217,9 +213,9 @@ pub fn declare(bus: &dyn Bus) {
 /// Registers `run` as the listener `id` (one of [`ORDER`]'s) of both
 /// [`ImageOpen`] and [`ImageClose`] on `bus`, in its declared place: a
 /// local listener bound to the calling thread (the interface's). `run`
-/// refuses the request with `Err(reason)`; once one refused, the
-/// listeners after it are not run. One there already under `id` is
-/// replaced.
+/// refuses the request with `Err(reason)` (`HookError::refuse`); once one
+/// refused or failed, the listeners after it are not run. One there
+/// already under `id` is replaced.
 ///
 /// # Errors
 /// `id` is not in [`ORDER`], or the bus refused it.
@@ -242,7 +238,11 @@ pub fn listen_local(
             None => opts,
         }
     };
-    let run = Rc::new(crate::request::listener(id, run));
+    let run = Rc::new(move |switch: &Switch, switched: &mut Switched| {
+        run(switch, switched).map_err(HookError::refuse)?;
+        switched.ran.push(id.to_owned());
+        Ok::<(), HookError>(())
+    });
     bus.unlisten(OPEN, id);
     bus.unlisten(CLOSE, id);
     let open = run.clone();
@@ -255,15 +255,22 @@ pub fn listen_local(
 /// Passes `switch` through `image.open` (an image asked) or `image.close`
 /// (none) on `bus`: what the listeners did, in order.
 ///
-/// Fail-closed ([`crate::request::pass`]): a listener that failed (an
-/// error, a panic, past its deadline) refuses the switch, and the
-/// listeners after it do not run.
+/// Fail-closed (both points are declared so): a listener that refused
+/// or failed (an error, a panic, past its deadline) refuses the switch,
+/// named in [`Switched::refused`], and the listeners after it do not run.
 pub fn pass(bus: &dyn Bus, switch: Switch) -> Switched {
-    if switch.to.is_some() {
-        crate::request::pass::<ImageOpen>(bus, switch, Switched::default())
+    declare(bus);
+    let altered = if switch.to.is_some() {
+        bus.alter::<ImageOpen>(switch, Switched::default())
     } else {
-        crate::request::pass::<ImageClose>(bus, switch, Switched::default())
+        bus.alter::<ImageClose>(switch, Switched::default())
+    };
+    for failure in &altered.failures {
+        log::warn!(target: "helios", "{failure}");
     }
+    let mut switched = altered.value;
+    switched.refused = altered.refused;
+    switched
 }
 
 /// Registers `run` as the follower `id` (one of [`FOLLOWERS`]) of both
@@ -331,7 +338,7 @@ pub fn said(switch: &Switch, switched: &Switched) -> Value {
         "ran": switched.ran,
     });
     if let Some(r) = &switched.refused {
-        data["refused"] = json!({ "by": r.by, "reason": r.reason });
+        data["refused"] = json!({ "by": r.listener, "reason": r.reason, "failed": r.failed });
     }
     data
 }
@@ -376,16 +383,75 @@ mod tests {
                 at: 0.0,
             },
         );
-        assert_eq!(refused.ran, [SAVE]);
+        assert!(refused.ran.is_empty(), "{:?}", refused.ran);
         assert_eq!(
             refused.refused,
-            Some(Refusal {
-                by: SAVE.into(),
-                reason: "not saved".into()
-            })
+            Some(Refusal::new(
+                OPEN,
+                SAVE,
+                Some(BUS_OWNER.into()),
+                "not saved"
+            ))
         );
         assert_eq!(*scoped.borrow(), 2);
         assert!(listen_local(&bus, "nobody", |_, _| Ok(())).is_err());
+    }
+
+    /// The points are fail-closed (bus-contract's veto): a save that
+    /// panics refuses the switch as failed, and `history.scope` after it
+    /// does not run, so the image's undo history stays.
+    #[test]
+    fn a_failing_listener_refuses_and_stops_the_listeners_after_it() {
+        let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::new();
+        let scoped = Rc::new(RefCell::new(0));
+        let s = scoped.clone();
+        listen_local(&bus, SCOPE, move |_, _| {
+            *s.borrow_mut() += 1;
+            Ok(())
+        })
+        .unwrap();
+        listen_local(&bus, SAVE, |_, _| panic!("the disk went away")).unwrap();
+        let switched = pass(
+            &bus,
+            Switch {
+                from: Some("a".into()),
+                to: Some("b".into()),
+                at: 0.0,
+            },
+        );
+        let refused = switched.refused.expect("a failed save refuses");
+        assert_eq!(refused.listener, SAVE);
+        assert!(refused.failed);
+        assert!(refused.reason.contains("the disk went away"), "{refused}");
+        assert_eq!(*scoped.borrow(), 0, "nothing after a failed listener runs");
+        let said = said(
+            &Switch::default(),
+            &Switched {
+                refused: Some(refused),
+                ..Switched::default()
+            },
+        );
+        assert_eq!(said["refused"]["by"], SAVE);
+        assert_eq!(said["refused"]["failed"], true);
+    }
+
+    /// A listener past its deadline refuses the switch, even when it
+    /// answered yes: its answer came too late to be read.
+    #[test]
+    fn a_late_listener_refuses() {
+        let bus = egui_pop::api::bus::egui_pop_hooks::Kernel::with_default_deadline(
+            std::time::Duration::from_millis(20),
+        );
+        listen_local(&bus, SCOPE, |_, _| {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            Ok(())
+        })
+        .unwrap();
+        let switched = pass(&bus, Switch::default());
+        let refused = switched.refused.expect("a late listener refuses");
+        assert_eq!(refused.listener, SCOPE);
+        assert!(refused.failed);
+        assert!(refused.reason.contains("deadline"), "{refused}");
     }
 
     #[test]

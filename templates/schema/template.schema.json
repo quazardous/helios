@@ -268,9 +268,15 @@
             "properties": {
               "query": { "$ref": "#/$defs/query" },
               "folder": { "type": "string", "minLength": 1 },
-              "collection": { "type": "string", "minLength": 1 }
+              "collection": { "type": "string", "minLength": 1 },
+              "auto_advance": { "type": "boolean" },
+              "results": { "$ref": "#/$defs/results" }
             }
           }
+        },
+        "results": {
+          "description": "How the main window's Library view shows its results: thumbnails at a size, or a list.",
+          "$ref": "#/$defs/results"
         }
       }
     },
@@ -314,6 +320,14 @@
           "description": "A file name taken already: another name, the file replaced, or the image left out.",
           "enum": ["number", "overwrite", "skip"]
         }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["thumbnails", "list"] },
+        "size": { "type": "integer", "minimum": 48, "maximum": 512 }
       }
     },
     "query": {

@@ -7,7 +7,7 @@
 //! paired, a version switched or removed, an album changed, a stack
 //! expanded, the metadata templates changed: each is asked on
 //! [`LibraryWrite`] (`library.write`) with the undo batch it was asked
-//! in, through bus-contract's `Defer` ([`crate::request::ask`]): the
+//! in, through bus-contract's `Defer` ([`ask`]): the
 //! Library is borrowed while it draws, so its listener runs after the
 //! drawing (egui-pop drains the asks once per pass, and before it
 //! quits). The listener, the host's (`persist.library`), adds each to
@@ -22,7 +22,6 @@ use egui_pop::api::bus::bus_contract::{self, Bus, Point, PointDecl, PointKind, R
 use crate::library::{
     AlbumEdit, Batch, KeywordAsk, MetaEdit, PairAsk, StackAsk, Template, TrashAsk, Turn, VersionAsk,
 };
-use crate::request::Heard;
 
 /// The request a Library write is asked on.
 pub const WRITE: &str = "library.write";
@@ -62,7 +61,7 @@ pub struct LibraryWrite;
 impl Point for LibraryWrite {
     const ID: &'static str = WRITE;
     type Input = WriteAsk;
-    type Value = Heard;
+    type Value = ();
     const KIND: PointKind = PointKind::Request;
 }
 
@@ -70,7 +69,8 @@ impl Point for LibraryWrite {
 /// declared by [`declare`].
 pub const POINTS: &[PointDecl] = &[PointDecl::of::<LibraryWrite>(
     "A write the Library asks of the vault (remove, turn, duplicate, trash, stacks, keywords, metadata, pairs, versions, albums, expansions, templates), with its undo batch: heard after the drawing, sent to the node in ask order",
-)];
+)
+.fail_closed()];
 
 /// Declares [`POINTS`] on `bus` (once).
 pub fn declare(bus: &dyn Bus) {
@@ -81,8 +81,14 @@ pub fn declare(bus: &dyn Bus) {
     }
 }
 
-/// Asks `write` on `bus`, heard after the drawing.
+/// Asks `write` on `bus`, heard after the drawing; on a bus without
+/// `Defer`, at once. Fail-closed (the point is declared so): a listener
+/// that fails refuses the write, and egui-pop's drain logs it.
 pub fn ask(bus: &dyn Bus, write: WriteAsk) {
     declare(bus);
-    crate::request::ask::<LibraryWrite>(bus, write, Heard::default());
+    if let Some(defer) = bus.defer() {
+        defer.ask::<LibraryWrite>(write, ());
+    } else if let Some(r) = bus.alter::<LibraryWrite>(write, ()).refused {
+        log::warn!(target: "helios", "{r}");
+    }
 }

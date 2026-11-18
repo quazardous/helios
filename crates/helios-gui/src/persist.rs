@@ -2331,14 +2331,14 @@ impl<S: Store + 'static> Persist<S> {
         let listened = bus.listen_local::<StacksAnswer>(
             STACKS,
             bus_contract::ListenOpts::new().owner(BUS_OWNER),
-            crate::request::listener(STACKS, move |r: &Request, _| {
+            move |r: &Request, (): &mut ()| {
                 held(&writes).push_back(match r.clone() {
                     Request::Suggest { images } => Write::Suggest(images),
                     Request::Accept { decision, groups } => Write::Accept(decision, groups),
                     Request::Decline { decision } => Write::Decline(decision),
                 });
                 Ok(())
-            }),
+            },
         );
         if let Err(e) = listened {
             log::error!(target: "helios", "{}: {e}", crate::stack_review::ANSWER);
@@ -2350,10 +2350,10 @@ impl<S: Store + 'static> Persist<S> {
         let listened = bus.listen_local::<crate::library_write::LibraryWrite>(
             LIBRARY,
             bus_contract::ListenOpts::new().owner(BUS_OWNER),
-            crate::request::listener(LIBRARY, move |w: &crate::library_write::WriteAsk, _| {
+            move |w: &crate::library_write::WriteAsk, (): &mut ()| {
                 write_asked(&writes, &asked, &node, &library, w.clone());
                 Ok(())
-            }),
+            },
         );
         if let Err(e) = listened {
             log::error!(target: "helios", "{}: {e}", crate::library_write::WRITE);
@@ -2612,7 +2612,7 @@ impl<S: Store + 'static> Persist<S> {
         }
         if let Some(refusal) = &switched.refused {
             handle.publish("helios", None, io::REFUSED, io::said(&switch, &switched));
-            let reason = if refusal.by == io::SAVE {
+            let reason = if refusal.listener == io::SAVE {
                 shell.text(
                     Message::new("gui-edit-not-saved", "The edit was not saved: { $error }")
                         .with("error", refusal.reason.clone()),
@@ -2818,6 +2818,14 @@ impl<S: Store + 'static> Persist<S> {
         self.ask_versions(shell);
         self.keep_templates(shell);
         self.pump(shell);
+        // A view's results shown another way (thumbnails, list, a
+        // size): kept with that view in the workspace.
+        let changes = shell.library_mut().take_results_changes();
+        for (gallery, results) in changes {
+            if let Err(e) = shell.keep_library_results(&gallery, results) {
+                log::warn!(target: "helios", "library results not kept: {e}");
+            }
+        }
         // The library sorted another way: read again in that order.
         if shell.library_mut().take_resort() {
             self.ask_fill(shell, false);

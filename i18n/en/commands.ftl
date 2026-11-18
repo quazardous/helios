@@ -124,6 +124,15 @@ command-helios-filmstrip-dock =
 command-helios-filmstrip-moveTo =
     .title = Move Filmstrip to an area (`area`)
 
+command-helios-filters-detach =
+    .title = Move Filters to a new window
+
+command-helios-filters-dock =
+    .title = Dock Filters back in its area
+
+command-helios-filters-moveTo =
+    .title = Move Filters to an area (`area`)
+
 command-helios-graph-detach =
     .title = Move Graph to a new window
 
@@ -692,7 +701,7 @@ command-theme-select =
     .title = Use a theme by name
 
 command-vault-autoAdvance =
-    .title = Culling: move to the next image after each mark (`on`; toggled when absent)
+    .title = Culling: move to the next image after each mark, in the Library view in use (`on`; toggled when absent)
 
 command-vault-flag-none =
     .title = Take the pick or reject off the selected images

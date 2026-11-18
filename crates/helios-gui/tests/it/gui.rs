@@ -73,6 +73,21 @@ fn a_layout_saved_before_egui_pop_s_workbench_migrates() {
     let open = shell.layout();
     for (a, node) in &layout.areas {
         let now = open.areas.iter().find(|(x, _)| x == a).unwrap();
+        if *a == Area::StartSide {
+            // A panel declared since (the Library's Filters) docks in its
+            // area beside what was saved, which stays as it was.
+            assert_eq!(
+                now.1,
+                Node::Split {
+                    vertical: false,
+                    ratio: 0.7,
+                    a: Box::new(node.clone()),
+                    b: Box::new(tabs(&["helios.filters"], 0)),
+                },
+                "{a:?}"
+            );
+            continue;
+        }
         assert_eq!(&now.1, node, "{a:?}");
     }
     assert_eq!(open.auxiliary, layout.auxiliary);
@@ -85,8 +100,11 @@ fn a_layout_saved_before_egui_pop_s_workbench_migrates() {
             .iter()
             .filter(|n| n.contains("helios."))
             .collect::<Vec<_>>(),
-        ["new palette `helios.masks` floats"],
-        "only the panel declared since is placed"
+        [
+            "new panel `helios.filters` placed in its default area",
+            "new palette `helios.masks` floats"
+        ],
+        "only the panels declared since are placed"
     );
     // Written back as egui-pop's document, it reads the same.
     let again = Layout::from_json(&open.to_json()).unwrap();
@@ -161,9 +179,13 @@ fn the_library_s_bar_and_empty_text_stay_in_its_narrow_panel() {
     // in a row as tall as its button, no measure of a line).
     let line = h.ctx.global_style().text_styles[&egui::TextStyle::Body].size;
     assert!(text.height() >= 2.0 * line, "wrapped: {text:?}");
-    // The search bar above it wraps rather than widen the panel.
-    for part in ["Search images", "Auto-advance"] {
-        let parts: Vec<egui::Rect> = h.query_all_by_label(part).map(|n| n.rect()).collect();
+    // The Results bar above it wraps rather than widen the panel (the
+    // search is in the Filters panel, above it).
+    for part in ["View as", "Auto-advance"] {
+        let parts: Vec<egui::Rect> = h
+            .query_all_by_label_contains(part)
+            .map(|n| n.rect())
+            .collect();
         assert!(!parts.is_empty(), "no `{part}`");
         for r in parts {
             assert!(inside(r), "`{part}` {r:?} in {panel:?}");

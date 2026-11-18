@@ -512,7 +512,7 @@ fn survival_killed_after_moving_a_panel_and_editing_the_workspace_keeps_both() {
     assert_eq!(detached, ["helios.log"]);
     let state = shell.workspace_state().unwrap();
     assert_eq!(state.meta.description, "Harbour");
-    assert!(shell.library().auto_advance);
+    assert!(shell.library().auto_advance());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

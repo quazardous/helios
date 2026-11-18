@@ -558,6 +558,28 @@ Each slice is one PR with its tests; the order matters.
    snapshots compact and narrow; accesskit clicks on sort, View menu
    and Compare; every button of the gallery has an accessible name and
    a tooltip (a test walking the tree); marks still applied by keys to the selection.
+
+   *Replaced by the owner's design (2026-11-17), landed:* a gallery is
+   an **explorer** of two linked parts. Its **Filters** (the search, the
+   restrictions, the facets, the sources; the current photo's marks
+   until L13) hold no photos; its **Results** show them, as thumbnails
+   at a size or as a list (egui-pop's `ThumbGrid` and `ListView`),
+   chosen in a "View as" menu as in a file browser's dialog, with the
+   sort and count, an auto-advance toggle (the fast-forward icon,
+   accessible name and pressed state), Compare and Import in its bar.
+   The main window draws them as two panels, `helios.filters` and
+   `helios.vault` (`library::EXPLORER`), linked by the gallery id both
+   draw; the default layouts keep both in view (the Library place puts
+   the Filters at the start side, the darkroom splits the start side,
+   Filters above). The Library window draws its gallery's two parts side
+   by side. Each view has its own auto-advance and its own results'
+   mode and size, kept with it in the workspace (`library.auto_advance`
+   and `library.results` for the main view, `library.views.<id>` for
+   the others; an older workspace's auto-advance goes to every view).
+   `vault.autoAdvance` acts on the view the user works in. Later: a
+   details mode (columns, egui-pop's `DataTable`), the filters laid out
+   in a bar above the results (an option per Filters panel), a second
+   explorer (gallery instances).
 3. **G3. One grammar.** `rules::parse_text` and `rules::to_text` in
    `helios-vault`, aliases, `-`, `OR`, ranges, relative dates;
    `presence`, `backup`, `cull` as rule fields; the search text, the

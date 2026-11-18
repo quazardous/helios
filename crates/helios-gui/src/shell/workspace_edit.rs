@@ -695,7 +695,6 @@ impl Shell {
                 self.focus.open_in_compare = t.library.as_ref().is_some_and(|l| l.compare);
             }
             let mut lib = self.focus.library.borrow_mut();
-            lib.auto_advance = t.library.as_ref().is_some_and(|l| l.auto_advance);
             lib.import_offered = self.focus.import_source.borrow().is_some();
             // The workspace's sort (validation refused one it does not
             // know).
@@ -716,7 +715,12 @@ impl Shell {
                     .flat_map(|l| l.views.keys().cloned())
                     .collect()
             };
-            let mut ids = vec![crate::library::MAIN_GALLERY.to_string()];
+            // The Library window's view too, with no entry of its own:
+            // it takes the library's auto-advance.
+            let mut ids = vec![
+                crate::library::MAIN_GALLERY.to_string(),
+                crate::library::WINDOW_GALLERY.to_string(),
+            ];
             for id in views(next)
                 .into_iter()
                 .chain(before.map(views).unwrap_or_default())
@@ -729,6 +733,15 @@ impl Shell {
                 let view =
                     |s: &State| crate::library::view_of(s.bundle.template.library.as_ref(), &id);
                 let now = view(next);
+                // Each view's auto-advance and how it shows its results.
+                let advance = crate::library::auto_advance_of(t.library.as_ref(), &id);
+                let results = now.results.clone().unwrap_or_default();
+                lib.with_gallery(&id, |lib| {
+                    lib.set_auto_advance(advance);
+                    if lib.results() != results {
+                        lib.set_results(&results);
+                    }
+                });
                 // The images shown change with the query only: a typed
                 // search stays while the other settings change.
                 let query_changed = changed(&|b| view(b).query != now.query);
@@ -1165,13 +1178,21 @@ impl Shell {
                             .map_err(|e| format!("sort: {e}"))?,
                     ),
                 };
-                // And the folder and the collection, the browse tree's.
+                // And the folder and the collection, the browse tree's,
+                // and how each view shows its results.
                 let kept = self
                     .workspace_state()
                     .and_then(|s| s.bundle.template.library)
                     .unwrap_or_default();
-                let library =
-                    library_of(args, export, sort, kept.folder, kept.collection, kept.views)?;
+                let library = library_of(
+                    args,
+                    export,
+                    sort,
+                    kept.folder,
+                    kept.collection,
+                    kept.views,
+                    kept.results,
+                )?;
                 self.edit_workspace(&json!({ "library": library }), origin)
             }
             "workspace.reset" => {
@@ -1668,6 +1689,7 @@ fn library_of(
     folder: Option<String>,
     collection: Option<String>,
     views: BTreeMap<String, helios_template::ViewDesc>,
+    results: Option<helios_template::ResultsDesc>,
 ) -> Result<Value, String> {
     let t = |k: &str, default: &str| text(args, k).unwrap_or(default).to_string();
     let source = t("source", "none");
@@ -1702,6 +1724,7 @@ fn library_of(
         && folder.is_none()
         && collection.is_none()
         && views.is_empty()
+        && results.is_none()
     {
         return Ok(Value::Null);
     }
@@ -1715,6 +1738,7 @@ fn library_of(
         folder,
         collection,
         views,
+        results,
     }))
 }
 
