@@ -76,6 +76,7 @@ use helios_vault::fields::{
 use serde_json::{Value, json};
 
 mod batch;
+mod details;
 mod gallery;
 mod grouping;
 mod keywords;
@@ -435,6 +436,16 @@ pub struct Entry {
     /// Its edit changed it from the original, as of the last step saved
     /// (`helios_vault::edit::EDITED`; unknown: not edited).
     pub edited: bool,
+    /// The camera's make and model, as its file says.
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    /// The lens, as its file says.
+    pub lens: Option<String>,
+    /// The aperture (f-number), the shutter time in seconds and the ISO,
+    /// as its file says.
+    pub aperture: Option<f64>,
+    pub shutter: Option<f64>,
+    pub iso: Option<f64>,
 }
 
 /// A volume as the library names it: its name, and when and on which
@@ -595,6 +606,12 @@ impl Entry {
             helios_vault::edit::EDITED => {
                 self.edited = value.and_then(Value::as_bool).unwrap_or(false);
             }
+            helios_vault::capture::CAMERA_MAKE => self.camera_make = text(value),
+            helios_vault::capture::CAMERA_MODEL => self.camera_model = text(value),
+            helios_vault::capture::LENS => self.lens = text(value),
+            helios_vault::capture::APERTURE => self.aperture = value.and_then(Value::as_f64),
+            helios_vault::capture::SHUTTER => self.shutter = value.and_then(Value::as_f64),
+            helios_vault::capture::ISO => self.iso = value.and_then(Value::as_f64),
             _ => {}
         }
     }
@@ -2162,40 +2179,6 @@ impl PresenceWords {
 struct Drawn {
     response: egui::Response,
     signals: Vec<Signal<String>>,
-}
-
-/// The photos a Results list shows, in the gallery's order.
-struct ListedPhotos<'a> {
-    entries: &'a [Entry],
-    order: &'a [usize],
-}
-
-impl egui_pop::views::list::ListRows<String> for ListedPhotos<'_> {
-    fn len(&self) -> usize {
-        self.order.len()
-    }
-
-    fn key(&self, row: usize) -> String {
-        self.entries[self.order[row]].id.clone()
-    }
-
-    fn label(&self, row: usize) -> String {
-        self.entries[self.order[row]].name.clone()
-    }
-
-    fn trailing(&self, row: usize) -> Option<String> {
-        let e = &self.entries[self.order[row]];
-        let stars = "★".repeat(e.rating.clamp(0, 5) as usize);
-        let flag = if e.rejected {
-            " ✕"
-        } else if e.picked {
-            " ⚑"
-        } else {
-            ""
-        };
-        let text = format!("{stars}{flag}");
-        (!text.is_empty()).then_some(text)
-    }
 }
 
 struct Items<'a> {
@@ -4183,16 +4166,46 @@ impl Library {
         };
         let can_compare = comparing || self.view.state.selection().len() >= 2;
         ui.horizontal_wrapped(|ui| {
+            // A button never wraps its words: one too wide for the line
+            // goes to the next one whole.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             self.view_menu(ui);
             self.auto_advance_toggle(ui);
-            if ui
+            // Compare's words where they fit on the line, else its icon
+            // alone (named, with its tip), so a narrow panel keeps it on
+            // the line, on one line.
+            let words = egui::WidgetText::from(compare.as_str())
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Button,
+                )
+                .size()
+                .x
+                + 2.0 * ui.spacing().button_padding.x;
+            let narrow = ui.available_width() < words;
+            let clicked = ui
                 .add_enabled_ui(can_compare, |ui| {
-                    helios_ui::action(ui, Action::Secondary, &compare)
+                    if narrow {
+                        let icon = if comparing {
+                            "phosphor:squares-four"
+                        } else {
+                            "phosphor:square-split-horizontal"
+                        };
+                        ui.add(
+                            IconWidget::new(IconSource::named(icon, "library bar"))
+                                .label(&compare)
+                                .sense_click(),
+                        )
+                    } else {
+                        helios_ui::action(ui, Action::Secondary, &compare)
+                    }
                 })
                 .inner
                 .tip(compare_hint)
-                .clicked()
-            {
+                .clicked();
+            if clicked {
                 crate::dialogs::request(
                     ui.ctx(),
                     crate::dialogs::Request::Run(
@@ -4211,21 +4224,29 @@ impl Library {
     }
 
     /// How the results show, as a file browser's dialog offers it:
-    /// thumbnails at a few sizes, or a list. A size zoomed to (Ctrl and
-    /// the wheel, + and -) shows as one more choice.
+    /// thumbnails at a few sizes, a list, or details in columns. A size
+    /// zoomed to (Ctrl and the wheel, + and -) shows as one more choice.
     fn view_menu(&mut self, ui: &mut Ui) {
+        /// A choice of the menu: thumbnails at a size, a list, details.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Shown {
+            Thumbnails(u16),
+            List,
+            Details,
+        }
         let ctx = ui.ctx().clone();
         let word = |m: Message| crate::i18n::text(&ctx, m);
         let size = self.view.state.size().round() as u16;
         let mut current = match self.view.mode {
-            ResultsMode::List => None,
-            ResultsMode::Thumbnails => Some(size),
+            ResultsMode::List => Shown::List,
+            ResultsMode::Details => Shown::Details,
+            ResultsMode::Thumbnails => Shown::Thumbnails(size),
         };
-        let mut options: Vec<(Option<u16>, String)> = THUMB_SIZES
+        let mut options: Vec<(Shown, String)> = THUMB_SIZES
             .iter()
-            .map(|&points| (Some(points), word(thumb_size_name(points))))
+            .map(|&points| (Shown::Thumbnails(points), word(thumb_size_name(points))))
             .collect();
-        if let Some(s) = current
+        if let Shown::Thumbnails(s) = current
             && !THUMB_SIZES.contains(&s)
         {
             let custom = word(
@@ -4233,24 +4254,32 @@ impl Library {
                     .with("size", u32::from(s)),
             );
             let at = THUMB_SIZES.iter().filter(|&&p| p < s).count();
-            options.insert(at, (Some(s), custom));
+            options.insert(at, (Shown::Thumbnails(s), custom));
         }
-        options.push((None, word(Message::new("gui-library-view-list", "List"))));
+        options.push((
+            Shown::List,
+            word(Message::new("gui-library-view-list", "List")),
+        ));
+        options.push((
+            Shown::Details,
+            word(Message::new("gui-library-view-details", "Details")),
+        ));
         let name = word(Message::new("gui-library-view", "View as"));
         let tip = word(Message::new(
             "gui-library-view-tip",
-            "Show the results as thumbnails of a size, or as a list",
+            "Show the results as thumbnails of a size, as a list, or as details in columns",
         ));
         if helios_ui::choice(ui, "helios.library.view", &name, &mut current, &options)
             .tip(&tip)
             .changed()
         {
             match current {
-                Some(points) => {
+                Shown::Thumbnails(points) => {
                     self.view.mode = ResultsMode::Thumbnails;
                     self.view.state.set_size(f32::from(points));
                 }
-                None => self.view.mode = ResultsMode::List,
+                Shown::List => self.view.mode = ResultsMode::List,
+                Shown::Details => self.view.mode = ResultsMode::Details,
             }
             self.view.results_changed = true;
         }
@@ -4851,6 +4880,8 @@ impl Library {
         let words = PresenceWords::of(ui.ctx());
         let out = if self.view.mode == ResultsMode::List {
             self.results_list(ui, &label)
+        } else if self.view.mode == ResultsMode::Details {
+            self.results_table(ui, &label)
         } else {
             let items = Items {
                 entries: &self.entries,
@@ -5008,15 +5039,17 @@ impl Library {
 
     /// The Results as a list (egui-pop's list view): a row per photo,
     /// its name, its stars and its flag; the selection is the gallery's,
-    /// as in the grid.
+    /// as in the grid; Enter or a double click opens a photo, a drag
+    /// from a row carries photos out ([`details::row_gestures`]).
     fn results_list(&mut self, ui: &mut Ui, label: &str) -> (egui::Response, Vec<Signal<String>>) {
         use egui_pop::views::list::{ListView, Signal as ListSignal};
         let selection = self.view.state.selection();
         let (keys, cursor) = (selection.keys().to_vec(), selection.cursor().cloned());
         self.view.list.set_selection(keys, cursor);
-        let mut rows = ListedPhotos {
+        let mut rows = details::ListedRows {
             entries: &self.entries,
             order: &self.view.order,
+            drawn: Vec::new(),
         };
         let mut list = ListView::new("list")
             .label(label)
@@ -5025,6 +5058,7 @@ impl Library {
             list = list.app(app);
         }
         let out = list.show(ui, &mut self.view.list, &mut rows);
+        let drawn = std::mem::take(&mut rows.drawn);
         let mut signals = Vec::new();
         for s in out.signals {
             match s {
@@ -5037,6 +5071,8 @@ impl Library {
                 }
             }
         }
+        let selection = self.view.state.selection();
+        signals.extend(details::row_gestures(ui, &out.response, &drawn, selection));
         (out.response, signals)
     }
 

@@ -1431,6 +1431,14 @@ gui-library-badge-versions = versions
 
 gui-library-cannot-open = The library cannot be opened: { $error }
 
+gui-library-column-flag = Flag
+
+gui-library-column-iso = ISO
+
+gui-library-column-labels = Labels
+
+gui-library-column-modified = Modified
+
 gui-library-compare = Compare
 
 gui-library-compare-add = Add to comparison
@@ -1761,6 +1769,8 @@ gui-library-view = View as
 
 gui-library-view-custom = Thumbnails, { $size } points
 
+gui-library-view-details = Details
+
 gui-library-view-huge = Extra large thumbnails
 
 gui-library-view-large = Large thumbnails
@@ -1771,7 +1781,7 @@ gui-library-view-medium = Medium thumbnails
 
 gui-library-view-small = Small thumbnails
 
-gui-library-view-tip = Show the results as thumbnails of a size, or as a list
+gui-library-view-tip = Show the results as thumbnails of a size, as a list, or as details in columns
 
 gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
 
