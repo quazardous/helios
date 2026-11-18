@@ -101,6 +101,7 @@ impl Store {
                 paths,
                 seq: None,
                 origin: None,
+                history: false,
             });
             self.announce();
         }

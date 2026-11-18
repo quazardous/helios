@@ -53,18 +53,6 @@ const ALLOWED: &[(&str, &str)] = &[
         "waits: an egui-pop keymap-layer-changed event",
     ),
     (
-        "sync_workspace",
-        "waits: the value store's path listener (ADR 0016); it produces `workspace.applied`",
-    ),
-    (
-        "follow_session",
-        "waits: the value store's history listener (ADR 0016)",
-    ),
-    (
-        "follow_edit_marks",
-        "waits: the value store's path listener (ADR 0016); it produces `edit.changed`",
-    ),
-    (
         "follow_theme",
         "waits: a `theme.installed` event (or a listener on the `theme.load` step)",
     ),
@@ -149,8 +137,10 @@ fn the_scan_finds_calls_named_or_listed() {
 
 /// Every per-pass follower left in `Shell::ui` is listed with its
 /// reason; a new one fails here, and one moved to an event leaves the
-/// list (19 per-pass followers before the first moves, 16 now: the
-/// snapshots' toasts are said with the asks answered after the panels).
+/// list (19 per-pass followers before the first moves; 16 once the
+/// snapshots' toasts were said with the asks answered after the panels;
+/// 13 now: the workspace's state, the workshop session and the edit's
+/// marks follow the values on `values.changed`).
 #[test]
 fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
     let found = followers();
@@ -182,7 +172,7 @@ fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
         "listed but no longer called in `Shell::ui`: {gone:?}; take them off the list"
     );
     assert!(ALLOWED.iter().all(|(_, why)| !why.is_empty()));
-    assert_eq!(found.len(), 16, "{found:?}");
+    assert_eq!(found.len(), 13, "{found:?}");
 }
 
 /// The followers moved to events are not called each pass.
@@ -193,6 +183,9 @@ fn the_followers_moved_to_events_are_not_called_each_pass() {
         "follow_subworkspaces",
         "follow_import_sessions",
         "follow_snapshots",
+        "sync_workspace",
+        "follow_session",
+        "follow_edit_marks",
     ] {
         assert!(
             !found.iter().any(|f| f == moved),

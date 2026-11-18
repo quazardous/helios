@@ -101,6 +101,8 @@ impl Store {
         self.named.retain(|_, g| groups.contains(g));
         self.preview.clear();
         self.history_rev += 1;
+        self.history_moved(None);
+        self.announce();
     }
 }
 

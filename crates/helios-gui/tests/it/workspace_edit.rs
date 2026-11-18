@@ -532,3 +532,63 @@ fn sub_workspaces_are_delegated_and_deleted_as_undo_steps() {
     );
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+/// Renames the workspace "Faces" through its form: one undo step.
+fn renamed(h: &mut Harness<'static, Shell>) {
+    run(h, "workspace.edit", json!(null));
+    answer(h, json!({ "name": "Faces" }));
+    assert_eq!(h.state().window_title(), "Faces — Helios");
+}
+
+#[test]
+fn an_undo_made_while_the_panels_draw_puts_the_state_in_place_in_the_same_pass() {
+    let root = temp("undo-drawing");
+    let (mut h, _, files) = window(&root, "helios.portrait-retouch");
+    let armed = std::rc::Rc::new(std::cell::Cell::new(false));
+    let (values, arm) = (h.state().values().clone(), armed.clone());
+    h.state_mut().set_content("helios.params", move |_ui| {
+        if arm.take() {
+            values.lock().unwrap().undo(&Origin::User).unwrap();
+        }
+    });
+    run(&mut h, "helios.params.focus", json!(null));
+    renamed(&mut h);
+    armed.set(true);
+    h.step();
+    assert!(!armed.get(), "the panel drew and undid");
+    assert_eq!(
+        h.state().window_title(),
+        "work — Helios",
+        "put in place in the pass the undo was made in"
+    );
+    assert_eq!(files.load().unwrap().meta.name, "work");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn an_undo_made_outside_the_pass_or_on_another_thread_is_put_in_place_at_the_next() {
+    let root = temp("undo-thread");
+    let (mut h, _, _) = window(&root, "helios.portrait-retouch");
+    renamed(&mut h);
+    // Outside the pass, as a window drawn apart does.
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    assert_eq!(h.state().window_title(), "Faces — Helios");
+    h.step();
+    assert_eq!(h.state().window_title(), "work — Helios");
+    // On another thread.
+    let values = h.state().values().clone();
+    std::thread::spawn(move || {
+        values.lock().unwrap().redo(&Origin::User).unwrap();
+    })
+    .join()
+    .unwrap();
+    assert_eq!(h.state().window_title(), "work — Helios");
+    h.step();
+    assert_eq!(h.state().window_title(), "Faces — Helios");
+    std::fs::remove_dir_all(&root).unwrap();
+}
