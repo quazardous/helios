@@ -77,7 +77,13 @@ impl World {
             // egui-pop-hooks too: the hook kernel (points, ordered
             // listeners), with no dependency at all.
             World::Engine | World::Forms => &["egui-pop-model", "egui-pop-hooks"],
-            World::Visual => &["egui-pop-model", "egui-pop-hooks", "egui_hud", "egui_fit"],
+            World::Visual => &[
+                "egui-pop-model",
+                "egui-pop-hooks",
+                "egui_hud",
+                "egui_fit",
+                "egui-pop-fit",
+            ],
             World::FormsFramework => &[
                 "egui-pop",
                 "egui-pop-model",
@@ -91,6 +97,7 @@ impl World {
                 "egui-pop-i18n",
                 "egui_hud",
                 "egui_fit",
+                "egui-pop-fit",
             ],
             World::Shell => &[
                 "eframe",

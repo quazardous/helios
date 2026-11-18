@@ -13,7 +13,11 @@
 //! (outlined), the arrow keys moving the active photo, the culling keys
 //! marking it, zoom and pan synchronised by default.
 
-use egui_pop::views::library::compare::{CompareState, MAX_PANES, PaneView};
+use egui_pop::views::library::compare::{CompareState, PANE_LIMIT, PaneView};
+
+/// How many photos a comparison holds at most: as many as egui-pop's
+/// Compare surface lays out (a 4 by 4 survey).
+pub const MAX_PANES: usize = PANE_LIMIT;
 
 /// Compares photos side by side, in the Compare place (`images`, else
 /// the selection): Lightroom's C. Without `images` while comparing, it
@@ -26,7 +30,8 @@ pub const COMMAND: &str = "library.compare";
 pub const LEAVE_COMMAND: &str = "compare.leave";
 
 /// Adds photos to the open comparison (`images`, else the gallery's
-/// selection), after those compared; at most [`MAX_PANES`] in all.
+/// selection), after those compared or before the one at `at`; at most
+/// [`MAX_PANES`] in all.
 pub const ADD_COMMAND: &str = "compare.add";
 
 /// Takes photos out of the comparison (`images`, else the active one);
@@ -49,7 +54,7 @@ pub const ACTIVE_COMMAND: &str = "compare.active";
 #[derive(Clone, Debug)]
 pub struct Comparison {
     /// The photos compared, in order. Empty: the selection is compared
-    /// (two to [`MAX_PANES`] photos), as in the Library's Compare tab.
+    /// (one to [`MAX_PANES`] photos), as in the Library's Compare tab.
     photos: Vec<String>,
     /// The active photo's place among those shown.
     active: usize,
@@ -99,38 +104,79 @@ impl Comparison {
         self.seen = None;
     }
 
-    /// The list once `ids` are added after the photos compared, without
-    /// the ones already there, at most [`MAX_PANES`]: `(list, added)`.
-    pub fn with_added(&self, ids: &[String]) -> (Vec<String>, Vec<String>) {
+    /// The list once `ids` are added before the photo at `at` (none, or
+    /// past the end: after the photos compared), without the ones
+    /// already there, at most [`MAX_PANES`]: `(list, added)`.
+    pub fn with_added(&self, ids: &[String], at: Option<usize>) -> (Vec<String>, Vec<String>) {
         let mut list = self.photos.clone();
+        let mut at = at.unwrap_or(list.len()).min(list.len());
         let mut added = Vec::new();
         for id in ids {
             if list.len() >= MAX_PANES {
                 break;
             }
-            if !list.contains(id) {
-                list.push(id.clone());
+            if !list.contains(id) && !added.contains(id) {
+                list.insert(at, id.clone());
+                at += 1;
                 added.push(id.clone());
             }
         }
         (list, added)
     }
 
+    /// The list once `id` moved to `to` (its place once moved), or
+    /// `None` when it is not compared.
+    pub fn with_moved(&self, id: &str, to: usize) -> Option<Vec<String>> {
+        let mut list = self.photos.clone();
+        let from = list.iter().position(|p| p == id)?;
+        let photo = list.remove(from);
+        list.insert(to.min(list.len()), photo);
+        Some(list)
+    }
+
     /// Edits the list in place (photos added or taken out): the active
     /// photo stays active while it is compared (else the one taking its
-    /// place), the best stays while compared, the zoom and pan are kept.
-    /// The list is trusted: [`Comparison::with_added`] or a removal made
-    /// it.
+    /// place), the best stays while compared, and each photo keeps its
+    /// own zoom and pan wherever it goes in the list.
     pub fn edit(&mut self, photos: Vec<String>) {
         let active = self.photos.get(self.active).cloned();
         let at = self.active;
+        let mut photos = photos;
+        photos.truncate(MAX_PANES);
+        self.follow_views(&photos);
         self.photos = photos;
-        self.photos.truncate(MAX_PANES);
         self.active = active
             .and_then(|a| self.photos.iter().position(|p| *p == a))
             .unwrap_or_else(|| at.min(self.photos.len().saturating_sub(1)));
         self.best = self.best.take().filter(|b| self.photos.contains(b));
         self.seen = None;
+    }
+
+    /// The views kept in step with the list going from the photos
+    /// compared to `next`: those taken out drop theirs, the others carry
+    /// theirs to their new place, those added start at fit.
+    fn follow_views(&mut self, next: &[String]) {
+        let mut list = self.photos.clone();
+        for i in (0..list.len()).rev() {
+            if !next.contains(&list[i]) {
+                list.remove(i);
+                self.view.removed(i);
+            }
+        }
+        for (to, id) in next.iter().enumerate() {
+            match list.iter().position(|p| p == id) {
+                Some(from) if from != to => {
+                    let photo = list.remove(from);
+                    list.insert(to, photo);
+                    self.view.moved(from, to);
+                }
+                Some(_) => {}
+                None => {
+                    list.insert(to.min(list.len()), id.clone());
+                    self.view.inserted(to);
+                }
+            }
+        }
     }
 
     /// Whether the gallery's `selection` changed since last seen (not on
@@ -145,13 +191,13 @@ impl Comparison {
         changed
     }
 
-    /// The photos shown: the chosen ones, else the selection's two to
-    /// [`MAX_PANES`] (none otherwise).
+    /// The photos shown: the chosen ones, else the selection's one to
+    /// [`MAX_PANES`] (none otherwise). One photo is a loupe.
     pub fn shown(&self, selection: &[String]) -> Vec<String> {
         if !self.photos.is_empty() {
             return self.photos.clone();
         }
-        if (2..=MAX_PANES).contains(&selection.len()) {
+        if (1..=MAX_PANES).contains(&selection.len()) {
             selection.to_vec()
         } else {
             Vec::new()
@@ -212,10 +258,8 @@ mod tests {
     fn the_chosen_photos_win_over_the_selection_and_the_arrows_wrap() {
         let mut c = Comparison::default();
         assert!(c.synced, "synchronised by default");
-        assert!(
-            c.shown(&ids(&["a"])).is_empty(),
-            "one photo is no comparison"
-        );
+        assert_eq!(c.shown(&ids(&["a"])), ids(&["a"]), "one photo is a loupe");
+        assert!(c.shown(&[]).is_empty(), "none: the surface's drop hint");
         assert_eq!(c.shown(&ids(&["a", "b"])), ids(&["a", "b"]));
         c.set_photos(ids(&["a", "b", "c"]));
         assert_eq!(c.shown(&ids(&["x", "y"])), ids(&["a", "b", "c"]));
@@ -232,7 +276,8 @@ mod tests {
         assert_eq!(c.active_index(3), 1);
         c.set_photos(ids(&["b", "d"]));
         assert_eq!((c.active_index(2), c.best()), (0, Some("b")));
-        c.set_photos(ids(&["d", "e", "f", "g", "h"]));
+        let many: Vec<String> = (0..MAX_PANES + 2).map(|i| format!("p{i}")).collect();
+        c.set_photos(many);
         assert_eq!(c.photos().len(), MAX_PANES);
         assert_eq!(c.best(), None);
     }
@@ -243,9 +288,15 @@ mod tests {
         c.set_photos(ids(&["a", "b"]));
         c.set_active(1);
         c.set_best(Some("a".into()));
-        let (list, added) = c.with_added(&ids(&["b", "c", "d", "e"]));
-        assert_eq!(list, ids(&["a", "b", "c", "d"]), "four at most");
+        let (list, added) = c.with_added(&ids(&["b", "c", "d"]), None);
+        assert_eq!(list, ids(&["a", "b", "c", "d"]));
         assert_eq!(added, ids(&["c", "d"]), "b was already compared");
+        let (front, _) = c.with_added(&ids(&["x", "y"]), Some(1));
+        assert_eq!(
+            front,
+            ids(&["a", "x", "y", "b"]),
+            "dropped before the pane at 1"
+        );
         c.edit(list);
         let shown = c.shown(&[]);
         assert_eq!(c.active(&shown).map(String::as_str), Some("b"));
@@ -254,6 +305,13 @@ mod tests {
         let shown = c.shown(&[]);
         assert_eq!(c.active(&shown).map(String::as_str), Some("c"));
         assert_eq!(c.best(), Some("a"));
+        // A move keeps the active photo and its place in the list.
+        let moved = c.with_moved("d", 0).expect("d is compared");
+        assert_eq!(moved, ids(&["d", "a", "c"]));
+        c.edit(moved);
+        let shown = c.shown(&[]);
+        assert_eq!(c.active(&shown).map(String::as_str), Some("c"));
+        assert_eq!(c.with_moved("z", 0), None);
         // The best taken out, down to one photo: still a list.
         c.edit(ids(&["d"]));
         assert_eq!(

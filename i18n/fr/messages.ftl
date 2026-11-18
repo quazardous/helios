@@ -1515,8 +1515,6 @@ xmp-reason-unsupported-version = version non prise en charge (lit { $known })
 
 gui-library-auto-advance-tip = Avance automatique : après une note, un drapeau ou un rejet au clavier, passer à la photo suivante
 
-gui-library-compare-hint = Sélectionnez de deux à quatre images pour les comparer
-gui-library-compare-one = Ajoutez une photo pour la comparer à celle-ci (Ajouter à la comparaison)
 gui-library-compare-add = Ajouter à la comparaison
 
 gui-library-compare-leave = Retour à la grille

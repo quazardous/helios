@@ -71,12 +71,12 @@ clip-application-x-helios-param-json.title bcd6c3b8b514812b
 command-activity-show.title 5c53367934640074
 command-calibrate-open.title 55fe1b5697baf66d
 command-compare-active.title c2a981af945b3eeb
-command-compare-add.title 16fd47d58cf8eca7
+command-compare-add.title bb3913e654b6c55f
 command-compare-clear.title a67979a73cbe2e26
 command-compare-next.title 6a4e045ce2fd0a54
 command-compare-previous.title 76e72bf6ba4bc334
 command-compare-remove.title 355f94f36d21e497
-command-compare-set.title ff731dd23189b7cc
+command-compare-set.title 198ac97ff33564bc
 command-compare-sync.title b6c37169cb876d53
 command-decision-accept.title 97a9433a6753c218
 command-decision-acceptAbove.title 3774ecbaaaa24ddd
@@ -1001,10 +1001,8 @@ gui-library-badge-versions e6e739b5295225ba
 gui-library-cannot-open 2702ccb4eb8511ba
 gui-library-compare 0b2cb0ac030421c2
 gui-library-compare-add 526921adbac81304
-gui-library-compare-hint ef5d43662fafd120
 gui-library-compare-leave e4fe8ae6c13fec9d
 gui-library-compare-leave-tip 37d98832afe242e0
-gui-library-compare-one ac753b0189d54c06
 gui-library-compare-tip e7cd98d9aa0035f5
 gui-library-count e72204ddb791f955
 gui-library-cull-clipped 1052a836d32a2f0e

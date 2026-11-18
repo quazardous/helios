@@ -1435,13 +1435,9 @@ gui-library-compare = Compare
 
 gui-library-compare-add = Add to comparison
 
-gui-library-compare-hint = Select two to four images to compare them
-
 gui-library-compare-leave = Back to grid
 
 gui-library-compare-leave-tip = Leave Compare, back to the grid (C or Escape)
-
-gui-library-compare-one = Add a photo to compare it with this one (Add to comparison)
 
 gui-library-compare-tip = The selected photos side by side (C)
 
