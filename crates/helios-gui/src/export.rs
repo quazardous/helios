@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use helios_core::jobs::Jobs;
-use helios_core::{Bus, Engine, Image, Scheduler};
+use helios_core::{Engine, Image, Scheduler};
 use helios_export::batch::{self, BatchRequest, Item, Line};
 use helios_inspect::client::Client;
 use helios_template::Bundle;
@@ -119,7 +119,7 @@ impl Exporter {
         let budget = helios_cache::Service::global()
             .budget(helios_cache::Tier::Ram)
             .map(|b| b as usize);
-        let engine = Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget));
+        let engine = Arc::new(Engine::with_budget(crate::bus(), budget));
         Self::with_engine(node, jobs, lines, wake, workers, engine)
     }
 
@@ -134,7 +134,7 @@ impl Exporter {
     ) -> Self {
         // Its own bus: the scheduler's events are no one's on the
         // desktop; the jobs' go to the shell's.
-        let own = Arc::new(Bus::new());
+        let own = crate::bus();
         Exporter {
             node,
             scheduler: Some(Scheduler::new(own, workers.max(1))),

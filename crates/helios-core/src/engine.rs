@@ -56,7 +56,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
-use crate::bus::{Bus, Event};
+use crate::bus::{Bus, Event, FactDecl};
 use crate::cancel;
 use crate::describe::Describe;
 use crate::error::Error;
@@ -70,6 +70,15 @@ use crate::network::{Expansion, Network, Wire};
 use crate::params::Params;
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
 use helios_cache::Lru;
+
+/// The engine's fact kinds.
+pub const FACTS: &[FactDecl] = &[
+    FactDecl::of::<RenderRequested>("A render was asked for"),
+    FactDecl::of::<StepComputed>("A step was computed, not found in the cache"),
+    FactDecl::of::<GpuFellBack>("A step's GPU variant failed: computed on the CPU"),
+    FactDecl::of::<GpuLost>("The accelerator's device was lost or hung"),
+    FactDecl::of::<CacheSettled>("The cache after a render: what it holds and evicted"),
+];
 
 /// The source name the engine publishes events under.
 const SOURCE: &str = "engine";

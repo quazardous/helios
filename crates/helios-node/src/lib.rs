@@ -77,6 +77,37 @@ use helios_resolve::http::{Api, Http};
 use helios_resolve::{Cached, Resolver, Routed};
 use serde::Deserialize;
 
+/// The fact kinds the node's library publishes (its binary's are in its
+/// `main`).
+pub const FACTS: &[helios_core::FactDecl] = {
+    use helios_core::FactDecl;
+    &[
+        FactDecl::of::<auto_import::Held<'static>>(
+            "An automatic import is held for a confirmation",
+        ),
+        FactDecl::json(
+            "extract.run",
+            "{ run, state, reason?, images?, nodes?, leaves?, tally? }",
+            "An extraction run changed state",
+        ),
+        FactDecl::json(
+            "extract.item",
+            "{ run, item, node, outcome, … }",
+            "One item of an extraction run concluded at a node",
+        ),
+        FactDecl::json(
+            "workflow.rows",
+            "{ run, node, items }",
+            "Rows of a workflow run changed",
+        ),
+        FactDecl::json(
+            "workflow.run",
+            "{ run, title?, state, why?, … }",
+            "A workflow run changed state",
+        ),
+    ]
+};
+
 #[derive(Debug, Deserialize)]
 pub struct Description {
     #[serde(default)]

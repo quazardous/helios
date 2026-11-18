@@ -42,7 +42,7 @@ pub mod trace;
 pub use brick::{
     BrickFamily, BrickPort, BrickSpec, Contract, Form, PortType, Shape, Space, Tolerance,
 };
-pub use bus::{Bus, Envelope, Event};
+pub use bus::{Bus, Envelope, Event, FactDecl};
 pub use curve::Curve;
 pub use describe::Describe;
 pub use engine::{Counters, Engine, FaultKind, Hold};

@@ -2615,7 +2615,7 @@ fn boot(from: BootFrom) -> Booted {
         node_kept,
         ending,
     } = from;
-    let bus = Arc::new(helios_core::Bus::new());
+    let bus = helios_gui::bus();
     // A library that cannot be opened leaves Helios without one: the
     // reason is said, and imports refuse with it. The local node owns the
     // library (docs/design/node-client-split.md, choice A): it saves it

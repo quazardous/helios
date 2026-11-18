@@ -25,7 +25,8 @@
 //!   `raw-egui --check`, `bus --check` and the optional linters that are
 //!   installed (see `lint.rs`).
 //! - `bus --check`: no library crate constructs the bus it declares points
-//!   or listens on; the application supplies it (see `bus.rs`).
+//!   or listens on; the application supplies it. Every typed fact of the
+//!   fact bus is declared in a contract table (see `bus.rs`).
 //! - `raw-egui [--check | --update]`: the raw egui widget calls of the
 //!   desktop shell, per file, may only go down (see `raw_egui.rs`).
 //! - `deps-worlds`: each workspace crate depends only on what its world

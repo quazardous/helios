@@ -32,6 +32,10 @@ use serde::{Deserialize, Serialize};
 
 pub mod batch;
 
+/// The fact kinds this crate publishes.
+pub const FACTS: &[helios_core::FactDecl] =
+    &[helios_core::FactDecl::of::<Written>("A file was written")];
+
 /// An output format.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "format", rename_all = "lowercase")]

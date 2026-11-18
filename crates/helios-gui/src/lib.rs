@@ -109,6 +109,32 @@ pub use workbench::{IMAGE_FIRST, area_named, beside_the_end_side, gather_palette
 use egui_pop::model::ids::PanelId;
 use egui_pop::model::panels::{Area, PanelSpec};
 
+/// Every fact kind the desktop's buses carry, by the table of the crate
+/// that publishes it: what `main` declares on them ([`helios_core::Bus::declare`]).
+/// A node's own kinds, relayed, were checked by the node.
+pub const FACTS: &[&[helios_core::FactDecl]] = &[
+    helios_core::engine::FACTS,
+    helios_core::scheduler::FACTS,
+    helios_core::jobs::FACTS,
+    helios_decision::FACTS,
+    helios_export::FACTS,
+    helios_library::FACTS,
+    helios_node_core::FACTS,
+    helios_values::FACTS,
+    helios_vault::FACTS,
+    helios_vault_sqlite::FACTS,
+    host::FACTS,
+    relay::FACTS,
+];
+
+/// A bus of the desktop, its fact kinds declared ([`FACTS`]): a kind
+/// published that no table holds stops a debug build.
+pub fn bus() -> std::sync::Arc<helios_core::Bus> {
+    let bus = helios_core::Bus::new();
+    bus.declare(FACTS.iter().copied());
+    std::sync::Arc::new(bus)
+}
+
 /// The panels that float over the image as palettes (egui-pop's
 /// `PanelSpec::palette`): floating in a new layout, docked from their
 /// header or `<panel>.dock`, floated again from their tab's menu or

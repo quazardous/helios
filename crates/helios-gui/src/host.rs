@@ -125,6 +125,34 @@ const KINDS: &[(&str, &str)] = &[
 /// name goes in the payload.
 const OTHER: &str = "gui.event";
 
+/// The fact kinds egui-pop's events go under, each with egui-pop's data.
+pub const FACTS: &[helios_core::FactDecl] = {
+    use helios_core::FactDecl;
+    const DATA: &str = "egui-pop's event data";
+    &[
+        FactDecl::json("gui.command.dispatched", DATA, "A command was dispatched"),
+        FactDecl::json("gui.command.done", DATA, "A command ran"),
+        FactDecl::json("gui.command.failed", DATA, "A command failed"),
+        FactDecl::json("gui.dialog.answered", DATA, "A dialog was answered"),
+        FactDecl::json("gui.toast.shown", DATA, "A toast was shown"),
+        FactDecl::json("gui.edit.undone", DATA, "An edit was undone"),
+        FactDecl::json("gui.edit.redone", DATA, "An edit was redone"),
+        FactDecl::json("gui.edit.undo_failed", DATA, "An undo failed"),
+        FactDecl::json("gui.edit.redo_failed", DATA, "A redo failed"),
+        FactDecl::json("gui.history.changed", DATA, "The edit history changed"),
+        FactDecl::json(
+            "gui.history.refused",
+            DATA,
+            "The edit history refused a step",
+        ),
+        FactDecl::json(
+            OTHER,
+            "{ name, data }",
+            "Any other egui-pop event, by its name",
+        ),
+    ]
+};
+
 /// Helios as egui-pop's host.
 pub struct HeliosHost {
     registry: Arc<Mutex<Registry>>,
@@ -442,6 +470,24 @@ mod tests {
             .build(&egui::Context::default())
             .unwrap();
         (app, bus, rx)
+    }
+
+    #[test]
+    fn every_kind_the_host_publishes_and_the_desktop_holds_is_declared_once() {
+        let declared: Vec<_> = FACTS.iter().map(|d| d.kind).collect();
+        for (_, kind) in KINDS {
+            assert!(declared.contains(kind), "{kind} is in no table");
+        }
+        assert!(declared.contains(&OTHER));
+        let mut all: Vec<_> = crate::FACTS
+            .iter()
+            .flat_map(|t| t.iter().map(|d| d.kind))
+            .collect();
+        let n = all.len();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(all.len(), n, "a kind declared twice");
+        assert!(crate::bus().declared("node.link").is_some());
     }
 
     #[test]

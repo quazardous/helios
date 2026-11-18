@@ -67,6 +67,10 @@ use helios_core::{Bus, Event, ParamHint, ParamKind, ParamSpec, ParamWidget, Valu
 use helios_shell::commands::Origin;
 use serde::{Deserialize, Serialize};
 
+/// The fact kinds this crate publishes.
+pub const FACTS: &[helios_core::FactDecl] =
+    &[helios_core::FactDecl::of::<ParamChanged>("A value changed")];
+
 /// The type of a value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

@@ -50,7 +50,7 @@ use std::time::Instant;
 
 use serde_json::{Map, Value as Json, json};
 
-use crate::bus::Bus;
+use crate::bus::{Bus, FactDecl};
 
 /// The bus source of the job events.
 pub const SOURCE: &str = "jobs";
@@ -67,6 +67,44 @@ pub const RESUMED: &str = "job.resumed";
 pub const FINISHED: &str = "job.finished";
 pub const FAILED: &str = "job.failed";
 pub const CANCELLED: &str = "job.cancelled";
+
+/// The job facts, each published with the job's `id`.
+pub const FACTS: &[FactDecl] = &[
+    FactDecl::json(
+        STARTED,
+        "{ id, title, kind, cancellable, pausable, total?, steps?, parent?, weight?, node?, promise?, images? }",
+        "A job started",
+    ),
+    FactDecl::json(
+        PROGRESS,
+        "{ id, done?, total?, item?, item_progress?, step?, step_done?, step_total?, failed?, skipped?, estimate? }",
+        "A job moved on",
+    ),
+    FactDecl::json(
+        ITEM_FAILED,
+        "{ id, item, error }",
+        "One item of a job failed; the job goes on",
+    ),
+    FactDecl::json(LOG, "{ id, text }", "A line a job wrote to its log"),
+    FactDecl::json(CANCELLING, "{ id }", "A job was asked to cancel"),
+    FactDecl::json(
+        PAUSED,
+        "{ id, reason }",
+        "A job waits on something outside it",
+    ),
+    FactDecl::json(RESUMED, "{ id }", "A paused job went on"),
+    FactDecl::json(
+        FINISHED,
+        "{ id, kind, seconds, actions?, result? }",
+        "A job did what it was asked",
+    ),
+    FactDecl::json(FAILED, "{ id, kind, seconds, error }", "A job failed"),
+    FactDecl::json(
+        CANCELLED,
+        "{ id, kind, seconds }",
+        "A job stopped, cancelled",
+    ),
+];
 
 type Cancel = Arc<dyn Fn() + Send + Sync>;
 type Pause = Arc<dyn Fn(bool) + Send + Sync>;

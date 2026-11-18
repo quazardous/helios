@@ -47,7 +47,7 @@ use egui_pop::viewport::source::{Readout, TileSource};
 use egui_pop::viewport::tiles::{exact_scale, scaled_size};
 use egui_pop::viewport::view::{MAX_ZOOM, MIN_ZOOM};
 use egui_pop::viewport::{Compare, Phase, Signal, View, ViewportState, Zoom};
-use helios_core::{Bus, Engine, Graph, Image, NodeId, Region, Value};
+use helios_core::{Engine, Graph, Image, NodeId, Region, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, GestureId, Set, Store};
 
@@ -351,7 +351,7 @@ pub fn engine() -> Arc<Engine> {
     let budget = helios_cache::Service::global()
         .budget(helios_cache::Tier::Ram)
         .map(|b| b as usize);
-    Arc::new(Engine::with_budget(Arc::new(Bus::new()), budget))
+    Arc::new(Engine::with_budget(crate::bus(), budget))
 }
 
 impl Viewport {
