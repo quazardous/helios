@@ -33,11 +33,22 @@
 //!
 //! Each change of the link is said on the bus too: `node.link` with the
 //! node's name, `up`, and why it dropped.
+//!
+//! When the desktop's application bus has a relay (`bus-contract`'s
+//! `Relay`, Helios's fact bus behind it), a second link per node takes in
+//! the node's relayable facts (`subscribe` with `relay`, see
+//! `helios_inspect::Inspector::stream_relay`): each one `ingest`ed with
+//! source `relayed:<name>`, decoded by the codec the desktop declares for
+//! its point, and heard by that point's listeners as a fact published
+//! here. It resumes from its cursor; a node restarted (`restarted`) or a
+//! cursor the node's journal no longer holds (`gap`) says `node.resync`
+//! to the listeners, then goes on from the node's facts.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use egui_pop::api::bus::bus_contract::{self, RelayedEntry};
 use helios_core::Bus;
 use helios_core::jobs::{
     CANCELLED, CANCELLING, FAILED, FINISHED, ITEM_FAILED, LOG, PAUSED, PROGRESS, RESUMED, STARTED,
@@ -170,21 +181,46 @@ impl Default for Timing {
 /// Follows a node's jobs while it lives; dropped, it stops.
 pub struct Relay {
     link: NodeLink,
-    /// Dropped with the relay: its thread stops.
+    /// Dropped with the relay: its threads stop.
     _stop: Sender<()>,
+    _stop_in: Option<Sender<()>>,
     closer: Arc<Mutex<Option<Closer>>>,
+    closer_in: Arc<Mutex<Option<Closer>>>,
 }
 
 impl Relay {
     /// Starts following `link`: its jobs republished on `bus`, its other
-    /// events handed to `events`.
+    /// events handed to `events`, its relayable facts taken in by the
+    /// relay of `hooks` (the application's bus), when it has one.
     pub fn start(
         link: NodeLink,
         bus: Arc<Bus>,
         events: NodeEvents,
+        hooks: Option<Arc<dyn bus_contract::Bus>>,
         timing: Timing,
     ) -> Result<Relay, String> {
         link.check()?;
+        let closer_in: Arc<Mutex<Option<Closer>>> = Arc::default();
+        let stop_in = match hooks.filter(|h| h.relay().is_some()) {
+            None => None,
+            Some(hooks) => {
+                let (stop_tx, stop) = channel();
+                let mut take = TakeIn {
+                    link: link.clone(),
+                    hooks,
+                    events: events.clone(),
+                    timing,
+                    stop,
+                    closer: closer_in.clone(),
+                    cursor: None,
+                };
+                std::thread::Builder::new()
+                    .name(format!("helios-relay-in-{}", link.name))
+                    .spawn(move || take.run())
+                    .map_err(|e| format!("cannot follow node `{}`: {e}", link.name))?;
+                Some(stop_tx)
+            }
+        };
         let (stop_tx, stop) = channel();
         let closer: Arc<Mutex<Option<Closer>>> = Arc::default();
         let mut follow = Follow {
@@ -207,7 +243,9 @@ impl Relay {
         Ok(Relay {
             link,
             _stop: stop_tx,
+            _stop_in: stop_in,
             closer,
+            closer_in,
         })
     }
 
@@ -243,13 +281,14 @@ impl Relay {
     /// Drops the current link, as a network failure would: the relay
     /// connects again (and catches up) at its next attempt.
     pub fn drop_link(&self) {
-        if let Some(c) = self
-            .closer
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-        {
-            c.close();
+        for closer in [&self.closer, &self.closer_in] {
+            if let Some(c) = closer
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+            {
+                c.close();
+            }
         }
     }
 }
@@ -557,6 +596,123 @@ impl Follow {
             self.bus
                 .publish_value(SOURCE, None, FORGOTTEN, json!({ "node": name, "ids": ids }));
         }
+    }
+}
+
+/// The source of a node's facts taken in: `relayed:<name>`.
+pub const RELAYED: &str = "relayed:";
+
+/// The thread taking in a node's relayable facts.
+struct TakeIn {
+    link: NodeLink,
+    /// The desktop's application bus: its relay takes them in.
+    hooks: Arc<dyn bus_contract::Bus>,
+    events: NodeEvents,
+    timing: Timing,
+    stop: Receiver<()>,
+    closer: Arc<Mutex<Option<Closer>>>,
+    /// Where the next link resumes: the node's run and the last fact
+    /// taken in. `None` before the first link, which starts from the
+    /// node's present.
+    cursor: Option<helios_inspect::RelayCursor>,
+}
+
+impl TakeIn {
+    fn stopped(&self) -> bool {
+        !matches!(self.stop.try_recv(), Err(TryRecvError::Empty))
+    }
+
+    fn run(&mut self) {
+        loop {
+            if self.session().is_ok() || self.stopped() {
+                return;
+            }
+            *self.closer.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            match self.stop.recv_timeout(self.timing.retry) {
+                Err(RecvTimeoutError::Timeout) => {}
+                Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+            }
+        }
+    }
+
+    /// One link: take in the node's facts until it drops (`Err`) or the
+    /// relay stops (`Ok`).
+    fn session(&mut self) -> Result<(), String> {
+        let unreachable = |e: std::io::Error| e.to_string();
+        let from = self.cursor.unwrap_or_default();
+        let (ack, mut client) =
+            helios_inspect::subscribe_relay(&self.link.inspect, from).map_err(unreachable)?;
+        let cursor_of = |v: &Value| helios_inspect::RelayCursor {
+            run: v["run"].as_u64().unwrap_or(0),
+            seq: v["seq"].as_u64().unwrap_or(0),
+        };
+        // The first link starts from the node's present: what it
+        // published before the desktop followed it is its state, read
+        // whole by whoever needs it.
+        let skip_to = match self.cursor {
+            None => Some(cursor_of(&ack["present"]).seq),
+            Some(_) => None,
+        };
+        let run = cursor_of(&ack["next"]).run;
+        if self.cursor.is_some() && ack["lost"].is_string() {
+            self.resync(&ack["lost"]);
+        }
+        self.cursor = Some(match (self.cursor, skip_to) {
+            (Some(c), None) if c.run == run => c,
+            (_, seq) => helios_inspect::RelayCursor {
+                run,
+                seq: seq.unwrap_or(0),
+            },
+        });
+        client
+            .set_read_timeout(Some(self.timing.silence))
+            .map_err(unreachable)?;
+        *self.closer.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(client.closer().map_err(unreachable)?);
+        let Some(relay) = self.hooks.relay() else {
+            return Ok(());
+        };
+        let source = format!("{RELAYED}{}", self.link.name);
+        loop {
+            if self.stopped() {
+                return Ok(());
+            }
+            let line = client.read().map_err(unreachable)?;
+            if let Some(e) = line.get("relayed") {
+                let seq = e["seq"].as_u64().unwrap_or(0);
+                if skip_to.is_some_and(|s| seq <= s) {
+                    continue;
+                }
+                let mut entry = RelayedEntry::new(
+                    seq,
+                    e["kind"].as_str().unwrap_or_default(),
+                    e["text"].as_str().unwrap_or_default(),
+                );
+                entry.cause = e["cause"].as_u64();
+                if let Err(refused) = relay.ingest(&source, entry) {
+                    log::warn!(target: "helios", "node `{}`: {refused}", self.link.name);
+                }
+                if let Some(c) = self.cursor.as_mut() {
+                    c.seq = seq;
+                }
+            } else if line["lost"].is_string() {
+                self.resync(&line["lost"]);
+                self.cursor = Some(cursor_of(&line["next"]));
+            } else if let (Some(seq), Some(c)) = (line["heartbeat"].as_u64(), self.cursor.as_mut())
+            {
+                c.seq = c.seq.max(seq);
+            }
+        }
+    }
+
+    /// The node's facts have a hole: every listener reads its state
+    /// again.
+    fn resync(&self, lost: &Value) {
+        let reason = match lost.as_str() {
+            Some("restarted") => "the node restarted",
+            _ => "the node's facts were missed",
+        };
+        self.events.resync(&self.link.name, reason);
     }
 }
 

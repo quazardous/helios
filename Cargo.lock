@@ -2625,6 +2625,7 @@ dependencies = [
 name = "helios-inspect"
 version = "0.92.0"
 dependencies = [
+ "bus-contract",
  "helios-core",
  "serde",
  "serde_json",

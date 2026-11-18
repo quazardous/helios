@@ -7994,6 +7994,7 @@ impl Shell {
             link,
             self.core.jobs.bus().clone(),
             self.core.node_events.clone(),
+            Some(self.core.app.handle().bus()),
             timing,
         )?;
         self.core.relays.borrow_mut().insert(name, relay);

@@ -939,3 +939,17 @@ A line without `"jsonrpc"` is the older protocol, answered as before:
 …}`, and `{"cmd": "subscribe"}` turns the connection into a stream. The
 `helios` CLI still sends it ([cli.md](cli.md)); it goes once every client
 in the tree speaks JSON-RPC.
+
+`{"cmd": "subscribe", "relay": {"run", "seq"}}` streams instead the
+relayable facts of the node's application bus after that cursor
+(`bus-contract`'s `Relay::resume`), for the desktop to take in on its
+own bus (`Relay::ingest`). The first line is `{"ok": true, "relay":
+true, "present", "next", "lost"}`: `present` the node's cursor now (a
+reader starting from now skips what came before), `lost` `"restarted"`
+for a cursor of another run (the node restarted: the reader reads its
+state again, then the run's facts from its start), `"gap"` when the
+facts after the cursor left the journal, else `null`. Then one
+`{"relayed": {seq, kind, cause, text}}` per fact, `text` written by
+the point's codec (JSON that a reader of another version reads,
+unknown fields ignored), a later `{"lost": "gap", "next"}` if the
+reader fell behind, and `{"heartbeat": seq}` when quiet.
