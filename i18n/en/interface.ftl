@@ -224,6 +224,10 @@ setting-system-cache-share =
     .description = The share of the machine's memory the render cache may use when no size is set above; 0 means no limit.
     .label = Render cache share
 
+setting-system-cache-states =
+    .description = Memory the photos' computed states may hold (the shown photo's full-size step, kept so the fit and a zoom do not compute it again, and the recent photos'); 0 means 12.5 % of the machine's memory, between 1 and 4 GiB.
+    .label = Kept photo states
+
 setting-system-cache-textures =
     .description = Graphics memory the grids' thumbnails may hold; beyond it, the thumbnails out of view are freed, those seen longest ago first, and read back from the thumbnail cache when they come back.
     .label = Thumbnail textures

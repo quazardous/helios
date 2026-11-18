@@ -234,6 +234,19 @@ pub const SETTINGS: &[Setting] = &[
         },
     },
     Setting {
+        key: "system.cache.states",
+        concern: Concern::Machine,
+        label: "Kept photo states",
+        about: "Memory the photos' computed states may hold (the shown photo's full-size step, kept so the fit and a zoom do not compute it again, and the recent photos'); 0 means 12.5 % of the machine's memory, between 1 and 4 GiB.",
+        kind: Kind::Number {
+            min: 0.0,
+            max: 1_048_576.0,
+            default: 0.0,
+            unit: "MiB",
+            integer: true,
+        },
+    },
+    Setting {
         key: "system.cache.thumbnails",
         concern: Concern::Machine,
         label: "Thumbnail cache",

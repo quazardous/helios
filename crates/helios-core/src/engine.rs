@@ -50,6 +50,7 @@
 //! says so ([`GpuLost`]).
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -762,6 +763,63 @@ pub struct Engine {
     last_fallback: Mutex<Option<String>>,
 }
 
+/// Full-size steps kept in an engine's cache ([`Engine::hold_at`]): never
+/// evicted nor cleared until it drops. It holds pins, not pixels.
+pub struct Hold {
+    cache: std::sync::Weak<Mutex<Cache>>,
+    keys: Vec<ContentHash>,
+}
+
+impl Hold {
+    /// The steps held.
+    pub fn keys(&self) -> &[ContentHash] {
+        &self.keys
+    }
+
+    /// The bytes the steps held take in the cache now (those computed).
+    pub fn bytes(&self) -> u64 {
+        let Some(cache) = self.cache.upgrade() else {
+            return 0;
+        };
+        let cache = cache.lock().expect("engine cache lock");
+        self.keys.iter().filter_map(|k| cache.order.size(k)).sum()
+    }
+}
+
+impl fmt::Debug for Hold {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Hold")
+            .field("keys", &self.keys.len())
+            .finish()
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        if let Some(cache) = self.cache.upgrade() {
+            let mut cache = cache.lock().expect("engine cache lock");
+            for key in &self.keys {
+                cache.unpin(*key);
+            }
+        }
+    }
+}
+
+/// The keys of the steps a planned render's reduces read at full
+/// resolution, sources aside.
+fn full_size_keys(planned: &Planned) -> Vec<ContentHash> {
+    let mut keys = Vec::new();
+    for step in &planned.steps {
+        if let Work::Reduce { input, .. } = &step.work
+            && !matches!(input.work, Work::Source(..))
+            && !keys.contains(&input.key)
+        {
+            keys.push(input.key);
+        }
+    }
+    keys
+}
+
 /// A step's graph, node, name (an inner node's path) and region.
 type TrackKey = (u64, NodeId, String, Region);
 
@@ -1087,6 +1145,47 @@ impl Engine {
         })
     }
 
+    /// The keys of the full-size steps a render at `scale` reads: the
+    /// content its reduces read at full resolution (a demosaic's output),
+    /// sources aside (the graph holds those). Computes nothing.
+    pub fn full_size_keys(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        region: Region,
+        scale: f64,
+    ) -> Result<Vec<ContentHash>, Error> {
+        Ok(full_size_keys(&self.plan(graph, node, 0, region, scale)?))
+    }
+
+    /// Renders like [`Engine::render_at`] and keeps the full-size steps
+    /// the render read ([`Engine::full_size_keys`]) in the cache until the
+    /// [`Hold`] drops: pinned before the render runs, so no eviction comes
+    /// between their computation and the hold, and never evicted while
+    /// held (the budget may be passed by what is held). The bytes stay
+    /// counted once, in this cache: a holder counts them through
+    /// [`Hold::bytes`], it holds no copy.
+    pub fn hold_at(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        port: &str,
+        region: Region,
+        scale: f64,
+    ) -> Result<Hold, Error> {
+        let mut hold = None;
+        self.render_content_holding(
+            graph,
+            node,
+            port,
+            region,
+            scale,
+            Some(&mut hold),
+            |_, _, _| Ok(()),
+        )?;
+        Ok(hold.expect("a render that ran took its hold"))
+    }
+
     /// Plans and executes a render, then hands the requested step, its
     /// content and the index of the port asked for to `finish` (which reads
     /// it where the caller wants it). A lost or hung device on the way
@@ -1098,6 +1197,22 @@ impl Engine {
         port: &str,
         region: Region,
         scale: f64,
+        finish: impl Fn(&Arc<Step>, &Arc<Content>, usize) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        self.render_content_holding(graph, node, port, region, scale, None, finish)
+    }
+
+    /// [`Engine::render_content`], taking a [`Hold`] on the full-size steps
+    /// into `hold` (when asked) before the render runs.
+    #[allow(clippy::too_many_arguments)]
+    fn render_content_holding<T>(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        port: &str,
+        region: Region,
+        scale: f64,
+        mut hold: Option<&mut Option<Hold>>,
         finish: impl Fn(&Arc<Step>, &Arc<Content>, usize) -> Result<T, Error>,
     ) -> Result<T, Error> {
         if !(scale > 0.0 && scale <= 1.0) {
@@ -1119,6 +1234,10 @@ impl Engine {
         let mut replays = 0;
         loop {
             let planned = self.plan(graph, node, index, region, scale)?;
+            if let Some(hold) = hold.as_deref_mut() {
+                // A replay plans again: the hold follows the last plan.
+                *hold = Some(self.hold(full_size_keys(&planned)));
+            }
             let pins = self.pin(&planned);
             let evictions = self.cache.lock().expect("engine cache lock").evictions;
             let result = self
@@ -1228,6 +1347,18 @@ impl Engine {
         cache.remove(key);
         cache.evictions += 1;
         true
+    }
+
+    /// Pins `keys` until the hold drops.
+    fn hold(&self, keys: Vec<ContentHash>) -> Hold {
+        let mut cache = self.cache.lock().expect("engine cache lock");
+        for key in &keys {
+            *cache.pins.entry(*key).or_default() += 1;
+        }
+        Hold {
+            cache: Arc::downgrade(&self.cache),
+            keys,
+        }
     }
 
     /// Pins every step of a render, counting the steps that read each.

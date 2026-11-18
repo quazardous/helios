@@ -10,6 +10,12 @@
 //! any other asker of the same state: the interface never waits on it. A
 //! newer graph asked while one renders replaces the older one, whose ask
 //! is withdrawn (its computation stops unless another asker wants it).
+//!
+//! The follower also asks for the shown photo's full-size step
+//! ([`StateKind::FullSize`], [`hold`]) and pins it while the photo is
+//! shown: under memory pressure the fit, a zoom and the next edit read it
+//! instead of demosaicing again. Once another photo is shown it stays
+//! kept as long as the router's budget allows, unpinned.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -17,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use helios_core::{Engine, Graph, Image, NodeId, Priority, Region};
 use helios_node_core::image_states::{
-    Compute, Handle, ImageStates, StateError, StateKey, StateKind, Value,
+    Compute, Handle, ImageStates, Ready, StateError, StateKey, StateKind, StatePin, Value,
 };
 
 use crate::engine_source::Shown;
@@ -189,9 +195,92 @@ pub fn ask(
             format!("{}x{} at {scale:.4}", region.width, region.height)
         });
         let image = engine.render_at(&graph, node, &port, region, scale)?;
-        Ok(Arc::new(image) as Value)
+        let bytes = image.bytes() as u64;
+        Ok(Ready::new(image, bytes))
     });
     Ok(states.ask(key, priority, compute))
+}
+
+/// Asks `states` to keep the full-size steps the preview of `node`'s
+/// output reads (the demosaic's output) in `engine`'s cache: a
+/// [`StateKind::FullSize`] state holding them ([`Engine::hold_at`]),
+/// computed with the preview's own render, so it shares the preview's
+/// steps. `None` when the render reads no full-size step (a source
+/// shown as is).
+///
+/// # Errors
+/// The engine's, when it cannot plan the render.
+pub fn hold(
+    states: &ImageStates,
+    engine: &Arc<Engine>,
+    graph: &Arc<Graph>,
+    node: NodeId,
+    port: &str,
+    extent: Region,
+    priority: Priority,
+) -> Result<Option<Handle>, helios_core::Error> {
+    let (scale, region) = plan(extent);
+    let keys = engine.full_size_keys(graph, node, region, scale)?;
+    if keys.is_empty() {
+        return Ok(None);
+    }
+    let mut development = Vec::with_capacity(keys.len() * 32);
+    for k in &keys {
+        development.extend_from_slice(&k.0);
+    }
+    let key = StateKey {
+        photo: format!("graph-{}", graph.id()),
+        development: helios_core::ContentHash::of(&development),
+        state: StateKind::FullSize,
+        size: 0,
+    };
+    let (engine, graph, port) = (engine.clone(), graph.clone(), port.to_string());
+    let compute: Compute = Arc::new(move || {
+        let held = engine.hold_at(&graph, node, &port, region, scale)?;
+        let bytes = held.bytes();
+        Ok(Ready::held(held, bytes))
+    });
+    Ok(Some(states.ask(key, priority, compute)))
+}
+
+/// The shown photo's full-size step: the ask (kept until it lands) and
+/// the pin that keeps it from eviction while the photo is shown.
+struct Kept {
+    _ask: Handle,
+    pin: StatePin,
+}
+
+/// Moves the shown photo's full-size hold to `shown`'s: the same steps
+/// (an edit downstream) keep their ask and pin; others replace them, the
+/// new pin taken before the old one goes.
+fn keep_full_size(
+    kept: &mut Option<Kept>,
+    states: &ImageStates,
+    engine: &Arc<Engine>,
+    shown: &Shown,
+) {
+    match hold(
+        states,
+        engine,
+        &shown.graph,
+        shown.node,
+        &shown.port,
+        shown.extent,
+        Priority::Interactive,
+    ) {
+        Ok(Some(ask)) => {
+            if kept
+                .as_ref()
+                .is_some_and(|k| k.pin.key().development == ask.key().development)
+            {
+                return;
+            }
+            let pin = states.pin(ask.key());
+            *kept = Some(Kept { _ask: ask, pin });
+        }
+        Ok(None) => *kept = None,
+        Err(e) => log::warn!("preview: the full-size step: {e}"),
+    }
 }
 
 /// A preview state's image.
@@ -209,12 +298,14 @@ fn work(
     state: &(Mutex<State>, Condvar),
 ) {
     let mut next = None;
+    let mut full_size = None;
     while let Some(mut job) = next.take().or_else(|| rx.recv().ok()) {
         // Only the newest graph is worth rendering.
         while let Ok(newer) = rx.try_recv() {
             job = newer;
         }
         let (n, shown) = job;
+        keep_full_size(&mut full_size, states, engine, &shown);
         let asked = ask(
             states,
             engine,
@@ -361,5 +452,171 @@ mod tests {
         assert_eq!(mine[2].detail, "256x171");
         assert!(mine[0].end() <= mine[1].end());
         assert!(mine[1].end() <= mine[2].start);
+    }
+
+    /// A demosaic stand-in: it needs full resolution.
+    struct FullSize;
+
+    impl helios_core::Module for FullSize {
+        type Plan = ();
+
+        fn manifest(&self) -> helios_core::Manifest {
+            use helios_core::*;
+            Manifest {
+                name: "full_size".into(),
+                version: 1,
+                description: "a demosaic stand-in".into(),
+                params: vec![],
+                inputs: vec![PortSpec::image("input", 1)],
+                outputs: vec![PortSpec::image("output", 1)],
+                context: vec![],
+                needs: Needs {
+                    overlap: 1,
+                    full_resolution: true,
+                    ..Needs::default()
+                },
+                kind: ModuleKind::Process,
+                family: Family::Detail,
+                role: Role::General,
+            }
+        }
+
+        fn prepare(&self, _: &helios_core::Params, _: &helios_core::Context) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn process(
+            &self,
+            (): &(),
+            inputs: &[&Image],
+            output: Region,
+        ) -> Result<Vec<Image>, String> {
+            let input = inputs[0];
+            Ok(vec![Image::from_fn(output, 1, |x, y, _| {
+                (input.pixel(x - 1, y)[0] + input.pixel(x + 1, y)[0]) * 0.5
+            })])
+        }
+    }
+
+    /// A photo whose full-size step is named `name` (the spans say it).
+    fn photo(name: &str, seed: u32) -> Shown {
+        let mut g = Graph::new();
+        let src = g.add_source(
+            "src",
+            Image::from_fn(Region::sized(600, 400), 1, move |x, y, _| {
+                ((x * 7 + y * 13 + i64::from(seed)) % 97) as f32
+            }),
+        );
+        let node = g
+            .add_module(
+                name,
+                helios_core::ModuleRef::new(FullSize),
+                &helios_core::Params::new(),
+            )
+            .unwrap();
+        g.connect(src, helios_core::graph::SOURCE_PORT, node, "input")
+            .unwrap();
+        Shown::new(Arc::new(g), node, "output").unwrap().unwrap()
+    }
+
+    /// The full-size steps of the node `name` computed, as the engine's
+    /// spans say.
+    fn demosaics(records: &Mutex<Vec<helios_core::trace::Record>>, name: &str) -> usize {
+        let node = format!("node={name} ");
+        records
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.name == "engine.step" && r.detail.contains(&node))
+            .count()
+    }
+
+    /// Waits until `states` holds a ready full-size state of `shown`.
+    fn held(states: &ImageStates, engine: &Arc<Engine>, shown: &Shown) {
+        let (scale, region) = plan(shown.extent);
+        let keys = engine
+            .full_size_keys(&shown.graph, shown.node, region, scale)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !states.list().0.iter().any(|k| {
+            k.state == StateKind::FullSize && k.photo == format!("graph-{}", shown.graph.id())
+        }) {
+            assert!(Instant::now() < deadline, "the full-size step never held");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(keys.len(), 1, "one full-size step");
+    }
+
+    fn fit(engine: &Engine, shown: &Shown) {
+        engine
+            .render_at(
+                &shown.graph,
+                shown.node,
+                "output",
+                Region::sized(300, 200),
+                0.5,
+            )
+            .unwrap();
+    }
+
+    /// #5256 S4: under memory pressure, the shown photo's full-size step
+    /// is kept, so fitting it again demosaics nothing; once another photo
+    /// is shown and the router lets it go, the pressure evicts it.
+    #[test]
+    fn the_shown_photo_s_full_size_step_survives_memory_pressure() {
+        let (listener, records) = helios_core::trace::collect();
+        let bus = Arc::new(helios_core::Bus::new());
+        let states = ImageStates::new(bus.clone(), 2);
+        let engine = Arc::new(Engine::new(bus));
+        let (a, b) = (photo("demosaic-r3-a", 1), photo("demosaic-r3-b", 2));
+        let preview = Preview::new(engine.clone(), states.clone());
+        let ctx = egui::Context::default();
+        preview.follow(Some(a.clone()), &ctx);
+        assert!(preview.wait(Duration::from_secs(30)), "A's preview renders");
+        held(&states, &engine, &a);
+        fit(&engine, &a);
+        assert_eq!(
+            demosaics(&records, "demosaic-r3-a"),
+            1,
+            "one demosaic per open"
+        );
+        // Room for one full-size step (600×400 floats: 960 kB) and a little.
+        engine.set_budget(Some(1_200_000));
+        // Another photo rendered (a compare head, an export): its own
+        // full-size step needs the room.
+        fit(&engine, &b);
+        assert_eq!(demosaics(&records, "demosaic-r3-b"), 1);
+        assert!(
+            engine.counters().evictions > 0,
+            "the budget forced evictions"
+        );
+        fit(&engine, &a);
+        assert_eq!(
+            demosaics(&records, "demosaic-r3-a"),
+            1,
+            "the shown photo's re-fit read its kept full-size step"
+        );
+        // B shown, the router keeping only what fits 1 MB: A's hold goes,
+        // and the pressure evicts its step.
+        states.set_budget(Some(1_000_000));
+        preview.follow(Some(b.clone()), &ctx);
+        assert!(preview.wait(Duration::from_secs(30)), "B's preview renders");
+        held(&states, &engine, &b);
+        // Evicted while A was shown, B's step was computed again.
+        assert_eq!(demosaics(&records, "demosaic-r3-b"), 2);
+        fit(&engine, &b);
+        fit(&engine, &a);
+        drop(listener);
+        assert_eq!(
+            demosaics(&records, "demosaic-r3-a"),
+            2,
+            "unpinned and let go, A's step was evicted"
+        );
+        assert_eq!(
+            demosaics(&records, "demosaic-r3-b"),
+            2,
+            "B's kept while shown"
+        );
+        assert!(states.counters().evicted >= 1);
     }
 }

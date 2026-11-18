@@ -7,7 +7,7 @@
 //!
 //! | listener | settings | what it does |
 //! |---|---|---|
-//! | [`CACHES_BUDGET`] | `system.cache.budget`, `system.cache.share` | the RAM tier's budget, to the cache service and to the engine the viewport, previews and exports render with |
+//! | [`CACHES_BUDGET`] | `system.cache.budget`, `system.cache.share`, `system.cache.states` | the RAM tier's budget, to the cache service and to the engine the viewport, previews and exports render with; the photos' kept states' budget, to the image-state router |
 //! | [`THUMBS_BUDGET`] | `system.cache.thumbnails`, `system.cache.textures` | the library's thumbnail cache limit (on disk), the grids' textures budget |
 //! | [`PLUGINS_VALUES`] | a plugin's own settings | the running plugin is handed its new values, or restarted |
 
@@ -68,10 +68,21 @@ fn is(change: &SettingChange, keys: &[&str]) -> bool {
 }
 
 /// Registers [`CACHES_BUDGET`] on `bus`: the RAM tier's budget, to the
-/// cache service and to `engine`, in the call the setting changed.
-pub fn listen_caches(bus: &dyn Bus, engine: Arc<Engine>) {
+/// cache service and to `engine`, and the kept states' budget to
+/// `states`, in the call the setting changed.
+pub fn listen_caches(
+    bus: &dyn Bus,
+    engine: Arc<Engine>,
+    states: helios_node_core::image_states::ImageStates,
+) {
     bus.unlisten(SettingsChanged::ID, CACHES_BUDGET);
     let listened = bus.listen::<SettingsChanged>(CACHES_BUDGET, opts(), move |change, ()| {
+        if is(change, &[crate::caches::STATES_BUDGET]) {
+            let Some(app) = asking() else { return Ok(()) };
+            let mib = number(&app, crate::caches::STATES_BUDGET).unwrap_or(0.0);
+            states.set_budget(Some(crate::caches::states_budget(mib)));
+            return Ok(());
+        }
         if !is(change, &[BUDGET, SHARE]) {
             return Ok(());
         }
