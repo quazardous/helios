@@ -187,7 +187,8 @@ impl Point for Applied {
 /// bus: declared by [`declare`].
 pub const POINTS: &[PointDecl] = &[PointDecl::of::<Applied>(
     "A workspace's state applied (opened, edited, undone, taken in from its files): who reads it follows",
-)];
+)
+.budget(crate::INTERFACE_PASS_BUDGET)];
 
 /// Declares [`POINTS`] on `bus` (once; a second desktop on the same bus
 /// finds them there).
