@@ -415,7 +415,7 @@ impl ImportWindow {
 
     /// Closes the import focus: nothing more read, the main window drawn
     /// again.
-    fn cancel(&mut self, ctx: &Egui) {
+    fn cancel(&mut self, app: &egui_pop::api::app::AppHandle) {
         let _stall = crate::stall::section("import window: closing");
         crate::start::trace_frame("import window closed");
         self.open = false;
@@ -425,7 +425,7 @@ impl ImportWindow {
         // The connection running gives up on its own thread; a picking
         // goes on there, detached, and says how it ended.
         self.accounts.window_closed();
-        ctx.request_repaint_of(ViewportId::ROOT);
+        super::main_pass::ask(app, WINDOW);
     }
 
     /// Its OS window goes: what still answers (a picking ending, a
@@ -1048,10 +1048,11 @@ impl Shell {
 
     /// Closes the import window as the system's close button does (its
     /// title bar's, past any dialog over it): the import focus closes.
-    pub fn close_import_window(&mut self, ctx: &Egui) {
+    pub fn close_import_window(&mut self, _ctx: &Egui) {
+        let app = self.core.app.handle().clone();
         let mut w = self.import.get_mut();
         if w.open {
-            w.cancel(ctx);
+            w.cancel(&app);
         }
     }
 
@@ -1509,7 +1510,7 @@ impl Shell {
         }
         // Its close button closes the import focus, as the OS window's does.
         if !open && w.open {
-            w.cancel(ctx);
+            w.cancel(&frame.app);
         }
     }
 
@@ -1967,7 +1968,7 @@ impl ImportWindow {
         match event {
             None => {}
             Some(Event::Cancel) => {
-                self.cancel(&ctx);
+                self.cancel(&app);
                 window.close = true;
                 // Closed: nothing more of this pass (no dialog, no choice
                 // kept), the window gone at once.
@@ -2013,7 +2014,7 @@ impl ImportWindow {
                 | Event::Promise(..)),
             ) => {
                 self.events.push(e);
-                ctx.request_repaint_of(ViewportId::ROOT);
+                super::main_pass::ask(&app, WINDOW);
             }
         }
         // The connection running, in a dialog over the window; before

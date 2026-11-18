@@ -1765,6 +1765,11 @@ pub struct Library {
     /// Each entry's place, by id.
     index: HashMap<String, usize>,
     revision: u64,
+    /// Raised when something came in that a window showing the Library
+    /// draws differently (thumbnails, renders, marks, a read answered, a
+    /// selection moved): with `revision`, the [`Library::stamp`] a window
+    /// drawn apart compares to the one it drew.
+    shown: u64,
     /// What a backup state is measured against (`backup:` terms, the
     /// backup facet): the library's strategy and backup volumes.
     backup_rule: helios_vault::Backups,
@@ -1956,6 +1961,7 @@ impl Default for Library {
             import_asked: false,
             index: HashMap::new(),
             revision: 0,
+            shown: 0,
             backup_rule: helios_vault::Backups::default(),
             folders: FolderCounts::Unread,
             albums: None,
@@ -2396,7 +2402,7 @@ impl Library {
 
     /// The volumes the vault knows: what an offline photo names.
     pub fn set_volumes(&mut self, volumes: &[helios_storage::Volume]) {
-        self.volumes = volumes
+        let volumes: HashMap<String, VolumeNote> = volumes
             .iter()
             .map(|v| {
                 (
@@ -2410,6 +2416,10 @@ impl Library {
                 )
             })
             .collect();
+        if self.volumes != volumes {
+            self.volumes = volumes;
+            self.shown_changed();
+        }
     }
 
     /// Each photo's backups, by id, read once per refresh; `badges`: the
@@ -2446,6 +2456,7 @@ impl Library {
 
     /// The facet counts of the filter, as the vault counted them.
     pub fn set_facets(&mut self, facets: helios_vault::Facets) {
+        self.shown_changed();
         self.view.facets = Some(facets);
     }
 
@@ -2575,6 +2586,7 @@ impl Library {
     /// The folders tree's counts, as the vault counted them
     /// ([`helios_vault::Vault::folders`] for the whole Library).
     pub fn set_folders(&mut self, folders: helios_vault::VolumeFolders) {
+        self.shown_changed();
         self.folders = FolderCounts::Read(folders);
     }
 
@@ -2665,6 +2677,7 @@ impl Library {
 
     /// The import sessions as the host read them, newest first.
     pub fn set_imports(&mut self, imports: Vec<ImportSession>) {
+        self.shown_changed();
         self.imports = imports;
     }
 
@@ -2744,6 +2757,7 @@ impl Library {
         if self.quick == images {
             return;
         }
+        self.shown_changed();
         self.quick_set = images.iter().cloned().collect();
         self.quick = images;
         if self.collection().as_deref() == Some(helios_vault::collections::QUICK) {
@@ -2761,6 +2775,7 @@ impl Library {
     /// The albums as the vault holds them; the photos of the album shown
     /// are asked again.
     pub fn set_albums(&mut self, albums: Vec<helios_vault::collections::Album>) {
+        self.shown_changed();
         self.albums = Some(albums);
         if self.collection().is_some() {
             self.ask_query();
@@ -2938,6 +2953,7 @@ impl Library {
     }
 
     pub fn set_entries(&mut self, entries: Vec<Entry>) {
+        self.shown_changed();
         // A photo found changed outside Helios has a new thumbnail under
         // its key: its texture is read again.
         // A photo turned (an undo, another writer) shows its pictures
@@ -3017,6 +3033,26 @@ impl Library {
 
     /// What the views show, in order: a stack's top image first, its
     /// other members right after it.
+    /// Something a window showing the Library draws came in.
+    pub(crate) fn shown_changed(&mut self) {
+        self.shown = self.shown.wrapping_add(1);
+    }
+
+    /// Where the Library stands, as a window drawn apart from the main
+    /// one sees it: it changes whenever something it shows came in or
+    /// moved (thumbnails and renders, marks, the entries and their order,
+    /// a read answered, a selection). A window comparing it with the one
+    /// it drew knows whether it has anything new to draw.
+    pub fn stamp(&self) -> u64 {
+        self.revision.wrapping_add(self.shown)
+    }
+
+    /// Thumbnails or renders sent and not taken yet: the next pass that
+    /// draws the Library takes them.
+    pub fn arrivals_waiting(&self) -> bool {
+        self.sink.wake.pending.load(Ordering::SeqCst)
+    }
+
     fn reorder(&mut self) {
         self.reorder_view();
         // The entries changed for every gallery: each shows them again.
@@ -3119,6 +3155,7 @@ impl Library {
     /// ([`Library::take_resort`]); the selection follows its photos.
     pub fn set_sort(&mut self, sort: helios_vault::Order) {
         if sort != self.view.sort {
+            self.shown_changed();
             self.view.sort = sort;
             self.view.resort = Some(sort);
         }
@@ -3173,6 +3210,7 @@ impl Library {
     /// The history as the vault keeps it; what was used before it was
     /// read goes on top.
     pub fn set_filter_history(&mut self, history: crate::recent_filters::FilterHistory) {
+        self.shown_changed();
         let early = std::mem::take(&mut self.used_early);
         let merged = history.clone().merged(&early);
         if merged != history {
@@ -3534,12 +3572,16 @@ impl Library {
                 }
             }
         }
+        if any {
+            self.shown_changed();
+        }
         any
     }
 
     /// The image's edit changed: its render is drawn until a new one of
     /// the new version lands.
     pub fn edit_changed(&mut self, id: &str) {
+        self.shown_changed();
         *self.heads.generations.entry(id.to_string()).or_default() += 1;
         self.heads.failed.remove(id);
         if let Some(r) = self.heads.renders.get_mut(id) {
@@ -3549,6 +3591,7 @@ impl Library {
 
     /// The workspace's network changed: every render is made again.
     pub fn network_changed(&mut self) {
+        self.shown_changed();
         let ids: Vec<String> = self
             .heads
             .renders
@@ -3632,6 +3675,7 @@ impl Library {
 
     /// Selects one image, by its place in `entries`.
     pub fn select(&mut self, index: usize) {
+        self.shown_changed();
         if let Some(e) = self.entries.get(index) {
             let key = e.id.clone();
             self.view.state.set_selection([key.clone()], Some(key));
@@ -3670,6 +3714,7 @@ impl Library {
 
     /// Selects images by id, the cursor on the last.
     pub fn select_ids(&mut self, ids: &[String]) {
+        self.shown_changed();
         let known: Vec<String> = ids
             .iter()
             .filter(|id| self.index.contains_key(*id))
@@ -3682,6 +3727,7 @@ impl Library {
 
     /// Moves the cursor by `step` among the images shown, within bounds.
     pub fn step(&mut self, step: i64) {
+        self.shown_changed();
         if self.view.order.is_empty() {
             return;
         }
@@ -3699,6 +3745,9 @@ impl Library {
     /// writes a gallery's selection or cursor: the filmstrip keeps its
     /// place while photos are compared.
     pub fn set_compare_active(&mut self, id: Option<String>) {
+        if self.compare_active != id {
+            self.shown_changed();
+        }
         self.compare_active = id;
     }
 
@@ -3781,6 +3830,9 @@ impl Library {
     /// Applies what the library's steps ran (a mark, a selection, a stack
     /// opened); whether marks changed.
     fn handle(&mut self, signals: Vec<Signal<String>>) -> bool {
+        if !signals.is_empty() {
+            self.shown_changed();
+        }
         let mut marked = false;
         for s in signals {
             match s {
@@ -3987,6 +4039,7 @@ impl Library {
     /// Shows a field as the vault holds it, for an image of the library:
     /// after another writer changed it, or after a write failed.
     pub fn show_field(&mut self, image: &str, field: &str, value: Option<&Value>) {
+        self.shown_changed();
         if let Some(i) = self.at(image) {
             let (turns, edited) = (self.entries[i].rotation, self.entries[i].edited);
             self.entries[i].show(field, value);
@@ -4095,6 +4148,7 @@ impl Library {
         }
         any |= self.receive_heads(ctx);
         if any {
+            self.shown_changed();
             ctx.request_repaint();
         }
     }

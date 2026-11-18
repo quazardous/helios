@@ -172,12 +172,14 @@ impl PasteMode {
 impl Library {
     /// Selects nothing: no photo selected, no cursor.
     pub fn select_none(&mut self) {
+        self.shown_changed();
         self.view.state.set_selection(Vec::<String>::new(), None);
     }
 
     /// Selects the photos shown that were not selected; the cursor goes
     /// to the first of them. How many are selected.
     pub fn invert_selection(&mut self) -> usize {
+        self.shown_changed();
         let selected: std::collections::HashSet<String> =
             self.view.state.selection().keys().iter().cloned().collect();
         let keys: Vec<String> = self
@@ -198,6 +200,7 @@ impl Library {
     /// Nothing selected, or the selected photos have no capture day (not
     /// read yet) or are in no stack.
     pub fn select_similar(&mut self, by: Similar) -> Result<usize, String> {
+        self.shown_changed();
         let places = self.places(&self.targets()?);
         let keys: Vec<String> = match by {
             Similar::Day => {
@@ -237,6 +240,7 @@ impl Library {
 
     /// Selects `keys`, the cursor on the first; how many.
     pub(crate) fn set_selected(&mut self, keys: Vec<String>) -> usize {
+        self.shown_changed();
         let cursor = keys.first().cloned();
         let count = keys.len();
         self.view.state.set_selection(keys, cursor);

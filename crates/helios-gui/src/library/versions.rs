@@ -62,6 +62,7 @@ const VERSIONS_HELD: usize = 8;
 impl Library {
     /// A photo's heads as the node listed them: the strip shows them.
     pub fn set_versions(&mut self, image: String, heads: Vec<VersionHead>) {
+        self.shown_changed();
         self.versions_asked.retain(|id| *id != image);
         self.versions.retain(|(id, _)| *id != image);
         self.versions.push((image, heads));

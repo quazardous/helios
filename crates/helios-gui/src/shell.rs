@@ -87,6 +87,7 @@ mod activity_focus;
 pub use activity_focus::WINDOW as ACTIVITY_WINDOW;
 mod focus_window;
 mod library_focus;
+mod main_pass;
 pub use library_focus::{COMMAND as LIBRARY_WINDOW_COMMAND, WINDOW as LIBRARY_WINDOW};
 mod calibrate_focus;
 mod camera_look;
@@ -1495,6 +1496,8 @@ impl Shell {
             .borrow_mut()
             .set_app(shell.core.app.handle().clone());
         shell.listen_decisions();
+        // A window drawn apart asks the main window's pass on the bus.
+        main_pass::listen(&*shell.core.app.handle().bus());
         // Every command run passes Helios's policy first (`command.run`).
         if let Err(e) = crate::command_policy::listen(&*shell.core.app.handle().bus()) {
             log::error!(target: "helios", "{}: {e}", crate::command_policy::POLICY);

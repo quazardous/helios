@@ -53,6 +53,9 @@ pub(crate) struct LibraryWindow {
     /// The window's last pass had input: the main window's pass takes
     /// what it asked of the Library.
     touched: bool,
+    /// The Library's stamp ([`Library::stamp`]) when the window last drew
+    /// it: the main window's pass wakes the window only when it moved.
+    drawn_stamp: Option<u64>,
 }
 
 /// The focus: its state shared with the window's content.
@@ -63,6 +66,26 @@ pub(super) struct LibraryFocus {
 
 fn window_title() -> Message {
     Message::new("gui-library-window", "Library")
+}
+
+impl LibraryWindow {
+    /// Whether the window, open, has something new to draw: the Library
+    /// moved since it drew it, thumbnails or renders wait to be taken, or
+    /// its own input asked the main window's pass something.
+    fn has_news(&self) -> bool {
+        if !self.open {
+            return false;
+        }
+        if self.touched {
+            return true;
+        }
+        let Some(library) = &self.library else {
+            return false;
+        };
+        library
+            .try_borrow()
+            .is_ok_and(|l| self.drawn_stamp != Some(l.stamp()) || l.arrivals_waiting())
+    }
 }
 
 impl WindowFocus for LibraryWindow {
@@ -98,6 +121,8 @@ impl WindowFocus for LibraryWindow {
         ui.push_id("helios.library.window", |ui| {
             library.show(ui, &crate::library::GalleryOptions::LIBRARY_WINDOW);
         });
+        // What this pass drew, its own changes included.
+        self.drawn_stamp = Some(library.stamp());
     }
 
     fn asks_main_pass(&self) -> bool {
@@ -134,11 +159,13 @@ impl Shell {
     pub(super) fn library_window_frame(&mut self, ctx: &Egui) {
         let app = self.core.app.handle().clone();
         FRAME.follow(&app, ctx, &self.library_focus.state);
-        // What the main window's pass changed in the Library (thumbnails
-        // come, a read answered) shows in this window too.
-        if self.library_focus.state.borrow().open
-            && let Some(v) = app.window_viewport(&FRAME.id())
+        // Something came in for the window (thumbnails, renders, a read
+        // answered, a mark, what its own input asked): it draws again. A
+        // main pass that brought nothing (a hover, a drag elsewhere)
+        // leaves it idle.
+        if let Some(v) = app.window_viewport(&FRAME.id())
             && v != egui::ViewportId::ROOT
+            && self.library_focus.state.borrow().has_news()
         {
             ctx.request_repaint_of(v);
         }
