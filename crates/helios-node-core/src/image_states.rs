@@ -491,7 +491,9 @@ impl StatePin {
 
 impl fmt::Debug for StatePin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("StatePin").field(&self.key).finish()
+        f.debug_struct("StatePin")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
     }
 }
 

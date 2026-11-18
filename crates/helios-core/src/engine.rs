@@ -789,8 +789,8 @@ impl Hold {
 impl fmt::Debug for Hold {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Hold")
-            .field("keys", &self.keys.len())
-            .finish()
+            .field("keys", &self.keys)
+            .finish_non_exhaustive()
     }
 }
 
