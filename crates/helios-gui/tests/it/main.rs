@@ -123,6 +123,7 @@ mod themes;
 mod thumb_budget;
 mod thumbnails;
 mod tips;
+mod values_changed;
 mod viewport;
 mod window_close;
 mod window_commands;

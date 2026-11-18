@@ -150,6 +150,7 @@ impl Store {
         self.commit(format!("undo {label}"), origin);
         self.replayed = true;
         self.redo.push(step);
+        self.announce();
         Ok(Some(label))
     }
 }

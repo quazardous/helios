@@ -1496,6 +1496,22 @@ impl Shell {
             .borrow_mut()
             .set_app(shell.core.app.handle().clone());
         shell.listen_decisions();
+        // Each change to the values is asked on `values.changed`, heard
+        // after the drawing; the darkroom's graph follows them there.
+        {
+            let bus = shell.core.app.handle().bus();
+            crate::values_changed::hook(
+                &mut lock(&shell.core.values),
+                bus.clone(),
+                crate::values_changed::MAIN_SURFACE,
+            );
+            crate::values_changed::listen_darkroom(
+                &bus,
+                crate::values_changed::MAIN_SURFACE,
+                shell.focus.viewport.clone(),
+                shell.core.values.clone(),
+            );
+        }
         // A window drawn apart asks the main window's pass on the bus.
         main_pass::listen(&*shell.core.app.handle().bus());
         // Every command run passes Helios's policy first (`command.run`).
@@ -7545,10 +7561,8 @@ impl Shell {
         });
         self.focus.rects.insert("window".into(), ctx.content_rect());
 
-        self.focus
-            .viewport
-            .borrow_mut()
-            .sync(&mut lock(&self.core.values));
+        // The graph shown follows the values on `values.changed` (its
+        // darkroom listener), heard after the drawing.
         self.follow_edit_marks();
         self.follow_opening(&ctx);
         self.follow_decisions();

@@ -19,6 +19,11 @@
 //! - Every change is announced on the bus (`param.changed`: path, old, new,
 //!   origin, sequence); a write equal to the value changes nothing and
 //!   announces nothing, so a change never loops back.
+//! - A change hook ([`Store::on_change`]): the host hears each change in
+//!   one go ([`Changed`]: a write, an undo or a redo step, a gesture
+//!   cancelled, a preview shown or left), with the paths it changed, its
+//!   sequence numbers and its origin. It is called under the store's
+//!   lock: it must not take the store again (a host queues a request).
 //! - Undo: one step per gesture or group, else one per write; a cancelled
 //!   gesture puts its values back and is no step. Each step keeps the
 //!   place of the context stack it was made in ([`Store::set_place`]), so
@@ -512,6 +517,32 @@ impl Event for ParamChanged {
     const KIND: &'static str = "param.changed";
 }
 
+/// What changed in one go, as the change hook hears it
+/// ([`Store::on_change`]): a write, an undo or a redo step, a gesture
+/// cancelled, a preview shown or left.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Changed {
+    /// The paths changed, each once, in the order first changed.
+    pub paths: Vec<String>,
+    /// The sequence numbers the writes took, first and last; `None` for
+    /// a preview shown or left (nothing written).
+    pub seq: Option<(u64, u64)>,
+    /// Who wrote; `None` for a preview shown or left.
+    pub origin: Option<Origin>,
+}
+
+impl Changed {
+    /// Whether it changed a path the graph mirrors (`node/…`,
+    /// `bypass/…`): the graph shown needs a [`sync`].
+    pub fn mirrored(&self) -> bool {
+        self.paths.iter().any(|p| preview::mirrored(p))
+    }
+}
+
+/// The change hook: called under the store's lock, so it must not take
+/// the store again.
+pub type ChangeHook = Box<dyn Fn(&Changed) + Send>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct GestureId(pub u64);
 
@@ -665,6 +696,10 @@ pub struct Store {
     /// The values the graph shows in place of the store's own, while a
     /// point of the history is previewed.
     preview: BTreeMap<String, Value>,
+    /// Hears each change in one go ([`Store::on_change`]).
+    hook: Option<ChangeHook>,
+    /// The change being made, heard by the hook when it is whole.
+    changing: Option<Changed>,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -686,6 +721,24 @@ impl Store {
     pub fn with_bus(mut self, bus: Arc<Bus>) -> Self {
         self.bus = Some(bus);
         self
+    }
+
+    /// Calls `hook` after each change, in one go ([`Changed`]): one call
+    /// per write, per undo or redo step, per gesture cancelled, per
+    /// preview shown or left; none for a write that changed nothing. It
+    /// replaces the hook set before. Called under the store's lock: the
+    /// hook must not take the store again.
+    pub fn on_change(&mut self, hook: impl Fn(&Changed) + Send + 'static) {
+        self.hook = Some(Box::new(hook));
+    }
+
+    /// The change made, heard by the hook (when one is set).
+    fn announce(&mut self) {
+        if let Some(changed) = self.changing.take()
+            && let Some(hook) = &self.hook
+        {
+            hook(&changed);
+        }
     }
 
     /// Declares a path at its default value.
@@ -883,6 +936,17 @@ impl Store {
         }
         // A write shows through a preview.
         self.preview.remove(path);
+        if self.hook.is_some() {
+            let changing = self.changing.get_or_insert_with(|| Changed {
+                paths: Vec::new(),
+                seq: None,
+                origin: Some(origin.clone()),
+            });
+            if !changing.paths.iter().any(|p| p == path) {
+                changing.paths.push(path.into());
+            }
+            changing.seq = Some(changing.seq.map_or((seq, seq), |(first, _)| (first, seq)));
+        }
         if let Some(bus) = &self.bus {
             let event = ParamChanged {
                 path: path.into(),
@@ -969,6 +1033,7 @@ impl Store {
                 aim: set.aim,
             }),
         }
+        self.announce();
         Ok(Applied {
             value,
             clamped,
@@ -1235,6 +1300,7 @@ impl Store {
                 n += 1;
             }
         }
+        self.announce();
         n
     }
 
@@ -1296,6 +1362,7 @@ impl Store {
         self.commit(format!("undo {label}"), origin);
         self.replayed = true;
         self.redo.push(step);
+        self.announce();
         Ok(Some(label))
     }
 
@@ -1312,6 +1379,7 @@ impl Store {
         self.commit(format!("redo {label}"), origin);
         self.replayed = true;
         self.undo.push(step);
+        self.announce();
         Ok(Some(label))
     }
 
@@ -1388,12 +1456,16 @@ impl Store {
             let step = self.undo.remove(i);
             if let Err(e) = self.replay(&step, origin, true) {
                 self.undo.insert(i, step);
+                // The steps undone before it are heard.
+                self.announce();
                 return Err(e);
             }
             self.commit(format!("undo {}", step.label), origin);
             self.replayed = true;
             label = Some(step.label.clone());
             self.redo.push(step);
+            // One change per step undone.
+            self.announce();
         }
         Ok(label)
     }
