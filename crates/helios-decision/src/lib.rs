@@ -35,9 +35,10 @@ use serde_json::{Value, json};
 
 /// The fact kinds this crate publishes.
 pub const FACTS: &[helios_core::FactDecl] = &[
-    helios_core::FactDecl::of::<Answered>("A decision was answered"),
-    helios_core::FactDecl::of::<Proposed>("A model proposed answers that wait for a human"),
-    helios_core::FactDecl::of::<Waiting>("A decision waits for an answer"),
+    helios_core::FactDecl::of::<Answered>("A decision was answered").relayable(),
+    helios_core::FactDecl::of::<Proposed>("A model proposed answers that wait for a human")
+        .relayable(),
+    helios_core::FactDecl::of::<Waiting>("A decision waits for an answer").relayable(),
 ];
 
 /// The config key holding the project's default mode.

@@ -2420,7 +2420,10 @@ name = "helios-core"
 version = "0.92.0"
 dependencies = [
  "blake3",
+ "bus-contract",
+ "egui-pop-hooks",
  "helios-cache",
+ "log",
  "serde",
  "serde_json",
 ]

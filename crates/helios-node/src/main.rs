@@ -2122,8 +2122,23 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     };
     let jobs = Jobs::new(bus.clone());
     // The node's bus (`bus-contract`), its choice as the application: one,
-    // the default implementation, where its health checks listen.
-    let hooks: Arc<dyn bus_contract::Bus> = Arc::new(egui_pop_hooks::Kernel::new());
+    // the default implementation, where its health checks listen. Its
+    // journal and relay are the node's fact bus: the typed facts reach
+    // named listeners on it, and the relayable ones are served to the
+    // desktop.
+    let (kernel, journal) = helios_core::BusJournal::attach(
+        bus.clone(),
+        |j| {
+            egui_pop_hooks::Kernel::new()
+                .with_journal(j.clone())
+                .with_relay(j)
+        },
+        egui_pop_hooks::Kernel::declaration,
+    );
+    for refused in journal.declare(&*kernel, FACTS.iter().copied()) {
+        eprintln!("helios-node: bus: {refused}");
+    }
+    let hooks: Arc<dyn bus_contract::Bus> = kernel;
     // The node owns the vault and runs its jobs: the volume watch, the
     // backups, the health check.
     let held = vault.zip(args.vault.as_ref()).map(|(vault, file)| {

@@ -43,12 +43,16 @@ pub const FACTS: &[helios_core::FactDecl] = {
         FactDecl::of::<endpoint::CommandRefused<'static>>(
             "A command run refused, by whom, and why",
         ),
-        FactDecl::of::<endpoint::Imported<'static>>("An import done through the node ended"),
-        FactDecl::of::<settings::LayerChanged>("A settings layer the node keeps changed"),
+        FactDecl::of::<endpoint::Imported<'static>>("An import done through the node ended")
+            .relayable(),
+        FactDecl::of::<settings::LayerChanged>("A settings layer the node keeps changed")
+            .relayable(),
+        // Their typed points are this crate's own (`volumes::POINTS`).
         FactDecl::of::<volumes::Mounted>(
             "A volume mounted: plugged in, or there at the first look",
-        ),
-        FactDecl::of::<volumes::Unmounted>("A volume gone: unplugged, or unmounted"),
+        )
+        .fact_only(),
+        FactDecl::of::<volumes::Unmounted>("A volume gone: unplugged, or unmounted").fact_only(),
         FactDecl::json(
             facts::REQUESTED,
             STATE,

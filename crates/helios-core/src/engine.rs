@@ -71,13 +71,14 @@ use crate::params::Params;
 use crate::status::{Load, NodeState, NodeStatus, NodeType};
 use helios_cache::Lru;
 
-/// The engine's fact kinds.
+/// The engine's fact kinds. The per-render ones are facts only: at the
+/// engine's rate they stay off the journal's pump.
 pub const FACTS: &[FactDecl] = &[
-    FactDecl::of::<RenderRequested>("A render was asked for"),
-    FactDecl::of::<StepComputed>("A step was computed, not found in the cache"),
+    FactDecl::of::<RenderRequested>("A render was asked for").fact_only(),
+    FactDecl::of::<StepComputed>("A step was computed, not found in the cache").fact_only(),
     FactDecl::of::<GpuFellBack>("A step's GPU variant failed: computed on the CPU"),
     FactDecl::of::<GpuLost>("The accelerator's device was lost or hung"),
-    FactDecl::of::<CacheSettled>("The cache after a render: what it holds and evicted"),
+    FactDecl::of::<CacheSettled>("The cache after a render: what it holds and evicted").fact_only(),
 ];
 
 /// The source name the engine publishes events under.

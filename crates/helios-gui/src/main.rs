@@ -1872,11 +1872,13 @@ fn main() -> Result<(), String> {
     // application chooses it, egui-pop's points and Helios's (the health
     // report and its reading, the volumes coming and going) declared and
     // listened on it, each part handed it at construction.
-    let bus: Arc<dyn egui_pop::api::bus::bus_contract::Bus> =
-        Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new());
+    // Its journal and relay are the desktop's fact bus: the typed facts
+    // reach named listeners on it, in order.
+    let (bus, facts) = journaled_bus();
     let booting = {
         let from = BootFrom {
             hooks: bus.clone(),
+            facts,
             library_file: vault_file.clone(),
             run_settings,
             image_file,
@@ -2559,6 +2561,8 @@ type NodeKept = Option<(LocalNode, Option<helios_node_core::endpoint::Advertised
 struct BootFrom {
     /// Helios's one bus, where the volume watch passes its events.
     hooks: Arc<dyn egui_pop::api::bus::bus_contract::Bus>,
+    /// The desktop's fact bus, the journal of `hooks`.
+    facts: Arc<helios_core::Bus>,
     /// `--vault FILE`, else the default library.
     library_file: Option<PathBuf>,
     /// One invocation's settings (`--set KEY=VALUE`).
@@ -2599,6 +2603,28 @@ struct Booted {
     interface: phases::Running,
 }
 
+/// The application's bus (`bus-contract`, egui-pop's hook kernel) with
+/// a desktop fact bus (`helios_gui::bus`) as its journal and relay
+/// (`helios_core::BusJournal`): the typed fact kinds of
+/// `helios_gui::FACTS` are its journaled event points, declared once the
+/// kernel holds the journal. The kernel and the fact bus.
+fn journaled_bus() -> (
+    Arc<dyn egui_pop::api::bus::bus_contract::Bus>,
+    Arc<helios_core::Bus>,
+) {
+    use egui_pop::api::bus::egui_pop_hooks::Kernel;
+    let facts = helios_gui::bus();
+    let (kernel, journal) = helios_core::BusJournal::attach(
+        facts.clone(),
+        |j| Kernel::new().with_journal(j.clone()).with_relay(j),
+        Kernel::declaration,
+    );
+    for refused in journal.declare(&*kernel, helios_gui::FACTS.iter().copied()) {
+        log::error!(target: "helios", "bus: {refused}");
+    }
+    (kernel, facts)
+}
+
 /// The start's work, off the window's thread (the boot splash shows its
 /// steps): the library opened by the desktop's node, its endpoint
 /// advertised, the settings resolved, the image named made ready, the
@@ -2606,6 +2632,7 @@ struct Booted {
 fn boot(from: BootFrom) -> Booted {
     let BootFrom {
         hooks,
+        facts,
         library_file,
         run_settings,
         image_file,
@@ -2615,7 +2642,7 @@ fn boot(from: BootFrom) -> Booted {
         node_kept,
         ending,
     } = from;
-    let bus = helios_gui::bus();
+    let bus = facts;
     // A library that cannot be opened leaves Helios without one: the
     // reason is said, and imports refuse with it. The local node owns the
     // library (docs/design/node-client-split.md, choice A): it saves it

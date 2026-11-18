@@ -18,15 +18,24 @@
 //! [`Bus::declare`]s the tables of the crates it links; from then on a
 //! kind published that no table holds is a bug: a debug build stops on it,
 //! a release build counts it in [`Describe`].
+//!
+//! A typed kind is also an event point of the bus contract
+//! (`bus-contract`): [`FactDecl::of`] makes its line
+//! `PointDecl::of::<FactPoint<E>>(…).journaled()`, and the application's
+//! bus delivers its facts to named, ordered listeners through
+//! [`crate::journal::BusJournal`], this bus's journal handed to the
+//! contract.
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use bus_contract::{Codec, PointDecl};
 use serde::Serialize;
 
 use crate::describe::Describe;
+use crate::journal::FactPoint;
 
 /// A typed event. `KIND` names it on the bus (`layer.event`).
 pub trait Event: Serialize {
@@ -51,16 +60,44 @@ pub struct FactDecl {
     pub payload: Payload,
     /// What it says, in one line.
     pub about: &'static str,
+    /// Its event point on the application's bus (`bus-contract`), for a
+    /// typed kind: journaled, and relayable to another process when the
+    /// line says so ([`FactDecl::relayable`]). `None`: a fact only, with
+    /// no listeners on the contract.
+    pub point: Option<PointDecl>,
+    /// The point's codec, kept for [`FactDecl::relayable`].
+    codec: Option<Codec>,
 }
 
 impl FactDecl {
-    /// A typed event: its kind and payload type come from `E`.
-    pub const fn of<E: Event>(about: &'static str) -> Self {
+    /// A typed event: its kind and payload type come from `E`. It is
+    /// also the journaled event point [`FactPoint<E>`], whose listeners
+    /// hear each of its facts, in order, after the publisher moved on.
+    pub const fn of<E: Event + 'static>(about: &'static str) -> Self {
         Self {
             kind: E::KIND,
             payload: Payload::Type(std::any::type_name::<E>),
             about,
+            point: Some(PointDecl::of::<FactPoint<E>>(about).journaled()),
+            codec: Some(Codec::of::<FactPoint<E>>()),
         }
+    }
+
+    /// The kind crosses processes: a node's facts of it reach the
+    /// desktop's listeners ([`crate::journal::BusJournal`]'s relay), read
+    /// with a codec that accepts the fields of another version.
+    pub const fn relayable(mut self) -> Self {
+        if let (Some(point), Some(codec)) = (self.point, self.codec) {
+            self.point = Some(point.relayable(codec));
+        }
+        self
+    }
+
+    /// A fact only, with no event point: an engine-rate kind kept off the
+    /// journal's pump, or one whose crate declares its own typed point.
+    pub const fn fact_only(mut self) -> Self {
+        self.point = None;
+        self
     }
 
     /// A kind published as JSON (`publish_value`) made from a value of
@@ -71,6 +108,8 @@ impl FactDecl {
             kind,
             payload: Payload::Type(std::any::type_name::<T>),
             about,
+            point: None,
+            codec: None,
         }
     }
 
@@ -80,6 +119,8 @@ impl FactDecl {
             kind,
             payload: Payload::Json(shape),
             about,
+            point: None,
+            codec: None,
         }
     }
 
@@ -98,7 +139,9 @@ impl std::fmt::Debug for FactDecl {
             .field("kind", &self.kind)
             .field("payload", &self.payload_name())
             .field("about", &self.about)
-            .finish()
+            .field("journaled", &self.point.is_some_and(|p| p.journaled))
+            .field("relayable", &self.point.is_some_and(|p| p.relay.is_some()))
+            .finish_non_exhaustive()
     }
 }
 
