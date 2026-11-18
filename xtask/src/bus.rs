@@ -17,12 +17,21 @@
 //! has its `FactDecl::of::<T>` in a contract table. A kind published as
 //! JSON is checked when it is published, on a bus that declared its
 //! tables (`Bus::declare`).
+//!
+//! `bus --timings <file>` reads the bus debug collector saved by a run
+//! (the journey's `bus-timings-*.json`) and prints, per point, its passes
+//! (count, p50, p95, max), its budget and the passes over it, and its
+//! slowest listeners: "who costs what". It reports and never fails on a
+//! budget (no gate).
 
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-pub const USAGE: &str = "bus --check";
+pub const USAGE: &str = "bus --check | bus --timings <file>";
+
+/// How many listeners `--timings` names per point.
+const SLOWEST: usize = 3;
 
 /// The folders holding the workspace's crates, from the root.
 const FOLDERS: &[&str] = &["crates", "modules", "plugins"];
@@ -38,6 +47,9 @@ const CONSTRUCTORS: &[&str] = &[
 
 /// Runs the check: `cargo xtask bus --check`.
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
+    if let ["--timings", file] = args {
+        return Some(timings(Path::new(file)));
+    }
     if args != ["--check"] {
         return None;
     }
@@ -67,6 +79,112 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         found.len()
     );
     Some(ExitCode::from(1))
+}
+
+/// `bus --timings <file>`: the report, or why the file cannot be read.
+fn timings(file: &Path) -> ExitCode {
+    let read = fs::read_to_string(file)
+        .map_err(|e| e.to_string())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).map_err(|e| e.to_string()));
+    match read {
+        Ok(snapshot) => {
+            print!("{}", timings_report(&snapshot));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("bus --timings: {}: {e}", file.display());
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// A duration in µs as the report writes it (`850 µs`, `4.2 ms`).
+fn time(us: u64) -> String {
+    if us < 1000 {
+        format!("{us} µs")
+    } else {
+        format!("{:.1} ms", us as f64 / 1000.0)
+    }
+}
+
+/// The report of a bus collector's snapshot (`{"points": [...]}`, or the
+/// whole debug snapshot holding it under `bus`): each point that ran a
+/// pass, the slowest first by its passes' p95, with its budget, the
+/// passes over it and its slowest listeners; then the points over budget.
+pub fn timings_report(snapshot: &serde_json::Value) -> String {
+    use std::fmt::Write as _;
+    let bus = snapshot.get("bus").unwrap_or(snapshot);
+    let u =
+        |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let mut points: Vec<&serde_json::Value> = bus
+        .get("points")
+        .and_then(serde_json::Value::as_array)
+        .map(|p| p.iter().filter(|p| p["timing"].is_object()).collect())
+        .unwrap_or_default();
+    let mut out = String::new();
+    if points.is_empty() {
+        out.push_str("no timings: the bus offers none, or no point ran a pass\n");
+        return out;
+    }
+    points.sort_by_key(|p| {
+        (
+            std::cmp::Reverse(u(&p["timing"], "p95_us")),
+            p["point"].to_string(),
+        )
+    });
+    let mut over = Vec::new();
+    for p in &points {
+        let t = &p["timing"];
+        let name = p["point"].as_str().unwrap_or("?");
+        let budget = p.get("budget_us").and_then(serde_json::Value::as_u64);
+        let _ = write!(
+            out,
+            "{name}: {} passes, p50 {}, p95 {}, max {}",
+            u(t, "count"),
+            time(u(t, "p50_us")),
+            time(u(t, "p95_us")),
+            time(u(t, "max_us")),
+        );
+        if let Some(b) = budget {
+            let n = u(t, "over_budget");
+            let _ = write!(out, "; budget {}, {n} over", time(b));
+            if n > 0 {
+                over.push(format!(
+                    "{name} ({n} of {} passes over {})",
+                    u(t, "count"),
+                    time(b)
+                ));
+            }
+        }
+        out.push('\n');
+        let mut listeners: Vec<&serde_json::Value> = p["listeners"]
+            .as_array()
+            .map(|l| l.iter().filter(|l| l["timing"].is_object()).collect())
+            .unwrap_or_default();
+        listeners.sort_by_key(|l| {
+            (
+                std::cmp::Reverse(u(&l["timing"], "p95_us")),
+                std::cmp::Reverse(u(&l["timing"], "max_us")),
+            )
+        });
+        for l in listeners.iter().take(SLOWEST) {
+            let t = &l["timing"];
+            let _ = writeln!(
+                out,
+                "  {}: {} runs, p95 {}, max {}",
+                l["id"].as_str().unwrap_or("?"),
+                u(t, "count"),
+                time(u(t, "p95_us")),
+                time(u(t, "max_us")),
+            );
+        }
+    }
+    if over.is_empty() {
+        out.push_str("no point went over its budget\n");
+    } else {
+        let _ = writeln!(out, "over budget: {}", over.join(", "));
+    }
+    out
 }
 
 /// Every construction outside the allowed places, as `path:line: text`;
@@ -315,5 +433,35 @@ mod tests {
     fn the_workspace_holds_none() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         assert_eq!(problems(root), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_timings_report_names_the_slowest_and_the_budgets_breached() {
+        let snapshot = serde_json::json!({"bus": {"points": [
+            {"point": "quiet", "listeners": [], "timing": null},
+            {"point": "library.changed", "budget_us": 4000,
+             "timing": {"count": 20, "p50_us": 300, "p95_us": 5200, "max_us": 9000, "over_budget": 2},
+             "listeners": [
+                {"id": "fill", "timing": {"count": 20, "p95_us": 100, "max_us": 200}},
+                {"id": "albums", "timing": {"count": 20, "p95_us": 5000, "max_us": 8000}},
+                {"id": "never", "timing": null}
+             ]},
+            {"point": "image.opened", "budget_us": 4000,
+             "timing": {"count": 2, "p50_us": 900, "p95_us": 900, "max_us": 900, "over_budget": 0},
+             "listeners": [{"id": "marks", "timing": {"count": 2, "p95_us": 900, "max_us": 900}}]}
+        ]}});
+        assert_eq!(
+            timings_report(&snapshot),
+            "library.changed: 20 passes, p50 300 µs, p95 5.2 ms, max 9.0 ms; budget 4.0 ms, 2 over\n\
+             \x20 albums: 20 runs, p95 5.0 ms, max 8.0 ms\n\
+             \x20 fill: 20 runs, p95 100 µs, max 200 µs\n\
+             image.opened: 2 passes, p50 900 µs, p95 900 µs, max 900 µs; budget 4.0 ms, 0 over\n\
+             \x20 marks: 2 runs, p95 900 µs, max 900 µs\n\
+             over budget: library.changed (2 of 20 passes over 4.0 ms)\n"
+        );
+        assert_eq!(
+            timings_report(&serde_json::json!({"points": []})),
+            "no timings: the bus offers none, or no point ran a pass\n"
+        );
     }
 }

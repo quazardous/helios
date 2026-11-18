@@ -194,7 +194,8 @@ pub const POINTS: &[PointDecl] = &[
     .fail_closed(),
     PointDecl::of::<ImageOpened>(
         "An image is open in the darkroom: what follows the image open, once, in order",
-    ),
+    )
+    .budget(crate::INTERFACE_PASS_BUDGET),
     PointDecl::of::<ImageClosed>(
         "The image open is closed, none after it: what follows the image open, once, in order",
     ),

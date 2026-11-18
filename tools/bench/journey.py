@@ -51,6 +51,12 @@ failure `journey-failure.txt` naming the step, with the screen at that
 moment (`<step>-screen.png`), each window's accessibility tree
 (`<step>-tree-<window>.json`) and helios-gui's logs (`logs/`). The exit
 status is 1 when a step failed.
+
+Before each quit, the bus's listener timings of that session are saved
+(`bus-timings-<step>.json`, the `bus` debug collector's points with their
+budget and passes, and its `slowest` list; `cargo xtask bus --timings`
+prints them), and the step's line names the points that went over their
+budget (`over_budget`). A budget only reports: it fails no step.
 """
 
 from __future__ import annotations
@@ -620,6 +626,37 @@ class Journey:
             return snapshot[name]
         return snapshot if isinstance(snapshot, dict) else {}
 
+    def bus_timings(self, entry: dict) -> None:
+        """The session's listener timings, saved before it quits; the
+        points over budget named on the step's line. Never fails a step."""
+        try:
+            bus = self.collector("bus")
+        except (OSError, RuntimeError, ValueError) as exc:
+            entry["bus_timings"] = f"not read: {exc}"
+            return
+        points = [
+            {
+                "point": p.get("point"),
+                "budget_us": p.get("budget_us"),
+                "timing": p.get("timing"),
+                "listeners": [
+                    {"id": x.get("id"), "owner": x.get("owner"), "timing": x.get("timing")}
+                    for x in p.get("listeners", [])
+                    if x.get("timing")
+                ],
+            }
+            for p in bus.get("points", [])
+            if p.get("timing")
+        ]
+        out = self.args.out / f"bus-timings-{entry['step']}.json"
+        out.write_text(json.dumps({"points": points, "slowest": bus.get("slowest", [])}, indent=1))
+        entry["bus_timings"] = out.name
+        entry["over_budget"] = {
+            p["point"]: p["timing"].get("over_budget", 0)
+            for p in points
+            if p.get("budget_us") is not None and p["timing"].get("over_budget", 0) > 0
+        }
+
     def find_photo(self, entry: dict) -> None:
         """The first pair's cell in the grid, for `workshop`."""
         try:
@@ -766,8 +803,11 @@ class Journey:
                 if "why" not in entry and step == "export":
                     self.exported(entry)
             else:
+                timings = {"step": step}
+                self.bus_timings(timings)
                 entry = self.quit()
                 entry["step"] = step
+                entry.update({k: v for k, v in timings.items() if k != "step"})
             entry["seconds"] = round(time.monotonic() - started, 1)
             if step.startswith("quit"):
                 # The screen before the compositor goes, kept on success too.
