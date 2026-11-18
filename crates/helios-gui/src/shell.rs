@@ -6345,13 +6345,10 @@ impl Shell {
             }
             c::REMOVE_COMMAND => {
                 open()?;
-                let ids = match images {
-                    Some(ids) => ids,
-                    None => {
-                        let cmp = self.focus.comparison.borrow();
-                        cmp.active(&current).cloned().into_iter().collect()
-                    }
-                };
+                let ids = images.unwrap_or_else(|| {
+                    let cmp = self.focus.comparison.borrow();
+                    cmp.active(&current).cloned().into_iter().collect()
+                });
                 let removed: Vec<String> = current
                     .iter()
                     .filter(|p| ids.contains(p))
