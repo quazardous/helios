@@ -3,16 +3,19 @@
   "title": "darktable classic",
   "keymap": [
     { "keys": "F1", "command": null },
-    { "keys": "F1", "command": "vault.label.red", "when": "${library}" },
-    { "keys": "F1", "command": "vault.label.red", "when": "${culling}" },
+    { "keys": "F1", "command": "vault.label.red", "when": "${library}", "scope": "window:main" },
+    { "keys": "F1", "command": "vault.label.red", "when": "${culling}", "scope": "window:main" },
+    { "keys": "F1", "command": "vault.label.red", "when": "${library_window}", "scope": "window:library" },
     { "keys": "L", "command": "view.library" },
     { "keys": "Ctrl+Shift+L", "command": "view.side_bar.toggle" },
     { "keys": "Ctrl+Shift+R", "command": "view.endSideBar.toggle" },
     { "keys": "Ctrl+Shift+B", "command": "view.bottomPanel.toggle" },
     { "keys": "Ctrl+E", "command": "library.export" },
-    { "keys": "Ctrl+D", "command": "library.duplicate", "when": "${library}" },
+    { "keys": "Ctrl+D", "command": "library.duplicate", "when": "${library}", "scope": "window:main" },
+    { "keys": "Ctrl+D", "command": "library.duplicate", "when": "${library_window}", "scope": "window:library" },
     { "keys": "Ctrl+Shift+D", "command": null },
-    { "keys": "Ctrl+Shift+D", "command": "library.duplicateOriginal", "when": "${library}" }
+    { "keys": "Ctrl+Shift+D", "command": "library.duplicateOriginal", "when": "${library}", "scope": "window:main" },
+    { "keys": "Ctrl+Shift+D", "command": "library.duplicateOriginal", "when": "${library_window}", "scope": "window:library" }
   ],
   "left_out": [
     { "keys": "x", "what": "culling mode", "reason": "X rejects, as in Lightroom; culling is view.culling in the palette" },

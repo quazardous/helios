@@ -44,8 +44,8 @@ pub const FRAME: PluginId = PluginId::from_static("helios.frame");
 /// out of the palette.
 #[derive(Default)]
 pub struct Declarations {
-    /// Keys, command, `when`.
-    pub keys: Vec<(String, String, String)>,
+    /// Keys, command, `when`, scope (`crate::keys::Binding`).
+    pub keys: Vec<crate::keys::Binding>,
     pub menus: Vec<MenuItem>,
     /// A command's `checked` clause.
     pub checked: BTreeMap<String, String>,
@@ -381,8 +381,14 @@ impl Plugin for Commands {
         for spec in specs {
             ctx.declare(declared(&spec, &d)?)?;
         }
-        for (keys, command, when) in &d.keys {
-            ctx.keybinding(keys, command_id(command)?, when, Layer::Default)?;
+        for (keys, command, when, scope) in &d.keys {
+            let scope = egui_pop::model::keymap::KeyScope::parse(scope)
+                .map_err(|e| PluginError::Failed(format!("`{keys}` on {command}: {e}")))?;
+            let options = egui_pop::model::keymap::BindOptions {
+                scope,
+                ..Default::default()
+            };
+            ctx.keybinding_with(keys, command_id(command)?, when, Layer::Default, options)?;
         }
         for item in &d.menus {
             ctx.menu_item(item.clone())?;

@@ -4,16 +4,17 @@
 //!
 //! A package is a keymap document (`keymaps/*.json`: keys, a command,
 //! `-command` to remove one, `null` to take the keys from the layers
-//! below, a `when`), loaded into the user's layer before the user's own
-//! keys, which keep winning. Its clauses may name the default map's
-//! scopes (`${library}`, `${culling}`, `${image}`, `${darkroom}`,
-//! `${viewport}`), so a package follows them. What a package leaves out
+//! below, a `when`, a `scope`: egui-pop's key scope, `window:main` for
+//! the main window's keys), loaded into the user's layer before the
+//! user's own keys, which keep winning. Its clauses may name the default
+//! map's clauses (`${library}`, `${culling}`, `${image}`, `${darkroom}`,
+//! `${viewport}`, `${library_window}`), so a package follows them. What a package leaves out
 //! of the keymap it imitates is listed with the reason (`left_out`).
 
 use egui_pop::model::keymap::{DocBinding, Keys};
 use serde::Deserialize;
 
-use crate::keys::{culling, darkroom, image, library, viewport};
+use crate::keys::{culling, darkroom, image, library, library_window, viewport};
 
 /// A key of the imitated keymap a package leaves out, and why.
 #[derive(Clone, Debug, Deserialize)]
@@ -45,6 +46,7 @@ impl Package {
             ("${image}", image()),
             ("${darkroom}", darkroom()),
             ("${viewport}", viewport()),
+            ("${library_window}", library_window()),
         ];
         self.keymap
             .iter()
