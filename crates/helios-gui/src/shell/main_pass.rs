@@ -41,7 +41,8 @@ impl Point for MainPass {
 /// The point, its contract with the application's bus.
 pub const POINTS: &[PointDecl] = &[PointDecl::of::<MainPass>(
     "A window drawn apart (the Library, the import window) asks the main window's pass, which takes what it left for the shell: heard after the drawing",
-)];
+)
+.fail_closed()];
 
 /// Declares [`POINTS`] on `bus` (once).
 pub fn declare(bus: &dyn Bus) {
