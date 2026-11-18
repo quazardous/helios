@@ -139,7 +139,7 @@ impl NodeEvents {
         if !self.wants(kind) {
             return None;
         }
-        Some(self.bus.publish_value(
+        Some(self.bus.republish_value(
             &format!("{SOURCE}{node}"),
             None,
             intern(kind),

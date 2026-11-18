@@ -56,6 +56,21 @@ pub const FORGOTTEN: &str = "node.jobs_forgotten";
 pub const LINK: &str = "node.link";
 /// The source of the events a relay publishes.
 const SOURCE: &str = "relay";
+
+/// The fact kinds the relays publish (a node's own are republished).
+pub const FACTS: &[helios_core::FactDecl] = &[
+    helios_core::FactDecl::json(FORGOTTEN, "{ node, ids }", "A lost node's jobs to forget"),
+    helios_core::FactDecl::json(
+        LINK,
+        "{ node, up, error? }",
+        "A node's link went up or down",
+    ),
+    helios_core::FactDecl::json(
+        crate::node_events::RESYNC,
+        "{ node, event: { seq, source, kind, payload: { node, reason } } }",
+        "A node's events have a hole: read its state again",
+    ),
+];
 /// How long a cancel waits for the node's answer.
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(3);
 

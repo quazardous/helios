@@ -12,6 +12,12 @@
 //! kept in its channel until read, whatever the journal overran, and a
 //! [`Wake`] tells it at once. A journal reader can still tell what it
 //! missed ([`Bus::missed`]).
+//!
+//! Every kind is declared once, in a contract table ([`FactDecl`]) next to
+//! its type: the kind, its payload type and what it says. A process
+//! [`Bus::declare`]s the tables of the crates it links; from then on a
+//! kind published that no table holds is a bug: a debug build stops on it,
+//! a release build counts it in [`Describe`].
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -26,6 +32,83 @@ use crate::describe::Describe;
 pub trait Event: Serialize {
     const KIND: &'static str;
 }
+
+/// The payload a fact kind carries.
+#[derive(Clone, Copy)]
+pub enum Payload {
+    /// A typed [`Event`]: its Rust type, by name.
+    Type(fn() -> &'static str),
+    /// JSON built in place, the shape of its fields written out
+    /// (`{ count }`), for a kind with no type yet.
+    Json(&'static str),
+}
+
+/// One fact kind of the bus, as a contract table declares it.
+#[derive(Clone, Copy)]
+pub struct FactDecl {
+    /// Its name on the bus (`layer.event`).
+    pub kind: &'static str,
+    pub payload: Payload,
+    /// What it says, in one line.
+    pub about: &'static str,
+}
+
+impl FactDecl {
+    /// A typed event: its kind and payload type come from `E`.
+    pub const fn of<E: Event>(about: &'static str) -> Self {
+        Self {
+            kind: E::KIND,
+            payload: Payload::Type(std::any::type_name::<E>),
+            about,
+        }
+    }
+
+    /// A kind published as JSON (`publish_value`) made from a value of
+    /// type `T`, for a kind several kinds share the payload of (the states
+    /// of a promise).
+    pub const fn typed<T: Serialize>(kind: &'static str, about: &'static str) -> Self {
+        Self {
+            kind,
+            payload: Payload::Type(std::any::type_name::<T>),
+            about,
+        }
+    }
+
+    /// A kind published as JSON (`publish_value`), `shape` its fields.
+    pub const fn json(kind: &'static str, shape: &'static str, about: &'static str) -> Self {
+        Self {
+            kind,
+            payload: Payload::Json(shape),
+            about,
+        }
+    }
+
+    /// Its payload: the type name, or the shape of its JSON.
+    pub fn payload_name(&self) -> &'static str {
+        match self.payload {
+            Payload::Type(name) => name(),
+            Payload::Json(shape) => shape,
+        }
+    }
+}
+
+impl std::fmt::Debug for FactDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FactDecl")
+            .field("kind", &self.kind)
+            .field("payload", &self.payload_name())
+            .field("about", &self.about)
+            .finish()
+    }
+}
+
+/// The fact kinds this crate publishes: the engine's, the scheduler's and
+/// the jobs'.
+pub const FACTS: &[&[FactDecl]] = &[
+    crate::engine::FACTS,
+    crate::scheduler::FACTS,
+    crate::jobs::FACTS,
+];
 
 /// An event as the bus carries it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -81,6 +164,10 @@ struct Inner {
     capacity: usize,
     journal: VecDeque<Envelope>,
     subscribers: Vec<Subscriber>,
+    /// The kinds declared ([`Bus::declare`]); `None` checks nothing.
+    declared: Option<std::collections::BTreeMap<&'static str, FactDecl>>,
+    /// Kinds published that no declared table holds (a release build).
+    undeclared: std::collections::BTreeSet<&'static str>,
 }
 
 impl Default for Bus {
@@ -102,8 +189,29 @@ impl Bus {
                 capacity,
                 journal: VecDeque::new(),
                 subscribers: Vec::new(),
+                declared: None,
+                undeclared: std::collections::BTreeSet::new(),
             }),
         }
+    }
+
+    /// Declares the fact kinds of `tables` (each crate's `FACTS`): from
+    /// now on a kind published that none of the declared tables holds is
+    /// a bug. A debug build panics at the publish; a release build
+    /// publishes it and lists it under `undeclared` in [`Describe`].
+    /// Called again, it adds to what was declared.
+    pub fn declare<'a>(&self, tables: impl IntoIterator<Item = &'a [FactDecl]>) {
+        let mut inner = self.inner.lock().expect("bus lock");
+        let declared = inner.declared.get_or_insert_with(Default::default);
+        for decl in tables.into_iter().flatten() {
+            declared.insert(decl.kind, *decl);
+        }
+    }
+
+    /// The declared kind `kind`, if the bus declared it.
+    pub fn declared(&self, kind: &str) -> Option<FactDecl> {
+        let inner = self.inner.lock().expect("bus lock");
+        inner.declared.as_ref()?.get(kind).copied()
     }
 
     /// Publishes an event; returns its sequence number.
@@ -121,8 +229,44 @@ impl Bus {
         kind: &'static str,
         payload: serde_json::Value,
     ) -> u64 {
+        self.publish_inner(source, cause, kind, payload, true)
+    }
+
+    /// Publishes again an event another bus published (a node's, relayed
+    /// to the desktop): its kind was checked against the tables of the
+    /// process that published it, which this one may not link.
+    pub fn republish_value(
+        &self,
+        source: &str,
+        cause: Option<u64>,
+        kind: &'static str,
+        payload: serde_json::Value,
+    ) -> u64 {
+        self.publish_inner(source, cause, kind, payload, false)
+    }
+
+    fn publish_inner(
+        &self,
+        source: &str,
+        cause: Option<u64>,
+        kind: &'static str,
+        payload: serde_json::Value,
+        check: bool,
+    ) -> u64 {
         let mut wakes = Vec::new();
         let mut inner = self.inner.lock().expect("bus lock");
+        if check
+            && inner
+                .declared
+                .as_ref()
+                .is_some_and(|declared| !declared.contains_key(kind))
+        {
+            inner.undeclared.insert(kind);
+            if cfg!(debug_assertions) {
+                drop(inner);
+                panic!("bus: kind `{kind}` published by `{source}` is in no declared FACTS table");
+            }
+        }
         let seq = inner.next;
         inner.next += 1;
         // Stamped under the lock, so `mono_us` follows `seq`.
@@ -240,6 +384,8 @@ impl Describe for Bus {
             "journal": { "len": inner.journal.len(), "capacity": inner.capacity,
                          "oldest": inner.journal.front().map(|e| e.seq) },
             "subscribers": inner.subscribers.len(),
+            "declared": inner.declared.as_ref().map(std::collections::BTreeMap::len),
+            "undeclared": inner.undeclared,
         })
     }
 }
@@ -309,6 +455,61 @@ mod tests {
         drop(rare);
         bus.publish("a", None, &Rare);
         assert_eq!(bus.describe()["subscribers"], 0, "gone with its receiver");
+    }
+
+    const PING_FACTS: &[FactDecl] = &[FactDecl::of::<Ping>("A test ping")];
+
+    #[test]
+    fn a_declared_bus_holds_its_kinds_with_their_payload() {
+        let bus = Bus::new();
+        bus.declare([PING_FACTS]);
+        let ping = bus.declared(Ping::KIND).expect("declared");
+        assert!(ping.payload_name().ends_with("::Ping"), "{ping:?}");
+        assert!(bus.declared(Rare::KIND).is_none());
+        bus.publish("a", None, &Ping { n: 1 });
+        assert_eq!(bus.describe()["declared"], 1);
+        assert_eq!(bus.describe()["undeclared"], serde_json::json!([]));
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic(expected = "test.rare"))]
+    fn a_kind_no_declared_table_holds_fails_its_publish() {
+        let bus = Bus::new();
+        bus.declare([PING_FACTS]);
+        bus.publish("a", None, &Rare);
+        // A release build publishes it and says so.
+        assert_eq!(
+            bus.describe()["undeclared"],
+            serde_json::json!(["test.rare"])
+        );
+    }
+
+    #[test]
+    fn a_relayed_kind_was_checked_where_it_was_published() {
+        let bus = Bus::new();
+        bus.declare([PING_FACTS]);
+        bus.republish_value("node:a", None, Rare::KIND, serde_json::json!(null));
+        assert_eq!(bus.describe()["undeclared"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn an_undeclared_bus_checks_nothing() {
+        let bus = Bus::new();
+        bus.publish("a", None, &Rare);
+        assert_eq!(bus.describe()["declared"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn the_core_tables_name_each_kind_once() {
+        let mut kinds: Vec<_> = FACTS
+            .iter()
+            .flat_map(|t| t.iter().map(|d| d.kind))
+            .collect();
+        let all = kinds.len();
+        kinds.sort_unstable();
+        kinds.dedup();
+        assert_eq!(kinds.len(), all, "a kind declared twice");
+        assert_eq!(all, 20);
     }
 
     #[test]

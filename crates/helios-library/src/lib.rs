@@ -60,5 +60,11 @@ pub mod stacks;
 pub mod thumb_check;
 pub mod trash;
 
+/// The fact kinds this crate publishes.
+pub const FACTS: &[helios_core::FactDecl] =
+    &[helios_core::FactDecl::of::<stacks::DecisionChanged>(
+        "A library decision was proposed or answered",
+    )];
+
 pub use import::{Duplicates, Options, Placement, Report};
 pub use signals::Signals;

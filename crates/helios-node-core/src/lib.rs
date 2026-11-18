@@ -32,3 +32,40 @@ pub mod reads;
 pub mod settings;
 pub mod volumes;
 pub mod workshops;
+
+/// The fact kinds this crate publishes.
+pub const FACTS: &[helios_core::FactDecl] = {
+    use helios_core::FactDecl;
+    use image_states::facts;
+    const STATE: &str = "{ photo, development, state, size, priority, reason?, bytes? }";
+    &[
+        FactDecl::of::<endpoint::CommandRan<'static>>("A command is run, by whom"),
+        FactDecl::of::<endpoint::CommandRefused<'static>>(
+            "A command run refused, by whom, and why",
+        ),
+        FactDecl::of::<endpoint::Imported<'static>>("An import done through the node ended"),
+        FactDecl::of::<settings::LayerChanged>("A settings layer the node keeps changed"),
+        FactDecl::of::<volumes::Mounted>(
+            "A volume mounted: plugged in, or there at the first look",
+        ),
+        FactDecl::of::<volumes::Unmounted>("A volume gone: unplugged, or unmounted"),
+        FactDecl::json(
+            facts::REQUESTED,
+            STATE,
+            "An image state nobody computes yet was asked for",
+        ),
+        FactDecl::json(
+            facts::COMPUTING,
+            STATE,
+            "An image state's computation started",
+        ),
+        FactDecl::json(facts::READY, STATE, "An image state is ready"),
+        FactDecl::json(facts::FAILED, STATE, "An image state's computation failed"),
+        FactDecl::json(
+            facts::CANCELLED,
+            STATE,
+            "Every asker of an image state cancelled",
+        ),
+        FactDecl::json(facts::EVICTED, STATE, "A ready image state was let go"),
+    ]
+};

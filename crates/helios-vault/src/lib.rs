@@ -66,6 +66,31 @@ pub mod versions;
 pub mod workflow;
 pub mod workshops;
 
+/// The fact kinds this crate publishes.
+pub const FACTS: &[helios_core::FactDecl] = {
+    use helios_core::FactDecl;
+    &[
+        FactDecl::of::<catalog::FieldChanged>("A field of images changed"),
+        FactDecl::of::<edit::EditSaved>("An edit was saved as a version"),
+        FactDecl::of::<stacks::StackChanged>("A stack was created, dissolved, topped or expanded"),
+        FactDecl::of::<versions::VersionAdded>("A version of an image's edit was kept"),
+        FactDecl::json(capture::CAPTURES_SET, "{ count }", "Capture dates were set"),
+        FactDecl::json(
+            changed::CHANGED_OUTSIDE,
+            "{ count }",
+            "The library changed outside this process",
+        ),
+        FactDecl::json(
+            LOCATIONS_CHANGED,
+            "{ count }",
+            "Copies of images were placed or moved",
+        ),
+        FactDecl::json(LIBRARY_CHANGED, "{ count }", "Photos moved in the library"),
+        FactDecl::typed::<promises::Promise>(promises::PROGRESS, "A promise moved on"),
+        FactDecl::typed::<promises::Promise>(promises::DONE, "A promise settled"),
+    ]
+};
+
 pub use capture::{Backfill, Capture};
 pub use catalog::{ApplyReport, CursorId, CursorInfo, Delta, LibraryRow, Row};
 pub use edit::{EditSaved, EditSession};

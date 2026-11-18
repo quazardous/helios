@@ -24,9 +24,18 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::bus::{Bus, Event};
+use crate::bus::{Bus, Event, FactDecl};
 use crate::describe::Describe;
 use crate::message::Message;
+
+/// The scheduler's fact kinds.
+pub const FACTS: &[FactDecl] = &[
+    FactDecl::of::<JobQueued>("A job was queued"),
+    FactDecl::of::<JobStarted>("A job started running"),
+    FactDecl::of::<JobEnded>("A job ended, done or failed"),
+    FactDecl::of::<Paused>("The scheduler was paused or resumed"),
+    FactDecl::of::<Idle>("Nothing is queued or running any more"),
+];
 
 const SOURCE: &str = "scheduler";
 

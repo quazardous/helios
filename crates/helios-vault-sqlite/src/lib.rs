@@ -54,6 +54,11 @@ pub mod health;
 mod migrate;
 pub mod snapshot;
 
+/// The fact kinds this crate publishes.
+pub const FACTS: &[helios_core::FactDecl] = &[helios_core::FactDecl::of::<Progress>(
+    "A database snapshot or migration moved on",
+)];
+
 pub use migrate::{Migrated, SCHEMA_VERSION};
 
 /// How a vault database is opened.

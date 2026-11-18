@@ -86,8 +86,8 @@ use std::time::{Duration, Instant};
 use helios_config::{Config, Layer, Schema};
 use helios_core::jobs::{Jobs, Report as JobReport, Start};
 use helios_core::{
-    Bus, Context, Describe, Engine, Event, Graph, JobId, JobState, Message, NodeId, Region,
-    Scheduler,
+    Bus, Context, Describe, Engine, Event, FactDecl, Graph, JobId, JobState, Message, NodeId,
+    Region, Scheduler,
 };
 use helios_decision::Book;
 use helios_inspect::control::ControlRequest;
@@ -138,6 +138,31 @@ struct Idle {
 impl Event for Idle {
     const KIND: &'static str = "node.idle";
 }
+
+/// The fact kinds this binary publishes.
+const MAIN_FACTS: &[FactDecl] = &[
+    FactDecl::of::<Ready>("The node is serving and about to render"),
+    FactDecl::of::<RenderDone>("A render is finished"),
+    FactDecl::of::<Idle>("Every render and export the description asks for is finished"),
+    FactDecl::of::<control::Action<'static>>("A control action was received"),
+];
+
+/// Every fact kind the node's bus carries, by the table of the crate that
+/// publishes it: what it declares on its bus ([`Bus::declare`]).
+const FACTS: &[&[FactDecl]] = &[
+    helios_core::engine::FACTS,
+    helios_core::scheduler::FACTS,
+    helios_core::jobs::FACTS,
+    helios_ai::FACTS,
+    helios_decision::FACTS,
+    helios_export::FACTS,
+    helios_library::FACTS,
+    helios_node_core::FACTS,
+    helios_vault::FACTS,
+    helios_vault_sqlite::FACTS,
+    helios_node::FACTS,
+    MAIN_FACTS,
+];
 
 /// The modules this node knows, with their manifests, and the composite
 /// files Helios ships (a workshop's block included): what a surface or
@@ -769,7 +794,7 @@ mod control {
 
     /// A control action was received.
     #[derive(Serialize)]
-    struct Action<'a> {
+    pub(super) struct Action<'a> {
         #[serde(flatten)]
         request: &'a ControlRequest,
     }
@@ -2083,6 +2108,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     let bus = Arc::new(Bus::with_journal(
         config.number("system.events.journal") as usize
     ));
+    bus.declare(FACTS.iter().copied());
     let mut book = Book::new().with_bus(bus.clone());
     for (name, mode) in &loaded.decisions {
         book.declare(name, *mode);

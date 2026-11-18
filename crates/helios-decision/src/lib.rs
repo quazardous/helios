@@ -33,6 +33,13 @@ use helios_core::{Bus, Engine, Event, Graph, NodeId, Params, Region};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// The fact kinds this crate publishes.
+pub const FACTS: &[helios_core::FactDecl] = &[
+    helios_core::FactDecl::of::<Answered>("A decision was answered"),
+    helios_core::FactDecl::of::<Proposed>("A model proposed answers that wait for a human"),
+    helios_core::FactDecl::of::<Waiting>("A decision waits for an answer"),
+];
+
 /// The config key holding the project's default mode.
 pub const MODE_SETTING: &str = "project.decisions.mode";
 
