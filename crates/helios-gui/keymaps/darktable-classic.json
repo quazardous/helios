@@ -11,6 +11,7 @@
     { "keys": "Ctrl+Shift+B", "command": "view.bottomPanel.toggle" },
     { "keys": "Ctrl+E", "command": "library.export" },
     { "keys": "Ctrl+D", "command": "library.duplicate", "when": "${library}" },
+    { "keys": "Ctrl+Shift+D", "command": null },
     { "keys": "Ctrl+Shift+D", "command": "library.duplicateOriginal", "when": "${library}" }
   ],
   "left_out": [

@@ -3558,7 +3558,7 @@ impl Shell {
         for (id, title) in [
             (
                 crate::comparison::ADD_COMMAND,
-                "Compare: add photos to the comparison open (`images`: ids, else the selection; four at most)",
+                "Compare: add photos to the comparison open (`images`: ids, else the selection; `at`: before the photo at that place, else last; sixteen at most)",
             ),
             (
                 crate::comparison::REMOVE_COMMAND,
@@ -3566,7 +3566,7 @@ impl Shell {
             ),
             (
                 crate::comparison::SET_COMMAND,
-                "Compare: compare exactly these photos (`images`: one to four ids), entering Compare",
+                "Compare: compare exactly these photos (`images`: one to sixteen ids, in that order), entering Compare",
             ),
             (
                 crate::comparison::CLEAR_COMMAND,
@@ -6269,7 +6269,7 @@ impl Shell {
     /// Without `images` while comparing, Compare is left: the command
     /// (its key C, the gallery bar's button) is a toggle.
     fn compare_photos(&mut self, args: &Value) -> Result<Value, String> {
-        use egui_pop::views::library::compare::MAX_PANES;
+        use crate::comparison::MAX_PANES;
         if args.get("images").is_none() && crate::contexts::comparing(self.core.app.handle()) {
             return self.leave_comparison();
         }
@@ -6362,14 +6362,22 @@ impl Shell {
             c::ADD_COMMAND => {
                 open()?;
                 let ids = images.unwrap_or_else(|| self.focus.library.borrow().selection());
-                let (list, added) = self.focus.comparison.borrow().with_added(&ids);
+                let at = match args.get("at") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(
+                        v.as_u64()
+                            .ok_or("`at`: the place to add the photos at (0: first)")?
+                            as usize,
+                    ),
+                };
+                let (list, added) = self.focus.comparison.borrow().with_added(&ids, at);
                 if added.len() < ids.iter().filter(|i| !current.contains(i)).count() {
                     self.note(
                         Message::new(
                             "gui-compare-full",
                             "Compare shows { $count } photos at most: the others were not added",
                         )
-                        .with("count", egui_pop::views::library::compare::MAX_PANES),
+                        .with("count", crate::comparison::MAX_PANES),
                     );
                 }
                 if !added.is_empty() {
@@ -6409,7 +6417,7 @@ impl Shell {
                 if ids.is_empty() {
                     return Err("`images`: one photo at least (`compare.clear` empties it)".into());
                 }
-                ids.truncate(egui_pop::views::library::compare::MAX_PANES);
+                ids.truncate(crate::comparison::MAX_PANES);
                 if comparing {
                     self.write_comparison(ids.clone())?;
                 } else {
@@ -6995,7 +7003,7 @@ impl Shell {
                 let selection = self.focus.library.borrow().selection();
                 let mut cmp = self.focus.comparison.borrow_mut();
                 let shown = cmp.shown(&selection);
-                if shown.len() < 2 {
+                if shown.is_empty() {
                     return Err("no photos are compared".into());
                 }
                 cmp.step(step, shown.len());

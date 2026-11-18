@@ -52,7 +52,10 @@ use egui_pop::core::widgets;
 use helios_ui::{Action, Scroll};
 
 use crate::thumb_textures::Resident;
-use egui_pop::views::library::compare::{CompareView, Pane};
+use egui_pop::views::library::compare::{CompareView, Intent, Pane};
+
+/// The Compare surface's name.
+const COMPARE_SURFACE: &str = "helios.compare";
 
 use crate::comparison::Comparison;
 use egui_pop::views::library::filter::{Filter, SearchField};
@@ -5302,26 +5305,6 @@ impl Library {
             .into_iter()
             .filter(|k| self.index.contains_key(k))
             .collect();
-        if keys.len() < 2 {
-            if comparing {
-                back_to_grid_action(ui);
-            }
-            // One photo left in the comparison: the list is kept, the
-            // next one added is compared with it.
-            let hint = if cmp.photos().len() == 1 {
-                Message::new(
-                    "gui-library-compare-one",
-                    "Add a photo to compare it with this one (Add to comparison)",
-                )
-            } else {
-                Message::new(
-                    "gui-library-compare-hint",
-                    "Select two to four images to compare them",
-                )
-            };
-            ui.muted(crate::i18n::text(ui.ctx(), hint));
-            return;
-        }
         let chosen = !cmp.photos().is_empty();
         // A photo of the comparison selected elsewhere (a click in the
         // filmstrip) becomes active, once, when the selection changes:
@@ -5377,9 +5360,11 @@ impl Library {
             .collect();
         // Each raw drawn from its head version, rendered at about the
         // size of a pane.
-        let pane = ui.available_size() * ui.ctx().pixels_per_point();
-        let side = pane.x / keys.len() as f32;
-        self.ask_heads(&keys, side.max(pane.y).ceil() as u32);
+        if !keys.is_empty() {
+            let pane = ui.available_size() * ui.ctx().pixels_per_point();
+            let side = pane.x / keys.len() as f32;
+            self.ask_heads(&keys, side.max(pane.y).ceil() as u32);
+        }
         self.ask_compare_large(&keys);
         let out = {
             let thumbs = CompareThumbs {
@@ -5392,36 +5377,20 @@ impl Library {
                     changed: None,
                 },
             };
-            CompareView::new("helios.compare")
+            CompareView::new(COMPARE_SURFACE)
                 .synced(cmp.synced)
                 .best(best.clone())
+                .active(cmp.active(&keys).cloned())
+                .max_panes(crate::comparison::MAX_PANES)
+                .removable(true)
+                .carry("photos", DraggedPhotos, |p: &DraggedPhotos| {
+                    (!p.0.is_empty()).then(|| p.0.clone())
+                })
                 .show(ui, &mut cmp.view, &panes, &thumbs)
         };
-        let rect = out.response.rect;
-        crate::name_rect(ui.ctx(), "helios.library.compare", rect);
-        // The active photo outlined; a click in a pane makes it active.
-        let gap = egui_pop::core::theme::Tokens::of(ui.ctx()).space.s;
-        let areas = pane_rects(rect, panes.len(), gap);
-        let clicked = ui.input(|i| {
-            i.pointer
-                .primary_clicked()
-                .then(|| i.pointer.interact_pos())
-                .flatten()
-        });
-        if let Some(at) = clicked
-            && let Some(i) = areas.iter().position(|a| a.contains(at))
-        {
-            cmp.set_active(i);
-        }
+        crate::name_rect(ui.ctx(), "helios.library.compare", out.response.rect);
         let active = cmp.active_index(keys.len());
-        if let Some(area) = areas.get(active) {
-            let ring = egui_pop::core::theme::Tokens::of(ui.ctx()).focus_ring;
-            ui.painter().rect_stroke(
-                area.shrink(1.0),
-                0.0,
-                egui::Stroke::new(2.0, ring),
-                egui::StrokeKind::Inside,
-            );
+        if let Some(area) = out.panes.get(active) {
             crate::name_rect(ui.ctx(), "helios.library.compare.active", *area);
         }
         self.after_pass(ui.ctx());
@@ -5431,9 +5400,79 @@ impl Library {
         if keep && let Some(best) = best {
             self.keep_best(&best, &keys);
         }
+        let mut active = active;
+        for intent in out.intents {
+            if let Some(i) = Self::compare_intent(ui.ctx(), cmp, &keys, chosen, intent) {
+                active = i;
+            }
+        }
         // The marks follow the active photo of a chosen comparison; the
         // gallery's selection and cursor stay as they were.
-        self.compare_active = chosen.then(|| keys[active].clone());
+        self.compare_active = keys.get(active).filter(|_| chosen).cloned();
+    }
+
+    /// What the Compare surface asked of the list: the active photo
+    /// changed here (its new place), the list edited through the
+    /// `compare.*` commands so the Compare place, and the workspace,
+    /// keep it. A comparison of the selection becomes one of its own.
+    fn compare_intent(
+        ctx: &egui::Context,
+        cmp: &mut Comparison,
+        keys: &[String],
+        chosen: bool,
+        intent: Intent<String>,
+    ) -> Option<usize> {
+        use crate::comparison as c;
+        let run = |id: &str, args: Value| {
+            crate::dialogs::request(
+                ctx,
+                crate::dialogs::Request::Run(id.into(), args, helios_shell::commands::Origin::User),
+            );
+        };
+        let mut list = keys.to_vec();
+        match intent {
+            Intent::Active { key } => {
+                let i = keys.iter().position(|k| *k == key)?;
+                cmp.set_active(i);
+                return Some(i);
+            }
+            Intent::Remove { key } if chosen => {
+                run(c::REMOVE_COMMAND, json!({ "images": [key] }));
+                return None;
+            }
+            Intent::Add { keys: added, at } if chosen => {
+                run(c::ADD_COMMAND, json!({ "images": added, "at": at }));
+                return None;
+            }
+            Intent::Move { key, to } if chosen => {
+                if let Some(list) = cmp.with_moved(&key, to) {
+                    run(c::SET_COMMAND, json!({ "images": list }));
+                }
+                return None;
+            }
+            Intent::Remove { key } => list.retain(|k| *k != key),
+            Intent::Add { keys: added, at } => {
+                let mut at = at.min(list.len());
+                for k in added {
+                    if !list.contains(&k) {
+                        list.insert(at, k);
+                        at += 1;
+                    }
+                }
+            }
+            Intent::Move { key, to } => {
+                let from = list.iter().position(|k| *k == key)?;
+                let k = list.remove(from);
+                list.insert(to.min(list.len()), k);
+            }
+            _ => return None,
+        }
+        if list.is_empty() {
+            return None;
+        }
+        list.truncate(c::MAX_PANES);
+        run(c::SET_COMMAND, json!({ "images": list }));
+        None
     }
 
     /// The active photo's marks in the Compare panel: its name, stars,
@@ -5574,28 +5613,6 @@ fn with_keys(ctx: &egui::Context, what: String, keys: &[String]) -> String {
             .with("what", what)
             .with("keys", keys.join(", ")),
     )
-}
-
-/// Where the Compare view puts `n` panes in `rect`, `gap` apart: side by
-/// side up to three, four in a square (egui-pop's `CompareView` layout).
-fn pane_rects(rect: egui::Rect, n: usize, gap: f32) -> Vec<egui::Rect> {
-    let (cols, rows) = match n {
-        0 | 1 => (1, 1),
-        2 => (2, 1),
-        3 => (3, 1),
-        _ => (2, 2),
-    };
-    let w = (rect.width() - gap * (cols as f32 - 1.0)) / cols as f32;
-    let h = (rect.height() - gap * (rows as f32 - 1.0)) / rows as f32;
-    (0..n.min(cols * rows))
-        .map(|i| {
-            let (c, r) = ((i % cols) as f32, (i / cols) as f32);
-            egui::Rect::from_min_size(
-                rect.min + egui::vec2(c * (w + gap), r * (h + gap)),
-                egui::vec2(w, h),
-            )
-        })
-        .collect()
 }
 
 /// What a unit test reads of the writes a Library made alone asked.

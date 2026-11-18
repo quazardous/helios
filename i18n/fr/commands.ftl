@@ -662,13 +662,13 @@ command-compare-sync =
     .title = Comparer : zoom et déplacement synchronisés entre les photos (`on` ; basculé en son absence)
 
 command-compare-add =
-    .title = Comparer : ajouter des photos à la comparaison ouverte (`images` : identifiants, sinon la sélection ; quatre au plus)
+    .title = Comparer : ajouter des photos à la comparaison ouverte (`images` : identifiants, sinon la sélection ; `at` : avant la photo à cette place, sinon en dernier ; seize au plus)
 
 command-compare-remove =
     .title = Comparer : retirer des photos de la comparaison (`images` : identifiants, sinon la photo active ; la dernière retirée quitte Comparer)
 
 command-compare-set =
-    .title = Comparer : comparer exactement ces photos (`images` : d’un à quatre identifiants), en entrant dans Comparer
+    .title = Comparer : comparer exactement ces photos (`images` : d’un à seize identifiants, dans cet ordre), en entrant dans Comparer
 
 command-compare-clear =
     .title = Comparer : vider la comparaison et quitter Comparer

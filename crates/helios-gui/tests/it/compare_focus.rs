@@ -84,9 +84,10 @@ fn rating(h: &Harness<'_, Shell>, id: &str) -> u8 {
     h.state().library().entry(id).unwrap().rating as u8
 }
 
-/// Zooms by `factor` with the pointer over the photo named `name`.
+/// Zooms by `factor` with the pointer over the photo named `name` (its
+/// pane, a list item of the Compare surface).
 fn zoom_over(h: &mut Harness<'_, Shell>, name: &str, factor: f32) {
-    h.get_by_role_and_label(Role::Unknown, name).hover();
+    h.get_by_role_and_label(Role::ListItem, name).hover();
     h.run();
     h.event(egui::Event::Zoom(factor));
     h.run();
