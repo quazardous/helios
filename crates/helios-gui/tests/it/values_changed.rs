@@ -133,3 +133,26 @@ fn a_drag_s_changes_made_between_two_passes_are_heard_in_the_next_one() {
     h.step();
     assert_eq!(shown(h.state()), 1.0, "the graph holds the last value");
 }
+
+#[test]
+fn a_value_written_on_another_thread_is_heard_at_the_next_pass() {
+    let mut h = harness(shell());
+    // As a camera look fitted off the frame writes it.
+    let values = h.state().values().clone();
+    std::thread::spawn(move || {
+        values
+            .lock()
+            .unwrap()
+            .set(helios_values::Set::new(
+                EV,
+                helios_values::Change::To(Value::Float(0.5)),
+                Origin::User,
+            ))
+            .unwrap();
+    })
+    .join()
+    .unwrap();
+    assert_eq!(shown(h.state()), 0.0, "never heard on the writing thread");
+    h.step();
+    assert_eq!(shown(h.state()), 0.5);
+}

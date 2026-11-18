@@ -10,7 +10,8 @@
 //! heard after the drawing, in the same pass (egui-pop drains the asks
 //! once per pass); asked from a window drawn apart (an application
 //! window, a deferred viewport), at the main window's next pass, which
-//! the bus wakes.
+//! the bus wakes. A value written on another thread (a camera look
+//! fitted off the frame) is heard at the interface's next pass too.
 //!
 //! The change names the surface whose store changed ([`MAIN_SURFACE`]
 //! for the main window's), so a listener of one surface leaves the
@@ -81,28 +82,34 @@ pub fn declare(bus: &dyn Bus) {
 }
 
 /// Gives `store` the hook that asks each change on `bus` as `surface`'s
-/// ([`ValuesChanged`]), heard after the drawing. Values are written on
-/// the interface's thread, the one calling this: a debug build checks
-/// it (an ask from another thread would wait for that thread's drain,
-/// never made). On a bus without `Defer` (none Helios builds), a change
-/// is logged and not heard: hearing it at once, under the store's lock,
-/// would wait for ever.
+/// ([`ValuesChanged`]). Written on the interface's thread (the one
+/// calling this), the change is asked through `Defer`: heard after the
+/// drawing. Written on another thread (a camera look fitted off the
+/// frame), it is emitted there: the listeners, local to the interface's
+/// thread, are queued for its next pass, which the bus wakes; never heard
+/// on the writing thread, under the store's lock. Every listener of the
+/// point is local for that reason. On a bus without `Defer` (none Helios
+/// builds), a change written on the interface's thread is logged and not
+/// heard: hearing it at once, under the store's lock, would wait for ever.
 pub fn hook(store: &mut helios_values::Store, bus: Arc<dyn Bus>, surface: u64) {
     declare(&*bus);
     let interface = std::thread::current().id();
     store.on_change(move |c| {
-        debug_assert_eq!(
-            std::thread::current().id(),
-            interface,
-            "{CHANGED}: values written off the interface's thread ({:?})",
-            c.paths
-        );
         let change = Change {
             surface,
             paths: c.paths.clone(),
             seq: c.seq,
             origin: c.origin.clone(),
         };
+        if std::thread::current().id() != interface {
+            // The local listeners are queued for the interface's thread.
+            let altered = bus.alter::<ValuesChanged>(change, ());
+            debug_assert!(
+                altered.refused.is_none() && altered.failures.is_empty(),
+                "{CHANGED}: a listener heard on the writing thread"
+            );
+            return;
+        }
         match bus.defer() {
             Some(defer) => {
                 defer.ask::<ValuesChanged>(change, ());
