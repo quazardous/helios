@@ -66,6 +66,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use egui::Context as Egui;
 use egui::ViewportId;
 use egui_pop::api::bus::Reason;
+use egui_pop::api::bus::bus_contract::Bus;
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use egui_pop::api::toasts::{TOASTS, Toast};
@@ -287,8 +288,11 @@ pub(crate) struct ImportWindow {
     volume_events: Option<crate::node_events::Listener>,
     /// Cards plugged in since the watch's first look, not toasted yet.
     inserted: Vec<Card>,
-    /// The context the cards' and the scans' threads ask a frame of.
+    /// The context the automatic imports' folder watch asks a frame of.
     pub(super) ctx: Arc<Mutex<Option<Egui>>>,
+    /// The bus the window's threads say their news on
+    /// ([`super::import_news`]), given when the shell is built.
+    pub(super) news: Arc<Mutex<Option<std::sync::Weak<dyn Bus>>>>,
     /// The automatic imports ([`super::import_auto`]).
     pub(super) auto: super::import_auto::AutoImports,
     /// The library's import history, listed under the sources
@@ -582,14 +586,15 @@ impl ImportWindow {
             .all(|t| self.scans.iter().any(|(p, _, done)| p == t && *done))
     }
 
-    /// Asks a frame of the window from another thread: of its own OS
-    /// window, or of the main one while embedded or not drawn yet.
+    /// Says the window's news on the bus, from any thread
+    /// ([`super::import_news`]): its listener wakes the window, or the
+    /// main window while it is drawn there, not open or going.
     pub(super) fn waker(&self) -> impl Fn() + Send + Sync + 'static {
-        let (ctx, drawn_in) = (self.ctx.clone(), self.drawn_in.clone());
+        let news = self.news.clone();
         move || {
-            if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                let at = *drawn_in.lock().unwrap_or_else(PoisonError::into_inner);
-                ctx.request_repaint_of(at.unwrap_or(ViewportId::ROOT));
+            let bus = news.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            if let Some(bus) = bus {
+                super::import_news::say(&bus);
             }
         }
     }
@@ -926,7 +931,7 @@ impl Shell {
         self.follow_local_node(watch.bus());
         let listener = self.node_events().listen("import-window", &["volume.*"]);
         let mut w = self.import.get_mut();
-        let (ctx, drawn_in) = (w.ctx.clone(), w.drawn_in.clone());
+        let wake = w.waker();
         // Subscribed before the list is read: a card in both is listed
         // once (by its root).
         w.volume_events = Some(listener);
@@ -948,19 +953,13 @@ impl Shell {
         }
         w.sources.see_cards(mounted);
         // A volume came or went: the main window's toasts and the import
-        // window's list, woken at once (before the scan).
+        // window's list, woken at once (before the scan) by the window's
+        // news, said from the watch's thread.
         let listened = node_volumes::listen_both(
             &**watch.hooks(),
             node_volumes::CARDS,
             "helios.import",
-            move |_| {
-                if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                    ctx.request_repaint_of(ViewportId::ROOT);
-                    if let Some(at) = *drawn_in.lock().unwrap_or_else(PoisonError::into_inner) {
-                        ctx.request_repaint_of(at);
-                    }
-                }
-            },
+            move |_| wake(),
         );
         if let Err(e) = listened {
             log::error!(target: "helios", "{}: {e}", node_volumes::CARDS);
