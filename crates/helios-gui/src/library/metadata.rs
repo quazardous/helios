@@ -289,6 +289,7 @@ impl Library {
 
     /// Shows the templates read from the library.
     pub fn set_templates(&mut self, list: Vec<Template>) {
+        self.shown_changed();
         self.templates = Some(list);
     }
 
@@ -407,6 +408,7 @@ impl Library {
 
     /// Shows a photo's capture details, read by the host.
     pub fn set_exif(&mut self, image: String, fields: Map<String, Value>) {
+        self.shown_changed();
         let exif = &mut self.meta_panel.exif;
         exif.retain(|(id, _)| *id != image);
         exif.push((image, fields));

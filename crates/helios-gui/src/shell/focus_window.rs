@@ -151,7 +151,7 @@ impl FocusWindow {
                 if s.is_open() && !window.close_requested() {
                     egui::CentralPanel::default().show(ui, |ui| s.window_ui(ui));
                     if s.asks_main_pass() {
-                        ui.ctx().request_repaint_of(ViewportId::ROOT);
+                        super::main_pass::ask(window.app(), self.window);
                     }
                     return;
                 }
