@@ -385,7 +385,7 @@ impl Gallery {
     pub fn set_results(&mut self, results: &ResultsDesc) {
         self.mode = results.mode;
         if self.columns != results.columns {
-            self.columns = results.columns.clone();
+            self.columns.clone_from(&results.columns);
             self.table_store = None;
         }
         self.state.set_size(
