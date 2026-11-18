@@ -18,8 +18,8 @@
 //!
 //! A gallery is an explorer of two linked parts (owner, 2026-11-17): its
 //! **Filters** (the search, the filters and the sources, nothing else)
-//! and its **Results** (the photos, shown as thumbnails at a size or as
-//! a list, with the view's options in its bar). The main window draws
+//! and its **Results** (the photos, shown as thumbnails at a size, as a
+//! list or as details in columns, with the view's options in its bar). The main window draws
 //! them as two panels ([`EXPLORER`]: `helios.filters` and
 //! `helios.vault`), linked by the gallery id they both draw; the Library
 //! window draws its gallery's two parts side by side. A second explorer
@@ -28,7 +28,8 @@
 use egui_pop::views::library::LibraryState;
 use egui_pop::views::library::filter::{Filter, SearchState};
 use egui_pop::views::list::ListState;
-use helios_template::{LibraryDesc, ResultsDesc, ResultsMode, ViewDesc};
+use egui_pop::views::table::TableState;
+use helios_template::{LibraryDesc, ResultsColumn, ResultsDesc, ResultsMode, ViewDesc};
 use helios_vault::fields::Query;
 use std::collections::HashSet;
 
@@ -327,6 +328,16 @@ pub struct Gallery {
     pub(super) mode: ResultsMode,
     /// The list's state, in list mode (its selection follows `state`'s).
     pub(super) list: ListState<String>,
+    /// The details' columns as the user set them (order, widths); the
+    /// default columns when empty.
+    pub(super) columns: Vec<ResultsColumn>,
+    /// The details' table's state, in details mode (its selection
+    /// follows `state`'s).
+    pub(super) table: TableState<String>,
+    /// The value store the details' table reads its sort and widths
+    /// from, for the columns it was made for (see
+    /// [`super::details::TableStore`]).
+    pub(super) table_store: Option<super::details::TableStore>,
     /// How the results show changed since the workspace last kept it
     /// ([`super::Library::take_results_changes`]).
     pub(super) results_changed: bool,
@@ -351,6 +362,9 @@ impl Gallery {
             auto_advance: false,
             mode: ResultsMode::Thumbnails,
             list: ListState::new(),
+            columns: Vec::new(),
+            table: TableState::new(),
+            table_store: None,
             results_changed: false,
         }
     }
@@ -362,6 +376,7 @@ impl Gallery {
         ResultsDesc {
             mode: self.mode,
             size: (size != default).then_some(size),
+            columns: self.columns.clone(),
         }
     }
 
@@ -369,6 +384,10 @@ impl Gallery {
     /// size when it says nothing).
     pub fn set_results(&mut self, results: &ResultsDesc) {
         self.mode = results.mode;
+        if self.columns != results.columns {
+            self.columns.clone_from(&results.columns);
+            self.table_store = None;
+        }
         self.state.set_size(
             results
                 .size

@@ -59,6 +59,6 @@ pub use bundle::{Bundle, Report, Text, Update, parse_composite, parse_template};
 pub use catalogue::Catalogue;
 pub use format::{
     CompositeFile, CompositeRef, ExportDesc, FORMAT, ImportDesc, LibraryDesc, Measure, Parameter,
-    ParameterKind, QueryDesc, ResultsDesc, ResultsMode, SortDesc, SourceKind, SubWorkspace, Target,
-    Template, ViewDesc, Workshop,
+    ParameterKind, QueryDesc, ResultsColumn, ResultsDesc, ResultsMode, SortDesc, SourceKind,
+    SubWorkspace, Target, Template, ViewDesc, Workshop,
 };

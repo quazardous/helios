@@ -36,7 +36,7 @@ use egui_pop::views::library::marks::RatingStars;
 use egui_pop::views::library::tags::TagInput;
 use egui_pop::views::library::{Flag, Marks};
 use helios_core::Message;
-use helios_ui::{Action, Scroll};
+use helios_ui::Action;
 use helios_vault::meta::{COPYRIGHT, CREATOR, DESCRIPTION, TEXT_FIELDS, TITLE};
 use serde_json::{Map, Value, json};
 
@@ -428,12 +428,10 @@ impl Library {
         )
         .default_open(true)
         .show(ui, |ui| {
-            // Its own scroll, a share of the panel's height: the grid
-            // below keeps its room, and the panel never scrolls the
-            // search field away.
-            helios_ui::scroll(ui, "helios.library.metadata.scroll", Scroll::Form, |ui| {
-                self.metadata_body(ui);
-            });
+            // No scroll of its own: the Filters scroll as a whole, so the
+            // section reaches the bottom of their column (a scroll of a
+            // share of the height stopped it short of the window's).
+            self.metadata_body(ui);
             // The versions strip below the scroll, always in view.
             if let Ok(keys) = self.targets()
                 && let [one] = keys.as_slice()

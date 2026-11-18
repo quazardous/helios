@@ -76,8 +76,9 @@ use crate::library::{Change, Entry};
 type Searched = (Vec<String>, helios_vault::Facets);
 
 /// The fields the library shows (the capture time gives the day the
-/// search field's dates match; the title is copied with the marks).
-const SHOWN: [&str; 15] = [
+/// search field's dates match; the title is copied with the marks; the
+/// camera, lens and exposure are the Results' details columns).
+const SHOWN: [&str; 21] = [
     RATING,
     REJECTED,
     PICKED,
@@ -93,6 +94,12 @@ const SHOWN: [&str; 15] = [
     cull::CLIP_WHITE,
     cull::CLIP_BLACK,
     helios_vault::edit::EDITED,
+    helios_vault::capture::CAMERA_MAKE,
+    helios_vault::capture::CAMERA_MODEL,
+    helios_vault::capture::LENS,
+    helios_vault::capture::APERTURE,
+    helios_vault::capture::SHUTTER,
+    helios_vault::capture::ISO,
 ];
 
 /// Who the vault's audit trail names for what the desktop writes.
