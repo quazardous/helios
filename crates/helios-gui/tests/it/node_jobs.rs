@@ -4,7 +4,9 @@
 //! drops and comes back, forgotten when the node stays away.
 //!
 //! Its other events reach the shell bus's listeners by kind, resumed
-//! after a reconnection, resynced after a hole (`node_events`).
+//! after a reconnection, resynced after a hole (`node_events`); its
+//! relayable facts reach the listeners of their point on the desktop's
+//! application bus, resynced when the node restarted.
 //!
 //! The node here is the real protocol over real sockets: a bus whose
 //! jobs an inspector shows and streams (as `helios-node` serves them),
@@ -18,16 +20,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui::vec2;
+use egui_pop::api::bus::bus_contract::ListenOpts;
+use egui_pop::api::bus::egui_pop_hooks::Kernel;
 use egui_pop::api::jobs as centre_jobs;
 use egui_pop::api::jobs::JOBS;
 use egui_pop::model::jobs::{JobState, Request};
 use helios_core::jobs::{Jobs, Progress, Start};
-use helios_core::{Bus, Envelope};
+use helios_core::{Bus, BusJournal, Envelope, Event, FactPoint};
 use helios_gui::node_events::{Listener, NodeEvent};
 use helios_gui::relay::{self, NodeLink, Timing};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_inspect::control::ControlRequest;
 use helios_inspect::{Address, Inspector, Listen};
+use helios_node_core::settings::LayerChanged;
 use serde_json::json;
 
 const LONG: Duration = Duration::from_secs(20);
@@ -45,6 +50,8 @@ struct Node {
     bus: Arc<Bus>,
     jobs: Jobs,
     inspector: Inspector,
+    /// Its application bus, when it relays its facts.
+    _kernel: Option<Arc<Kernel>>,
 }
 
 impl Node {
@@ -54,13 +61,27 @@ impl Node {
 
     /// A node whose bus keeps `journal` events.
     fn with_journal(name: &str, journal: usize) -> Node {
+        Node::serving(name, journal, false)
+    }
+
+    /// A node serving its relayable facts, as `helios-node` does: its
+    /// application bus has its fact bus as journal and relay.
+    fn relaying(name: &str) -> Node {
+        Node::serving(name, helios_core::bus::JOURNAL, true)
+    }
+
+    fn serving(name: &str, journal: usize, relays: bool) -> Node {
         let dir =
             std::env::temp_dir().join(format!("helios-node-jobs-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let bus = Arc::new(Bus::with_journal(journal));
         let jobs = Jobs::new(bus.clone());
-        let inspector = Inspector::new(bus.clone()).with_jobs();
+        let mut inspector = Inspector::new(bus.clone()).with_jobs();
+        let kernel = relays.then(|| journaled(bus.clone()));
+        if let Some(kernel) = &kernel {
+            inspector = inspector.with_relay(kernel.clone());
+        }
         helios_inspect::serve(inspector.clone(), &dir.join("node.sock")).unwrap();
         let cancels = jobs.clone();
         helios_inspect::serve_at(
@@ -80,6 +101,7 @@ impl Node {
             bus,
             jobs,
             inspector,
+            _kernel: kernel,
         }
     }
 
@@ -120,6 +142,19 @@ fn wait_for(events: &Receiver<Envelope>, kind: &str, id: &str) -> Envelope {
             Err(e) => panic!("no {kind} for {id} ({e}); seen: {seen:#?}"),
         }
     }
+}
+
+/// An application bus with `facts` as its journal and relay, the
+/// desktop's fact kinds declared on it, as `main` builds it.
+fn journaled(facts: Arc<Bus>) -> Arc<Kernel> {
+    let (kernel, journal) = BusJournal::attach(
+        facts,
+        |j| Kernel::new().with_journal(j.clone()).with_relay(j),
+        Kernel::declaration,
+    );
+    let refused = journal.declare(&*kernel, helios_gui::FACTS.iter().copied());
+    assert!(refused.is_empty(), "{refused:?}");
+    kernel
 }
 
 fn harness<'a>() -> egui_kittest::Harness<'a, Shell> {
@@ -439,4 +474,79 @@ fn a_node_s_events_reach_listeners_resumed_and_resynced() {
     says("storage.changed", 100, None);
     assert_eq!(next_heard(&heard).event.payload["n"], 100);
     job.finished();
+}
+
+#[test]
+fn a_node_s_relayable_facts_reach_the_desktop_s_listeners_and_a_restart_resyncs() {
+    let node = Node::relaying("relay");
+    // The desktop's application bus, as `main` builds it, and a listener
+    // of a relayable kind on it.
+    let desktop = journaled(helios_gui::bus());
+    let (heard_tx, heard) = channel();
+    let heard_tx = Mutex::new(heard_tx);
+    desktop
+        .listen::<FactPoint<LayerChanged>>("test", ListenOpts::new(), move |fact, ()| {
+            let n = fact.payload["n"].as_u64().unwrap_or(0);
+            let _ = heard_tx.lock().unwrap().send((fact.source.clone(), n));
+            Ok(())
+        })
+        .unwrap();
+    let shell = Shell::builder(helios_panels(), None)
+        .bus(desktop.clone())
+        .build();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    let resyncs = h.state().node_events().listen("test", &["nothing.*"]);
+    h.state_mut()
+        .follow_node_with(node.link("box"), FAST)
+        .unwrap();
+    let layer = |node: &Node, n: u64| {
+        node.bus.publish_value(
+            "settings",
+            None,
+            LayerChanged::KIND,
+            json!({ "layer": "user", "n": n }),
+        )
+    };
+    // The link starts from the node's present: said until it is up.
+    let deadline = Instant::now() + LONG;
+    let first = loop {
+        layer(&node, 1);
+        if let Ok(got) = heard.recv_timeout(Duration::from_millis(50)) {
+            break got;
+        }
+        assert!(Instant::now() < deadline, "no relayed fact within {LONG:?}");
+    };
+    assert_eq!(first, ("relayed:box".to_string(), 1));
+    while heard.try_recv().is_ok() {}
+    layer(&node, 2);
+    assert_eq!(heard.recv_timeout(LONG).unwrap().1, 2, "taken in once");
+
+    // The node restarts: another process at the same address, its
+    // numbers from 1 again. The desktop resyncs, then hears it.
+    node.go_away();
+    assert!(h.state().drop_node_link("box"));
+    drop(node);
+    let node = Node::relaying("relay");
+    let deadline = Instant::now() + LONG;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let e = resyncs
+            .recv_timeout(left)
+            .expect("a resync after the node restarted");
+        if e.is_resync() && e.event.payload["reason"] == "the node restarted" {
+            break;
+        }
+    }
+    layer(&node, 3);
+    let deadline = Instant::now() + LONG;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let (_, n) = heard
+            .recv_timeout(left)
+            .expect("the restarted node's fact is heard");
+        if n == 3 {
+            break;
+        }
+        assert_eq!(n, 2, "only what the old run said may come before");
+    }
 }
