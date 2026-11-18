@@ -64,8 +64,8 @@ fn culling_keys() -> Vec<(String, String)> {
     let library = keys::behind_no_picker(&keys::library());
     keys::defaults()
         .into_iter()
-        .filter(|(_, _, when)| *when == library)
-        .map(|(k, command, _)| (k, command))
+        .filter(|(_, _, when, _)| *when == library)
+        .map(|(k, command, _, _)| (k, command))
         .collect()
 }
 
@@ -98,7 +98,7 @@ fn the_default_map_has_no_conflict_and_no_global_letter() {
     let shell = Shell::new(helios_panels(), None);
     egui_pop_test::assert_keymap_clean(shell.app());
     let app = shell.app().handle();
-    for (k, command, when) in keys::defaults() {
+    for (k, command, when, _) in keys::defaults() {
         let parsed = Keys::parse(&k).unwrap();
         // Every key of the map is live on its command.
         let id = CommandId::new(&command).unwrap();

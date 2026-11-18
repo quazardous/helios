@@ -5121,6 +5121,9 @@ impl Library {
                 ListSignal::Vetoed { step, reason } => {
                     signals.push(Signal::Vetoed { step, reason });
                 }
+                // egui-pop's list says more since its signals became
+                // non-exhaustive; the library reads these two.
+                _ => {}
             }
         }
         let selection = self.view.state.selection();

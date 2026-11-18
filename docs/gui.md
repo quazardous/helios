@@ -988,9 +988,12 @@ darktable and Lightroom columns behind each key):
    suggest `{command, key, when}`; egui-pop's keymap orders user >
    workspace > defaults > suggestions, the most specific `when` winning
    within a layer. A widget never reads a key a command could take.
-3. **Contexts are explicit**: every binding has a `when` over named keys
-   (`focusedPanel`, `place`, `mode.orientation`); a plain key never fires
-   while typing, and no single global letter switches the view.
+3. **Contexts are explicit**: every binding declares where it listens,
+   egui-pop's key scope (2026-11-18: a window, `window:main`, or a panel,
+   each window keeping its own focused panel), and has a `when` over
+   named keys (`focusedPanel`, `place`, `mode.orientation`) for the rest;
+   a key pressed in one window never acts on another's, a plain key never
+   fires while typing, and no single global letter switches the view.
 4. **Conflicts are visible**: the shortcuts editor shows where a key
    comes from and the other bindings of the same keys; losing
    suggestions are listed. The default map has none (a test says so).
@@ -1012,8 +1015,12 @@ darktable and Lightroom columns behind each key):
     holding `H` will show the keys of the current context.
 
 **The default map** (2026-10-21, `helios-gui/src/keys.rs`): the
-keymap's default layer, every key scoped. *Library* is the vault's grid,
-the filmstrip or Compare having the focus, anywhere but the darkroom;
+keymap's default layer, every key scoped. The library's, Compare's,
+culling's and the view's keys listen in the main window only (the Import
+window's Delete never removes library photos); the library's also listen
+in the Library window, whose gallery is the whole window. *Library* is
+the vault's grid, the filmstrip or Compare having the focus, anywhere but
+the darkroom;
 *culling* is the culling mode, wherever the focus is; *image* is the
 image having the focus, not culling; *view* is the image having the focus
 or the darkroom. The grid and the filmstrip read no culling key

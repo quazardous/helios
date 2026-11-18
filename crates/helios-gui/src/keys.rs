@@ -1,8 +1,28 @@
 //! Helios's keyboard map (see `docs/gui.md`, "Keyboard shortcuts"): the
-//! default layer of egui-pop's keymap, every binding scoped by a `when`
-//! clause; [`crate::keymaps`] adds packages over it.
+//! default layer of egui-pop's keymap. Every binding declares where it
+//! listens, egui-pop's key scope (the window it is pressed in, its
+//! focused panel), and a `when` clause for the rest; [`crate::keymaps`]
+//! adds packages over it.
 
 use crate::contexts::{COMPARISON, CULLING, DARKROOM, ORIENTATION, SUBWORKSPACE};
+
+/// The main window's scope: the library's grid, Compare, culling and the
+/// darkroom live there, and their keys never fire from another window
+/// (the Import window's Delete must not remove library photos).
+pub const MAIN: &str = "window:main";
+
+/// The Library window's scope: its gallery keeps the library's keys.
+pub const LIBRARY_WINDOW: &str = "window:library";
+
+/// No declared scope: egui-pop infers it from the clause (a panel's when
+/// it requires `focusedPanel`, else every window).
+pub const INFERRED: &str = "";
+
+/// In the Library window ([`LIBRARY_WINDOW`]): the library's keys, its
+/// gallery being the window's whole content.
+pub fn library_window() -> String {
+    "appWindow == 'library'".into()
+}
 
 /// While the library has the focus (its grid, the filmstrip or Compare),
 /// anywhere but the darkroom: as in darktable's lighttable. egui-pop
@@ -58,12 +78,20 @@ pub fn viewport() -> String {
     format!("focusedPanel == 'helios.viewport' || place == '{DARKROOM}'")
 }
 
-/// The default map: keys, command, `when`. darktable's keys where they
-/// fit the credo, Lightroom's culling keys beside them.
-pub fn defaults() -> Vec<(String, String, String)> {
-    let mut keys: Vec<(String, String, String)> = Vec::new();
-    let mut bind = |k: &str, command: &str, when: &str| {
-        keys.push((k.into(), command.into(), when.into()));
+/// One binding of the default map: keys, command, `when`, scope (as in
+/// keymap files: [`MAIN`], [`LIBRARY_WINDOW`], [`INFERRED`]).
+pub type Binding = (String, String, String, String);
+
+/// The default map. darktable's keys where they fit the credo,
+/// Lightroom's culling keys beside them. The library's, Compare's,
+/// culling's and the darkroom's keys listen in the main window
+/// ([`MAIN`]), the library's also in the Library window
+/// ([`LIBRARY_WINDOW`]); the image's and the graph's are their panels'
+/// (inferred from `focusedPanel`); the rest are global.
+pub fn defaults() -> Vec<Binding> {
+    let mut keys: Vec<Binding> = Vec::new();
+    let mut bind_in = |scope: &str, k: &str, command: &str, when: &str| {
+        keys.push((k.into(), command.into(), when.into(), scope.into()));
     };
     let (library, culling, image, viewport) = (library(), culling(), image(), viewport());
     // Culling, in the library and while culling: digits rate (top row
@@ -100,6 +128,9 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // win there, and an image is not rated behind it.
     // In Compare, the arrows move the active photo instead (below).
     let comparison = comparison();
+    // The Library window shows the library alone: its keys there, with
+    // no focus test (its gallery is the window).
+    let in_library_window = library_window();
     for (k, command) in &culling_keys {
         for when in [&library, &culling] {
             let when = if matches!(k.as_str(), "Left" | "Right") {
@@ -107,16 +138,28 @@ pub fn defaults() -> Vec<(String, String, String)> {
             } else {
                 when.clone()
             };
-            bind(k, command, &behind_no_picker(&when));
+            bind_in(MAIN, k, command, &behind_no_picker(&when));
         }
+        bind_in(
+            LIBRARY_WINDOW,
+            k,
+            command,
+            &behind_no_picker(&in_library_window),
+        );
     }
     // Compare, as Lightroom's C in the library; in it, the arrows move
     // the active photo, as in Lightroom's Survey view.
-    bind("C", crate::comparison::COMMAND, &behind_no_picker(&library));
+    bind_in(
+        MAIN,
+        "C",
+        crate::comparison::COMMAND,
+        &behind_no_picker(&library),
+    );
     // The recent filters (darktable's collection history, its Ctrl+K):
     // Ctrl+K starts chords here (Ctrl+K Z, Ctrl+K Ctrl+S), so Shift is
     // added. Not while a text field is typed in.
-    bind(
+    bind_in(
+        MAIN,
         "Ctrl+Shift+K",
         crate::recent_filters::SWITCH_COMMAND,
         &format!("{} && !textInputFocus", behind_no_picker(&library)),
@@ -127,23 +170,36 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ("Ctrl+Shift+A", crate::library::SELECT_NONE_COMMAND),
         ("Ctrl+I", crate::library::SELECT_INVERT_COMMAND),
     ] {
-        bind(
-            k,
-            command,
-            &format!("{} && !textInputFocus", behind_no_picker(&library)),
-        );
+        for (scope, when) in [(MAIN, &library), (LIBRARY_WINDOW, &in_library_window)] {
+            bind_in(
+                scope,
+                k,
+                command,
+                &format!("{} && !textInputFocus", behind_no_picker(when)),
+            );
+        }
     }
     // Remove from Library, as Lightroom's and darktable's Delete in the
     // grid: the flag only, undoable, so nothing is asked first. Delete
     // is the image's own while a mask point is picked (above).
     // Not on the Compare panel: there Delete takes the active photo out
     // of the comparison (below), never out of the Library.
-    bind(
+    bind_in(
+        MAIN,
         "Delete",
         crate::library::REMOVE_COMMAND,
         &format!(
             "{} && focusedPanel != 'helios.compare' && !textInputFocus",
             behind_no_picker(&library)
+        ),
+    );
+    bind_in(
+        LIBRARY_WINDOW,
+        "Delete",
+        crate::library::REMOVE_COMMAND,
+        &format!(
+            "{} && !textInputFocus",
+            behind_no_picker(&in_library_window)
         ),
     );
     // Rotate Left and Right, as Lightroom's and darktable's Ctrl+[ and
@@ -152,30 +208,39 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ("Ctrl+OpenBracket", crate::library::ROTATE_LEFT_COMMAND),
         ("Ctrl+CloseBracket", crate::library::ROTATE_RIGHT_COMMAND),
     ] {
-        bind(
-            k,
-            command,
-            &format!("{} && !textInputFocus", behind_no_picker(&library)),
-        );
+        for (scope, when) in [(MAIN, &library), (LIBRARY_WINDOW, &in_library_window)] {
+            bind_in(
+                scope,
+                k,
+                command,
+                &format!("{} && !textInputFocus", behind_no_picker(when)),
+            );
+        }
     }
     // Duplicate, as Lightroom's "Create Virtual Copy" (Ctrl+'); the
     // darktable package adds its Ctrl+D and Ctrl+Shift+D.
-    bind(
-        "Ctrl+Quote",
-        crate::library::DUPLICATE_COMMAND,
-        &format!("{} && !textInputFocus", behind_no_picker(&library)),
-    );
+    for (scope, when) in [(MAIN, &library), (LIBRARY_WINDOW, &in_library_window)] {
+        bind_in(
+            scope,
+            "Ctrl+Quote",
+            crate::library::DUPLICATE_COMMAND,
+            &format!("{} && !textInputFocus", behind_no_picker(when)),
+        );
+    }
     // Group into Stack and Unstack, as Lightroom's Ctrl+G and
     // Ctrl+Shift+G (Ctrl+G is the graph's macro there: another context).
     for (k, command) in [
         ("Ctrl+G", crate::library::GROUP_COMMAND),
         ("Ctrl+Shift+G", crate::library::UNGROUP_COMMAND),
     ] {
-        bind(
-            k,
-            command,
-            &format!("{} && !textInputFocus", behind_no_picker(&library)),
-        );
+        for (scope, when) in [(MAIN, &library), (LIBRARY_WINDOW, &in_library_window)] {
+            bind_in(
+                scope,
+                k,
+                command,
+                &format!("{} && !textInputFocus", behind_no_picker(when)),
+            );
+        }
     }
     // Move to Trash… and Delete Rejected…, as Lightroom's "Remove and
     // Delete from Disk" (Ctrl+Alt+Shift+Delete) and "Delete Rejected
@@ -184,18 +249,22 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ("Ctrl+Alt+Shift+Delete", crate::library::TRASH_COMMAND),
         ("Ctrl+Backspace", crate::library::DELETE_REJECTED_COMMAND),
     ] {
-        bind(
-            k,
-            command,
-            &format!("{} && !textInputFocus", behind_no_picker(&library)),
-        );
+        for (scope, when) in [(MAIN, &library), (LIBRARY_WINDOW, &in_library_window)] {
+            bind_in(
+                scope,
+                k,
+                command,
+                &format!("{} && !textInputFocus", behind_no_picker(when)),
+            );
+        }
     }
     // Escape leaves Compare, as Lightroom's Survey and Compare views:
     // not while a pushed mode, an overlay, a field, zen mode or a tip's
     // card wants it (egui-pop's own Escape bindings), nor while a mask
     // path is drawn (`mask.cancel` below stops it). Each of those tests
     // makes the clauses exclusive, so the keymap holds no conflict.
-    bind(
+    bind_in(
+        MAIN,
         "Escape",
         crate::comparison::LEAVE_COMMAND,
         &format!(
@@ -203,11 +272,22 @@ pub fn defaults() -> Vec<(String, String, String)> {
             behind_no_picker(&comparison)
         ),
     );
-    bind("Right", "compare.next", &behind_no_picker(&comparison));
-    bind("Left", "compare.previous", &behind_no_picker(&comparison));
+    bind_in(
+        MAIN,
+        "Right",
+        "compare.next",
+        &behind_no_picker(&comparison),
+    );
+    bind_in(
+        MAIN,
+        "Left",
+        "compare.previous",
+        &behind_no_picker(&comparison),
+    );
     // Delete on the Compare panel takes the active photo out of the
     // comparison (Lightroom's Survey drops a photo from its view).
-    bind(
+    bind_in(
+        MAIN,
         "Delete",
         crate::comparison::REMOVE_COMMAND,
         &format!(
@@ -216,8 +296,8 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ),
     );
     // Next and previous image while culling; in the grid Space selects.
-    bind("Space", "vault.next", &culling);
-    bind("Backspace", "vault.previous", &culling);
+    bind_in(MAIN, "Space", "vault.next", &culling);
+    bind_in(MAIN, "Backspace", "vault.previous", &culling);
     // Drawing masks, while the image has the focus. Escape and Enter
     // bind only while a path is drawn: otherwise Escape is the
     // viewport's (it cancels a drag).
@@ -229,9 +309,10 @@ pub fn defaults() -> Vec<(String, String, String)> {
         // The mask display, as darktable's mask key.
         ("M", crate::mask_display::COMMAND),
     ] {
-        bind(k, command, &image);
+        bind_in(INFERRED, k, command, &image);
     }
-    bind(
+    bind_in(
+        INFERRED,
         "Enter",
         "mask.path.close",
         &format!("{image} && maskTool == 'path'"),
@@ -241,12 +322,14 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // serves a path drawn without the stack. In zen mode Escape leaves
     // it (egui-pop's), and a tip's card shown closes first (egui-pop's
     // `tips.notNow`).
-    bind(
+    bind_in(
+        INFERRED,
         "Escape",
         "mask.cancel",
         &format!("{image} && maskTool == 'path' && !workbenchZen && !modePushed && !tipShown"),
     );
-    bind(
+    bind_in(
+        INFERRED,
         "Delete",
         "mask.point.remove",
         &format!("{image} && maskPoint"),
@@ -257,7 +340,7 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ("Alt+2", "viewport.zoom.fill"),
         ("Alt+3", "viewport.zoom.fit"),
     ] {
-        bind(k, command, &viewport);
+        bind_in(MAIN, k, command, &viewport);
     }
     // Ctrl+Plus and Ctrl+Minus are egui-pop's `view.zoom_in` and
     // `view.zoom_out`, for the canvas in use (the image or the node graph
@@ -268,46 +351,57 @@ pub fn defaults() -> Vec<(String, String, String)> {
         ("Ctrl+Plus", "viewport.zoom.in"),
         ("Ctrl+Minus", "viewport.zoom.out"),
     ] {
-        bind(k, command, &format!("({viewport}) && !canvasActive"));
+        bind_in(MAIN, k, command, &format!("({viewport}) && !canvasActive"));
     }
     // Sub-workspaces, in the graph, as Houdini goes in and out of a
     // network: I enters the one holding the selected node, U goes up
     // (inside one only: its own layer).
-    bind("I", "subworkspace.enter", &graph());
+    bind_in(INFERRED, "I", "subworkspace.enter", &graph());
     // Macros, in the graph, as Blender's and Nuke's groups: Ctrl+G makes
     // one of the selected nodes, Ctrl+Alt+G dissolves the selected one,
     // Ctrl+Enter opens it or folds the one the selected node is in.
-    bind("Ctrl+G", "macro.make", &graph());
-    bind("Ctrl+Alt+G", "macro.dissolve", &graph());
-    bind("Ctrl+Enter", "macro.toggle", &graph());
-    bind("U", "nav.up", &subworkspace());
+    bind_in(INFERRED, "Ctrl+G", "macro.make", &graph());
+    bind_in(INFERRED, "Ctrl+Alt+G", "macro.dissolve", &graph());
+    bind_in(INFERRED, "Ctrl+Enter", "macro.toggle", &graph());
+    bind_in(INFERRED, "U", "nav.up", &subworkspace());
     // Navigation, everywhere (egui-pop adds the palette, settings, back,
     // full screen, undo and quit).
-    bind("Ctrl+P", crate::quick_open::COMMAND, "");
+    bind_in(INFERRED, "Ctrl+P", crate::quick_open::COMMAND, "");
     // Import photos, as Lightroom's File > Import.
-    bind("Ctrl+Shift+I", "library.importWindow", "");
+    bind_in(INFERRED, "Ctrl+Shift+I", "library.importWindow", "");
     // The Activity focus: the background jobs, as Ctrl+J opens a
     // browser's downloads.
-    bind("Ctrl+Shift+J", crate::activity::COMMAND, "");
+    bind_in(INFERRED, "Ctrl+Shift+J", crate::activity::COMMAND, "");
     // The History panel (Window > History): the edit's undo steps.
-    bind(
+    bind_in(
+        INFERRED,
         "Ctrl+Shift+H",
         &format!("{}.toggle", egui_pop::api::history_view::PANEL_HISTORY),
         "",
     );
     // The Library in its own window (Lightroom's key for the Library).
-    bind("Ctrl+Alt+1", crate::shell::LIBRARY_WINDOW_COMMAND, "");
+    bind_in(
+        INFERRED,
+        "Ctrl+Alt+1",
+        crate::shell::LIBRARY_WINDOW_COMMAND,
+        "",
+    );
     // Close the window in front, as its close button does (egui-pop's
     // `window.close`); Ctrl+Q, egui-pop's, quits from any window.
-    bind("Ctrl+W", "window.close", "");
+    bind_in(INFERRED, "Ctrl+W", "window.close", "");
     // Export photos, as Lightroom's File > Export.
-    bind("Ctrl+Shift+E", "library.export", "");
+    bind_in(INFERRED, "Ctrl+Shift+E", "library.export", "");
     // Bypass the selected module (darktable's and Blender's habit).
-    bind(crate::modules::KEY, crate::modules::COMMAND, "");
+    bind_in(INFERRED, crate::modules::KEY, crate::modules::COMMAND, "");
     // Zen mode (egui-pop's, no default key): the image alone, as in
     // VS Code; Escape leaves it.
-    bind("Ctrl+K Z", egui_pop::api::workbench::CMD_ZEN.as_str(), "");
-    bind("Ctrl+K Ctrl+S", "workbench.keybindings", "");
+    bind_in(
+        INFERRED,
+        "Ctrl+K Z",
+        egui_pop::api::workbench::CMD_ZEN.as_str(),
+        "",
+    );
+    bind_in(INFERRED, "Ctrl+K Ctrl+S", "workbench.keybindings", "");
     // Ctrl+B, Ctrl+Alt+B and Ctrl+J fold the start side bar, the end side
     // bar and the bottom panel: egui-pop's layout toggles bind them
     // (workbench.toggle.*), as in VS Code.

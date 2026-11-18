@@ -150,6 +150,7 @@ egui-pop in the lock: 0.14.0.
 | a confirmation dialog | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action. |
 | a file or folder picker | `FileBrowser` (egui-pop)<br>`egui_pop::api::files::browser::FileBrowser` | The file browser: entries from a `FileSource`, shown by a `ViewMode` chosen in its toolbar (or with `Ctrl+1` to `Ctrl+9`), kept per dialog in the host's store when drawn with `FileBrowser::show_in`. |
 | a settings or admin page declared as a manifest | `Admin` (egui-pop)<br>`egui_pop::api::admin::Admin` | The administration app's state, manifests, hooks, widget kinds and value layers. |
+| a submenu in a context menu drawn by hand | `menus::submenu(..)` (egui-pop)<br>`egui_pop::api::menus::submenu` | A submenu item in a menu drawn by hand (a context menu built in a closure, `egui_pop_core::pointer::claim::context_menu`), drawn as the declared menus' submenu items: the kit's `menu-item` with the submenu arrow, `selected` while its submenu is open. |
 | ask before a destructive action | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action. |
 
 ## Lists, trees and tables
