@@ -1028,6 +1028,7 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
             paths: vec![ev_path.into()],
             seq: Some((seq, seq)),
             origin: Some(Origin::User),
+            history: true,
         }]
     );
     // A write that changes nothing is not heard.
@@ -1048,8 +1049,22 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
     store
         .set(Set::new(black, Change::To(Value::Float(-0.02)), agent()).gesture(group))
         .unwrap();
+    let rev = store.history_rev();
     store.end(group);
-    assert_eq!(take().len(), 2);
+    let lift = take();
+    assert_eq!(lift.len(), 3, "{lift:?}");
+    assert!(!lift[0].history && !lift[1].history, "no step yet");
+    // Ended, it becomes a step: the history moved, nothing written.
+    assert_eq!(
+        lift[2],
+        Changed {
+            paths: Vec::new(),
+            seq: None,
+            origin: Some(agent()),
+            history: true,
+        }
+    );
+    assert!(store.history_rev() > rev);
     let before = store.seq();
     store.undo(&Origin::User).unwrap();
     let undone = take();
@@ -1057,6 +1072,7 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
     assert_eq!(undone[0].paths, [black, ev_path]);
     assert_eq!(undone[0].seq, Some((before + 1, before + 2)));
     assert_eq!(undone[0].origin, Some(Origin::User));
+    assert!(undone[0].history);
     assert!(undone[0].mirrored());
     store.redo(&Origin::User).unwrap();
     assert_eq!(take().len(), 1);
@@ -1070,7 +1086,9 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
     }
     assert_eq!(take().len(), 2);
     assert_eq!(store.cancel(drag), 1);
-    assert_eq!(take().len(), 1);
+    let cancelled = take();
+    assert_eq!(cancelled.len(), 1);
+    assert!(!cancelled[0].history, "a gesture cancelled makes no step");
 
     // A preview shown and left: heard, nothing written.
     assert!(store.set_preview(vec![(ev_path.into(), Value::Float(0.5))]));
@@ -1079,4 +1097,13 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
     assert_eq!((shown[0].seq, shown[0].origin.clone()), (None, None));
     assert!(store.set_preview(vec![]));
     assert_eq!(take().len(), 1);
+
+    // The history cleared, or left for another image: heard, nothing
+    // written.
+    for leave in [Store::clear_history, Store::leave_image] {
+        leave(&mut store);
+        let left = take();
+        assert_eq!(left.len(), 1, "{left:?}");
+        assert!(left[0].history && left[0].paths.is_empty() && left[0].seq.is_none());
+    }
 }

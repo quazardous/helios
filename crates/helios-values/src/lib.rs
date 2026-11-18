@@ -21,8 +21,9 @@
 //!   announces nothing, so a change never loops back.
 //! - A change hook ([`Store::on_change`]): the host hears each change in
 //!   one go ([`Changed`]: a write, an undo or a redo step, a gesture
-//!   cancelled, a preview shown or left), with the paths it changed, its
-//!   sequence numbers and its origin. It is called under the store's
+//!   cancelled or ended, a preview shown or left, the history cleared or
+//!   left), with the paths it changed, its sequence numbers, its origin
+//!   and whether the history moved. It is called under the store's
 //!   lock: it must not take the store again (a host queues a request).
 //! - Undo: one step per gesture or group, else one per write; a cancelled
 //!   gesture puts its values back and is no step. Each step keeps the
@@ -523,16 +524,24 @@ impl Event for ParamChanged {
 
 /// What changed in one go, as the change hook hears it
 /// ([`Store::on_change`]): a write, an undo or a redo step, a gesture
-/// cancelled, a preview shown or left.
+/// cancelled or ended, a preview shown or left, the history cleared or
+/// left for another image.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Changed {
-    /// The paths changed, each once, in the order first changed.
+    /// The paths changed, each once, in the order first changed; none
+    /// when only the history moved (a gesture ended, the history cleared
+    /// or left).
     pub paths: Vec<String>,
-    /// The sequence numbers the writes took, first and last; `None` for
-    /// a preview shown or left (nothing written).
+    /// The sequence numbers the writes took, first and last; `None` when
+    /// nothing was written (a preview shown or left, the history moved).
     pub seq: Option<(u64, u64)>,
-    /// Who wrote; `None` for a preview shown or left.
+    /// Who wrote, or who made the step; `None` for a preview shown or
+    /// left, the history cleared or left.
     pub origin: Option<Origin>,
+    /// Whether the undo history moved with it ([`Store::history_rev`]):
+    /// a step made, undone or redone, a gesture ended into a step, the
+    /// history cleared or left for another image.
+    pub history: bool,
 }
 
 impl Changed {
@@ -728,12 +737,28 @@ impl Store {
     }
 
     /// Calls `hook` after each change, in one go ([`Changed`]): one call
-    /// per write, per undo or redo step, per gesture cancelled, per
-    /// preview shown or left; none for a write that changed nothing. It
+    /// per write, per undo or redo step, per gesture cancelled or ended
+    /// into a step, per preview shown or left, per history cleared or
+    /// left for another image; none for a write that changed nothing. It
     /// replaces the hook set before. Called under the store's lock: the
     /// hook must not take the store again.
     pub fn on_change(&mut self, hook: impl Fn(&Changed) + Send + 'static) {
         self.hook = Some(Box::new(hook));
+    }
+
+    /// Marks the change being made as one that moved the history (when a
+    /// hook is set): heard at the next [`Store::announce`].
+    fn history_moved(&mut self, origin: Option<&Origin>) {
+        if self.hook.is_some() {
+            self.changing
+                .get_or_insert_with(|| Changed {
+                    paths: Vec::new(),
+                    seq: None,
+                    origin: origin.cloned(),
+                    history: false,
+                })
+                .history = true;
+        }
     }
 
     /// The change made, heard by the hook (when one is set).
@@ -945,6 +970,7 @@ impl Store {
                 paths: Vec::new(),
                 seq: None,
                 origin: Some(origin.clone()),
+                history: false,
             });
             if !changing.paths.iter().any(|p| p == path) {
                 changing.paths.push(path.into());
@@ -1128,6 +1154,7 @@ impl Store {
     fn commit(&mut self, label: String, origin: &Origin) {
         self.committed += 1;
         self.history_rev += 1;
+        self.history_moved(Some(origin));
         self.last_committed = label;
         self.last_origin = Some(origin.clone());
         self.replayed = false;
@@ -1155,6 +1182,8 @@ impl Store {
         self.named.clear();
         self.preview.clear();
         self.history_rev += 1;
+        self.history_moved(None);
+        self.announce();
     }
 
     /// The history's revision: it moves on with every change of the undo
@@ -1279,6 +1308,9 @@ impl Store {
                 group: None,
                 aim: g.aim,
             });
+            // Its writes were heard one by one; the step it became is
+            // heard now.
+            self.announce();
         }
     }
 

@@ -288,8 +288,9 @@ impl Shell {
 
     /// Records the value steps made on the session's node since the last
     /// call: a new step (a set, or `hint`'s kind answering a proposal), an
-    /// undo or a redo. Called each frame and right after a command that
-    /// set values. Nothing without a session.
+    /// undo or a redo. Called once the history moved (`values.changed`,
+    /// [`super::Shell::values_heard`]) and right after a command that set
+    /// values. Nothing without a session.
     pub(super) fn follow_session(&mut self, hint: Option<(Kind, u32)>) {
         if !self.follow_photo() {
             return;
@@ -425,6 +426,19 @@ impl Shell {
         panel.queue_write();
         drop(panel);
         self.keep_photo();
+    }
+
+    /// Whether the session waits for something the next drain may bring:
+    /// its first step on the photo open not yet measured (the image's
+    /// network lacks the workshop's node), or the photo not yet kept.
+    /// Nothing without a session, or on a photo away from it.
+    pub(super) fn session_waits(&self) -> bool {
+        let panel = self.focus.workshops.borrow();
+        panel.pilot.as_ref().is_some_and(|p| {
+            p.away.is_none()
+                && (p.record.steps.iter().any(|r| opening(r, p.photo))
+                    || !p.photos.get(p.photo).is_some_and(Option::is_some))
+        })
     }
 
     /// Follows the photo open: back on a test photo, the session goes on

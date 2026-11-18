@@ -1523,6 +1523,18 @@ impl Shell {
                 shell.focus.viewport.clone(),
                 shell.core.values.clone(),
             );
+            crate::values_changed::listen_edit_marks(
+                shell.core.app.handle(),
+                crate::values_changed::MAIN_SURFACE,
+                shell.core.values.clone(),
+                shell.focus.edit_marks.clone(),
+            );
+            crate::values_changed::listen_due(
+                &bus,
+                crate::values_changed::MAIN_SURFACE,
+                WORKSPACE_STATE,
+                &shell.focus.values_due,
+            );
         }
         // A window drawn apart asks the main window's pass on the bus.
         main_pass::listen(&*shell.core.app.handle().bus());
@@ -2132,6 +2144,9 @@ impl Shell {
     /// dialog or a menu opened here is drawn at the next frame, asked
     /// for at once.
     fn answer_asks(&mut self, ctx: &Egui) {
+        // What the values' listeners heard at the drain after the drawing
+        // and left to the shell.
+        self.values_heard();
         let mut answered = false;
         // A few rounds: an answer may ask again; more waits a frame.
         for _ in 0..4 {
@@ -2330,54 +2345,24 @@ impl Shell {
         }
     }
 
-    /// Reads the edit's marks again once the value store was written (a
-    /// drag's frames, a step, an undo, a redo) or its history moved
-    /// (another photo opened) and, when they
-    /// changed, passes them through `edit.changed` on the application's
-    /// bus: each listener's part done in the order they ran, then
-    /// `edit.changed` said on the journal (`crate::edit_marks`).
-    fn follow_edit_marks(&mut self) {
-        use crate::edit_marks as em;
-        let marks = {
-            let store = lock(&self.core.values);
-            // A write (a drag's frames included) or the history moved
-            // (another photo opened).
-            let rev = (store.seq(), store.history_rev());
-            if self.focus.edit_rev == Some(rev) {
-                return;
-            }
-            self.focus.edit_rev = Some(rev);
-            em::Marks::read(&store)
-        };
-        if *self.focus.edit_marks.borrow() == marks {
-            return;
+    /// Does what the listeners of `values.changed` left to the shell
+    /// ([`crate::values_changed::Due`]), once the bus drained: the
+    /// workspace's state put in place (an edit, an undo, a redo of it),
+    /// then the workshop session's record following the value steps. A
+    /// session whose first step waits to be measured (the image's network
+    /// not yet holding its node) or whose photo waits to be kept stays
+    /// due, tried again at the next drain.
+    fn values_heard(&mut self) {
+        let due = self.focus.values_due.clone();
+        if due.workspace.take() {
+            self.sync_workspace();
         }
-        let bus = self.core.app.handle().bus();
-        if !self
-            .focus
-            .edit_listening
-            .as_ref()
-            .is_some_and(|b| Arc::ptr_eq(b, &bus))
-        {
-            for (id, _) in em::ORDER {
-                if let Err(e) = em::listen(&*bus, id) {
-                    log::error!(target: "helios", "{}: {e}", em::CHANGED);
-                }
-            }
-            self.focus.edit_listening = Some(bus.clone());
-        }
-        let mut data = marks.to_json();
-        let ran = em::pass(&*bus, marks.clone());
-        for id in &ran {
-            if id == em::MARKS {
-                *self.focus.edit_marks.borrow_mut() = marks.clone();
+        if due.session.take() {
+            self.follow_session(None);
+            if self.session_waits() {
+                due.session.set(true);
             }
         }
-        data["ran"] = json!(ran);
-        self.core
-            .app
-            .handle()
-            .publish("helios", None, em::CHANGED, data);
     }
 
     /// What the open photo's edit changed from its defaults, as last
@@ -7563,10 +7548,12 @@ impl Shell {
             .follow
             .frame(self.core.app.handle(), &mut lock(&self.core.values));
         self.follow_comparison();
-        // An undo or a redo of the workspace's state, put in place.
-        self.sync_workspace();
-        // The workshop session's record follows the value steps.
-        self.follow_session(None);
+        // What was asked before the drawing (the commands above, a window
+        // drawn apart since the last pass) heard now, as it was asked:
+        // the darkroom's graph, the edit's marks, then what the values'
+        // listeners left to the shell, in place before anything is drawn.
+        self.core.app.handle().drain_asks();
+        self.values_heard();
         // The theme asked for is installed here, before anything is drawn.
         self.core.app.logic(&ctx);
         let spec = self.core.app.handle().theme().spec();
@@ -7591,9 +7578,9 @@ impl Shell {
         });
         self.focus.rects.insert("window".into(), ctx.content_rect());
 
-        // The graph shown follows the values on `values.changed` (its
-        // darkroom listener), heard after the drawing.
-        self.follow_edit_marks();
+        // The graph shown and the edit's marks follow the values on
+        // `values.changed` (their listeners); written while drawing, they
+        // are heard after the drawing.
         self.follow_opening(&ctx);
         self.follow_decisions();
         self.status_bar(&ctx);

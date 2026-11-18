@@ -628,13 +628,19 @@ shown goes through the new network in place, or is opened again). The pass is sa
 and the listeners that ran (`ran`). The order is a reviewed dump
 (`crates/helios-gui/tests/bus/workspace.txt`).
 
-Left, and why: the shell still notices an undo or a redo of the state
-by the store's sequence number of its path, once per pass (a number,
-no longer the text): the value store has no path listener yet (ADR
-0016 names it). The host's listener only marks the change: the image
+Left, and why: the host's listener only marks the change: the image
 is passed through the new network after the shell's pass, by the host,
-which holds the image (2026-11-17). The workshop session (`follow_session`) follows the value
-store's history, not the workspace's state.
+which holds the image (2026-11-17).
+
+Since 2026-11-18 the shell no longer checks the state's sequence
+number each pass: an undo or a redo of the state is heard on
+`values.changed` (the value store's change hook), whose
+`helios.workspace.sync` listener notes it due; the shell puts it in
+place once the bus drained, in the same pass (before the drawing for
+what was asked before it, after the drawing for what the panels
+wrote). The workshop session (`helios.workshop.session`, on the
+history moving) and the edit's marks (`helios.edit.marks`) follow the
+values the same way, after the darkroom's `helios.darkroom.sync`.
 
 ### Slice 2h: the layout changed
 
