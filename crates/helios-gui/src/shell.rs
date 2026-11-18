@@ -382,6 +382,10 @@ enum Action {
     /// Zoom and pan synchronised across the compared photos, or not
     /// (toggled when `None`).
     CompareSync(Option<bool>),
+    /// Edits the comparison's list: `compare.add`, `compare.remove`,
+    /// `compare.set`, `compare.clear`, `compare.active` (the command's
+    /// id, its arguments).
+    CompareList(&'static str, Value),
     /// Enters a sub-workspace (by id; without one, the one under the
     /// place shown that holds the selected node), as whom.
     EnterSubworkspace(Option<String>, Origin),
@@ -3506,6 +3510,33 @@ impl Shell {
             ),
             Box::new(|a, _| Ok(Action::CompareSync(a.get("on").and_then(Value::as_bool)))),
         );
+        for (id, title) in [
+            (
+                crate::comparison::ADD_COMMAND,
+                "Compare: add photos to the comparison open (`images`: ids, else the selection; four at most)",
+            ),
+            (
+                crate::comparison::REMOVE_COMMAND,
+                "Compare: take photos out of the comparison (`images`: ids, else the active photo; the last one out leaves Compare)",
+            ),
+            (
+                crate::comparison::SET_COMMAND,
+                "Compare: compare exactly these photos (`images`: one to four ids), entering Compare",
+            ),
+            (
+                crate::comparison::CLEAR_COMMAND,
+                "Compare: empty the comparison and leave Compare",
+            ),
+            (
+                crate::comparison::ACTIVE_COMMAND,
+                "Compare: the photos compared and the active one (`image`: make that compared photo active)",
+            ),
+        ] {
+            add(
+                CommandSpec::new(id, title, "Library"),
+                Box::new(move |a, _| Ok(Action::CompareList(id, a.clone()))),
+            );
+        }
         add(
             CommandSpec::new(
                 "subworkspace.enter",
@@ -6228,7 +6259,13 @@ impl Shell {
                 .with("count", MAX_PANES),
             );
         }
-        let payload = helios_template::contexts::images_payload(&ids);
+        let done = self.enter_compare(&ids)?;
+        Ok(json!({ "images": ids, "place": done }))
+    }
+
+    /// Enters the Compare place on `ids`, its panel shown and focused.
+    fn enter_compare(&mut self, ids: &[String]) -> Result<Value, String> {
+        let payload = helios_template::contexts::images_payload(ids);
         let app = self.core.app.handle().clone();
         let done = crate::contexts::enter_comparison(
             &app,
@@ -6243,7 +6280,150 @@ impl Shell {
         }
         app.focus_panel(&panel);
         self.follow_comparison();
-        Ok(json!({ "images": ids, "place": done }))
+        Ok(done)
+    }
+
+    /// The `compare.*` list commands: the comparison's photos edited by
+    /// id, the Compare place's payload written so the workspace keeps
+    /// them; a gallery's selection and cursor are never written.
+    fn compare_list(&mut self, id: &str, args: &Value) -> Result<Value, String> {
+        use crate::comparison as c;
+        let images: Option<Vec<String>> = match args.get("images") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(list)) => Some(
+                list.iter()
+                    .map(|v| v.as_str().map(String::from).ok_or("`images`: photo ids"))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Some(_) => return Err("`images`: a list of photo ids".into()),
+        };
+        if let Some(ids) = &images {
+            let library = self.focus.library.borrow();
+            if let Some(unknown) = ids.iter().find(|id| !library.holds(id)) {
+                return Err(format!("the library has no photo `{unknown}`"));
+            }
+        }
+        let app = self.core.app.handle().clone();
+        let comparing = crate::contexts::comparing(&app);
+        let open = || -> Result<(), String> {
+            if comparing {
+                Ok(())
+            } else {
+                Err("no comparison is open: compare photos first (`library.compare`, C)".into())
+            }
+        };
+        let current = self.focus.comparison.borrow().photos().to_vec();
+        match id {
+            c::ADD_COMMAND => {
+                open()?;
+                let ids = images.unwrap_or_else(|| self.focus.library.borrow().selection());
+                let (list, added) = self.focus.comparison.borrow().with_added(&ids);
+                if added.len() < ids.iter().filter(|i| !current.contains(i)).count() {
+                    self.note(
+                        Message::new(
+                            "gui-compare-full",
+                            "Compare shows { $count } photos at most: the others were not added",
+                        )
+                        .with("count", egui_pop::views::library::compare::MAX_PANES),
+                    );
+                }
+                if !added.is_empty() {
+                    self.write_comparison(list.clone())?;
+                }
+                Ok(json!({ "images": list, "added": added }))
+            }
+            c::REMOVE_COMMAND => {
+                open()?;
+                let ids = match images {
+                    Some(ids) => ids,
+                    None => {
+                        let cmp = self.focus.comparison.borrow();
+                        cmp.active(&current).cloned().into_iter().collect()
+                    }
+                };
+                let removed: Vec<String> = current
+                    .iter()
+                    .filter(|p| ids.contains(p))
+                    .cloned()
+                    .collect();
+                let list: Vec<String> = current
+                    .iter()
+                    .filter(|p| !ids.contains(p))
+                    .cloned()
+                    .collect();
+                if !removed.is_empty() {
+                    if list.is_empty() {
+                        self.leave_comparison()?;
+                    } else {
+                        self.write_comparison(list.clone())?;
+                    }
+                }
+                Ok(json!({ "images": list, "removed": removed }))
+            }
+            c::SET_COMMAND => {
+                let mut ids = images.ok_or("`images`: the photos to compare")?;
+                let mut seen = std::collections::HashSet::new();
+                ids.retain(|id| seen.insert(id.clone()));
+                if ids.is_empty() {
+                    return Err("`images`: one photo at least (`compare.clear` empties it)".into());
+                }
+                ids.truncate(egui_pop::views::library::compare::MAX_PANES);
+                if comparing {
+                    self.write_comparison(ids.clone())?;
+                } else {
+                    self.enter_compare(&ids)?;
+                }
+                Ok(json!({ "images": ids }))
+            }
+            c::CLEAR_COMMAND => {
+                if comparing {
+                    self.leave_comparison()?;
+                }
+                Ok(json!({ "cleared": if comparing { current.len() } else { 0 } }))
+            }
+            _ => {
+                if let Some(image) = args.get("image").and_then(Value::as_str) {
+                    open()?;
+                    let at = current
+                        .iter()
+                        .position(|p| p == image)
+                        .ok_or_else(|| format!("`{image}` is not compared"))?;
+                    self.focus.comparison.borrow_mut().set_active(at);
+                    let active = current.get(at).cloned();
+                    self.focus.library.borrow_mut().set_compare_active(active);
+                }
+                let cmp = self.focus.comparison.borrow();
+                let active = if comparing {
+                    cmp.active(&current).cloned()
+                } else {
+                    None
+                };
+                Ok(json!({
+                    "comparing": comparing,
+                    "images": if comparing { current.clone() } else { Vec::new() },
+                    "active": active,
+                    "best": cmp.best(),
+                    "synced": cmp.synced,
+                }))
+            }
+        }
+    }
+
+    /// The Compare place's photos replaced by `list`, the comparison
+    /// edited in place (its active photo, best and views kept), the marks'
+    /// target its active photo.
+    fn write_comparison(&mut self, list: Vec<String>) -> Result<(), String> {
+        let payload = helios_template::contexts::images_payload(&list);
+        crate::contexts::enter_comparison(
+            self.core.app.handle(),
+            payload,
+            &egui_pop::model::commands::Origin::User,
+        )?;
+        let mut cmp = self.focus.comparison.borrow_mut();
+        cmp.edit(list);
+        let active = cmp.active(cmp.photos()).cloned();
+        self.focus.library.borrow_mut().set_compare_active(active);
+        Ok(())
     }
 
     /// Leaves Compare (`compare.leave`): back to the place it was entered
@@ -6782,6 +6962,7 @@ impl Shell {
                     self.focus.library.borrow_mut().set_compare_active(active);
                 }
             }
+            Action::CompareList(id, args) => return self.compare_list(id, &args),
             Action::CompareSync(on) => {
                 let mut cmp = self.focus.comparison.borrow_mut();
                 cmp.synced = on.unwrap_or(!cmp.synced);

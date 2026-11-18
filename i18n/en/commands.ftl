@@ -7,6 +7,15 @@ command-activity-show =
 command-calibrate-open =
     .title = Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)
 
+command-compare-active =
+    .title = Compare: the photos compared and the active one (`image`: make that compared photo active)
+
+command-compare-add =
+    .title = Compare: add photos to the comparison open (`images`: ids, else the selection; four at most)
+
+command-compare-clear =
+    .title = Compare: empty the comparison and leave Compare
+
 command-compare-leave =
     .title = Leave Compare: back to the grid, or wherever it was entered from (Escape)
 
@@ -15,6 +24,12 @@ command-compare-next =
 
 command-compare-previous =
     .title = Compare: make the previous photo active
+
+command-compare-remove =
+    .title = Compare: take photos out of the comparison (`images`: ids, else the active photo; the last one out leaves Compare)
+
+command-compare-set =
+    .title = Compare: compare exactly these photos (`images`: one to four ids), entering Compare
 
 command-compare-sync =
     .title = Compare: zoom and pan synchronised across the photos (`on`; toggled when absent)

@@ -468,6 +468,18 @@ The library panels are egui-pop's photo library widgets (its
   (`compare.leave`), `C` or the gallery's button again (a toggle,
   "Back to grid" while comparing), the view's **Back to grid**, the
   Compare panel closed, or the breadcrumb's back.
+- **The comparison is a list** (2026-11-18): the photos compared are
+  a list of their own, one to four, that never writes a gallery's
+  selection or cursor. Photos go in with "Add to comparison" in the
+  Results' and the filmstrip's context menu (the selected photos) or
+  `compare.add`, and out with Delete on the Compare panel (the active
+  photo) or `compare.remove`; `compare.set` compares exactly the photos
+  named, `compare.clear` empties the list and leaves Compare, and
+  `compare.active` says which photos are compared and which one is
+  active (`image` makes another one active). The active photo and the
+  best stay through the edits. The list is the Compare place's payload,
+  so the workspace reopens on it. A list of one photo waits for a
+  second one (one photo as a loupe is a later step).
 
 **Sorting** (2026-11-11, see [design/library.md](design/library.md),
 L3): the grid shows the photos by capture time, oldest first, unless

@@ -136,10 +136,15 @@ pub fn defaults() -> Vec<(String, String, String)> {
     // Remove from Library, as Lightroom's and darktable's Delete in the
     // grid: the flag only, undoable, so nothing is asked first. Delete
     // is the image's own while a mask point is picked (above).
+    // Not on the Compare panel: there Delete takes the active photo out
+    // of the comparison (below), never out of the Library.
     bind(
         "Delete",
         crate::library::REMOVE_COMMAND,
-        &format!("{} && !textInputFocus", behind_no_picker(&library)),
+        &format!(
+            "{} && focusedPanel != 'helios.compare' && !textInputFocus",
+            behind_no_picker(&library)
+        ),
     );
     // Rotate Left and Right, as Lightroom's and darktable's Ctrl+[ and
     // Ctrl+] in the library (darktable's package keeps them: its keys).
@@ -200,6 +205,16 @@ pub fn defaults() -> Vec<(String, String, String)> {
     );
     bind("Right", "compare.next", &behind_no_picker(&comparison));
     bind("Left", "compare.previous", &behind_no_picker(&comparison));
+    // Delete on the Compare panel takes the active photo out of the
+    // comparison (Lightroom's Survey drops a photo from its view).
+    bind(
+        "Delete",
+        crate::comparison::REMOVE_COMMAND,
+        &format!(
+            "{} && focusedPanel == 'helios.compare' && !textInputFocus",
+            behind_no_picker(&comparison)
+        ),
+    );
     // Next and previous image while culling; in the grid Space selects.
     bind("Space", "vault.next", &culling);
     bind("Backspace", "vault.previous", &culling);
