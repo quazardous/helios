@@ -171,32 +171,60 @@ pub const IN_LIBRARY: &str = "appWindow == 'main' || appWindow == 'library'";
 /// left out) from which it is `hidpi` for profile variants.
 const HIDPI: f32 = 1.5;
 
-/// About's one-line description of Helios, as the README says it.
-/// The engine's notice kinds, on a subscription of their own: each is
-/// kept until the shell reads it, however many step events the engine
-/// publishes meanwhile (its journal keeps only the latest), and wakes the
-/// window (once the shell's first frame gave its context).
-fn subscribe_engine_notices(
+/// The listener of the viewport engine's notices on the application's
+/// bus (`Shell::engine_notices`).
+pub const ENGINE_NOTICES: &str = "helios.engine-notices";
+
+/// The engine's notices (a GPU fell back, a GPU lost): its journaled
+/// kinds relayed into the application's bus `bus`
+/// (`helios_core::journal::relay_points`), its per-render kinds left on
+/// its own; each heard by the named listener [`ENGINE_NOTICES`], kept
+/// until the shell reads it, and waking the window (once the shell's
+/// first frame gave its context).
+fn listen_engine_notices(
     engine: &helios_core::Engine,
+    bus: &Arc<dyn egui_pop::api::bus::bus_contract::Bus>,
 ) -> (
-    std::sync::mpsc::Receiver<helios_core::Envelope>,
+    std::sync::mpsc::Receiver<helios_core::Fact>,
     Arc<OnceLock<Egui>>,
 ) {
-    use helios_core::Event as _;
     use helios_core::engine::{GpuFellBack, GpuLost};
-    let wake: Arc<OnceLock<Egui>> = Arc::default();
-    let ctx = wake.clone();
-    let notices = engine.bus().subscribe_kinds(
-        &[GpuFellBack::KIND, GpuLost::KIND],
-        Some(Arc::new(move || {
-            if let Some(ctx) = ctx.get() {
-                ctx.request_repaint();
-            }
-        })),
+    helios_core::journal::relay_points(
+        engine.bus(),
+        [helios_core::engine::FACTS],
+        Arc::downgrade(bus),
     );
-    (notices, wake)
+    let wake: Arc<OnceLock<Egui>> = Arc::default();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let listened = [
+        listen_notice::<GpuFellBack>(&**bus, tx.clone(), wake.clone()),
+        listen_notice::<GpuLost>(&**bus, tx, wake.clone()),
+    ];
+    for refused in listened.into_iter().filter_map(Result::err) {
+        log::error!(target: "helios", "{ENGINE_NOTICES}: {refused}");
+    }
+    (rx, wake)
 }
 
+/// [`ENGINE_NOTICES`] on `E`'s point: the fact kept for the shell
+/// (`tx`), the window woken.
+fn listen_notice<E: helios_core::Event + 'static>(
+    bus: &dyn egui_pop::api::bus::bus_contract::Bus,
+    tx: std::sync::mpsc::Sender<helios_core::Fact>,
+    wake: Arc<OnceLock<Egui>>,
+) -> Result<(), egui_pop::api::bus::bus_contract::Refused> {
+    let opts = egui_pop::api::bus::bus_contract::ListenOpts::new().owner(main_pass::BUS_OWNER);
+    bus.listen::<helios_core::FactPoint<E>>(ENGINE_NOTICES, opts, move |fact, ()| {
+        if tx.send(fact.clone()).is_ok()
+            && let Some(ctx) = wake.get()
+        {
+            ctx.request_repaint();
+        }
+        Ok(())
+    })
+}
+
+/// About's one-line description of Helios, as the README says it.
 fn about_description() -> Message {
     Message::new(
         "gui-about-description",
@@ -1148,7 +1176,7 @@ impl Shell {
         // The viewport engine and its render cache: one per process, every
         // window's viewport renders on it.
         let engine = crate::viewport::engine();
-        let (engine_notices, engine_wake) = subscribe_engine_notices(&engine);
+        let (engine_notices, engine_wake) = listen_engine_notices(&engine, &app.handle().bus());
         // The image-state router on it: the preview is one of its states.
         let states = helios_node_core::image_states::ImageStates::new(
             engine.bus().clone(),
@@ -4746,8 +4774,8 @@ impl Shell {
 
     /// What the viewport's engine says a user should know: a step whose
     /// GPU version failed (once per module), a GPU lost. Shown as toasts.
-    /// Read from the shell's own subscription to those kinds, not from the
-    /// engine bus's journal, which a burst of step events overruns.
+    /// Heard by the listener [`ENGINE_NOTICES`], each kept until read: a
+    /// burst of step events on the engine's bus does not push one out.
     fn engine_notices(&mut self, ctx: &Egui) {
         if self.core.engine_wake.get().is_none() {
             let _ = self.core.engine_wake.set(ctx.clone());
@@ -4755,7 +4783,7 @@ impl Shell {
         let notices: Vec<_> = self.core.engine_notices.try_iter().collect();
         for e in notices {
             let message = || serde_json::from_value::<Message>(e.payload["message"].clone()).ok();
-            match e.kind {
+            match e.kind.as_str() {
                 "engine.gpu_fell_back" => {
                     let module = e.payload["module"].as_str().unwrap_or_default().to_string();
                     if self.core.fell_back.insert(module)

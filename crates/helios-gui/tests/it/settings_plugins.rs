@@ -117,6 +117,8 @@ struct World {
     node: LocalNode<SqliteStore>,
     secrets: Arc<MemorySecrets>,
     dir: PathBuf,
+    /// The application's bus the node's layers are heard on, kept alive.
+    _bus: Arc<egui_pop::api::bus::egui_pop_hooks::Kernel>,
 }
 
 fn world(name: &str) -> World {
@@ -136,7 +138,23 @@ fn world(name: &str) -> World {
     let app = h.state().app().handle().clone();
     let secrets = Arc::new(MemorySecrets::default());
     config::use_secrets(&app, secrets.clone());
-    let heard = bus.subscribe();
+    // The application's bus with the node's bus as its journal, as
+    // `main` builds it; the layers listened to before they are read.
+    let (kernel, journal) = helios_core::BusJournal::attach(
+        bus.clone(),
+        |j| {
+            egui_pop::api::bus::egui_pop_hooks::Kernel::new()
+                .with_journal(j.clone())
+                .with_relay(j)
+        },
+        egui_pop::api::bus::egui_pop_hooks::Kernel::declaration,
+    );
+    assert!(
+        journal
+            .declare(&*kernel, helios_gui::FACTS.iter().copied())
+            .is_empty()
+    );
+    let heard = config::listen_layers(&*kernel).unwrap();
     let mine = node.settings();
     let (sources, problems) = config::read(&dir, &|n| mine.read(n), Some(PROJECT.into()), &[]);
     assert!(problems.is_empty(), "{problems:?}");
@@ -152,6 +170,7 @@ fn world(name: &str) -> World {
         node,
         secrets,
         dir,
+        _bus: kernel,
     };
     saved(&mut w.h);
     w

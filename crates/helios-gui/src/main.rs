@@ -2591,9 +2591,9 @@ struct Booted {
     library_reading: Option<LibraryReading>,
     node_settings:
         Option<helios_node_core::settings::NodeSettings<helios_vault_sqlite::SqliteStore>>,
-    /// The node's events heard for the settings kept in its layers
-    /// (`config::follow`).
-    layer_events: Option<std::sync::mpsc::Receiver<helios_core::Envelope>>,
+    /// The layers the node said changed, for the settings kept in them
+    /// (`config::listen_layers`, `config::follow`).
+    layer_events: Option<std::sync::mpsc::Receiver<String>>,
     settings: helios_gui::config::Settings,
     preparing: Option<Preparing>,
     plugins: Arc<helios_plugin::Broker>,
@@ -2745,8 +2745,13 @@ fn boot(from: BootFrom) -> Booted {
     // The library is read while the shell is built.
     let library_reading = persist.as_ref().map(|p| read_library(p.reader()));
     // Heard from before they are read: a layer another client of the
-    // node changes from now on is read again (`config::follow`).
-    let layer_events = persist.as_ref().map(|p| p.bus().subscribe());
+    // node changes from now on is read again (`config::follow`), heard by
+    // a named listener of the application's bus.
+    let layer_events = persist.as_ref().and_then(|_| {
+        helios_gui::config::listen_layers(&*hooks)
+            .inspect_err(|e| warn(&format!("the settings' layers are not followed: {e}")))
+            .ok()
+    });
     // Helios's settings, resolved once from their layers: the machine's
     // file, the library's and the person's layers the node keeps (as
     // `helios-node --vault` does), `--set`. Every part reads them from
