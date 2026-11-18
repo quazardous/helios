@@ -14,7 +14,7 @@ use helios_core::Value;
 use crate::{BYPASS, Step, Store};
 
 /// Whether the graph mirrors a path: a node's parameter or bypass.
-fn mirrored(path: &str) -> bool {
+pub(crate) fn mirrored(path: &str) -> bool {
     path.starts_with("node/") || path.starts_with(BYPASS)
 }
 
@@ -86,10 +86,23 @@ impl Store {
             return false;
         }
         let before = std::mem::replace(&mut self.preview, values);
+        let mut paths: Vec<String> = Vec::new();
         for path in before.keys().chain(self.preview.keys()) {
             if mirrored(path) {
                 self.dirty.insert(path.clone());
             }
+            if !paths.contains(path) {
+                paths.push(path.clone());
+            }
+        }
+        // Heard as a change: what the graph shows moved, nothing written.
+        if self.hook.is_some() {
+            self.changing = Some(crate::Changed {
+                paths,
+                seq: None,
+                origin: None,
+            });
+            self.announce();
         }
         true
     }

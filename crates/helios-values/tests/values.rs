@@ -1003,3 +1003,80 @@ fn a_preview_shows_a_step_s_values_on_the_graph_and_writes_nothing() {
     store.clear_history();
     assert!(store.previewed().is_empty());
 }
+
+#[test]
+fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
+    let (_, _, mut store, _) = exposure();
+    let heard: Arc<Mutex<Vec<Changed>>> = Arc::default();
+    let into = heard.clone();
+    store.on_change(move |c| into.lock().unwrap().push(c.clone()));
+    let take = || std::mem::take(&mut *heard.lock().unwrap());
+    let (ev_path, black) = ("node/exposure/exposure", "node/exposure/black");
+
+    // A write: one change, its path, its sequence number, its origin.
+    store
+        .set(Set::new(
+            ev_path,
+            Change::To(Value::Float(1.0)),
+            Origin::User,
+        ))
+        .unwrap();
+    let seq = store.seq();
+    assert_eq!(
+        take(),
+        [Changed {
+            paths: vec![ev_path.into()],
+            seq: Some((seq, seq)),
+            origin: Some(Origin::User),
+        }]
+    );
+    // A write that changes nothing is not heard.
+    store
+        .set(Set::new(
+            ev_path,
+            Change::To(Value::Float(1.0)),
+            Origin::User,
+        ))
+        .unwrap();
+    assert!(take().is_empty());
+
+    // A group's writes are heard one by one; its undo, two paths, once.
+    let group = store.begin_group(agent(), "lift");
+    store
+        .set(Set::new(ev_path, Change::To(Value::Float(2.0)), agent()).gesture(group))
+        .unwrap();
+    store
+        .set(Set::new(black, Change::To(Value::Float(-0.02)), agent()).gesture(group))
+        .unwrap();
+    store.end(group);
+    assert_eq!(take().len(), 2);
+    let before = store.seq();
+    store.undo(&Origin::User).unwrap();
+    let undone = take();
+    assert_eq!(undone.len(), 1, "{undone:?}");
+    assert_eq!(undone[0].paths, [black, ev_path]);
+    assert_eq!(undone[0].seq, Some((before + 1, before + 2)));
+    assert_eq!(undone[0].origin, Some(Origin::User));
+    assert!(undone[0].mirrored());
+    store.redo(&Origin::User).unwrap();
+    assert_eq!(take().len(), 1);
+
+    // A gesture cancelled puts its values back in one change.
+    let drag = store.begin_gesture(Origin::User, "drag");
+    for v in [2.5, 3.0] {
+        store
+            .set(Set::new(ev_path, Change::To(Value::Float(v)), Origin::User).gesture(drag))
+            .unwrap();
+    }
+    assert_eq!(take().len(), 2);
+    assert_eq!(store.cancel(drag), 1);
+    assert_eq!(take().len(), 1);
+
+    // A preview shown and left: heard, nothing written.
+    assert!(store.set_preview(vec![(ev_path.into(), Value::Float(0.5))]));
+    let shown = take();
+    assert_eq!(shown.len(), 1);
+    assert_eq!((shown[0].seq, shown[0].origin.clone()), (None, None));
+    assert!(store.set_preview(vec![]));
+    assert_eq!(take().len(), 1);
+}
