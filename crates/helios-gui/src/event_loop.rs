@@ -32,6 +32,13 @@
 //!   the detached panels. A frame of the main window owed past the grace
 //!   is painted by the loop itself.
 //!
+//! - **Every window's handles** (`egui_pop::api::runner::host`, feature
+//!   `host-loop`): the main window at creation, the display when the loop
+//!   resumes, each redraw around eframe's paint (so a detached panel's
+//!   window is paired with its viewport), a destroyed window forgotten.
+//!   `egui_pop::api::runner::window` then answers for every window, and a
+//!   detached viewer gets an image surface of its own (`crate::display`).
+//!
 //! Everything else goes to eframe as it comes.
 
 use std::cell::RefCell;
@@ -40,6 +47,7 @@ use std::time::{Duration, Instant};
 
 use eframe::UserEvent;
 use egui_pop::api::main_wake::{MainWake, PassCounter};
+use egui_pop::api::runner::host;
 use egui_pop::api::window::{self, Screen};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, StartCause, WindowEvent};
@@ -75,6 +83,8 @@ pub fn run(
     let context: Rc<RefCell<Option<egui::Context>>> = Rc::default();
     let context_in = context.clone();
     let creator: eframe::AppCreator<'_> = Box::new(move |cc| {
+        // Every window's handles: the main window first.
+        host::created(cc);
         if let Some(w) = cc.winit_window() {
             *main_in.borrow_mut() = Some(Main {
                 window: w.id(),
@@ -103,8 +113,10 @@ pub fn run(
         context,
         watch: ScreenWatch::new(None),
     };
-    event_loop.run_app_on_demand(&mut runner)?;
+    let ran = event_loop.run_app_on_demand(&mut runner);
     drop(runner);
+    host::detach();
+    ran?;
     match std::mem::replace(&mut *made.borrow_mut(), Creation::Pending) {
         Creation::Done => Ok(()),
         Creation::Failed(e) => Err(e),
@@ -272,7 +284,9 @@ impl Runner<'_> {
         self.know_main();
         let eframe = &mut self.eframe;
         self.wake.redraw(id, || {
-            eframe.window_event(event_loop, id, WindowEvent::RedrawRequested);
+            host::redraw(id, || {
+                eframe.window_event(event_loop, id, WindowEvent::RedrawRequested);
+            });
         });
     }
 
@@ -288,11 +302,13 @@ impl Runner<'_> {
 
 impl ApplicationHandler<UserEvent> for Runner<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        host::resumed(event_loop);
         self.tell_screens(event_loop);
         self.eframe.resumed(event_loop);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        host::window_event(id, &event);
         match event {
             WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Moved(_) => {
                 self.tell_screens(event_loop);

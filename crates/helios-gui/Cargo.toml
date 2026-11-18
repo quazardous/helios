@@ -15,8 +15,10 @@ helios-shell.workspace = true
 # crash reports) too; the editors (`egui_pop::editors`, MIT: syntect,
 # vt100) for the jobs centre's log consoles; the Phosphor icon font
 # (egui-phosphor, MIT OR Apache-2.0; the icons MIT) for the commands' and
-# panels' icons, named `phosphor:<name>`.
-egui-pop = { workspace = true, features = ["phosphor", "viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash", "platform-text-scale", "image-previews", "platform-thumbnails"] }
+# panels' icons, named `phosphor:<name>`; the runner's host hooks
+# (`host-loop`), which Helios's own event loop calls so egui-pop knows
+# every window's handles (a detached panel's own image surface).
+egui-pop = { workspace = true, features = ["phosphor", "viewport", "imaging", "i18n", "views", "editors", "platform-instance", "platform-notify", "platform-logs", "platform-crash", "platform-text-scale", "image-previews", "platform-thumbnails", "host-loop"] }
 # The agent socket: the debug bridge to agents (MCP through
 # egui-pop-agent-mcp), when EGUI_POP_AGENT_SOCKET=1.
 egui-pop-agent.workspace = true
