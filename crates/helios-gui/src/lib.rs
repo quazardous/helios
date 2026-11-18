@@ -94,6 +94,7 @@ pub mod theme_editor;
 pub mod thumb_textures;
 pub mod thumbnails;
 pub mod tips;
+pub mod values_changed;
 pub mod viewport;
 pub mod window_commands;
 mod windows;
