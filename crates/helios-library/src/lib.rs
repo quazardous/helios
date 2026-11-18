@@ -64,7 +64,8 @@ pub mod trash;
 pub const FACTS: &[helios_core::FactDecl] =
     &[helios_core::FactDecl::of::<stacks::DecisionChanged>(
         "A library decision was proposed or answered",
-    )];
+    )
+    .relayable()];
 
 pub use import::{Duplicates, Options, Placement, Report};
 pub use signals::Signals;

@@ -8,9 +8,14 @@ repository.workspace = true
 
 [dependencies]
 blake3.workspace = true
+bus-contract.workspace = true
 helios-cache.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+log = "0.4"
+
+[dev-dependencies]
+egui-pop-hooks.workspace = true
 
 [lints]
 workspace = true

@@ -29,6 +29,7 @@ pub mod error;
 pub mod graph;
 pub mod image;
 pub mod jobs;
+pub mod journal;
 pub mod manifest;
 pub mod message;
 pub mod module;
@@ -49,6 +50,7 @@ pub use engine::{Counters, Engine, FaultKind, Hold};
 pub use error::Error;
 pub use graph::{Graph, LayoutHint, NodeId, passed_input};
 pub use image::{ContentHash, Image, Region};
+pub use journal::{BusJournal, Fact, FactPoint};
 pub use manifest::{
     Family, Manifest, ModuleKind, Needs, ParamHint, ParamKind, ParamSpec, ParamWidget, PixelFormat,
     PortKind, PortSpec, Role,

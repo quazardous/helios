@@ -76,7 +76,7 @@ egui-pop-i18n = "0.12"
 # MIT OR Apache-2.0: the bus contract (points, ordered listeners, the
 # order dump), std only: Helios's library crates declare their points and
 # listen on the bus the application hands them, never building one.
-bus-contract = "0.3.0"
+bus-contract = "0.3.2"
 # MIT: egui-pop's hook kernel, the bus contract's default implementation:
 # the one bus Helios's binaries build (and tests, a bus each).
 egui-pop-hooks = "0.2"
