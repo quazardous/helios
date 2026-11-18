@@ -19,7 +19,10 @@
 //!   its running jobs and the last ones ended, to catch up from;
 //! - `subscribe` (`prefix`, `since`): turns the connection into a stream of
 //!   the bus events whose kind starts with `prefix`, pushed as they are
-//!   published (see [`Inspector::stream`]).
+//!   published (see [`Inspector::stream`]); with `relay` (a cursor
+//!   `{run, seq}`), a stream of the relayable facts of the process's
+//!   application bus after that cursor, for another process to take in
+//!   (see [`Inspector::stream_relay`]).
 //!
 //! Responses: `{"ok": true, ...}` or `{"ok": false, "error": "...", ...}`.
 //!
@@ -37,6 +40,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use bus_contract::{Cursor, Lost, Relay};
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
 pub mod batch;
@@ -83,7 +87,49 @@ pub enum Request {
         prefix: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         since: Option<u64>,
+        /// Instead of the events, the relayable facts after this cursor
+        /// ([`Inspector::stream_relay`]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        relay: Option<RelayCursor>,
     },
+}
+
+/// Where a reader of a relay stands ([`bus_contract::Cursor`]), on the
+/// wire: the journal's run (a process restarted has another) and the last
+/// number taken in it. `{run: 0, seq: 0}` has read nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelayCursor {
+    pub run: u64,
+    pub seq: u64,
+}
+
+impl From<RelayCursor> for Cursor {
+    fn from(c: RelayCursor) -> Cursor {
+        Cursor {
+            run: c.run,
+            seq: c.seq,
+        }
+    }
+}
+
+impl From<Cursor> for RelayCursor {
+    fn from(c: Cursor) -> RelayCursor {
+        RelayCursor {
+            run: c.run,
+            seq: c.seq,
+        }
+    }
+}
+
+/// How many relayed facts a stream reads at once.
+const RELAY_BATCH: usize = 256;
+
+/// The name of a loss on the wire (`gap`, `restarted`).
+fn lost_name(lost: Option<Lost>) -> Option<&'static str> {
+    lost.map(|l| match l {
+        Lost::Gap => "gap",
+        _ => "restarted",
+    })
 }
 
 /// How often a quiet stream says it is still there.
@@ -103,6 +149,9 @@ pub struct Inspector {
     instance: String,
     /// The JSON-RPC subscriptions streaming, each with its stop flag.
     subscriptions: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    /// The application bus's relay, whose relayable facts a `subscribe`
+    /// with `relay` streams ([`Inspector::with_relay`]).
+    relay: Option<Arc<dyn Relay>>,
 }
 
 /// How often a wait looks whether it was cancelled.
@@ -148,7 +197,16 @@ impl Inspector {
             scheduler: None,
             instance: new_token()[..16].to_string(),
             subscriptions: Arc::default(),
+            relay: None,
         }
+    }
+
+    /// Serves the relayable facts of the application's bus `relay` (its
+    /// journal is this inspector's bus): a `subscribe` with `relay`
+    /// streams them from a cursor ([`Inspector::stream_relay`]).
+    pub fn with_relay(mut self, relay: Arc<dyn Relay>) -> Self {
+        self.relay = Some(relay);
+        self
     }
 
     /// Shows the jobs running now and the last ones ended, folded from
@@ -226,7 +284,16 @@ impl Inspector {
         connection: &mut Connection<'_>,
     ) -> Option<Value> {
         match request {
-            Request::Subscribe { prefix, since } => {
+            Request::Subscribe {
+                relay: Some(cursor),
+                ..
+            } => {
+                self.stream_relay(*cursor, HEARTBEAT, &never, &mut |line: &Value| {
+                    connection.send(line)
+                });
+                None
+            }
+            Request::Subscribe { prefix, since, .. } => {
                 self.stream(prefix, *since, HEARTBEAT, &mut |line: &Value| {
                     connection.send(line)
                 });
@@ -269,6 +336,92 @@ impl Inspector {
             Beat::Event(e) => send(&json!({ "event": e })),
             Beat::Heartbeat(seq) => send(&json!({ "heartbeat": seq })),
         });
+    }
+
+    /// Streams the relayable facts of the application's bus after
+    /// `cursor` ([`Relay::resume`]) to `send`, until it fails (the client
+    /// has gone) or `stop` says so.
+    ///
+    /// First a line saying what the stream is: `{"ok": true, "relay":
+    /// true, "present", "next": {run, seq}, "lost"}` (`present`: the
+    /// journal's cursor when the stream opened, for a reader that starts
+    /// from now), `lost` `"restarted"` when the
+    /// cursor is of another run (this process restarted: the reader reads
+    /// its state again, then the facts from the run's start) or `"gap"`
+    /// when the facts after it left the journal, else `null`. Then each
+    /// fact, in order, `{"relayed": {seq, kind, cause, text}}`, as they
+    /// are published; a later `{"lost": "gap", "next"}` if the reader fell
+    /// behind the journal; and `{"heartbeat": seq}` after `heartbeat`
+    /// without a line. A process with no relay answers `{"ok": false}`.
+    pub fn stream_relay(
+        &self,
+        cursor: RelayCursor,
+        heartbeat: Duration,
+        stop: &dyn Fn() -> bool,
+        send: &mut dyn FnMut(&Value) -> io::Result<()>,
+    ) {
+        let Some(relay) = &self.relay else {
+            let _ = send(&json!({ "ok": false, "error": "this process relays nothing" }));
+            return;
+        };
+        // Listened to before the first read, so a fact published in
+        // between wakes the next one.
+        let rx = self.bus.subscribe();
+        let present = relay.cursor();
+        let mut read = relay.resume(cursor.into(), RELAY_BATCH);
+        let ack = json!({
+            "ok": true,
+            "relay": true,
+            "present": RelayCursor::from(present),
+            "next": RelayCursor::from(read.next),
+            "lost": lost_name(read.lost),
+        });
+        if send(&ack).is_err() {
+            return;
+        }
+        let mut quiet = Instant::now();
+        loop {
+            for e in &read.entries {
+                let line = json!({ "relayed": {
+                    "seq": e.seq, "kind": e.kind, "cause": e.cause, "text": e.text,
+                } });
+                if send(&line).is_err() {
+                    return;
+                }
+                quiet = Instant::now();
+            }
+            let cursor = read.next;
+            if read.entries.len() < RELAY_BATCH {
+                // Caught up: wait for the bus to move.
+                loop {
+                    if stop() {
+                        return;
+                    }
+                    match rx.recv_timeout(CANCEL_POLL.min(heartbeat)) {
+                        Ok(_) => {
+                            while rx.try_recv().is_ok() {}
+                            break;
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                    if quiet.elapsed() >= heartbeat {
+                        quiet = Instant::now();
+                        if send(&json!({ "heartbeat": cursor.seq })).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            read = relay.resume(cursor, RELAY_BATCH);
+            if read.lost.is_some() {
+                let line =
+                    json!({ "lost": lost_name(read.lost), "next": RelayCursor::from(read.next) });
+                if send(&line).is_err() {
+                    return;
+                }
+            }
+        }
     }
 
     /// Listens to the bus, then reads the journal after `since` (from now
@@ -570,6 +723,7 @@ pub fn subscribe(
     let ack = client.request(&Request::Subscribe {
         prefix: prefix.to_string(),
         since,
+        relay: None,
     })?;
     if ack["ok"] != true {
         return Err(io::Error::other(
@@ -577,6 +731,24 @@ pub fn subscribe(
                 .as_str()
                 .unwrap_or("subscribe refused")
                 .to_string(),
+        ));
+    }
+    Ok((ack, client))
+}
+
+/// Subscribes to the relayable facts of the endpoint at `address` after
+/// `cursor`: the stream's first line (see [`Inspector::stream_relay`]),
+/// and the connection to read the facts from, one [`Client::read`] each.
+pub fn subscribe_relay(address: &Address, cursor: RelayCursor) -> io::Result<(Value, Client)> {
+    let mut client = Client::connect(address)?;
+    let ack = client.request(&Request::Subscribe {
+        prefix: String::new(),
+        since: None,
+        relay: Some(cursor),
+    })?;
+    if ack["ok"] != true {
+        return Err(io::Error::other(
+            ack["error"].as_str().unwrap_or("relay refused").to_string(),
         ));
     }
     Ok((ack, client))

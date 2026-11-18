@@ -2138,6 +2138,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     for refused in journal.declare(&*kernel, FACTS.iter().copied()) {
         eprintln!("helios-node: bus: {refused}");
     }
+    let relay: Arc<dyn bus_contract::Relay> = kernel.clone();
     let hooks: Arc<dyn bus_contract::Bus> = kernel;
     // The node owns the vault and runs its jobs: the volume watch, the
     // backups, the health check.
@@ -2196,7 +2197,9 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         )],
     ));
     // Built first: its instance names the owner of the runs.
-    let inspector = Inspector::new(bus.clone());
+    // Its relayable facts are served to the desktop on its subscribe
+    // endpoint (`subscribe` with `relay`).
+    let inspector = Inspector::new(bus.clone()).with_relay(relay);
     // The runs last in the node's vault, or in `--runs-vault`'s.
     let runs_vault = match &args.runs_vault {
         None => vault,
