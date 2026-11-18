@@ -24,11 +24,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
-use egui::ViewportId;
 use serde_json::{Value, json};
 
 use super::Shell;
@@ -315,7 +314,7 @@ impl Shell {
     /// ended, the window closed. Nothing is fetched before.
     pub(super) fn import_chosen(&mut self) {
         let (sink, ends) = (self.import_sink(), self.import_ends());
-        let (hook, jobs, args, ctx, album) = {
+        let (hook, jobs, args, wake, album) = {
             let mut w = self.import.get_mut();
             let Some((root, account, album)) = w
                 .chosen
@@ -365,7 +364,7 @@ impl Shell {
                     (batch, items)
                 })
                 .collect();
-            (hook, jobs, args, w.ctx.clone(), album)
+            (hook, jobs, args, w.waker(), album)
         };
         if self.core.activity.has_node() {
             self.hand_chosen(jobs, &args, album);
@@ -406,9 +405,9 @@ impl Shell {
                     Some(e) => ends.failed(&args, &e),
                     None => ends.ended(&args, crate::import_end::merged(reports), None),
                 }
-                if let Some(ctx) = ctx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                    ctx.request_repaint_of(ViewportId::ROOT);
-                }
+                // The main window takes the end (its toast, the photos
+                // selected), woken by the window's news.
+                wake();
             });
         if let Err(e) = spawned {
             self.warn(format!("import: {e}"));

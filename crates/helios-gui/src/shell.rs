@@ -105,6 +105,8 @@ mod import_choices;
 mod import_detail;
 mod import_history;
 mod import_merge;
+mod import_news;
+pub use import_news::ImportNews;
 mod import_profile_editor;
 mod import_profile_store;
 mod import_profiles;
@@ -1514,6 +1516,16 @@ impl Shell {
         }
         // A window drawn apart asks the main window's pass on the bus.
         main_pass::listen(&*shell.core.app.handle().bus());
+        // What comes in for the import window off the interface's thread
+        // wakes it, on the bus.
+        import_news::listen(shell.core.app.handle(), import_window::WINDOW);
+        *shell
+            .import
+            .get_mut()
+            .news
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(std::sync::Arc::downgrade(&shell.core.app.handle().bus()));
         // Every command run passes Helios's policy first (`command.run`).
         if let Err(e) = crate::command_policy::listen(&*shell.core.app.handle().bus()) {
             log::error!(target: "helios", "{}: {e}", crate::command_policy::POLICY);

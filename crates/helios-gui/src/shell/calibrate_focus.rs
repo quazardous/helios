@@ -868,11 +868,9 @@ impl Shell {
         for (ask, result) in landed {
             self.landed(ask, result);
         }
-        // The focus's own window shows what landed.
-        let app = self.core.app.handle().clone();
-        if let Some(v) = app.window_viewport(&WindowId::new(WINDOW)) {
-            ctx.request_repaint_of(v);
-        }
+        // The focus's own window shows what landed: egui-pop wakes it, or
+        // the main window where it is drawn.
+        self.core.app.handle().wake_window(&WindowId::new(WINDOW));
         ctx.request_repaint();
     }
 
