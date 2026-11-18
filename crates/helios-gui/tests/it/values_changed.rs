@@ -1,7 +1,8 @@
-//! A change to the values reaches the graph shown on `values.changed`:
-//! written while the panels draw, in the same pass, after the drawing;
-//! written outside the main window's pass (an application window, drawn
-//! after it), it waits for the main window's next pass, asked for it.
+//! A change to the values reaches the graph shown and the edit's marks
+//! on `values.changed`: written while the panels draw, in the same pass,
+//! after the drawing; written outside the main window's pass (an
+//! application window, drawn after it), it waits for the main window's
+//! next pass, asked for it, and is heard there before the drawing.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -155,4 +156,68 @@ fn a_value_written_on_another_thread_is_heard_at_the_next_pass() {
     assert_eq!(shown(h.state()), 0.0, "never heard on the writing thread");
     h.step();
     assert_eq!(shown(h.state()), 0.5);
+}
+
+/// Whether the edit's marks, as last passed through `edit.changed`, name
+/// the exposure as edited: nothing read here.
+fn marked(shell: &Shell) -> bool {
+    shell.edit_marks().nodes.contains("exposure")
+}
+
+#[test]
+fn the_edit_s_marks_follow_a_value_written_while_the_panels_draw_in_the_same_pass() {
+    let mut shell = shell();
+    let armed = Rc::new(Cell::new(None::<f64>));
+    let (values, arm) = (shell.values().clone(), armed.clone());
+    shell.set_content("helios.params", move |_ui| {
+        if let Some(ev) = arm.take() {
+            values
+                .lock()
+                .unwrap()
+                .set(helios_values::Set::new(
+                    EV,
+                    helios_values::Change::To(Value::Float(ev)),
+                    Origin::User,
+                ))
+                .unwrap();
+        }
+    });
+    let mut h = harness(shell);
+    assert!(!marked(h.state()));
+    armed.set(Some(1.5));
+    h.step();
+    assert_eq!(armed.get(), None, "the panel drew and wrote");
+    assert!(
+        marked(h.state()),
+        "the marks follow in the pass the value was written in"
+    );
+    armed.set(Some(0.0));
+    h.step();
+    assert!(!marked(h.state()), "back to its default: unmarked");
+}
+
+#[test]
+fn the_edit_s_marks_follow_a_value_written_outside_the_pass_or_on_another_thread_at_the_next() {
+    let mut h = harness(shell());
+    write(h.state(), 0.75);
+    assert!(!marked(h.state()), "nothing is heard while drawing");
+    h.step();
+    assert!(marked(h.state()));
+    let values = h.state().values().clone();
+    std::thread::spawn(move || {
+        values
+            .lock()
+            .unwrap()
+            .set(helios_values::Set::new(
+                EV,
+                helios_values::Change::To(Value::Float(0.0)),
+                Origin::User,
+            ))
+            .unwrap();
+    })
+    .join()
+    .unwrap();
+    assert!(marked(h.state()), "never heard on the writing thread");
+    h.step();
+    assert!(!marked(h.state()));
 }

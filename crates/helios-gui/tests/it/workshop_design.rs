@@ -1274,3 +1274,99 @@ fn workshops_session_snapshots() {
     results.add(h.try_shot_of("workshops-generalise-pop-dark-1x", rect));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The kinds of the steps of the session's record as last queued for
+/// the vault, if one was: nothing asked of the shell here.
+fn queued_kinds(h: &mut Harness<'static, Shell>) -> Option<Vec<String>> {
+    let (_, doc) = h.state_mut().take_session_writes().pop()?;
+    let steps = doc?["steps"].as_array()?.clone();
+    Some(
+        steps
+            .iter()
+            .map(|s| s["kind"].as_str().unwrap_or_default().to_string())
+            .collect(),
+    )
+}
+
+#[test]
+fn the_session_records_a_step_made_while_the_panels_draw_in_the_same_pass() {
+    stand_ins();
+    let root = temp("session-drawing");
+    let mut h = window(&root);
+    let (node, _) = designed(&mut h, &root);
+    let lift = format!("node/{node}/backlight_lift");
+    let armed = std::rc::Rc::new(std::cell::Cell::new(false));
+    let (values, arm) = (h.state().values().clone(), armed.clone());
+    h.state_mut().set_content("helios.params", move |_ui| {
+        if arm.take() {
+            values
+                .lock()
+                .unwrap()
+                .set(helios_values::Set::new(
+                    &lift,
+                    helios_values::Change::To(helios_core::Value::Float(0.9)),
+                    Origin::User,
+                ))
+                .unwrap();
+        }
+    });
+    h.state_mut()
+        .run("helios.params.focus", json!(null), Origin::User)
+        .unwrap();
+    follow(&mut h);
+    h.state_mut().take_session_writes();
+    armed.set(true);
+    h.step();
+    assert!(!armed.get(), "the panel drew and wrote");
+    assert_eq!(
+        queued_kinds(&mut h),
+        Some(vec!["design".to_string(), "set".to_string()]),
+        "recorded in the pass the value was written in"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_session_records_a_step_made_outside_the_pass_or_on_another_thread_at_the_next() {
+    stand_ins();
+    let root = temp("session-thread");
+    let mut h = window(&root);
+    let (node, _) = designed(&mut h, &root);
+    let lift = format!("node/{node}/backlight_lift");
+    h.state_mut().take_session_writes();
+    let set = |v: f64| {
+        helios_values::Set::new(
+            &lift,
+            helios_values::Change::To(helios_core::Value::Float(v)),
+            Origin::User,
+        )
+    };
+    // Outside the pass, as a window drawn apart does.
+    h.state().values().lock().unwrap().set(set(0.5)).unwrap();
+    assert_eq!(queued_kinds(&mut h), None, "nothing heard while written");
+    h.step();
+    assert_eq!(
+        queued_kinds(&mut h),
+        Some(vec!["design".to_string(), "set".to_string()])
+    );
+    // On another thread.
+    let values = h.state().values().clone();
+    let on_thread = set(0.7);
+    std::thread::spawn(move || {
+        values.lock().unwrap().set(on_thread).unwrap();
+    })
+    .join()
+    .unwrap();
+    assert_eq!(
+        queued_kinds(&mut h),
+        None,
+        "never heard on the writing thread"
+    );
+    h.step();
+    assert_eq!(
+        queued_kinds(&mut h).map(|k| k.len()),
+        Some(3),
+        "the second step recorded"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
