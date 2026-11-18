@@ -216,6 +216,18 @@ shell bus the events some listener asked for, with source `node:<name>`
 and the node's own envelope in the payload (`{"node", "event"}`); the
 node's `job.*` go only through the jobs relay, as before.
 
+(2026-11-18) A node's **relayable** facts (`FactDecl::relayable`) take
+another path, never both: when the application bus has a relay, the
+relay's second link takes them in once on the desktop's fact bus (source
+`relayed:<name>`), and `NodeEvents` hears them as one named listener
+(`helios.node-events`) of each relayable point, beside the point's other
+listeners; the event stream leaves those kinds out, and a node that
+restarted says one `node.resync`, from that link. Listeners hold no bus
+subscription of their own: `NodeEvents` is one table (id, patterns, a
+channel each). The desktop's other hand-rolled subscriptions to a bus
+are the exceptions `xtask/allow/bus.toml` lists with their reasons
+(`cargo xtask bus --check`).
+
 - **Listening.** `Shell::node_events().listen(id, patterns)` gives a
   `Listener` of the kinds matching its patterns (`storage.*`,
   `volume.*`, an exact kind, or `*`): each heard event is a `NodeEvent`,

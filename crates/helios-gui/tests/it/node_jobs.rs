@@ -550,3 +550,122 @@ fn a_node_s_relayable_facts_reach_the_desktop_s_listeners_and_a_restart_resyncs(
         assert_eq!(n, 2, "only what the old run said may come before");
     }
 }
+
+#[test]
+fn a_relayed_fact_lands_once_and_a_restart_resyncs_once() {
+    let node = Node::relaying("once");
+    let facts = helios_gui::bus();
+    let desktop = journaled(facts.clone());
+    let (point_tx, by_point) = channel();
+    let point_tx = Mutex::new(point_tx);
+    desktop
+        .listen::<FactPoint<LayerChanged>>("test", ListenOpts::new(), move |fact, ()| {
+            let n = fact.payload["n"].as_u64().unwrap_or(0);
+            let _ = point_tx.lock().unwrap().send(n);
+            Ok(())
+        })
+        .unwrap();
+    let shell = Shell::builder(helios_panels(), None)
+        .bus(desktop.clone())
+        .build();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    let shell_bus = h.state().jobs().bus().subscribe();
+    let by_table = h.state().node_events().listen("test", &["settings.*"]);
+    h.state_mut()
+        .follow_node_with(node.link("box"), FAST)
+        .unwrap();
+    let layer = |node: &Node, n: u64| {
+        node.bus.publish_value(
+            "settings",
+            None,
+            LayerChanged::KIND,
+            json!({ "layer": "user", "n": n }),
+        )
+    };
+    // Said until both links are up: the relay link takes it in.
+    let deadline = Instant::now() + LONG;
+    while by_point.recv_timeout(Duration::from_millis(50)).is_err() {
+        layer(&node, 1);
+        assert!(Instant::now() < deadline, "no relayed fact within {LONG:?}");
+    }
+    wait_for_link(&shell_bus);
+
+    // One fact: on the desktop's fact bus once, heard once by the point's
+    // listener and once by the node table's, never copied on the shell
+    // bus by the event stream.
+    layer(&node, 2);
+    assert_eq!(heard_n(&by_point, 2), 1, "the point's listener");
+    let table: Vec<NodeEvent> = std::iter::from_fn(|| by_table.recv_timeout(QUIET).ok())
+        .filter(|e| e.event.payload["n"] == 2)
+        .collect();
+    assert_eq!(table.len(), 1, "the node table's listener: {table:#?}");
+    assert_eq!(table[0].node, "box");
+    assert_eq!(table[0].event.source, "relayed:box");
+    let landed = facts
+        .since(0)
+        .iter()
+        .filter(|e| e.kind == LayerChanged::KIND && e.payload["n"] == 2)
+        .count();
+    assert_eq!(landed, 1, "on the desktop's fact bus once");
+    let copied: Vec<Envelope> = shell_bus
+        .try_iter()
+        .filter(|e| e.kind == LayerChanged::KIND && e.payload["event"]["payload"]["n"] == 2)
+        .collect();
+    assert!(copied.is_empty(), "copied on the shell bus: {copied:#?}");
+
+    // The node restarts: one resync, not one per link.
+    node.go_away();
+    assert!(h.state().drop_node_link("box"));
+    drop(node);
+    let _node = Node::relaying("once");
+    let deadline = Instant::now() + LONG;
+    let first = loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let e = by_table
+            .recv_timeout(left)
+            .expect("a resync after the node restarted");
+        if e.is_resync() {
+            break e;
+        }
+    };
+    let more: Vec<NodeEvent> = std::iter::from_fn(|| by_table.recv_timeout(QUIET).ok())
+        .filter(NodeEvent::is_resync)
+        .collect();
+    assert!(
+        more.is_empty(),
+        "one resync per hole: {first:?} then {more:#?}"
+    );
+}
+
+/// How long a test waits to be sure nothing more comes.
+const QUIET: Duration = Duration::from_millis(500);
+
+/// How many times `n` comes on `heard`: the first awaited at most
+/// [`LONG`], then counted until nothing comes for [`QUIET`].
+fn heard_n(heard: &Receiver<u64>, n: u64) -> usize {
+    let deadline = Instant::now() + LONG;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match heard.recv_timeout(left) {
+            Ok(got) if got == n => break,
+            Ok(_) => {}
+            Err(_) => return 0,
+        }
+    }
+    1 + std::iter::from_fn(|| heard.recv_timeout(QUIET).ok())
+        .filter(|got| *got == n)
+        .count()
+}
+
+/// Waits for the shell's bus to say the node's link is up.
+fn wait_for_link(events: &Receiver<Envelope>) {
+    let deadline = Instant::now() + LONG;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match events.recv_timeout(left) {
+            Ok(e) if e.kind == relay::LINK && e.payload["up"] == true => return,
+            Ok(_) => {}
+            Err(e) => panic!("the node's link did not come up: {e}"),
+        }
+    }
+}

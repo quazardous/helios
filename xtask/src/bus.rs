@@ -18,6 +18,15 @@
 //! JSON is checked when it is published, on a bus that declared its
 //! tables (`Bus::declare`).
 //!
+//! And it holds the desktop to its listener tables: a hand-rolled
+//! subscription to a fact bus (`.subscribe()`, `.subscribe_kinds(`) in
+//! `crates/helios-gui/src`, outside comments and tests, is in a file
+//! listed in `xtask/allow/bus.toml` with its reason. The desktop's
+//! followers of node facts are named listeners of the application bus's
+//! points, or of the node listener table (`node_events`); the list holds
+//! the documented exceptions and only shrinks (an entry whose file no
+//! longer subscribes is reported).
+//!
 //! `bus --timings <file>` reads the bus debug collector saved by a run
 //! (the journey's `bus-timings-*.json`) and prints, per point, its passes
 //! (count, p50, p95, max), its budget and the passes over it, and its
@@ -39,6 +48,15 @@ const FOLDERS: &[&str] = &["crates", "modules", "plugins"];
 /// Crates that stand for an application in tests: they may build a bus.
 const TEST_CRATES: &[&str] = &["crates/helios-testkit/"];
 
+/// The desktop's sources, held to their listener tables.
+const DESKTOP: &str = "crates/helios-gui/src";
+
+/// The desktop's exceptions, relative to the workspace root.
+pub const ALLOW_LIST: &str = "xtask/allow/bus.toml";
+
+/// A hand-rolled subscription to a fact bus.
+const SUBSCRIPTIONS: &[&str] = &[".subscribe()", ".subscribe_kinds("];
+
 const CONSTRUCTORS: &[&str] = &[
     "Kernel::new(",
     "Kernel::with_default_deadline(",
@@ -54,6 +72,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         return None;
     }
     let mut found = problems(root);
+    let subscriptions = subscriptions(root);
+    found.extend(judge_subscriptions(root, &subscriptions));
     let facts = facts(root);
     found.extend(
         facts
@@ -68,6 +88,15 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
             facts.events.len(),
             facts.events.len()
         );
+        let files: std::collections::BTreeSet<&str> = subscriptions
+            .iter()
+            .map(|s| s.split(':').next().unwrap_or(""))
+            .collect();
+        println!(
+            "hand-rolled bus subscriptions on the desktop: {} in {} files, each listed in {ALLOW_LIST}",
+            subscriptions.len(),
+            files.len()
+        );
         return Some(ExitCode::SUCCESS);
     }
     for f in &found {
@@ -75,7 +104,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     }
     eprintln!(
         "bus: {} problem(s): a bus built in a library crate (take it from the application), \
-         or a fact no table declares (add its `FactDecl::of`)",
+         a fact no table declares (add its `FactDecl::of`), or a desktop subscription \
+         to a bus outside {ALLOW_LIST} (listen on the point or the node table instead)",
         found.len()
     );
     Some(ExitCode::from(1))
@@ -256,6 +286,73 @@ fn scan(root: &Path, dir: &Path, found: &mut Vec<String>) -> Result<(), String> 
     Ok(())
 }
 
+/// The desktop's hand-rolled subscriptions to a bus, as
+/// `path:line: text`, comments and inline test modules left out.
+pub fn subscriptions(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    let dir = root.join(DESKTOP);
+    if sources(&dir, &mut files).is_err() {
+        return vec![format!("{DESKTOP}: cannot be read")];
+    }
+    let mut found = Vec::new();
+    for path in files {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        found.extend(subscriptions_in(&rel, &text));
+    }
+    found
+}
+
+/// One file's subscriptions to a bus, up to its inline test module.
+pub fn subscriptions_in(rel: &str, text: &str) -> Vec<String> {
+    text.lines()
+        .enumerate()
+        .take_while(|(_, line)| !line.starts_with("#[cfg(test)]"))
+        .filter(|(_, line)| {
+            let code = line.split("//").next().unwrap_or("");
+            SUBSCRIPTIONS.iter().any(|s| code.contains(s))
+        })
+        .map(|(n, line)| format!("{rel}:{}: {}", n + 1, line.trim()))
+        .collect()
+}
+
+/// What the allow-list says of `found`: a subscription in a file it does
+/// not list, an entry whose file no longer subscribes, or the list
+/// unreadable.
+fn judge_subscriptions(root: &Path, found: &[String]) -> Vec<String> {
+    let allow = match fs::read_to_string(root.join(ALLOW_LIST))
+        .map_err(|e| e.to_string())
+        .and_then(|t| crate::vault_access::parse_allow_list(&t))
+    {
+        Ok(list) => list,
+        Err(e) => return vec![format!("{ALLOW_LIST}: {e}")],
+    };
+    let file_of = |s: &String| s.split(':').next().unwrap_or("").to_string();
+    let mut problems: Vec<String> = found
+        .iter()
+        .filter(|s| !allow.iter().any(|a| a.path == file_of(s)))
+        .map(|s| format!("{s}: a subscription to a bus no listener table holds"))
+        .collect();
+    problems.extend(
+        allow
+            .iter()
+            .filter(|a| !found.iter().any(|s| file_of(s) == a.path))
+            .map(|a| {
+                format!(
+                    "{ALLOW_LIST}: `{}` no longer subscribes to a bus: remove its entry",
+                    a.path
+                )
+            }),
+    );
+    problems
+}
+
 /// The typed facts of the workspace and those no table declares.
 #[derive(Debug, Default)]
 pub struct Facts {
@@ -427,6 +524,30 @@ mod tests {
         let facts = facts(root);
         assert_eq!(facts.undeclared, Vec::<String>::new());
         assert!(facts.events.len() >= 30, "{facts:?}");
+    }
+
+    #[test]
+    fn a_desktop_subscription_is_found_outside_comments_and_tests() {
+        let text = "let rx = bus.subscribe();\n\
+                    // bus.subscribe() in a comment\n\
+                    let n = engine.bus().subscribe_kinds(&[K], None);\n\
+                    let (a, c) = self.subscribe(seq)?;\n\
+                    #[cfg(test)]\n\
+                    mod tests { fn t() { bus.subscribe(); } }\n";
+        assert_eq!(
+            subscriptions_in("crates/helios-gui/src/x.rs", text),
+            [
+                "crates/helios-gui/src/x.rs:1: let rx = bus.subscribe();",
+                "crates/helios-gui/src/x.rs:3: let n = engine.bus().subscribe_kinds(&[K], None);",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_desktop_s_subscriptions_are_the_listed_exceptions() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let found = subscriptions(root);
+        assert_eq!(judge_subscriptions(root, &found), Vec::<String>::new());
     }
 
     #[test]
