@@ -5049,7 +5049,6 @@ impl Library {
         let mut rows = details::ListedRows {
             entries: &self.entries,
             order: &self.view.order,
-            drawn: Vec::new(),
         };
         let mut list = ListView::new("list")
             .label(label)
@@ -5058,7 +5057,6 @@ impl Library {
             list = list.app(app);
         }
         let out = list.show(ui, &mut self.view.list, &mut rows);
-        let drawn = std::mem::take(&mut rows.drawn);
         let mut signals = Vec::new();
         for s in out.signals {
             match s {
@@ -5072,7 +5070,12 @@ impl Library {
             }
         }
         let selection = self.view.state.selection();
-        signals.extend(details::row_gestures(ui, &out.response, &drawn, selection));
+        let ctx = ui.ctx().clone();
+        let row_at = |p: egui::Pos2| {
+            let keys = self.view.order.iter().map(|&i| self.entries[i].id.clone());
+            details::list_row_at(&ctx, "list", keys, p)
+        };
+        signals.extend(details::row_gestures(ui, &out.response, &row_at, selection));
         (out.response, signals)
     }
 

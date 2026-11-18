@@ -334,6 +334,12 @@ fn a_module_s_filter_key_shows_in_the_facets_bar() {
     );
 }
 
+/// Whether a node is named `label` (a row's text is a node of its own
+/// beside the row).
+fn any(h: &Harness, label: &str) -> bool {
+    h.query_all_by_label(label).next().is_some()
+}
+
 /// Three photos with details.
 fn detailed() -> Vec<Entry> {
     [("a", 3, 2_000_000), ("b", 5, 1_000), ("c", 1, 30_000_000)]
@@ -389,18 +395,18 @@ fn details_show_the_columns_and_sort_as_the_gallery() {
     h.run();
     // The default columns' headers, named for screen readers; the
     // gallery's sort (capture time, up) on its column.
-    assert!(has(&h, "File name"));
-    assert!(has(&h, "Rating"));
-    assert!(has(&h, "File size"));
-    assert!(has(&h, "Camera"));
+    assert!(any(&h, "File name"));
+    assert!(any(&h, "Rating"));
+    assert!(any(&h, "File size"));
+    assert!(any(&h, "Camera"));
     assert!(
         h.query_all_by_label_contains("Capture time")
             .any(|n| n.accesskit_node().role() == egui::accesskit::Role::Button),
         "the capture time's header"
     );
-    assert!(has(&h, "a.jpg"), "a row per photo");
-    assert!(has(&h, "2.0 MB"), "its size");
-    assert!(has(&h, "Fujifilm X-T5"), "its camera");
+    assert!(any(&h, "a.jpg"), "a row per photo");
+    assert!(any(&h, "2.0 MB"), "its size");
+    assert!(any(&h, "Fujifilm X-T5"), "its camera");
     drop(h);
 
     // In the window: a click on the File name header (the first column, in
@@ -425,7 +431,8 @@ fn details_show_the_columns_and_sort_as_the_gallery() {
         "the header ran the gallery's sort"
     );
     assert!(
-        h.query_by_label("File name").is_none() && h.query_by_label_contains("File name").is_some(),
+        h.query_all_by_label("File name").next().is_none()
+            && h.query_all_by_label_contains("File name").next().is_some(),
         "the File name header says it sorts"
     );
 }
@@ -449,8 +456,8 @@ fn the_details_columns_are_each_view_s_and_kept() {
         ..ResultsDesc::default()
     });
     let h = harness(&lib, GalleryOptions::RESULTS_PANEL);
-    assert!(has(&h, "ISO"), "the chosen column");
-    assert!(!has(&h, "Camera"), "a column not chosen");
+    assert!(any(&h, "ISO"), "the chosen column");
+    assert!(!any(&h, "Camera"), "a column not chosen");
     drop(h);
     let mut lib = lib.borrow_mut();
     assert_eq!(lib.results().columns, columns);
@@ -466,7 +473,15 @@ fn the_details_columns_are_each_view_s_and_kept() {
 fn list_and_details_open_a_photo_on_enter_and_double_click() {
     for mode in [ResultsMode::List, ResultsMode::Details] {
         let lib = library_as(mode);
-        let mut h = harness(&lib, GalleryOptions::RESULTS_PANEL);
+        // Frames a sixtieth of a second apart: kittest's default (a
+        // quarter) puts a double click's two clicks past egui's delay.
+        let shown = lib.clone();
+        let mut h = Harness::builder()
+            .allow_missing_glyphs()
+            .with_step_dt(1.0 / 60.0)
+            .with_size(egui::vec2(480.0, 640.0))
+            .build_ui(move |ui| shown.borrow_mut().show(ui, &GalleryOptions::RESULTS_PANEL));
+        h.run();
         h.query_all_by_label("b.jpg")
             .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
             .expect("b.jpg's row")
@@ -480,8 +495,6 @@ fn list_and_details_open_a_photo_on_enter_and_double_click() {
             "{mode:?}: Enter opens the cursor's photo"
         );
         let at = rect_of(&h, "c.jpg").center();
-        // The two clicks in one frame: each run moves the harness's clock
-        // on, past egui's double click delay.
         h.event(egui::Event::PointerMoved(at));
         for _ in 0..2 {
             h.event(egui::Event::PointerButton {

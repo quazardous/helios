@@ -9,8 +9,8 @@
 //!
 //! upstream: egui-pop's list and table have no activation, no drag out
 //! and no sort set by the application yet (filed in egui-pop's terms);
-//! until they do, the rows' rects come from the cells drawn, Enter from
-//! the focused view, and the sort goes through a value store of the
+//! until they do, the rows' rects come from the cells drawn (the
+//! details) or the rows' responses (the list), Enter from the focused view, and the sort goes through a value store of the
 //! table's own.
 
 use egui::{Rect, Ui};
@@ -333,11 +333,28 @@ impl TableRows<String> for Rows<'_> {
     }
 }
 
-/// The rows of a list, as drawn, for the same gestures.
+/// The photos a Results list shows, in the gallery's order.
 pub(super) struct ListedRows<'a> {
     pub(super) entries: &'a [Entry],
     pub(super) order: &'a [usize],
-    pub(super) drawn: Vec<(Rect, String)>,
+}
+
+/// The photo of the list row at `p`, from the rows' responses.
+///
+/// upstream: egui-pop's list names its rows `Id::unique(("egui_pop_views::list",
+/// <list id>)).with(("row", <key>))`; read until it signals activation
+/// and drag out itself.
+pub(super) fn list_row_at(
+    ctx: &egui::Context,
+    list: &str,
+    keys: impl Iterator<Item = String>,
+    p: egui::Pos2,
+) -> Option<String> {
+    let id = egui::Id::unique(("egui_pop_views::list", &list.to_string()));
+    keys.into_iter().find(|key| {
+        ctx.read_response(id.with(("row", key)))
+            .is_some_and(|r| r.rect.contains(p))
+    })
 }
 
 impl egui_pop::views::list::ListRows<String> for ListedRows<'_> {
@@ -366,15 +383,6 @@ impl egui_pop::views::list::ListRows<String> for ListedRows<'_> {
         let text = format!("{stars}{flag}");
         (!text.is_empty()).then_some(text)
     }
-
-    fn ui(&mut self, ui: &mut Ui, row: usize, _selected: bool) {
-        // The row's content: its label on one line, elided when it
-        // does not fit, as egui-pop's list draws it.
-        let key = self.entries[self.order[row]].id.clone();
-        self.drawn.push((ui.max_rect(), key));
-        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-        ui.text_role(TextRole::Body, self.label(row));
-    }
 }
 
 /// What the rows' gestures ask: Enter on the focused view or a double
@@ -383,11 +391,10 @@ impl egui_pop::views::list::ListRows<String> for ListedRows<'_> {
 pub(super) fn row_gestures(
     ui: &Ui,
     response: &egui::Response,
-    drawn: &[(Rect, String)],
+    row_at: &dyn Fn(egui::Pos2) -> Option<String>,
     selection: &egui_pop::views::select::Selection<String>,
 ) -> Vec<Signal<String>> {
     let mut out = Vec::new();
-    let row_at = |p: egui::Pos2| drawn.iter().find(|(r, _)| r.contains(p)).map(|(_, k)| k);
     if response.has_focus()
         && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
         && let Some(key) = selection.cursor().or(selection.keys().first())
@@ -395,14 +402,15 @@ pub(super) fn row_gestures(
         out.push(Signal::Activate { key: key.clone() });
     }
     let (double, at) = ui.input(|i| {
+        // A third click quick after a double one still opens.
+        let button = egui::PointerButton::Primary;
         (
-            i.pointer
-                .button_double_clicked(egui::PointerButton::Primary),
-            i.pointer.interact_pos(),
+            i.pointer.button_double_clicked(button) || i.pointer.button_triple_clicked(button),
+            i.pointer.interact_pos().or(i.pointer.latest_pos()),
         )
     });
     if double && let Some(key) = at.and_then(row_at) {
-        out.push(Signal::Activate { key: key.clone() });
+        out.push(Signal::Activate { key });
     }
     let (dragging, origin) = ui.input(|i| {
         (
@@ -415,10 +423,10 @@ pub(super) fn row_gestures(
         && !carrying
         && let Some(key) = origin.and_then(row_at)
     {
-        let keys = if selection.contains(key) {
+        let keys = if selection.contains(&key) {
             selection.keys().to_vec()
         } else {
-            vec![key.clone()]
+            vec![key]
         };
         out.push(Signal::DragOut { keys });
     }
@@ -551,7 +559,13 @@ impl Library {
             self.view.results_changed = true;
         }
         let selection = self.view.state.selection();
-        signals.extend(row_gestures(ui, &out.response, &drawn, selection));
+        let row_at = |p: egui::Pos2| {
+            drawn
+                .iter()
+                .find(|(r, _)| r.contains(p))
+                .map(|(_, k)| k.clone())
+        };
+        signals.extend(row_gestures(ui, &out.response, &row_at, selection));
         (out.response, signals)
     }
 }
