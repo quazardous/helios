@@ -166,15 +166,24 @@ fn scrolling_ten_thousand_images_keeps_the_textures_in_budget() {
         let freed = passed.iter().filter(|k| !library.has_thumbnail(k)).count();
         assert_eq!(freed, passed.len(), "the screen passed was freed");
     }
-    // Back up: the screen passed comes back, from the cache.
+    // Back up: the screen passed comes back, from the cache. The cells
+    // of it seen on the way are kept: a wheel notch scrolls on at the
+    // pass after its own, and may be taller than the screen (four small
+    // thumbnails a row in a narrow panel), so the screen passed can be
+    // left behind again by the time the scrolling stops.
+    let mut back_in: HashSet<String> = HashSet::new();
+    let seen = |h: &egui_kittest::Harness<'_, Shell>, back_in: &mut HashSet<String>| {
+        let in_view = h.state().library().in_view();
+        back_in.extend(passed.iter().filter(|k| in_view.contains(k)).cloned());
+        in_view.contains(&passed[0])
+    };
     for _ in 0..200 {
         step += 1;
         cache.borrow_mut().step = step;
         h.event(wheel(400.0));
         h.step();
         check(&h, step, &cache.borrow());
-        let back = h.state().library().in_view().contains(&passed[0]);
-        if back {
+        if seen(&h, &mut back_in) {
             break;
         }
     }
@@ -182,6 +191,7 @@ fn scrolling_ten_thousand_images_keeps_the_textures_in_budget() {
         step += 1;
         cache.borrow_mut().step = step;
         h.step();
+        seen(&h, &mut back_in);
     }
     let s = h.state();
     let library = s.library();
@@ -189,9 +199,8 @@ fn scrolling_ten_thousand_images_keeps_the_textures_in_budget() {
     for k in library.in_view() {
         assert!(library.has_thumbnail(&k), "{k} shown again");
     }
-    let reloaded: Vec<&String> = passed
+    let reloaded: Vec<&String> = back_in
         .iter()
-        .filter(|k| library.in_view().contains(k))
         .filter(|k| c.hits.get(*k).copied().unwrap_or(0) > 0)
         .collect();
     assert!(
