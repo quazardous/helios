@@ -2,7 +2,7 @@
 //! ([`helios_node_core::warm`]): the `decoded` state of a photo of the
 //! library (its file through the workspace's network, before its edit),
 //! which the darkroom's open asks of the image-state router
-//! ([`open`]) rather than decoding by itself, and the [`Book`] of the
+//! ([`open()`]) rather than decoding by itself, and the [`Book`] of the
 //! photos near the shown one, where the warmer's recipe finds their files
 //! and network to compute the same state ahead.
 
