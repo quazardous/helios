@@ -328,8 +328,10 @@ pub fn command_id(id: &str) -> Result<CommandId, PluginError> {
 }
 
 /// A command of Helios's registry as egui-pop declares it: its `when`,
-/// the tick and palette visibility Helios gives it, and whether it
-/// carries private data ([`crate::privacy`]).
+/// the tick and palette visibility Helios gives it, whether it carries
+/// private data ([`crate::privacy`]), whether an agent asks the user
+/// before it runs ([`crate::destructive`]), and its arguments' schema
+/// ([`crate::schemas`]).
 pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, PluginError> {
     let mut s =
         CommandSpec::new(command_id(&spec.id)?, &spec.title, &spec.category).when(&spec.when);
@@ -352,6 +354,11 @@ pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, Plug
         // Declared in its arguments, as egui-pop's commands declare it:
         // the window commands let a dry run through to it alone.
         s = s.args(serde_json::json!({ "dry_run": false }));
+    } else if let Some(schema) = crate::schemas::schema(&spec.id) {
+        s = s.schema(schema);
+    }
+    if crate::destructive::is_destructive(&spec.id) {
+        s = s.destructive();
     }
     Ok(s)
 }
