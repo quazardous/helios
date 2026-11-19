@@ -647,7 +647,8 @@ Every agent follows them.
   `egui-pop-threading`, `egui-pop-perf`, `start-timing`, `quit-timing`, `test-times`, `thumb-bench`, `open-timing`, the
   parity and bench jobs) run before a release only, queued by one agent
   given that job, never by the agents writing code. Helios's whole suite
-  runs in `next`'s CI (nextest on the workspace, survival, Windows).
+  runs in `next`'s CI (nextest on the workspace, survival, the Windows
+  build); its Windows tests run nightly (`windows-tests.yml`).
 - A new test has a deadline on every wait (a child process, a window, a
   file, a socket reply) and fails fast. Tests run under nextest, which stops
   a test after 120 s; `cargo survival` runs under nextest too.

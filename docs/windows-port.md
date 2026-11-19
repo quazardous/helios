@@ -18,9 +18,11 @@ document is the original study; this section says what was done since.
 Done:
 
 - **CI.** `.github/workflows/ci.yml` has a `windows` job on
-  `windows-latest`: `cargo build --locked --workspace --all-targets`, then
-  `cargo test --workspace`. It checks out with `core.autocrlf false`, so
-  text fixtures keep their LF.
+  `windows-latest`, on every push: `cargo build --locked --workspace
+  --all-targets`. The tests, `cargo test --workspace`, run nightly on
+  `next` and on demand (`.github/workflows/windows-tests.yml`; moved there
+  2026-11-19, they made the per-push job the run's slowest path). Both
+  check out with `core.autocrlf false`, so text fixtures keep their LF.
 - **`helios batch` works on Windows.** Where Unix sockets do not exist,
   the sandbox starts its node on loopback TCP (`tcp://127.0.0.1:0`) for
   the inspection and batch endpoints, with the session token in the
@@ -38,9 +40,10 @@ Done:
   a `helios batch` JPEG export on the CPU). The zip goes into the Release
   and its line into `SHA256SUMS`. See `docs/releases.md`.
 
-**Tests on Windows: 22 test targets fail** (first run, 2026-11-08). The
-CI step runs them with `continue-on-error`, so the job stays green on the
-build; making the step required is the next task. What fails, by cause:
+**Tests on Windows: 22 test targets fail** (first run, 2026-11-08). They
+run in the nightly `windows-tests` workflow, which goes red while any
+fails; nothing waits on it. The build, in `ci.yml`, is required. Making
+the tests pass is the next task. What fails, by cause:
 
 - **The vault's snapshots (fixed, 2026-11-11).** `helios-vault-sqlite`
   (lib, `integrity`, `migrations`, `catalogue`) and the GUI's

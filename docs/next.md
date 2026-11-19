@@ -156,7 +156,8 @@ Every failed box job gets its reason at once:
 | Local | fmt, check, typos | while coding |
 | Bench box, narrow | the manifests' jobs (clippy first) | the author, per pull request; a merger, per batch on a `gate/…` branch |
 | The pull request's `pr-lint` | the cheap checks, no test but the English catalogue's: every linter, `cargo doc` without a warning, the UI index, the catalogues, the changelog fragment | every push of our own pull request into `next` |
-| `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, Windows | every push of `next` |
+| `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, the Windows build | every push of `next` |
+| `windows-tests` workflow | the workspace's tests on Windows | nightly on `next` (02:30 UTC), and on manual dispatch |
 | Bench box, wide | `test-affected`, `test`, GPU, timing, `stability` | daily, before a release, on demand |
 | Bench box, `journey` | the first-user journey: a fresh profile's wizard, a card imported, the Library's count, the import session, the health fixes, Settings › Storage, quit and restart, a photo opened in the darkroom and exported, headless ([bench.md](bench.md)) | every push of `next` (queued by the watcher of `next`), and before a release |
 
