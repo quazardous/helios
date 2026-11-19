@@ -274,7 +274,7 @@ fn a_switch_is_said_on_the_journal_with_the_listeners_that_ran() {
         .handle()
         .events_since(0)
         .into_iter()
-        .filter(|e| e.name.starts_with("image."))
+        .filter(|e| e.name.starts_with("helios.image."))
         .map(|e| (e.name.clone(), e.data.clone()))
         .collect();
     let kinds: Vec<&str> = said.iter().map(|(k, _)| k.as_str()).collect();
@@ -328,7 +328,7 @@ fn a_switch_runs_each_follower_once_in_order() {
         .handle()
         .events_since(0)
         .into_iter()
-        .filter(|e| e.name.starts_with("image."))
+        .filter(|e| e.name.starts_with("helios.image."))
         .map(|e| (e.name.clone(), e.data.clone()))
         .collect();
     let kinds: Vec<&str> = said.iter().map(|(k, _)| k.as_str()).collect();
