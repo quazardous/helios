@@ -194,8 +194,8 @@ Helios's test jobs (`test-crate`, `test`, `test-affected`, `survival`,
 since 2026-11-19: the chained check waited about 20 min at the
 median before each of them, and a test build type-checks anyway (a compile
 error fails the job in its first minutes). Lints still come from `check`:
-an agent runs it once per branch head (`cargo xtask bench-remote check`,
-side by side with its tests), and the gate runs it for each pull request.
+an agent runs it once per branch head (`cargo xtask bench-remote check`),
+and the gate runs it for each pull request.
 `first=none` on a run skips it; `HELIOS_BENCH_LOCAL_CHECK=1` also runs the
 same `cargo check` here first. `HELIOS_BENCH_NO_PREFLIGHT=1` queues it anyway; never for a
 compile error.
@@ -619,15 +619,16 @@ Every agent follows them.
   modules with `+` in `test=` and test names with `+` in `filter=`:
 
   ```bash
-  cargo xtask bench-remote check                                   # once per branch head: clippy, every lint
   cargo xtask bench-remote test-crate crate=helios-gui test=import+storage+import_close+lib
   cargo xtask bench-remote test-crate crate=helios-gui test=accounts+storage \
       filter=accounts::an_expired_session+storage::a_vault_held_locked
+  cargo xtask bench-remote check                                   # once per branch head: clippy, every lint
   ```
 
-  A different crate is a second job; queue it at once (`check` too), they
-  run side by side: `test-crate` and `check` take 3 threads and 3 GB each,
-  so three fit in the box's 10 threads and 14 GB.
+  A different crate is a second job. A branch's jobs take turns on its
+  target, so they run one after the other; jobs of different branches run
+  side by side: `test-crate` and `check` take 3 threads and 3 GB each, so
+  three fit in the box's 10 threads and 14 GB.
 - Run the narrowest job first. A Helios change is tested with `test-crate
   crate=<crate> test=<target> filter=<name>` on the crates and targets it
   touched, and nothing wider: no `test-affected` and no `--affected` in a

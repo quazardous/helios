@@ -79,8 +79,8 @@ A pull request is merged only when its tests passed on the box and its
    wrote the change runs its narrowest tests; it beat batching every pull
    request through one gate). The branch's `check`,
    `cargo xtask bench-remote check branch=<branch>` (clippy, every lint
-   at once), and the manifest's jobs with `branch=<branch>`, queued
-   together: test jobs no longer wait on the check, and the manifest's
+   at once), and the manifest's jobs with `branch=<branch>`, in any
+   order: test jobs no longer wait on a check first, and the manifest's
    tests of one crate go in one `test-crate` job (`test=a+b`, see
    bench.md, "Rules for agents"). Wait in the
    foreground with `jbx wait <id>`: a subagent's turn stays alive. Fix
@@ -157,7 +157,7 @@ Every failed box job gets its reason at once:
 | Where | What | When |
 |---|---|---|
 | Local | fmt, check, typos | while coding |
-| Bench box, narrow | the branch's `check` (clippy) and the manifests' jobs, side by side | the author, per pull request; a merger, per batch on a `gate/…` branch |
+| Bench box, narrow | the branch's `check` (clippy) and the manifests' jobs | the author, per pull request; a merger, per batch on a `gate/…` branch |
 | The pull request's `pr-lint` | the cheap checks, no test but the English catalogue's: every linter, `cargo doc` without a warning, the UI index, the catalogues, the changelog fragment | every push of our own pull request into `next` |
 | `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, the Windows build | every push of `next` |
 | `windows-tests` workflow | the workspace's tests on Windows | nightly on `next` (02:30 UTC), and on manual dispatch |
