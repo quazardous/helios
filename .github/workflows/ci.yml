@@ -83,6 +83,33 @@ jobs:
         with:
           name: junit
           path: target/nextest/ci/junit.xml
+      # The broker's shadow week (docs/ci-broker.md, "Shadow week"): which
+      # of the tests above `ci-broker select` would have run, since the
+      # push's previous commit. It skips nothing and never fails the job;
+      # xtask is already built (by "slowest tests"), so it costs seconds.
+      # ci-history.yml reads the `broker-shadow` artifact nightly.
+      - name: broker shadow
+        id: broker-shadow
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+        continue-on-error: true
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] \
+            || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "no previous commit to compare with (a first or forced push): no shadow"
+            exit 0
+          fi
+          cargo xtask ci-broker select --base "$BEFORE" --committed \
+            --shadow broker-shadow.json --run "$GITHUB_RUN_ID" --commit "$GITHUB_SHA" \
+            --junit target/nextest/ci/junit.xml > /dev/null
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.broker-shadow.outcome == 'success' }}
+        continue-on-error: true
+        with:
+          name: broker-shadow
+          path: broker-shadow.json
+          if-no-files-found: ignore
       # Say which GPU adapter the backend tests ran on (or that they skipped).
       - name: GPU adapter
         run: cargo test -q -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E "^(GPU|skipped):" | sort -u

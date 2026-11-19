@@ -14,8 +14,8 @@ It is built in steps:
 |---|---|---|
 | B1 | The per-test history, written nightly to the `ci-history` branch | done |
 | B2 | The always-run set: file-level `affected`, new or changed tests, recent failures, a smoke set | done |
-| B3 | A shadow week: the broker prints its choice and skips nothing, to measure what it would have missed | next |
-| B4 | Confidence rhythm, seeded per commit | |
+| B3 | A shadow week: the broker records its choice and skips nothing, to measure what it would have missed | in place; the week runs |
+| B4 | Confidence rhythm, seeded per commit | after the shadow week |
 | B5 | A time budget per pull request | |
 | B6 | Full runs nightly, at release and on demand; bisect-back tickets | |
 
@@ -106,6 +106,7 @@ a diff of the tests that ran.
 | `last_run` | The date of the last run that ran it. |
 | `last_failure`, `last_flake` | `{run, commit, date}`, or `null`. |
 | `median_s`, `recent_s` | The median of its last 21 times. Passes and flakes count; a failure's time does not. |
+| `shadow` (top) | The shadow week's runs and misses: see "Shadow week". Absent in a summary from before B3. |
 
 **A renamed test** shows up as a new id with a fresh record. The old id
 keeps its history. It is no longer current once no run among the last 10
@@ -132,6 +133,9 @@ cargo xtask ci-history rebuild --history DIR
 git fetch origin ci-history
 cargo xtask ci-history report [--top N|all] [--min-runs N]   # reads origin/ci-history
 cargo xtask ci-history report --history DIR
+
+# The shadow week over the last N days (7): see "Shadow week".
+cargo xtask ci-history report --shadow [--history DIR] [--days N]
 ```
 
 `report` lists three things:
@@ -231,3 +235,114 @@ The job runs one at a time and is never cancelled. GITHUB_TOKEN's
 scheduled workflows from the default branch, so the first nightly history
 appears the night after `next` is promoted with this file. Before that, run
 the workflow by hand on `next` if it is needed sooner.
+
+## Shadow week
+
+Before the broker skips anything, it runs in shadow (step B3): CI still
+runs the full suite on every push to `next`, and records beside it what
+`ci-broker select` would have chosen. A week of these runs shows what the
+selection would have missed.
+
+### On each push to next
+
+The `test` job of `ci.yml` has a `broker shadow` step, after the tests
+and their JUnit upload:
+
+```sh
+cargo xtask ci-broker select --base <the push's previous commit> --committed \
+    --shadow broker-shadow.json --run <run id> --commit <sha> \
+    --junit target/nextest/ci/junit.xml
+```
+
+- It runs on pushes to `next` only, after failed tests too, and never
+  fails the job (`continue-on-error`). xtask is already built by the step
+  before it, so it costs a few seconds.
+- `--committed` reads the commits since the base, not the working tree:
+  CI's checkout holds untracked files (vkdt) that would select everything.
+- A first or forced push has no previous commit to compare with: no
+  shadow for that run.
+- The file is uploaded as the `broker-shadow` artifact:
+
+```json
+{
+  "format": 1,
+  "run": "19456781234",
+  "commit": "<full sha>",
+  "base": "<the push's previous sha>",
+  "everything": false,
+  "filter": "<the nextest filter select printed>",
+  "tests": 4123,
+  "selected": ["helios-gui::it import::a_card_imports", "…"],
+  "changed": ["crates/helios-gui/src/import_scan.rs", "…"],
+  "sources": [{"source": "affected", "filter": "…", "why": "…"}],
+  "notes": [{"source": "recent failures", "note": "…"}]
+}
+```
+
+`selected` lists the tests of the run's JUnit report that the set holds
+(all of them when `everything`); `tests` counts those the report lists.
+
+### Nightly
+
+`ci-history.yml` downloads each run's `broker-shadow` artifact next to its
+`junit` one and passes it to `ci-history ingest --shadow FILE`. A run
+without one is ingested all the same, with its shadow skipped; an artifact
+that doesn't read is skipped the same way.
+
+For each run with a shadow, the ingest measures:
+
+- `total` and `selected`: the tests the run ran (skips aside), and those
+  of them selected;
+- `total_s` and `selected_s`: the same in test-seconds, each test counted
+  at its median time before the run (its own time when it has none yet).
+  These are test-seconds, not wall time: nextest runs tests in parallel;
+- **misses**: the tests that failed on every attempt in the full suite but
+  were not selected. A flake (passed on its retry) is not a miss.
+
+The day file line gets a `shadow` object with these fields, the base and
+the changed files, so a rebuild finds them again. `summary.json` gets a
+`shadow` section: `runs` and `misses` since the history began, `list` (the
+last 500 misses, each with its run, commit, date, test and changed files)
+and `recent` (the last 500 shadow runs, with their counts).
+
+### The report
+
+```sh
+git fetch origin ci-history
+cargo xtask ci-history report --shadow [--days 7]
+```
+
+It prints, over the last N days up to the last shadow run:
+
+- the number of runs, the selected share (selected tests / tests run) and
+  the test-seconds selection would have saved;
+- each miss, with its run, commit and the files that changed in that run.
+  A miss on a real break is fixed by an `OVERRIDES` line in
+  `xtask/src/ci_select.rs` (from a changed file to the test's module), or
+  by widening the map.
+
+The nightly job adds the report to its job summary.
+
+### When the week starts
+
+The `broker shadow` step runs on the first push to `next` after this
+change lands there. The nightly ingest that reads it runs from `main`'s
+copy of `ci-history.yml`, so the shadow history starts once `next` is
+promoted with it. Its first run reads the last two days of runs, so the
+shadow runs of those two days are not lost.
+
+### Go criteria for B4
+
+The analysis aims for 80–90 % of regressions caught on the pull request,
+the rest by the full runs on `next`. Skipping goes live (B4) when, over
+7 days of shadow runs on `next`:
+
+- **no miss on a real break**, or every miss on a real break is fixed by
+  an `OVERRIDES` entry (or a wider map) that makes `select --explain`
+  pick it for that run's change;
+- flakes and infrastructure failures among the misses are named as such
+  in the review, not counted;
+- the selected share is low enough to be worth it: the report's saved
+  test-seconds are the measure, read against today's test time.
+
+The owner reads the report and decides; until then nothing is skipped.

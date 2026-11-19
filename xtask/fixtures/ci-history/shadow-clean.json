@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "run": "202",
+  "commit": "sha202",
+  "base": "sha201",
+  "everything": false,
+  "filter": "package(=helios-core)",
+  "tests": 3,
+  "selected": ["helios-core graph::tests::a_cycle_is_refused", "helios-core graph::tests::an_edge_is_kept"],
+  "changed": ["crates/helios-core/src/graph.rs"],
+  "sources": [
+    {"source": "affected", "filter": "package(=helios-core)", "why": "crates/helios-core/src/graph.rs"}
+  ],
+  "notes": []
+}

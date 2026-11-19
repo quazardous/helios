@@ -13,6 +13,12 @@
 //!   only: the slowest tests, the flakiest, and those that never failed in
 //!   N runs (50 by default). Without `--history` it reads `summary.json`
 //!   from `origin/ci-history` (`git fetch origin ci-history` first).
+//! - `ingest --shadow FILE` adds the run's `broker-shadow` artifact (step
+//!   B3): the tests the broker would have selected, and so its misses. A
+//!   file that is not there is skipped, and said.
+//! - `report --shadow [--days N]`: the shadow week instead, over the last
+//!   N days (7): the selected share, the time saved, each miss with the
+//!   files its run changed.
 //!
 //! The format and the fold live in `ci_broker`, which knows nothing of
 //! JUnit or git: this file is the glue.
@@ -22,9 +28,10 @@ use std::process::{Command, ExitCode};
 
 use crate::ci_broker::history::{Outcome, Run, Summary, TestResult};
 use crate::ci_broker::report;
+use crate::ci_broker::shadow::{self, Artifact, Shadow};
 use crate::test_times::{self, Report, Status};
 
-pub const USAGE: &str = "ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N]";
+pub const USAGE: &str = "ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] [--shadow FILE] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-history report --shadow [--history DIR] [--days N]";
 
 const SUMMARY: &str = "summary.json";
 const DAYS: &str = "days";
@@ -81,11 +88,24 @@ fn write_summary(dir: &Path, summary: &Summary) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Appends the run to its day file and folds it into the summary. False
-/// when the summary already holds it (nothing written).
-pub fn ingest(dir: &Path, mut run: Run) -> Result<bool, String> {
+/// Appends the run to its day file and folds it into the summary, with
+/// its shadow when the run uploaded one. False when the summary already
+/// holds it (nothing written).
+pub fn ingest(dir: &Path, mut run: Run, artifact: Option<&Artifact>) -> Result<bool, String> {
     let day = run.day()?.to_string();
     let mut summary = read_summary(dir)?;
+    if summary.contains(&run.id) {
+        return Ok(false);
+    }
+    if let Some(a) = artifact {
+        if a.run != run.id {
+            return Err(format!(
+                "the shadow artifact is run {}'s, not run {}'s",
+                a.run, run.id
+            ));
+        }
+        run.shadow = Some(Shadow::measure(&summary, &run, a));
+    }
     if !summary.fold(&mut run) {
         return Ok(false);
     }
@@ -166,6 +186,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     let (command, rest) = args.split_first()?;
     let (mut history, mut id, mut commit, mut date, mut source) = (None, None, None, None, "ci");
     let (mut options, mut files) = (report::Options::default(), Vec::new());
+    let (mut shadow_file, mut shadow_report, mut days) = (None, false, 7);
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         match *a {
@@ -181,6 +202,9 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
                 };
             }
             "--min-runs" => options.min_runs = it.next()?.parse().ok()?,
+            "--shadow" if *command == "ingest" => shadow_file = Some(Path::new(*it.next()?)),
+            "--shadow" if *command == "report" => shadow_report = true,
+            "--days" => days = it.next()?.parse().ok()?,
             f if !f.starts_with("--") && *command == "ingest" => files.push(f),
             _ => return None,
         }
@@ -201,9 +225,37 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
                     Err(e) => return Some(fail(&format!("{f}: {e}"))),
                 }
             }
+            let artifact = match shadow_file {
+                Some(f) if f.exists() => match std::fs::read_to_string(f)
+                    .map_err(|e| e.to_string())
+                    .and_then(|t| Artifact::from_json(&t))
+                {
+                    Ok(a) => Some(a),
+                    // A shadow that does not read loses the shadow, not
+                    // the run's history.
+                    Err(e) => {
+                        eprintln!(
+                            "ci-history: {}: {e}; run {id}'s shadow skipped",
+                            f.display()
+                        );
+                        None
+                    }
+                },
+                Some(f) => {
+                    println!(
+                        "run {id}: no shadow artifact ({}), shadow skipped",
+                        f.display()
+                    );
+                    None
+                }
+                None => None,
+            };
             let run = run_from_reports(id, commit, date, source, &reports);
             let tests = run.tests.len();
-            match ingest(dir, run) {
+            match ingest(dir, run, artifact.as_ref()) {
+                Ok(true) if artifact.is_some() => {
+                    println!("run {id} ({commit}, {date}): {tests} tests and the shadow ingested");
+                }
                 Ok(true) => println!("run {id} ({commit}, {date}): {tests} tests ingested"),
                 Ok(false) => println!("run {id}: already in the history, left out"),
                 Err(e) => return Some(fail(&e)),
@@ -223,6 +275,10 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
                 None => remote_summary(root),
             };
             match summary {
+                Ok(s) if shadow_report => {
+                    print!("{}", shadow::render(&s, days));
+                    Some(ExitCode::SUCCESS)
+                }
                 Ok(s) => {
                     print!("{}", report::render(&s, options));
                     Some(ExitCode::SUCCESS)
@@ -264,10 +320,10 @@ mod tests {
     fn junit_reports_fold_into_the_summary() {
         let dir = temp("fold");
         let d = &dir.0;
-        assert!(ingest(d, fixture("101", "2026-11-18T10:00:00Z", RUN_1)).unwrap());
-        assert!(ingest(d, fixture("102", "2026-11-19T09:00:00Z", RUN_2)).unwrap());
+        assert!(ingest(d, fixture("101", "2026-11-18T10:00:00Z", RUN_1), None).unwrap());
+        assert!(ingest(d, fixture("102", "2026-11-19T09:00:00Z", RUN_2), None).unwrap());
         // The same run again (overlapping nightly windows): left out.
-        assert!(!ingest(d, fixture("102", "2026-11-19T09:00:00Z", RUN_2)).unwrap());
+        assert!(!ingest(d, fixture("102", "2026-11-19T09:00:00Z", RUN_2), None).unwrap());
 
         let s = read_summary(d).unwrap();
         assert_eq!(s.runs, 2);
@@ -315,11 +371,92 @@ mod tests {
         let d = &dir.0;
         // A run of the 18th that finished late is folded after one of the
         // 19th: the rebuild keeps that order, not the files'.
-        ingest(d, fixture("2", "2026-11-19T01:00:00Z", RUN_2)).unwrap();
-        ingest(d, fixture("1", "2026-11-18T23:00:00Z", RUN_1)).unwrap();
+        ingest(d, fixture("2", "2026-11-19T01:00:00Z", RUN_2), None).unwrap();
+        ingest(d, fixture("1", "2026-11-18T23:00:00Z", RUN_1), None).unwrap();
         let s = read_summary(d).unwrap();
         assert_eq!(s.last_run.as_ref().unwrap().run, "1");
         assert_eq!(rebuild(d).unwrap(), s);
+    }
+
+    #[test]
+    fn the_shadow_counts_misses_and_skips_a_run_without_one() {
+        let dir = temp("shadow");
+        let d = dir.0.to_str().unwrap();
+        let root = Path::new(".");
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ci-history");
+        let xml = fixtures.join("run-1.xml");
+        let ingest_cli = |id: &str, date: &str, shadow: &str| {
+            let shadow = fixtures.join(shadow);
+            let args = [
+                "ingest",
+                "--history",
+                d,
+                "--run",
+                id,
+                "--commit",
+                &format!("sha{id}"),
+                "--date",
+                date,
+                "--shadow",
+                shadow.to_str().unwrap(),
+                xml.to_str().unwrap(),
+            ];
+            run(root, &args)
+        };
+        // A run with a miss: `an_edge_is_kept` failed, outside the set.
+        assert_eq!(
+            ingest_cli("201", "2026-11-20T10:00:00Z", "shadow-miss.json"),
+            Some(ExitCode::SUCCESS)
+        );
+        // The same failure, selected this time: no miss.
+        assert_eq!(
+            ingest_cli("202", "2026-11-21T10:00:00Z", "shadow-clean.json"),
+            Some(ExitCode::SUCCESS)
+        );
+        // No shadow artifact: the run is ingested, its shadow skipped.
+        assert_eq!(
+            ingest_cli("203", "2026-11-22T10:00:00Z", "no-such-shadow.json"),
+            Some(ExitCode::SUCCESS)
+        );
+        // An artifact of another run is refused.
+        assert_eq!(
+            ingest_cli("204", "2026-11-22T11:00:00Z", "shadow-clean.json"),
+            Some(ExitCode::FAILURE)
+        );
+
+        let s = read_summary(&dir.0).unwrap();
+        assert_eq!((s.runs, s.shadow.runs, s.shadow.misses), (3, 2, 1));
+        let miss = &s.shadow.list[0];
+        assert_eq!(
+            (miss.run.as_str(), miss.test.as_str()),
+            ("201", "helios-core graph::tests::an_edge_is_kept")
+        );
+        assert_eq!(miss.changed[0], "crates/helios-gui/src/import_scan.rs");
+        let first = &s.shadow.recent[0];
+        assert_eq!((first.selected, first.total, first.misses), (1, 3, 1));
+        let second = &s.shadow.recent[1];
+        assert_eq!((second.selected, second.misses), (2, 0));
+        // The day line keeps the shadow: the rebuild finds it again.
+        let day = std::fs::read_to_string(dir.0.join("days/2026-11-20.jsonl")).unwrap();
+        assert!(day.contains("\"shadow\":"), "{day}");
+        let day = std::fs::read_to_string(dir.0.join("days/2026-11-22.jsonl")).unwrap();
+        assert!(!day.contains("\"shadow\":"), "{day}");
+        assert_eq!(rebuild(&dir.0).unwrap(), s);
+
+        let text = shadow::render(&s, 7);
+        assert!(text.contains("Misses: 1 "), "{text}");
+        assert!(
+            text.contains("- helios-core graph::tests::an_edge_is_kept  (run 201"),
+            "{text}"
+        );
+        assert!(
+            text.contains("changed: crates/helios-gui/src/import_scan.rs"),
+            "{text}"
+        );
+        assert_eq!(
+            run(root, &["report", "--shadow", "--history", d, "--days", "3"]),
+            Some(ExitCode::SUCCESS)
+        );
     }
 
     #[test]

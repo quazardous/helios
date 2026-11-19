@@ -10,6 +10,9 @@ name: ci-history
 #   history is left out, so the overlap counts nothing twice.
 # - A run with no `junit` artifact (it stopped before the tests: lint,
 #   build) is skipped.
+# - Beside it, the run's `broker-shadow` artifact (the broker's shadow
+#   week, B3): what `ci-broker select` would have run, so its misses. A run
+#   without one is ingested with its shadow skipped.
 # - Scheduled runs use the default branch's copy of this file: the nightly
 #   run starts only once this file reaches `main` through promotion. The
 #   job checks out `next` itself, for the newest xtask.
@@ -67,10 +70,16 @@ jobs:
               echo "run $id: no junit artifact, skipped"
               continue
             fi
+            # The broker's shadow (B3), when the run uploaded one: a run
+            # without it is ingested all the same, its shadow skipped.
+            shadow="shadow/$id"
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --name broker-shadow --dir "$shadow" 2>/dev/null || true
             find "$dir" -name '*.xml' -print0 | xargs -0 cargo xtask ci-history ingest \
-              --history history --run "$id" --commit "$sha" --date "$created" --source ci
+              --history history --run "$id" --commit "$sha" --date "$created" --source ci \
+              --shadow "$shadow/broker-shadow.json"
           done < runs.txt
           cargo xtask ci-history report --history history --top 15 >> "$GITHUB_STEP_SUMMARY"
+          cargo xtask ci-history report --shadow --history history >> "$GITHUB_STEP_SUMMARY"
       - name: commit and push
         working-directory: history
         run: |

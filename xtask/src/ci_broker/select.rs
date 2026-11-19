@@ -261,6 +261,11 @@ impl Selection {
             .join(" | ")
     }
 
+    /// Whether the set holds the test `binary` `name`.
+    pub fn selects(&self, binary: &str, name: &str) -> bool {
+        self.picks.iter().any(|p| p.scope.contains(binary, name))
+    }
+
     /// The picks that select a test, named as nextest and the history name
     /// it: `<binary id> <test name>`.
     pub fn explain(&self, test: &str) -> Result<Vec<&Pick>, String> {
