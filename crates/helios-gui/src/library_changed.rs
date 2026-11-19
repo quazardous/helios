@@ -26,6 +26,7 @@
 use std::collections::BTreeSet;
 use std::sync::mpsc::{Receiver, Sender};
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
 };
@@ -182,7 +183,7 @@ pub struct Reactions {
 pub struct LibraryChanged;
 
 impl Point for LibraryChanged {
-    const ID: &'static str = CHANGED;
+    const ID: PointId = PointId::new(CHANGED);
     type Input = Change;
     type Value = Reactions;
 }
@@ -191,7 +192,7 @@ impl Point for LibraryChanged {
 pub struct LibraryFilled;
 
 impl Point for LibraryFilled {
-    const ID: &'static str = FILLED;
+    const ID: PointId = PointId::new(FILLED);
     type Input = Filled;
     type Value = Reactions;
 }

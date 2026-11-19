@@ -251,11 +251,17 @@ journal holds an old name (`helios_core::legacy_kinds`, an alias table):
   desktop's link was down shows as failed there (`describe jobs` is not
   translated).
 
-egui-pop reads the shell bus as its journal under its own names: its
-events without `helios.gui.`, and Helios's jobs without `helios.`
-(`job.started`), the job protocol its jobs centre follows
-(`helios_gui::host::journal_name`). The aliases go in 0.94 (ROADMAP). `cargo xtask bus --check` refuses a
-fact kind declared without the prefix.
+egui-pop reads the shell bus as its journal, its own events without
+`helios.gui.` (`helios_gui::host::journal_name`), any other kind as it
+is. Its jobs centre reads no journal name: the host says each
+`helios.job.*` fact on egui-pop's `pop.job.event`, typed by its
+`JobEventKind` (`helios_gui::host::job_event_kind`, through the
+`JobPublisher` egui-pop hands the host). egui-pop records each such event
+in the journal again under its label (`job.started`), which the shell
+bus keeps as a `helios.gui.event`: Helios's readers follow the
+`helios.job.*` facts, egui-pop's its own copy. The aliases go in 0.94
+(ROADMAP). `cargo xtask bus --check` refuses a fact kind declared without
+the prefix.
 
 - **Listening.** `Shell::node_events().listen(id, patterns)` gives a
   `Listener` of the kinds matching its patterns (`storage.*`,

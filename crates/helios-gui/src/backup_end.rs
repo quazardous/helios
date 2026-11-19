@@ -26,6 +26,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
 };
@@ -85,7 +86,7 @@ pub struct Reactions {
 pub struct BackupEnded;
 
 impl Point for BackupEnded {
-    const ID: &'static str = ENDED;
+    const ID: PointId = PointId::new(ENDED);
     type Input = BackupEnd;
     type Value = Reactions;
 }
@@ -94,7 +95,7 @@ impl Point for BackupEnded {
 pub struct CardSafe;
 
 impl Point for CardSafe {
-    const ID: &'static str = SAFE;
+    const ID: PointId = PointId::new(SAFE);
     type Input = SafeCards;
     type Value = Reactions;
 }

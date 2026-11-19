@@ -21,7 +21,7 @@
 //!
 //! A typed kind is also an event point of the bus contract
 //! (`bus-contract`): [`FactDecl::of`] makes its line
-//! `PointDecl::of::<FactPoint<E>>(…).journaled()`, and the application's
+//! `PointDecl::of::<FactPoint<E>>(…).facets(&[JOURNALED])`, and the application's
 //! bus delivers its facts to named, ordered listeners through
 //! [`crate::journal::BusJournal`], this bus's journal handed to the
 //! contract.
@@ -31,7 +31,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use bus_contract::{Codec, PointDecl};
+use bus_contract::{Facet, PointDecl};
+use bus_contract_crossing::relayable_event;
+use bus_contract_journal::{JOURNALED, is_journaled};
 use serde::Serialize;
 
 use crate::describe::Describe;
@@ -65,8 +67,8 @@ pub struct FactDecl {
     /// line says so ([`FactDecl::relayable`]). `None`: a fact only, with
     /// no listeners on the contract.
     pub point: Option<PointDecl>,
-    /// The point's codec, kept for [`FactDecl::relayable`].
-    codec: Option<Codec>,
+    /// The point's facets once relayable, kept for [`FactDecl::relayable`].
+    relayed: Option<&'static [Facet]>,
 }
 
 impl FactDecl {
@@ -78,8 +80,8 @@ impl FactDecl {
             kind: E::KIND,
             payload: Payload::Type(std::any::type_name::<E>),
             about,
-            point: Some(PointDecl::of::<FactPoint<E>>(about).journaled()),
-            codec: Some(Codec::of::<FactPoint<E>>()),
+            point: Some(PointDecl::of::<FactPoint<E>>(about).facets(FactFacets::<E>::JOURNALED)),
+            relayed: Some(FactFacets::<E>::RELAYED),
         }
     }
 
@@ -87,8 +89,8 @@ impl FactDecl {
     /// desktop's listeners ([`crate::journal::BusJournal`]'s relay), read
     /// with a codec that accepts the fields of another version.
     pub const fn relayable(mut self) -> Self {
-        if let (Some(point), Some(codec)) = (self.point, self.codec) {
-            self.point = Some(point.relayable(codec));
+        if let (Some(point), Some(relayed)) = (self.point, self.relayed) {
+            self.point = Some(point.facets(relayed));
         }
         self
     }
@@ -109,7 +111,7 @@ impl FactDecl {
             payload: Payload::Type(std::any::type_name::<T>),
             about,
             point: None,
-            codec: None,
+            relayed: None,
         }
     }
 
@@ -120,7 +122,7 @@ impl FactDecl {
             payload: Payload::Json(shape),
             about,
             point: None,
-            codec: None,
+            relayed: None,
         }
     }
 
@@ -133,14 +135,32 @@ impl FactDecl {
     }
 }
 
+/// The facets of the fact point of `E` as constants, so a `const`
+/// declaration can borrow them for `'static`: journaled, and journaled
+/// and relayable.
+struct FactFacets<E>(std::marker::PhantomData<fn() -> E>);
+
+impl<E: Event + 'static> FactFacets<E> {
+    const JOURNALED: &'static [Facet] = &[JOURNALED];
+    const RELAYED: &'static [Facet] = &[JOURNALED, relayable_event::<FactPoint<E>>()];
+}
+
 impl std::fmt::Debug for FactDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FactDecl")
             .field("kind", &self.kind)
             .field("payload", &self.payload_name())
             .field("about", &self.about)
-            .field("journaled", &self.point.is_some_and(|p| p.journaled))
-            .field("relayable", &self.point.is_some_and(|p| p.relay.is_some()))
+            .field(
+                "journaled",
+                &self.point.is_some_and(|p| is_journaled(p.facets)),
+            )
+            .field(
+                "relayable",
+                &self
+                    .point
+                    .is_some_and(|p| bus_contract_crossing::codec(p.facets).is_some()),
+            )
             .finish_non_exhaustive()
     }
 }

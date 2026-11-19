@@ -542,7 +542,7 @@ fn only_a_setting_that_opts_into_a_scope_offers_set_for_and_a_stray_value_moves_
 /// kept for it, once; a remote node's layer (relayed in) is left out.
 #[test]
 fn a_layer_changed_before_the_first_read_is_not_missed() {
-    use egui_pop::api::bus::bus_contract::Journal;
+    use egui_pop::api::bus::bus_contract_journal::Journal;
     use egui_pop::api::bus::egui_pop_hooks::Kernel;
     use helios_core::{BusJournal, Event};
     use helios_node_core::settings::LayerChanged;

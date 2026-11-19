@@ -37,6 +37,7 @@
 
 use std::rc::Rc;
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
@@ -127,7 +128,7 @@ pub struct Switched {
 pub struct ImageOpen;
 
 impl Point for ImageOpen {
-    const ID: &'static str = OPEN;
+    const ID: PointId = PointId::new(OPEN);
     type Input = Switch;
     type Value = Switched;
     const KIND: PointKind = PointKind::Request;
@@ -137,7 +138,7 @@ impl Point for ImageOpen {
 pub struct ImageClose;
 
 impl Point for ImageClose {
-    const ID: &'static str = CLOSE;
+    const ID: PointId = PointId::new(CLOSE);
     type Input = Switch;
     type Value = Switched;
     const KIND: PointKind = PointKind::Request;
@@ -167,7 +168,7 @@ pub struct Followed {
 pub struct ImageOpened;
 
 impl Point for ImageOpened {
-    const ID: &'static str = OPENED;
+    const ID: PointId = PointId::new(OPENED);
     type Input = Shown;
     type Value = Followed;
 }
@@ -176,7 +177,7 @@ impl Point for ImageOpened {
 pub struct ImageClosed;
 
 impl Point for ImageClosed {
-    const ID: &'static str = CLOSED;
+    const ID: PointId = PointId::new(CLOSED);
     type Input = Shown;
     type Value = Followed;
 }

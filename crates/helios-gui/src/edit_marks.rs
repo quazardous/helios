@@ -29,6 +29,7 @@
 
 use std::collections::BTreeSet;
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
 };
@@ -121,7 +122,7 @@ pub struct Reactions {
 pub struct EditChanged;
 
 impl Point for EditChanged {
-    const ID: &'static str = CHANGED;
+    const ID: PointId = PointId::new(CHANGED);
     type Input = Marks;
     type Value = Reactions;
 }

@@ -61,7 +61,7 @@ fn an_export_shows_in_the_jobs_centre_and_is_cancelled_from_it() {
     let progress: Vec<String> = app
         .events_since(0)
         .into_iter()
-        .filter(|e| e.name == "job.progress" && e.data["id"] == done.id.as_str())
+        .filter(|e| e.name == helios_core::jobs::PROGRESS && e.data["id"] == done.id.as_str())
         .filter_map(|e| e.data["step"].as_str().map(str::to_string))
         .collect();
     assert_eq!(progress, ["render", "encode", "write"]);

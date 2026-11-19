@@ -2138,7 +2138,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     for refused in journal.declare(&*kernel, FACTS.iter().copied()) {
         eprintln!("helios-node: bus: {refused}");
     }
-    let relay: Arc<dyn bus_contract::Relay> = kernel.clone();
+    let relay: Arc<dyn bus_contract_crossing::Relay> = kernel.clone();
     let hooks: Arc<dyn bus_contract::Bus> = kernel;
     // The node owns the vault and runs its jobs: the volume watch, the
     // backups, the health check.

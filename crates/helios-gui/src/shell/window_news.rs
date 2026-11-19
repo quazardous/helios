@@ -17,6 +17,7 @@
 use std::sync::Weak;
 
 use egui_pop::api::app::AppHandle;
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
@@ -27,7 +28,7 @@ use egui_pop::api::windows::WindowId;
 pub struct LibraryNews;
 
 impl Point for LibraryNews {
-    const ID: &'static str = "helios.library.window.news";
+    const ID: PointId = PointId::new("helios.library.window.news");
     type Input = ();
     type Value = ();
     const KIND: PointKind = PointKind::Alter;
@@ -37,7 +38,7 @@ impl Point for LibraryNews {
 pub struct CalibrateNews;
 
 impl Point for CalibrateNews {
-    const ID: &'static str = "helios.calibrate.window.news";
+    const ID: PointId = PointId::new("helios.calibrate.window.news");
     type Input = ();
     type Value = ();
     const KIND: PointKind = PointKind::Alter;
@@ -70,7 +71,7 @@ fn declare(bus: &dyn Bus) {
 pub fn listen<P: Point<Input = (), Value = ()>>(app: &AppHandle, window: &str, heard_by: &str) {
     let bus = app.bus();
     declare(&*bus);
-    bus.unlisten(P::ID, heard_by);
+    bus.unlisten(&P::ID, heard_by);
     let listened = app.listen_local_in::<P>(
         &WindowId::new(window),
         heard_by,

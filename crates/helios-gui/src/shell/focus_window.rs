@@ -230,7 +230,7 @@ pub(super) fn listen_window_close(
     let bus = app.bus();
     let id = format!("{owner}.close");
     bus.unlisten(
-        <WindowClose as egui_pop::api::bus::bus_contract::Point>::ID,
+        &<WindowClose as egui_pop::api::bus::bus_contract::Point>::ID,
         &id,
     );
     bus.listen_local::<WindowClose>(
@@ -278,7 +278,7 @@ impl super::Shell {
     pub fn window_close_order(&self) -> String {
         egui_pop::api::bus::order_dump(
             &*self.core.app.handle().bus(),
-            &[<WindowClose as egui_pop::api::bus::bus_contract::Point>::ID],
+            &[&<WindowClose as egui_pop::api::bus::bus_contract::Point>::ID],
         )
     }
 

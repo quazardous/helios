@@ -12,7 +12,7 @@
 //!   library's imports, a settings layer changed, an export written),
 //!   when the desktop's application bus has a relay: the relay link takes
 //!   them in once, on the desktop's fact bus, with source
-//!   `relayed:<name>` (`bus_contract::Relay::ingest`). [`NodeEvents`]
+//!   `relayed:<name>` (`bus_contract_crossing::Relay::ingest`). [`NodeEvents`]
 //!   hears them as one named listener (`helios.node-events`) of each
 //!   relayable fact point ([`NodeEvents::attach`]), beside the points'
 //!   other listeners; the event stream leaves them out.
@@ -55,6 +55,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use egui_pop::api::bus::bus_contract::{self, ListenOpts};
+use egui_pop::api::bus::bus_contract_crossing::BusCrossing as _;
 use helios_core::{Bus, Envelope, Fact, FactDecl};
 use serde_json::{Value, json};
 
@@ -134,7 +135,7 @@ impl NodeEvents {
             .into_iter()
             .flatten()
             .filter_map(|d| d.point)
-            .filter(|p| p.relay.is_some())
+            .filter(|p| egui_pop::api::bus::bus_contract_crossing::codec(p.facets).is_some())
         {
             let me = self.clone();
             let run: bus_contract::AnyListener = Arc::new(move |input, _| {
@@ -149,7 +150,7 @@ impl NodeEvents {
                     self.relayed
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
-                        .insert(point.id);
+                        .insert(point.id.as_str());
                 }
                 Err(e) => refused.push(format!("{}: {e}", point.id)),
             }
@@ -366,7 +367,7 @@ impl NodeEvents {
             .into_iter()
             .flatten()
             .filter_map(|d| d.point)
-            .filter(|p| patterns.iter().any(|pattern| matches(pattern, p.id)))
+            .filter(|p| patterns.iter().any(|pattern| matches(pattern, &p.id)))
         {
             let (me, heard) = (self.clone(), heard.clone());
             let run: bus_contract::AnyListener = Arc::new(move |input, _| {
@@ -379,7 +380,7 @@ impl NodeEvents {
                 }
                 Ok(())
             });
-            app.unlisten(point.id, id);
+            app.unlisten(&point.id, id);
             let opts = ListenOpts::new().owner(owner);
             if let Err(e) = app.listen_any(point.key(), id.to_string(), opts, run) {
                 refused.push(format!("{}: {e}", point.id));

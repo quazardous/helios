@@ -947,7 +947,7 @@ fn a_node_cancels_an_export_on_job_cancel() {
 #[cfg(debug_assertions)]
 #[test]
 fn a_batch_shows_as_a_parent_with_its_exports_as_children() {
-    use egui_pop_model::jobs::{Incoming, JobState, Jobs as Model};
+    use egui_pop_model::jobs::{Incoming, JobEventKind, JobState, Jobs as Model};
 
     let p = Place::new("parent");
     let node = Sandbox::start(p.join("node"), NETWORK);
@@ -973,16 +973,19 @@ fn a_batch_shows_as_a_parent_with_its_exports_as_children() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    // egui-pop's jobs model reads its own protocol (`job.started`), as
-    // helios-gui's host hands it on: the old names.
+    // egui-pop's jobs model reads typed job events, as helios-gui's host
+    // publishes them (`helios.job.started` is `JobEventKind::Started`).
     let mut model = Model::new();
     for e in job_events(&node) {
+        let Some(kind) = e["kind"]
+            .as_str()
+            .and_then(|k| k.strip_prefix(helios_core::legacy_kinds::PREFIX))
+            .and_then(|name| JobEventKind::ALL.into_iter().find(|k| k.name() == name))
+        else {
+            continue;
+        };
         model.apply(
-            &Incoming::new(
-                e["seq"].as_u64().unwrap(),
-                helios_core::legacy_kinds::legacy(e["kind"].as_str().unwrap()),
-                &e["payload"],
-            ),
+            &Incoming::new(e["seq"].as_u64().unwrap(), kind, &e["payload"]),
             0.0,
         );
     }

@@ -484,7 +484,7 @@ fn a_burst_and_a_bracket_are_suggested_accepted_and_dissolved() {
 /// and no half-written copy left.
 #[test]
 fn an_import_shows_in_the_jobs_model_and_is_cancelled_midway() {
-    use egui_pop_model::jobs::{Incoming, JobState, Jobs as Model};
+    use egui_pop_model::jobs::{Incoming, JobEventKind, JobState, Jobs as Model};
 
     let p = Place::new("cancel");
     let roll = p.join("roll");
@@ -543,13 +543,19 @@ fn an_import_shows_in_the_jobs_model_and_is_cancelled_midway() {
     }
     assert_eq!(copies, ["a.png"], "no half-written copy");
 
-    // egui-pop's jobs model reads its own protocol (`job.started`), as
-    // helios-gui's host hands it on: the old names.
+    // egui-pop's jobs model reads typed job events, as helios-gui's host
+    // publishes them (`helios.job.started` is `JobEventKind::Started`).
     let mut model = Model::new();
     for e in bus.since(0) {
+        let Some(kind) = e
+            .kind
+            .strip_prefix(helios_core::legacy_kinds::PREFIX)
+            .and_then(|name| JobEventKind::ALL.into_iter().find(|k| k.name() == name))
+        else {
+            continue;
+        };
         model.apply(
-            &Incoming::new(e.seq, helios_core::legacy_kinds::legacy(e.kind), &e.payload)
-                .source(&e.source),
+            &Incoming::new(e.seq, kind, &e.payload).source(&e.source),
             0.0,
         );
     }

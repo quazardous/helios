@@ -28,6 +28,7 @@
 
 use std::time::Duration;
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
@@ -72,7 +73,7 @@ pub struct AppQuit;
 
 impl Point for AppQuit {
     const KIND: PointKind = PointKind::Request;
-    const ID: &'static str = QUIT;
+    const ID: PointId = PointId::new(QUIT);
     type Input = QuitAsk;
     type Value = Vec<String>;
 }

@@ -52,7 +52,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel}
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use egui_pop::api::bus::bus_contract::{self, RelayedEntry};
+use egui_pop::api::bus::bus_contract;
+use egui_pop::api::bus::bus_contract_crossing::{BusCrossing as _, Origin, RelayedEntry};
 use helios_core::jobs::{
     CANCELLED, CANCELLING, FAILED, FINISHED, ITEM_FAILED, LOG, PAUSED, PROGRESS, RESUMED, STARTED,
 };
@@ -746,7 +747,7 @@ impl TakeIn {
         let Some(relay) = self.hooks.relay() else {
             return Ok(());
         };
-        let source = format!("{RELAYED}{}", self.link.name);
+        let source = Origin::process(format!("{RELAYED}{}", self.link.name));
         loop {
             if self.stopped() {
                 return Ok(());

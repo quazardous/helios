@@ -45,6 +45,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use egui::Context as Egui;
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{Bus, ListenOpts, Point, PointDecl, Refused};
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::{Event, Pending, Seq};
@@ -154,7 +155,7 @@ pub const IGNORED: &str = "health.ignored";
 pub struct HealthChecked;
 
 impl Point for HealthChecked {
-    const ID: &'static str = CHECKED_POINT;
+    const ID: PointId = PointId::new(CHECKED_POINT);
     type Input = Checked;
     type Value = Shown;
 }
@@ -219,7 +220,7 @@ pub fn listen_checked(bus: &dyn Bus) {
             }),
         ),
     ] {
-        bus.unlisten(HealthChecked::ID, id);
+        bus.unlisten(&HealthChecked::ID, id);
         let o = if id == KEYS_LISTENER {
             opts().after(STATUS_LISTENER)
         } else {
@@ -236,8 +237,8 @@ pub fn listen_checked(bus: &dyn Bus) {
 /// the one bus.
 pub fn order(bus: &dyn Bus, registry: &helios_health::Registry) -> String {
     let mut out =
-        egui_pop::api::bus::order_dump(&**registry.bus(), &[helios_health::HealthReport::ID]);
-    out.push_str(&egui_pop::api::bus::order_dump(bus, &[HealthChecked::ID]));
+        egui_pop::api::bus::order_dump(&**registry.bus(), &[&helios_health::HealthReport::ID]);
+    out.push_str(&egui_pop::api::bus::order_dump(bus, &[&HealthChecked::ID]));
     out
 }
 
@@ -523,7 +524,7 @@ impl Shell {
         let bus = self.core.app.handle().bus();
         match self.core.health.runner.as_ref() {
             Some(r) => order(&*bus, r.registry()),
-            None => egui_pop::api::bus::order_dump(&*bus, &[HealthChecked::ID]),
+            None => egui_pop::api::bus::order_dump(&*bus, &[&HealthChecked::ID]),
         }
     }
 

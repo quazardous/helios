@@ -5,10 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use bus_contract::{
-    Cursor, FailureKind, IngestError, Journal, ListenOpts, Lost, PointDecl, PointKind, Relay,
-    RelayedEntry,
+use bus_contract::{FailureKind, ListenOpts, PointDecl, PointKind};
+use bus_contract_crossing::{
+    BusCrossing, Cursor, IngestError, Journal, Lost, Origin, RelayedEntry, codec,
 };
+use bus_contract_journal::is_journaled;
+use bus_kernel::RelayHost;
 use egui_pop_hooks::Kernel;
 use helios_core::{Bus, BusJournal, Event, Fact, FactDecl, FactPoint};
 use serde::{Deserialize, Serialize};
@@ -86,13 +88,13 @@ fn a_typed_kind_is_a_journaled_event_point_and_the_others_are_facts_only() {
     let (k, _) = kernel();
     let points: Vec<PointDecl> = helios_core::journal::points([FACTS]);
     assert_eq!(
-        points.iter().map(|p| p.id).collect::<Vec<_>>(),
+        points.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
         ["test.moved", "test.saved"]
     );
     let (_, moved) = k.declaration(Moved::KIND).unwrap();
-    assert!(moved.journaled && moved.relay.is_none());
+    assert!(is_journaled(&moved.facets) && codec(&moved.facets).is_none());
     let (key, saved) = k.declaration(Saved::KIND).unwrap();
-    assert!(saved.journaled && saved.relay.is_some());
+    assert!(is_journaled(&saved.facets) && codec(&saved.facets).is_some());
     assert_eq!(key.kind, PointKind::Event);
     assert!(k.declaration(Local::KIND).is_none());
 }
@@ -101,15 +103,19 @@ fn a_typed_kind_is_a_journaled_event_point_and_the_others_are_facts_only() {
 fn facts_published_on_the_bus_reach_their_named_listeners_in_order() {
     let (k, j) = kernel();
     let heard: Heard = Arc::default();
-    listen::<Moved>(&k, "first", ListenOpts::new(), &heard);
+    listen::<Moved>(&k, "test.first", ListenOpts::new(), &heard);
     let payloads = Arc::new(Mutex::new(Vec::new()));
     let p = payloads.clone();
-    k.listen::<FactPoint<Moved>>("second", ListenOpts::new().after("first"), move |f, ()| {
-        p.lock()
-            .unwrap()
-            .push((f.source.clone(), f.payload["to"].clone()));
-        Ok(())
-    })
+    k.listen::<FactPoint<Moved>>(
+        "test.second",
+        ListenOpts::new().after("test.first"),
+        move |f, ()| {
+            p.lock()
+                .unwrap()
+                .push((f.source.clone(), f.payload["to"].clone()));
+            Ok(())
+        },
+    )
     .unwrap();
     let bus = j.bus();
     let a = bus.publish(
@@ -132,7 +138,7 @@ fn facts_published_on_the_bus_reach_their_named_listeners_in_order() {
     assert!(Journal::flush(&*j, SOON), "the pump delivered every fact");
     assert_eq!(
         *heard.lock().unwrap(),
-        [(a, "first".to_string()), (b, "first".to_string())]
+        [(a, "test.first".to_string()), (b, "test.first".to_string())]
     );
     assert_eq!(
         *payloads.lock().unwrap(),
@@ -158,7 +164,7 @@ fn a_slow_listener_does_not_stall_the_pump_past_its_deadline() {
         }),
     );
     k.listen::<FactPoint<Moved>>(
-        "stuck",
+        "test.stuck",
         ListenOpts::new().threaded().deadline(deadline),
         |_, ()| {
             thread::sleep(Duration::from_secs(30));
@@ -167,7 +173,7 @@ fn a_slow_listener_does_not_stall_the_pump_past_its_deadline() {
     )
     .unwrap();
     let heard: Heard = Arc::default();
-    listen::<Moved>(&k, "quick", ListenOpts::new(), &heard);
+    listen::<Moved>(&k, "test.quick", ListenOpts::new(), &heard);
     let start = Instant::now();
     for photo in 0..3 {
         j.bus().publish(
@@ -192,7 +198,8 @@ fn a_slow_listener_does_not_stall_the_pump_past_its_deadline() {
     assert!(
         failures
             .iter()
-            .all(|(listener, kind)| listener == "stuck" && matches!(kind, FailureKind::Late { .. })),
+            .all(|(listener, kind)| listener == "test.stuck"
+                && matches!(kind, FailureKind::Late { .. })),
         "each failure names the stuck listener: {failures:?}"
     );
 }
@@ -201,15 +208,16 @@ fn a_slow_listener_does_not_stall_the_pump_past_its_deadline() {
 fn publishing_through_the_journal_lands_on_the_fact_bus() {
     let (k, j) = kernel();
     let heard: Heard = Arc::default();
-    listen::<Moved>(&k, "first", ListenOpts::new(), &heard);
-    let journal = bus_contract::Bus::journal(&*k).expect("the kernel offers a journal");
+    listen::<Moved>(&k, "test.first", ListenOpts::new(), &heard);
+    let journal =
+        bus_contract_journal::BusJournal::journal(&*k).expect("the kernel offers a journal");
     let fact = Fact {
         payload: serde_json::json!({ "photo": 7, "to": "z" }),
         ..Fact::default()
     };
     let seq = journal.publish::<FactPoint<Moved>>(fact).unwrap();
     assert!(journal.flush(SOON));
-    assert_eq!(*heard.lock().unwrap(), [(seq, "first".to_string())]);
+    assert_eq!(*heard.lock().unwrap(), [(seq, "test.first".to_string())]);
     let on_bus = j.bus().since(seq - 1);
     assert_eq!(on_bus[0].kind, Moved::KIND);
     assert_eq!(on_bus[0].payload["to"], "z");
@@ -301,34 +309,40 @@ fn the_codec_reads_a_payload_of_an_older_or_newer_node() {
     let views = Arc::new(Mutex::new(Vec::new()));
     let v = views.clone();
     desktop
-        .listen::<FactPoint<Saved>>("view", ListenOpts::new(), move |f, ()| {
+        .listen::<FactPoint<Saved>>("test.view", ListenOpts::new(), move |f, ()| {
             v.lock()
                 .unwrap()
                 .push((f.source.clone(), f.cause, f.read::<SavedView>()));
             Ok(())
         })
         .unwrap();
-    let relay = bus_contract::Bus::relay(&*desktop).expect("the kernel offers a relay");
+    let relay = BusCrossing::relay(&*desktop).expect("the kernel offers a relay");
     // An older node: a field missing. A newer one: a field unknown here.
     let mut old = RelayedEntry::new(4, Saved::KIND, r#"{"photo":3}"#);
     old.cause = Some(2);
-    relay.ingest("node:old", old).unwrap();
+    relay.ingest(&Origin::process("node:old"), old).unwrap();
     relay
         .ingest(
-            "node:new",
+            &Origin::process("node:new"),
             RelayedEntry::new(9, Saved::KIND, r#"{"photo":5,"version":2,"colour":"red"}"#),
         )
         .unwrap();
     // A text that is not a payload at all is refused, nothing recorded.
     let last = j.bus().last_seq();
-    let broken = relay.ingest("node:new", RelayedEntry::new(10, Saved::KIND, "{photo"));
+    let broken = relay.ingest(
+        &Origin::process("node:new"),
+        RelayedEntry::new(10, Saved::KIND, "{photo"),
+    );
     assert!(
         matches!(broken, Err(IngestError::Decode { .. })),
         "{broken:?}"
     );
     assert_eq!(j.bus().last_seq(), last);
     // A kind declared here but not relayable may not be published from afar.
-    let refused = relay.ingest("node:new", RelayedEntry::new(11, Moved::KIND, "{}"));
+    let refused = relay.ingest(
+        &Origin::process("node:new"),
+        RelayedEntry::new(11, Moved::KIND, "{}"),
+    );
     assert!(
         matches!(refused, Err(IngestError::NotRelayable { .. })),
         "{refused:?}"
@@ -336,7 +350,7 @@ fn the_codec_reads_a_payload_of_an_older_or_newer_node() {
     // A kind this desktop does not know is kept as text, heard by no one.
     let unknown = relay
         .ingest(
-            "node:new",
+            &Origin::process("node:new"),
             RelayedEntry::new(12, "test.future", r#"{"x":1}"#),
         )
         .unwrap();
@@ -377,7 +391,7 @@ fn the_codec_reads_a_payload_of_an_older_or_newer_node() {
 fn a_relayed_bus_hands_its_point_kinds_on_and_keeps_the_others() {
     let (k, j) = kernel();
     let heard: Heard = Arc::default();
-    listen::<Moved>(&k, "notices", ListenOpts::new(), &heard);
+    listen::<Moved>(&k, "test.notices", ListenOpts::new(), &heard);
     let engine = Bus::with_journal(16);
     engine.declare([FACTS]);
     let into: std::sync::Weak<dyn bus_contract::Bus> = Arc::downgrade(&k) as _;
@@ -424,7 +438,7 @@ fn a_relayed_bus_hands_its_point_kinds_on_and_keeps_the_others() {
 fn without_a_journal_a_relayed_kind_is_emitted_at_once() {
     let k = Arc::new(Kernel::new());
     let heard: Heard = Arc::default();
-    listen::<Moved>(&k, "notices", ListenOpts::new(), &heard);
+    listen::<Moved>(&k, "test.notices", ListenOpts::new(), &heard);
     let engine = Bus::new();
     let into: std::sync::Weak<dyn bus_contract::Bus> = Arc::downgrade(&k) as _;
     helios_core::journal::relay_points(&engine, [FACTS], into);
@@ -436,5 +450,5 @@ fn without_a_journal_a_relayed_kind_is_emitted_at_once() {
             to: "gpu".into(),
         },
     );
-    assert_eq!(*heard.lock().unwrap(), [(seq, "notices".to_string())]);
+    assert_eq!(*heard.lock().unwrap(), [(seq, "test.notices".to_string())]);
 }

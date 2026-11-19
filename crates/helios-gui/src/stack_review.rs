@@ -15,6 +15,8 @@
 //! and heard after it in the same pass (`Defer`): the host's listener
 //! sends it to the node with the library's other writes.
 
+use egui_pop::api::bus::bus_contract::PointId;
+use egui_pop::api::bus::bus_contract_defer::BusDefer as _;
 use egui_pop::core::ui::UiPop as _;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,7 +40,7 @@ pub const ANSWER: &str = "helios.stacks.answer";
 pub struct StacksAnswer;
 
 impl Point for StacksAnswer {
-    const ID: &'static str = ANSWER;
+    const ID: PointId = PointId::new(ANSWER);
     type Input = Request;
     type Value = ();
     const KIND: PointKind = PointKind::Request;

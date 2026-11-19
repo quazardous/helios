@@ -10,8 +10,9 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use bus_kernel::conformance::{self, Outcome};
-use egui_pop::api::bus::bus_contract::{self, Capability, offers};
+use egui_pop::api::bus::bus_contract::{self, offers};
 use egui_pop::api::bus::egui_pop_hooks::Kernel;
+use egui_pop::api::bus::{bus_contract_crossing, bus_contract_journal};
 use helios_core::BusJournal;
 use helios_gui::{Shell, helios_panels};
 
@@ -51,19 +52,21 @@ fn desktop_bus() -> Arc<dyn bus_contract::Bus> {
 #[test]
 fn the_desktop_bus_keeps_the_bus_contract() {
     let bus = desktop_bus();
-    assert!(offers(&*bus, Capability::Journal));
-    assert!(offers(&*bus, Capability::Relay));
+    assert!(offers(&*bus, &bus_contract_journal::CONTRACT));
+    assert!(offers(&*bus, &bus_contract_crossing::CONTRACT));
     drop(bus);
 
     let report = conformance::report(desktop_bus);
     for (name, outcome) in &report {
         println!("{name}: {outcome:?}");
     }
-    // The journal and relay groups run: the bus offers both.
+    // The journal and crossing groups run: the bus offers both.
     let skipped: Vec<&str> = report
         .iter()
         .filter(|(name, outcome)| {
-            (name.starts_with("journal.") || name.starts_with("relay."))
+            (name.starts_with("journal.")
+                || name.starts_with("relay.")
+                || name.starts_with("crossing."))
                 && matches!(outcome, Outcome::Skipped(_))
         })
         .map(|(name, _)| *name)

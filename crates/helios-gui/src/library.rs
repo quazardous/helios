@@ -3890,9 +3890,11 @@ impl Library {
                     }
                 }
                 Signal::Activate { key } => self.activated = Some(key),
-                // A selection: the gallery's state holds it, cursor
+                // A zoom, by count or (a `GridResize::FixedSize` grid
+                // only; the library keeps egui-pop's default `PerRow`) by
+                // size. A selection: the gallery's state holds it, cursor
                 // included, already.
-                Signal::Zoom { .. } => self.view.results_changed = true,
+                Signal::Zoom { .. } | Signal::ZoomSize { .. } => self.view.results_changed = true,
                 Signal::Select { .. } | Signal::DragOut { .. } => {}
                 Signal::Vetoed { step, reason } => self.notes.push(format!("{step}: {reason}")),
             }

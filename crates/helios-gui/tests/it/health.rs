@@ -1235,9 +1235,9 @@ fn helios_s_points_sit_next_to_egui_pop_s_on_the_one_bus() {
         .map(|p| p.id)
         .collect();
     for id in [
-        WindowOpen::ID,
-        WindowClose::ID,
-        HealthReport::ID,
+        WindowOpen::ID.as_str(),
+        WindowClose::ID.as_str(),
+        HealthReport::ID.as_str(),
         helios_gui::shell::HEALTH_CHECKED,
     ] {
         assert!(declared.contains(&id), "{id} declared: {declared:?}");
@@ -1245,8 +1245,8 @@ fn helios_s_points_sit_next_to_egui_pop_s_on_the_one_bus() {
     let dump = order_dump(
         &*bus,
         &[
-            WindowClose::ID,
-            HealthReport::ID,
+            WindowClose::ID.as_str(),
+            HealthReport::ID.as_str(),
             helios_gui::shell::HEALTH_CHECKED,
         ],
     );

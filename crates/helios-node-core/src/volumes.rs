@@ -36,6 +36,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
+use bus_contract::PointId;
 use bus_contract::{Bus as HookBus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused};
 use helios_core::Bus;
 use helios_core::bus::{Envelope, Event};
@@ -132,7 +133,7 @@ impl Change {
 pub struct VolumeMounted;
 
 impl Point for VolumeMounted {
-    const ID: &'static str = Mounted::KIND;
+    const ID: PointId = PointId::new(Mounted::KIND);
     type Input = Mounted;
     type Value = Reactions;
     const KIND: PointKind = PointKind::Event;
@@ -143,7 +144,7 @@ impl Point for VolumeMounted {
 pub struct VolumeUnmounted;
 
 impl Point for VolumeUnmounted {
-    const ID: &'static str = Unmounted::KIND;
+    const ID: PointId = PointId::new(Unmounted::KIND);
     type Input = Unmounted;
     type Value = Reactions;
     const KIND: PointKind = PointKind::Event;
@@ -258,9 +259,9 @@ pub fn listen_mounted(
     owner: &str,
     run: impl Fn(&Mounted) + Send + Sync + 'static,
 ) -> Result<(), String> {
-    let opts = place_in(MOUNTED_ORDER, VolumeMounted::ID, id, owner)?;
+    let opts = place_in(MOUNTED_ORDER, &VolumeMounted::ID, id, owner)?;
     declare(bus);
-    bus.unlisten(VolumeMounted::ID, id);
+    bus.unlisten(&VolumeMounted::ID, id);
     bus.listen::<VolumeMounted>(id, opts, move |mounted, reactions| {
         run(mounted);
         reactions.ran.push(id.to_owned());
@@ -280,9 +281,9 @@ pub fn listen_unmounted(
     owner: &str,
     run: impl Fn(&Unmounted) + Send + Sync + 'static,
 ) -> Result<(), String> {
-    let opts = place_in(UNMOUNTED_ORDER, VolumeUnmounted::ID, id, owner)?;
+    let opts = place_in(UNMOUNTED_ORDER, &VolumeUnmounted::ID, id, owner)?;
     declare(bus);
-    bus.unlisten(VolumeUnmounted::ID, id);
+    bus.unlisten(&VolumeUnmounted::ID, id);
     bus.listen::<VolumeUnmounted>(id, opts, move |unmounted, reactions| {
         run(unmounted);
         reactions.ran.push(id.to_owned());
@@ -331,7 +332,7 @@ pub fn listen_scan(
 
 /// The order the volume points' listeners run in on `bus`.
 pub fn order(bus: &dyn HookBus) -> String {
-    bus_contract::order_dump(bus, &[VolumeMounted::ID, VolumeUnmounted::ID])
+    bus_contract::order_dump(bus, &[&VolumeMounted::ID, &VolumeUnmounted::ID])
 }
 
 /// One volume event as the watch passed it through its point.
@@ -485,7 +486,7 @@ impl VolumeWatch {
                 heard.pop_front();
             }
             heard.push_back(Heard {
-                point,
+                point: point.as_str(),
                 id: change.id().clone(),
                 ran: altered.value.ran,
             });

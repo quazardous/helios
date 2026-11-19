@@ -42,7 +42,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use bus_contract::{Cursor, Lost, Relay};
+use bus_contract_crossing::{Cursor, Lost, Relay};
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
 pub mod batch;
@@ -145,7 +145,7 @@ impl Names {
     }
 }
 
-/// Where a reader of a relay stands ([`bus_contract::Cursor`]), on the
+/// Where a reader of a relay stands ([`bus_contract_crossing::Cursor`]), on the
 /// wire: the journal's run (a process restarted has another) and the last
 /// number taken in it. `{run: 0, seq: 0}` has read nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

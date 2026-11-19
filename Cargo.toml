@@ -66,28 +66,34 @@ helios-ui = { path = "crates/helios-ui" }
 # Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { version = "0.17", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { version = "0.18.1", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
-egui-pop-agent = "0.10"
+egui-pop-agent = "0.11.1"
 # MIT: egui-pop's translation plugin, alone for the tools (xtask's
 # catalogue tasks) that do not build the window's stack.
-egui-pop-i18n = "0.15"
+egui-pop-i18n = "0.16"
 # MIT OR Apache-2.0: the bus contract (points, ordered listeners, the
 # order dump), std only: Helios's library crates declare their points and
 # listen on the bus the application hands them, never building one.
-bus-contract = "0.3.2"
+bus-contract = "0.5"
+# MIT OR Apache-2.0: bus-contract's capability contracts, each its own
+# crate: deferred requests, the journal, and crossing (relay between
+# processes), for the crates that use them.
+bus-contract-defer = "0.2"
+bus-contract-journal = "0.2"
+bus-contract-crossing = "0.2"
 # MIT: egui-pop's hook kernel, the bus contract's default implementation:
 # the one bus Helios's binaries build (and tests, a bus each).
-egui-pop-hooks = "0.3"
+egui-pop-hooks = "0.4"
 # MIT OR Apache-2.0: bus-kernel's conformance suite (dev only), run on
 # the buses Helios builds to check they keep the bus contract.
-bus-kernel = { version = "0.1", features = ["conformance"] }
+bus-kernel = "0.3.1"
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
-egui-pop-model = "0.11"
+egui-pop-model = "0.12"
 # MIT: egui-pop's test kit (keymap checks, the accessibility tree).
-egui-pop-test = "0.16"
+egui-pop-test = "0.17"
 # MIT: egui-pop's Wayland layer, for the compositor announcements the
 # image surface's tests fake.
 egui-pop-wayland = "0.2"
@@ -97,8 +103,8 @@ egui-pop-wayland = "0.2"
 egui-pop-fit = "0.1.2"
 # MIT OR Apache-2.0: the controls framework (controls as data, cards on the
 # slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
-# Pinned to egui_hud's 0.10.0 release branch (egui-pop 0.17) until it is on crates.io.
-egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "c1c3b00349919adf02622265022c2cc2222ee377" }
+# Pinned to egui_hud's 0.10.0 release branch (egui-pop 0.18) until it is on crates.io.
+egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "d9cbed55ede4d7e6476f0cb5aa69f5ac7f900027" }
 blake3 = "1"
 # MIT OR Apache-2.0: the hashes connectors claim for their items (MD5,
 # SHA-1, SHA-256), checked while fetched bytes land.

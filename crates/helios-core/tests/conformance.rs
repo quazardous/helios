@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use bus_contract::{Bus as _, Capability, offers};
+use bus_contract::offers;
+use bus_contract_crossing::{BusCrossing as _, BusJournal as _};
 use bus_kernel::conformance::{self, Outcome};
 use egui_pop_hooks::Kernel;
 use helios_core::{Bus, BusJournal};
@@ -28,8 +29,8 @@ fn node_bus() -> Arc<dyn bus_contract::Bus> {
 #[test]
 fn the_node_bus_offers_a_journal_and_a_relay() {
     let bus = node_bus();
-    assert!(offers(&*bus, Capability::Journal));
-    assert!(offers(&*bus, Capability::Relay));
+    assert!(offers(&*bus, &bus_contract_journal::CONTRACT));
+    assert!(offers(&*bus, &bus_contract_crossing::CONTRACT));
     assert!(bus.journal().is_some() && bus.relay().is_some());
 }
 
@@ -39,9 +40,12 @@ fn the_node_bus_keeps_the_bus_contract() {
     for (name, outcome) in &report {
         println!("{name}: {outcome:?}");
     }
-    // The journal and relay groups run: the bus offers both.
+    // The journal and crossing groups run: the bus offers both.
     for (name, outcome) in &report {
-        if name.starts_with("journal.") || name.starts_with("relay.") {
+        if name.starts_with("journal.")
+            || name.starts_with("relay.")
+            || name.starts_with("crossing.")
+        {
             assert!(
                 !matches!(outcome, Outcome::Skipped(_)),
                 "{name} was skipped"

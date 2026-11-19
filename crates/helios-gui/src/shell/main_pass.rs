@@ -16,6 +16,7 @@
 //! window's pass itself.
 
 use egui_pop::api::app::AppHandle;
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
@@ -32,7 +33,7 @@ const HEARD_BY: &str = "helios.shell.main_pass";
 pub struct MainPass;
 
 impl Point for MainPass {
-    const ID: &'static str = PASS;
+    const ID: PointId = PointId::new(PASS);
     type Input = &'static str;
     type Value = ();
     const KIND: PointKind = PointKind::Request;

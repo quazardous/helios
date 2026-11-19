@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-bus-contract.workspace = true
+bus-contract-crossing.workspace = true
 helios-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

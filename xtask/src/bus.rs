@@ -639,9 +639,12 @@ pub fn point_names_in(rel: &str, text: &str) -> Vec<(String, String)> {
         if !in_point {
             continue;
         }
+        // `const ID: PointId = PointId::new(<id>);`, the type and the
+        // constructor maybe written with their path.
         let Some(value) = code
-            .strip_prefix("const ID: &'static str = ")
-            .and_then(|v| v.strip_suffix(';'))
+            .strip_prefix("const ID: ")
+            .and_then(|v| v.split_once("PointId::new("))
+            .and_then(|(_, v)| v.strip_suffix(");"))
         else {
             continue;
         };
@@ -1004,16 +1007,16 @@ mod tests {
     fn a_point_s_name_is_read_from_its_literal_or_its_constant() {
         let text = "pub const OPEN: &str = \"helios.image.open\";\n\
                     impl Point for Open {\n\
-                    const ID: &'static str = OPEN;\n\
+                    const ID: PointId = PointId::new(OPEN);\n\
                     }\n\
                     impl bus_contract::Point for Screen {\n\
-                    const ID: &'static str = \"display.window_screen\";\n\
+                    const ID: bus_contract::PointId = bus_contract::PointId::new(\"display.window_screen\");\n\
                     }\n\
                     impl<E: Event> Point for FactPoint<E> {\n\
-                    const ID: &'static str = E::KIND;\n\
+                    const ID: PointId = PointId::new(E::KIND);\n\
                     }\n\
                     #[cfg(test)]\n\
-                    mod tests { impl Point for T { const ID: &'static str = \"t\"; } }\n";
+                    mod tests { impl Point for T { const ID: PointId = PointId::new(\"t.t\"); } }\n";
         assert_eq!(
             point_names_in("crates/x/src/lib.rs", text),
             [
