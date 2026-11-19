@@ -209,12 +209,18 @@ as new envelopes (new `seq`, `mono_us` and `wall_ms`).
 (2026-11-15, decided) Windows, panels and services never subscribe to a
 node themselves. The desktop follows each node it is connected to through
 **one relay** (`helios_gui::relay`, `helios_gui::node_events`): a remote
-node's relay holds one `events.subscribe` with every kind; the desktop's
-own node, which runs in its process, is followed on its bus
-(`Shell::follow_local_node`, node `local`). A relay republishes on the
-shell bus the events some listener asked for, with source `node:<name>`
-and the node's own envelope in the payload (`{"node", "event"}`); the
-node's `job.*` go only through the jobs relay, as before.
+node's relay holds one `events.subscribe` with every kind. A relay
+republishes on the shell bus the events some listener asked for, with
+source `node:<name>` and the node's own envelope in the payload
+(`{"node", "event"}`); the node's `job.*` go only through the jobs
+relay, as before.
+
+(2026-11-19) The desktop's own node runs in its process on the desktop's
+fact bus, which is the application bus's journal: its facts are the
+journaled points' facts. Its followers are named listeners of those
+points (`NodeEvents::listen_local`, as node `local`; the volume points'
+own listeners), so a fact is heard once, with no copy; the relay thread
+that used to copy them (`LocalRelay`) is gone.
 
 (2026-11-18) A node's **relayable** facts (`FactDecl::relayable`) take
 another path, never both: when the application bus has a relay, the

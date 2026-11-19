@@ -84,6 +84,7 @@ mod mask_handles;
 mod mask_tree;
 mod masks;
 mod modules;
+mod node_events;
 mod node_jobs;
 mod node_volumes;
 mod normalized;
