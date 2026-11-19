@@ -369,6 +369,16 @@ gui-end-changes = Enregistrement de vos modifications
 
 gui-end-interface = Enregistrement des réglages de l’interface
 
+gui-end-jobs = Vérification des tâches en cours
+
+gui-end-node = Demande d’arrêt au nœud de la bibliothèque
+
+gui-end-client = Déconnexion du nœud de la bibliothèque
+
+gui-end-host-step = { $step } (fenêtre)
+
+gui-last-quit-cut = La dernière fermeture a été écourtée : { $what }
+
 gui-gesture-in-progress = { $gesture } est en cours
 
 gui-graph-add-macro = Macros › { $name }

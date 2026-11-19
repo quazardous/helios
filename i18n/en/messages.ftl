@@ -597,6 +597,16 @@ gui-end-changes = Saving your changes
 
 gui-end-interface = Saving the interface settings
 
+gui-end-jobs = Checking the running jobs
+
+gui-end-node = Asking the library's node to stop
+
+gui-end-client = Disconnecting from the library's node
+
+gui-end-host-step = { $step } (window)
+
+gui-last-quit-cut = The last quit cut short: { $what }
+
 gui-export-bits = PNG bits per channel
 
 gui-export-cancelled = The export was cancelled: { $written } photos written to { $folder }

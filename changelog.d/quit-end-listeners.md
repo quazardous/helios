@@ -1,0 +1,3 @@
+kind: changed
+
+The closing splash lists every step of the quit in order and names the one running: telling the library's node to stop and disconnecting from it are now listeners of the `helios.app.quit` request, run one per frame, and the two window steps (saving your changes, saving the interface settings) are listed with them, marked as the window's. A step past its deadline is cut and the quit goes on. What the quit did (steps finished, past their deadline, failed or left, and whether work may have been lost) is said on the journal and kept for the next start, which logs it and shows a notice when the last quit cut something short. The report's shape follows qubit-event-bus's `ShutdownReport` (https://github.com/qubit-ltd/rs-event-bus).
