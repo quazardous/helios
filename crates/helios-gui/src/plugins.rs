@@ -328,7 +328,8 @@ pub fn command_id(id: &str) -> Result<CommandId, PluginError> {
 }
 
 /// A command of Helios's registry as egui-pop declares it: its `when`,
-/// and the tick and palette visibility Helios gives it.
+/// the tick and palette visibility Helios gives it, and whether it
+/// carries private data ([`crate::privacy`]).
 pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, PluginError> {
     let mut s =
         CommandSpec::new(command_id(&spec.id)?, &spec.title, &spec.category).when(&spec.when);
@@ -343,6 +344,9 @@ pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, Plug
     }
     if spec.read_only {
         s = s.read_only();
+    }
+    if crate::privacy::is_private(&spec.id) {
+        s = s.private();
     }
     if spec.dry_run {
         // Declared in its arguments, as egui-pop's commands declare it:
