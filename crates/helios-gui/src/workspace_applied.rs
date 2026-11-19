@@ -42,23 +42,23 @@ use serde_json::Value as Json;
 
 /// The hook point a workspace's state applied passes through, and the
 /// journal's event once it did.
-pub const APPLIED: &str = "workspace.applied";
+pub const APPLIED: &str = "helios.workspace.applied";
 
 /// egui-pop's workspace keymap layer, as the workspace's keys loaded it.
-pub const KEYS: &str = "workspace.keys";
+pub const KEYS: &str = "helios.workspace.keys";
 /// The workspace's sub-workspaces, the places it offers.
-pub const SUBWORKSPACES: &str = "contexts.subworkspaces";
+pub const SUBWORKSPACES: &str = "helios.contexts.subworkspaces";
 /// The value store's scope, on the sub-workspace shown.
-pub const SCOPE: &str = "contexts.scope";
+pub const SCOPE: &str = "helios.contexts.scope";
 /// The graph editor's network, groups and Add menu.
-pub const GRAPH: &str = "graph.template";
+pub const GRAPH: &str = "helios.graph.template";
 /// The Workshops panel's workshops and their nodes.
-pub const WORKSHOPS: &str = "workshops.composites";
+pub const WORKSHOPS: &str = "helios.workshops.composites";
 /// The library's head renders (the Compare panel's), made again.
-pub const HEADS: &str = "library.heads";
+pub const HEADS: &str = "helios.library.heads";
 /// The image shown, through the new network: the host's listener
 /// ([`listen_network`]).
-pub const NETWORK: &str = "darkroom.network";
+pub const NETWORK: &str = "helios.darkroom.network";
 
 /// Whether a listener reads a part that changed.
 type Wants = fn(&Changed) -> bool;
@@ -323,7 +323,7 @@ mod tests {
         let bus = kernel();
         let ids: Vec<&str> = ORDER.iter().map(|(id, ..)| *id).collect();
         assert_eq!(ran(&bus, Changed::ALL), ids);
-        assert!(listen_local(&bus, "cards.toast", |_, _| {}).is_err());
+        assert!(listen_local(&bus, "helios.cards.toast", |_, _| {}).is_err());
     }
 
     /// A listener runs only for the parts it reads.

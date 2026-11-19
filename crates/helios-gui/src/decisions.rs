@@ -48,10 +48,10 @@ pub const MARK: &str = "helios.status.decisions";
 pub const THRESHOLD: f64 = 0.8;
 
 /// The request a decision's answer is asked on.
-pub const ANSWER: &str = "decisions.answer";
+pub const ANSWER: &str = "helios.decisions.answer";
 /// Its listener, the shell's: the answer through the book on the
 /// viewport's graph.
-pub const ANSWERED_BY: &str = "shell.decision";
+pub const ANSWERED_BY: &str = "helios.shell.decision";
 /// The owner of the listener.
 pub const BUS_OWNER: &str = "helios.decisions";
 

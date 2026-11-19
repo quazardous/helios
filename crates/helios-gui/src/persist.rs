@@ -121,9 +121,9 @@ pub fn who(origin: &helios_shell::commands::Origin) -> String {
 /// The owner of the listeners this layer registers for the panels' asks.
 pub const BUS_OWNER: &str = "helios.persist";
 /// The listener that sends the Stacks panel's asks to the node.
-pub const STACKS: &str = "persist.stacks";
+pub const STACKS: &str = "helios.persist.stacks";
 /// The listener that sends the Library's writes to the node.
-pub const LIBRARY: &str = "persist.library";
+pub const LIBRARY: &str = "helios.persist.library";
 
 /// How often a gesture still going (a drag) is saved, in seconds.
 pub const FLUSH_SECONDS: f64 = 1.0;

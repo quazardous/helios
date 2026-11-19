@@ -51,7 +51,7 @@ use crate::workbench::Contents;
 pub use crate::workbench::Content;
 pub use export::{ExportAsk, OPEN_FOLDER, folder_path, settings_of};
 pub use health::{
-    BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, CHECKED as HEALTH_CHECKED,
+    BADGE as HEALTH_BADGE, CHECK_NOW as HEALTH_CHECK_NOW, CHECKED_POINT as HEALTH_CHECKED,
     COMMAND as HEALTH_COMMAND, Desktop as HealthDesktop, FINDINGS as HEALTH_FINDINGS,
     FIX as HEALTH_FIX, IGNORE as HEALTH_IGNORE, OTHERS as HEALTH_OTHERS, OWNERS as HEALTH_OWNERS,
     PAGE as HEALTH_PAGE, POINTS as HEALTH_POINTS, checks as health_checks,

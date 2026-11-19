@@ -1747,7 +1747,7 @@ fn signing_out_is_said_once_with_the_listeners_that_ran() {
             .handle()
             .events_since(since)
             .into_iter()
-            .filter(|e| e.name == "account.signedOut")
+            .filter(|e| e.name == "helios.account.signedOut")
             .collect();
     assert_eq!(said.len(), 1, "said once");
     let ran: Vec<&str> = helios_gui::account_gone::ORDER

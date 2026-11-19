@@ -3,6 +3,16 @@
 Status: analysis (2026-11-15). Nothing here is built; the slices at the
 end say what would be, in which order.
 
+Names (2026-11-19): under bus-contract's naming rule (its README,
+"Naming points"), every point and listener a library declares carries
+its crate's prefix, so several share one bus: egui-pop's are `pop.*`
+(`pop.window.close`, `pop.command.run`), egui_stack's `stack.*`, and
+Helios's own `helios.*` (`helios.image.open`, `helios.library.changed`,
+the listener `helios.library.scan`; a health check's listener is
+`helios.check.<check id>`). This document was written before: it names
+them without their prefix. The node's fact kinds (`vault.*`,
+`volume.*`…) keep their names until the relay can map an older node's.
+
 The owner's ask: re-read how Helios's modules depend on each other, in the
 light of the event bus, so that modules stop holding strong dependencies on
 one another. The inspiration is the owner's

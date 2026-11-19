@@ -27,6 +27,15 @@
 //! the documented exceptions and only shrinks (an entry whose file no
 //! longer subscribes is reported).
 //!
+//! And it holds Helios's points to the bus-contract naming rule (its
+//! README, "Naming points"): every point a Helios crate declares
+//! (`impl Point for T` with its `const ID`) is under `helios.`, so
+//! egui-pop's `pop.*` and `egui_stack`'s `stack.*` share the bus with it.
+//! A point named after a node fact kind (`const ID = E::KIND`) keeps the
+//! kind's name until the relay maps an older node's. The listeners are
+//! held to it by helios-gui's `every_point_and_listener_of_helios_has_its_prefix`,
+//! on the bus the desktop builds.
+//!
 //! `bus --timings <file>` reads the bus debug collector saved by a run
 //! (the journey's `bus-timings-*.json`) and prints, per point, its passes
 //! (count, p50, p95, max), its budget and the passes over it, and its
@@ -51,6 +60,9 @@ const TEST_CRATES: &[&str] = &["crates/helios-testkit/"];
 /// The desktop's sources, held to their listener tables.
 const DESKTOP: &str = "crates/helios-gui/src";
 
+/// The prefix of every point Helios declares.
+pub const PREFIX: &str = "helios.";
+
 /// The desktop's exceptions, relative to the workspace root.
 pub const ALLOW_LIST: &str = "xtask/allow/bus.toml";
 
@@ -74,6 +86,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     let mut found = problems(root);
     let subscriptions = subscriptions(root);
     found.extend(judge_subscriptions(root, &subscriptions));
+    let named = point_names(root);
+    found.extend(named.problems.iter().cloned());
     let facts = facts(root);
     found.extend(
         facts
@@ -83,6 +97,11 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     );
     if found.is_empty() {
         println!("no library crate constructs a bus (the application supplies it)");
+        println!(
+            "points declared under `{PREFIX}`: {} of {}",
+            named.points.len(),
+            named.points.len()
+        );
         println!(
             "typed fact kinds declared in a contract table: {} of {}",
             facts.events.len(),
@@ -104,7 +123,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     }
     eprintln!(
         "bus: {} problem(s): a bus built in a library crate (take it from the application), \
-         a fact no table declares (add its `FactDecl::of`), or a desktop subscription \
+         a fact no table declares (add its `FactDecl::of`), a point without its \
+         `{PREFIX}` prefix, or a desktop subscription \
          to a bus outside {ALLOW_LIST} (listen on the point or the node table instead)",
         found.len()
     );
@@ -441,6 +461,107 @@ pub fn facts_in(rel: &str, text: &str) -> (Vec<String>, Vec<String>) {
     (events, declared)
 }
 
+/// Helios's points and those without their prefix.
+#[derive(Debug, Default)]
+pub struct PointNames {
+    /// Every point with a name, as `path:line: id`.
+    pub points: Vec<String>,
+    /// Those not under [`PREFIX`].
+    pub problems: Vec<String>,
+}
+
+/// Reads every crate's `src/` (tests left out) for the points it
+/// declares and their names.
+pub fn point_names(root: &Path) -> PointNames {
+    let mut files = Vec::new();
+    for folder in FOLDERS {
+        let dir = root.join(folder);
+        if dir.is_dir() {
+            let _ = sources(&dir, &mut files);
+        }
+    }
+    let mut names = PointNames::default();
+    for path in files {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if !rel.contains("/src/") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for (at, id) in point_names_in(&rel, &text) {
+            if !id.starts_with(PREFIX) {
+                names
+                    .problems
+                    .push(format!("{at}: point `{id}` is not under `{PREFIX}`"));
+            }
+            names.points.push(format!("{at}: {id}"));
+        }
+    }
+    names
+}
+
+/// One file's named points, up to its inline test module: each
+/// `impl … Point for T` with its `const ID`, a string or a constant of the
+/// file, as `(path:line, id)`. An id taken from a fact kind
+/// (`E::KIND`, `Mounted::KIND`) is a node fact's, not named here.
+pub fn point_names_in(rel: &str, text: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = text
+        .lines()
+        .take_while(|line| !line.starts_with("#[cfg(test)]"))
+        .collect();
+    let constant = |name: &str| {
+        lines.iter().find_map(|line| {
+            let code = line.split("//").next().unwrap_or("").trim();
+            let rest = code
+                .strip_prefix("pub ")
+                .or_else(|| code.strip_prefix("pub(crate) "))
+                .or_else(|| code.strip_prefix("pub(super) "))
+                .unwrap_or(code);
+            let rest = rest.strip_prefix("const ")?.strip_prefix(name)?;
+            let value = rest.strip_prefix(": &str = ")?;
+            Some(value.strip_prefix('"')?.split('"').next()?.to_string())
+        })
+    };
+    let mut found = Vec::new();
+    let mut in_point = false;
+    for (n, line) in lines.iter().enumerate() {
+        let code = line.split("//").next().unwrap_or("").trim();
+        if code.starts_with("impl") && code.contains("Point for ") {
+            in_point = true;
+            continue;
+        }
+        if code.starts_with('}') {
+            in_point = false;
+            continue;
+        }
+        if !in_point {
+            continue;
+        }
+        let Some(value) = code
+            .strip_prefix("const ID: &'static str = ")
+            .and_then(|v| v.strip_suffix(';'))
+        else {
+            continue;
+        };
+        let id = if let Some(literal) = value.strip_prefix('"') {
+            Some(literal.trim_end_matches('"').to_string())
+        } else if value.contains("::") {
+            None
+        } else {
+            constant(value)
+        };
+        if let Some(id) = id {
+            found.push((format!("{rel}:{}", n + 1), id));
+        }
+    }
+    found
+}
+
 /// The last segment of the type path `ty` starts with, its generics and
 /// what follows left out: `endpoint::CommandRan<'static>>(` is `CommandRan`.
 fn type_name(ty: &str) -> &str {
@@ -541,6 +662,43 @@ mod tests {
                 "crates/helios-gui/src/x.rs:3: let n = engine.bus().subscribe_kinds(&[K], None);",
             ]
         );
+    }
+
+    #[test]
+    fn a_point_s_name_is_read_from_its_literal_or_its_constant() {
+        let text = "pub const OPEN: &str = \"helios.image.open\";\n\
+                    impl Point for Open {\n\
+                    const ID: &'static str = OPEN;\n\
+                    }\n\
+                    impl bus_contract::Point for Screen {\n\
+                    const ID: &'static str = \"display.window_screen\";\n\
+                    }\n\
+                    impl<E: Event> Point for FactPoint<E> {\n\
+                    const ID: &'static str = E::KIND;\n\
+                    }\n\
+                    #[cfg(test)]\n\
+                    mod tests { impl Point for T { const ID: &'static str = \"t\"; } }\n";
+        assert_eq!(
+            point_names_in("crates/x/src/lib.rs", text),
+            [
+                (
+                    "crates/x/src/lib.rs:3".to_string(),
+                    "helios.image.open".to_string()
+                ),
+                (
+                    "crates/x/src/lib.rs:6".to_string(),
+                    "display.window_screen".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_point_of_the_workspace_is_under_helios() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let named = point_names(root);
+        assert_eq!(named.problems, Vec::<String>::new());
+        assert!(named.points.len() >= 20, "{named:?}");
     }
 
     #[test]

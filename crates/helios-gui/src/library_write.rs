@@ -24,7 +24,7 @@ use crate::library::{
 };
 
 /// The request a Library write is asked on.
-pub const WRITE: &str = "library.write";
+pub const WRITE: &str = "helios.library.write";
 
 /// A write the Library asks of the vault.
 #[derive(Clone, Debug, PartialEq)]

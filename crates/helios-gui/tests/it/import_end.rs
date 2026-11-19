@@ -350,24 +350,24 @@ fn the_import_points_listeners_run_in_a_declared_order() {
     let w = world("order");
     assert_eq!(
         w.h.state().import_end_order(),
-        "import.ended\n\
-         \x20 1. library.history (owner helios.import): nothing\n\
-         \x20 2. backups.on-import (owner helios.import): after library.history\n\
-         \x20 3. library.refill (owner helios.import): after backups.on-import\n\
-         \x20 4. storage.cards-waiting (owner helios.import): local; after library.refill\n\
-         \x20 5. duplicates.collect (owner helios.import): local; after storage.cards-waiting\n\
-         \x20 6. log.import (owner helios.import): local; after duplicates.collect\n\
-         \x20 7. import.toast (owner helios.import): local; after log.import\n\
-         \x20 8. library.import-session (owner helios.import): local; after import.toast\n\
-         \x20 9. import-window.history (owner helios.import): local; after library.import-session\n\
-         \x20 10. library.select-imported (owner helios.import): local; after import-window.history\n\
-         import.failed\n\
-         \x20 1. library.refill (owner helios.import): nothing\n\
-         \x20 2. duplicates.collect (owner helios.import): local; after library.refill\n\
-         \x20 3. log.import (owner helios.import): local; after duplicates.collect\n\
-         \x20 4. import.toast (owner helios.import): local; after log.import\n\
-         \x20 5. library.import-session (owner helios.import): local; after import.toast\n\
-         \x20 6. import-window.history (owner helios.import): local; after library.import-session\n"
+        "helios.import.ended\n\
+         \x20 1. helios.library.history (owner helios.import): nothing\n\
+         \x20 2. helios.backups.on-import (owner helios.import): after helios.library.history\n\
+         \x20 3. helios.library.refill (owner helios.import): after helios.backups.on-import\n\
+         \x20 4. helios.storage.cards-waiting (owner helios.import): local; after helios.library.refill\n\
+         \x20 5. helios.duplicates.collect (owner helios.import): local; after helios.storage.cards-waiting\n\
+         \x20 6. helios.log.import (owner helios.import): local; after helios.duplicates.collect\n\
+         \x20 7. helios.import.toast (owner helios.import): local; after helios.log.import\n\
+         \x20 8. helios.library.import-session (owner helios.import): local; after helios.import.toast\n\
+         \x20 9. helios.import-window.history (owner helios.import): local; after helios.library.import-session\n\
+         \x20 10. helios.library.select-imported (owner helios.import): local; after helios.import-window.history\n\
+         helios.import.failed\n\
+         \x20 1. helios.library.refill (owner helios.import): nothing\n\
+         \x20 2. helios.duplicates.collect (owner helios.import): local; after helios.library.refill\n\
+         \x20 3. helios.log.import (owner helios.import): local; after helios.duplicates.collect\n\
+         \x20 4. helios.import.toast (owner helios.import): local; after helios.log.import\n\
+         \x20 5. helios.library.import-session (owner helios.import): local; after helios.import.toast\n\
+         \x20 6. helios.import-window.history (owner helios.import): local; after helios.library.import-session\n"
     );
 }
 

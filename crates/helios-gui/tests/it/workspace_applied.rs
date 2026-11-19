@@ -14,7 +14,7 @@ use helios_gui::{Shell, headless, helios_panels, templates};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
-const APPLIED: &str = "workspace.applied";
+const APPLIED: &str = "helios.workspace.applied";
 const CIRCLE: CommandId = CommandId::from_static("mask.add.circle");
 
 fn temp(name: &str) -> PathBuf {
@@ -92,7 +92,11 @@ fn an_undo_of_a_tools_change_is_applied_once() {
     let said = applied_since(&h, since);
     assert_eq!(said.len(), 1, "said once: {said:?}");
     assert_eq!(strings(&said[0]["changed"]), ["tools"], "{said:?}");
-    assert_eq!(strings(&said[0]["ran"]), ["workspace.keys"], "{said:?}");
+    assert_eq!(
+        strings(&said[0]["ran"]),
+        ["helios.workspace.keys"],
+        "{said:?}"
+    );
     assert_eq!(steps(&h), before - 1, "the undo only, no step for the keys");
     drop(h);
     std::fs::remove_dir_all(&root).unwrap();
@@ -178,7 +182,7 @@ fn a_nodes_change_reaches_the_renders_then_the_host_once() {
     let ran = strings(&said[0]["ran"]);
     assert_eq!(
         ran[ran.len() - 2..],
-        ["library.heads", "darkroom.network"],
+        ["helios.library.heads", "helios.darkroom.network"],
         "{said:?}"
     );
     assert_eq!(crate::host::network_changed(), 1, "once");
@@ -198,7 +202,7 @@ fn assert_network(said: &Value) {
     assert!(strings(&said["changed"]).contains(&"network"), "{said}");
     assert_eq!(
         strings(&said["ran"]),
-        ["graph.template", "workshops.composites"],
+        ["helios.graph.template", "helios.workshops.composites"],
         "{said}"
     );
 }

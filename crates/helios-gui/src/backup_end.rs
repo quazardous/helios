@@ -34,23 +34,23 @@ use serde_json::{Value, json};
 
 /// The hook point a backup job's end passes through, and the journal's
 /// event once it did.
-pub const ENDED: &str = "backup.ended";
+pub const ENDED: &str = "helios.backup.ended";
 /// The hook point the cards found safe to format pass through, and the
 /// journal's event once they did.
-pub const SAFE: &str = "card.safe";
+pub const SAFE: &str = "helios.card.safe";
 /// The owner of the desktop's listeners of both points.
 pub const BUS_OWNER: &str = "helios.storage";
 
 /// Each photo's backups read again: its badges and `backup:` filters.
-pub const BACKUPS: &str = "storage.backups";
+pub const BACKUPS: &str = "helios.storage.backups";
 /// The cards still inserted checked again, off the frame.
-pub const SAFETY: &str = "cards.safety";
+pub const SAFETY: &str = "helios.cards.safety";
 /// The cards safe to format said in a toast and in the Log.
-pub const TOAST: &str = "cards.toast";
+pub const TOAST: &str = "helios.cards.toast";
 /// The Storage page's reads made out of date: its card rows read again.
-pub const STORAGE: &str = "storage.cards";
+pub const STORAGE: &str = "helios.storage.cards";
 /// The health check's "Cards safe to format" run again.
-pub const HEALTH: &str = "health.cards";
+pub const HEALTH: &str = "helios.health.cards";
 
 /// The listeners of [`BackupEnded`], each with the one it runs after:
 /// the order they run in.

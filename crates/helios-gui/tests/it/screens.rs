@@ -109,8 +109,8 @@ fn a_monitor_unplugged_is_said_on_the_bus_by_its_name() {
     assert_eq!(
         *heard.lock().unwrap(),
         vec![
-            "screen.removed Some(\"DP-1\")".to_string(),
-            "screen.added Some(\"DP-1\")".to_string(),
+            "pop.screen.removed Some(\"DP-1\")".to_string(),
+            "pop.screen.added Some(\"DP-1\")".to_string(),
         ]
     );
 }
@@ -188,7 +188,7 @@ fn a_monitor_unplugged_with_no_window_event_is_heard_within_the_period() {
     window::set_screens(Vec::new());
     assert_eq!(
         *heard.lock().unwrap(),
-        vec!["screen.removed Some(\"DP-1\")".to_string()]
+        vec!["pop.screen.removed Some(\"DP-1\")".to_string()]
     );
 }
 

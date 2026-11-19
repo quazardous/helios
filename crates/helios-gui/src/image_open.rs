@@ -43,13 +43,13 @@ use egui_pop::api::bus::bus_contract::{
 use serde_json::{Value, json};
 
 /// The request to open an image in the darkroom.
-pub const OPEN: &str = "image.open";
+pub const OPEN: &str = "helios.image.open";
 /// The request to close the image open in the darkroom.
-pub const CLOSE: &str = "image.close";
+pub const CLOSE: &str = "helios.image.close";
 /// The journal's event once an image is open.
-pub const OPENED: &str = "image.opened";
+pub const OPENED: &str = "helios.image.opened";
 /// The journal's event once the image open before is closed.
-pub const CLOSED: &str = "image.closed";
+pub const CLOSED: &str = "helios.image.closed";
 /// The journal's event when a listener refused the request.
 pub const REFUSED: &str = "image.refused";
 /// The owner of the desktop's listeners of both points.
@@ -58,10 +58,10 @@ pub const BUS_OWNER: &str = "helios.darkroom";
 /// The edit of the image open saved, its write answered, and the
 /// snapshots pending at its step kept: a refused write refuses the
 /// request.
-pub const SAVE: &str = "edit.save";
+pub const SAVE: &str = "helios.edit.save";
 /// The edit's history (the image's steps of the value store, the snapshot
 /// book) leaves the image; the workspace's steps stay.
-pub const SCOPE: &str = "history.scope";
+pub const SCOPE: &str = "helios.history.scope";
 
 /// How long `edit.save` may run before the bus counts it late (a late
 /// listener refuses the switch). The save waits up to 30 s for the
@@ -78,13 +78,13 @@ pub const ORDER: &[(&str, Option<&str>)] = &[(SAVE, None), (SCOPE, Some(SAVE))];
 
 /// The image's pinned snapshots loaded into the snapshot book, with the
 /// parameters its edit saves.
-pub const SNAPSHOTS: &str = "snapshots.book";
+pub const SNAPSHOTS: &str = "helios.snapshots.book";
 /// The labels and locks the image's edit was saved with, put back in the
 /// value store (another image's gone).
-pub const MARKS: &str = "mask.marks";
+pub const MARKS: &str = "helios.mask.marks";
 /// The workshop session's photo: the vault image its steps are recorded
 /// on.
-pub const WORKSHOP: &str = "workshop.photo";
+pub const WORKSHOP: &str = "helios.workshop.photo";
 
 /// The followers of [`ImageOpened`] and [`ImageClosed`], each with the
 /// one it runs after: the order they run in.

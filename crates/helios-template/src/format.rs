@@ -225,15 +225,20 @@ pub struct ViewDesc {
 }
 
 /// How a Library view shows its results, as a file browser's dialog
-/// offers: thumbnails at a size, a list, or details (columns).
+/// offers: thumbnails so many per row, a list, or details (columns).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResultsDesc {
     /// `thumbnails` (the default) or `list`.
     #[serde(default, skip_serializing_if = "ResultsMode::is_thumbnails")]
     pub mode: ResultsMode,
-    /// The thumbnails' size, in points (48 to 512); the default size
-    /// when absent.
+    /// How many thumbnails share a row: the zoom, kept through a resize
+    /// (one fills the view); the default count when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_row: Option<u16>,
+    /// The thumbnails' size in points, as older workspaces kept the zoom:
+    /// read once, turned into [`ResultsDesc::per_row`] at the view's
+    /// width, and no longer written once it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<u16>,
     /// The details' columns, in order, with their widths; the default

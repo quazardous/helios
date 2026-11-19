@@ -199,13 +199,13 @@ fn the_library_points_listeners_run_in_a_declared_order() {
     let shell = d.h.state();
     assert_eq!(
         d.persist.library_changed_order(shell),
-        "library.changed\n\
-         \x20 1. library.volumes (owner helios.library): local\n\
-         \x20 2. library.fill (owner helios.library): local; after library.volumes\n\
-         \x20 3. library.albums (owner helios.library): local; after library.fill\n\
-         \x20 4. library.stacks (owner helios.library): local; after library.albums\n\
-         \x20 5. library.imports (owner helios.library): local; after library.stacks\n\
-         library.filled\n\
-         \x20 1. library.select-imported (owner helios.library): local\n"
+        "helios.library.changed\n\
+         \x20 1. helios.library.volumes (owner helios.library): local\n\
+         \x20 2. helios.library.fill (owner helios.library): local; after helios.library.volumes\n\
+         \x20 3. helios.library.albums (owner helios.library): local; after helios.library.fill\n\
+         \x20 4. helios.library.stacks (owner helios.library): local; after helios.library.albums\n\
+         \x20 5. helios.library.imports (owner helios.library): local; after helios.library.stacks\n\
+         helios.library.filled\n\
+         \x20 1. helios.library.select-imported (owner helios.library): local\n"
     );
 }

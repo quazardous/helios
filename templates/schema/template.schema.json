@@ -327,7 +327,18 @@
       "additionalProperties": false,
       "properties": {
         "mode": { "enum": ["thumbnails", "list", "details"] },
-        "size": { "type": "integer", "minimum": 48, "maximum": 512 },
+        "per_row": {
+          "description": "How many thumbnails share a row (one fills the view); the default count when absent.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "size": {
+          "description": "The thumbnails' size in points, as older workspaces kept the zoom: turned into per_row once read.",
+          "type": "integer",
+          "minimum": 48,
+          "maximum": 512
+        },
         "columns": {
           "description": "The details' columns, in order, with their widths in points; the default columns when absent.",
           "type": "array",

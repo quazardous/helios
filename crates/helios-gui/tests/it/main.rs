@@ -16,6 +16,7 @@ mod accounts;
 mod activity_focus;
 mod background_jobs;
 mod batch_undo;
+mod bus_names;
 mod caches;
 mod calibrate;
 mod calibrate_focus;

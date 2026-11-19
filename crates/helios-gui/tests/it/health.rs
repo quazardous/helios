@@ -1188,11 +1188,11 @@ fn the_health_points_run_their_listeners_in_a_declared_order() {
     let h = headless::harness(shell(), vec2(1280.0, 800.0));
     assert_eq!(
         h.state().health_order(),
-        "health.report\n\
-         \x20 1. test.broken (owner test): nothing\n\
-         health.checked\n\
-         \x20 1. status.health (owner helios.health): nothing\n\
-         \x20 2. health.context-keys (owner helios.health): after status.health\n"
+        "helios.health.report\n\
+         \x20 1. helios.check.test.broken (owner test): nothing\n\
+         helios.health.checked\n\
+         \x20 1. helios.status.health (owner helios.health): nothing\n\
+         \x20 2. helios.health.context-keys (owner helios.health): after helios.status.health\n"
     );
 }
 
@@ -1262,7 +1262,7 @@ fn helios_s_points_sit_next_to_egui_pop_s_on_the_one_bus() {
         "the check: {dump}"
     );
     assert!(
-        dump.contains("status.health (owner helios.health)"),
+        dump.contains("helios.status.health (owner helios.health)"),
         "the badge: {dump}"
     );
     // The shell's own reading of its health points is that bus's.

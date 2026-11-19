@@ -35,8 +35,8 @@ It also reads what the close wrote to helios-gui's logs and the bus
 - a pass of the Settings window's viewport after its window went painted
   nothing (egui-pop's "it paints nothing" line): the black window;
 - "the Settings app is closed" is not logged exactly once;
-- that line did not come from Helios's listener on `window.close`
-  (`helios.screen`, placed after `admin.window`), which runs in the same
+- that line did not come from Helios's listener on `pop.window.close`
+  (`helios.screen`, placed after `pop.admin.window`), which runs in the same
   call that publishes `window.closed`: not from a later pass that samples
   the app's state. `admin.close` too closes the window through the bus
   (egui-pop ADR 0029, slice 3), so every way is held to it.
@@ -246,9 +246,11 @@ def changed_share(a: Path, b: Path) -> float | None:
 # draws nothing (the system window shows the clear colour alone).
 PAINTS_NOTHING = "it paints nothing"
 CLOSED_LINE = "screen: the Settings app is closed"
-# Helios's listener on `window.close` (crates/helios-gui/src/shell/trace.rs).
+# egui-pop's bus point a window's close passes through.
+CLOSE_POINT = "pop.window.close"
+# Helios's listener on it (crates/helios-gui/src/shell/trace.rs).
 LISTENER = "helios.screen"
-ADMIN_LISTENER = "admin.window"
+ADMIN_LISTENER = "pop.admin.window"
 
 
 def log_files(args, state: Path) -> list[Path]:
@@ -277,15 +279,15 @@ def log_since(files: list[Path], mark: dict[Path, int]) -> list[str]:
 
 
 def close_listener(agent) -> dict:
-    """Helios's listener on `window.close` as the `bus` collector shows
-    it: whether it runs after `admin.window`, and its runs."""
+    """Helios's listener on `pop.window.close` as the `bus` collector
+    shows it: whether it runs after `pop.admin.window`, and its runs."""
     try:
         s = agent.request("snapshot", {"collector": "bus"}) or {}
     except (OSError, RuntimeError, ValueError) as exc:
         return {"error": f"no bus collector: {exc}"}
     s = s.get("bus", s) if isinstance(s, dict) else {}
     for p in s.get("points", []) if isinstance(s, dict) else []:
-        if p.get("point") != "window.close":
+        if p.get("point") != CLOSE_POINT:
             continue
         ids = [x.get("id") for x in p.get("listeners", [])]
         for i, x in enumerate(p.get("listeners", [])):
@@ -295,8 +297,8 @@ def close_listener(agent) -> dict:
                     "runs": x.get("runs"),
                     "failures": x.get("failures"),
                 }
-        return {"error": f"no `{LISTENER}` listener on window.close ({ids})"}
-    return {"error": "no window.close point on the bus"}
+        return {"error": f"no `{LISTENER}` listener on {CLOSE_POINT} ({ids})"}
+    return {"error": f"no {CLOSE_POINT} point on the bus"}
 
 
 def open_settings(args, agent) -> str | None:

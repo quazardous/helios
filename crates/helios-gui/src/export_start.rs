@@ -25,13 +25,13 @@ use serde_json::{Value, json};
 use crate::shell::ExportAsk;
 
 /// The request to start an export.
-pub const START: &str = "export.start";
+pub const START: &str = "helios.export.start";
 /// The journal's event once an export started.
 pub const STARTED: &str = "export.started";
 /// The journal's event when the request was refused.
 pub const REFUSED: &str = "export.refused";
 /// The listener that runs an export: the host's.
-pub const RUN: &str = "export.run";
+pub const RUN: &str = "helios.export.run";
 /// The owner of the listener.
 pub const BUS_OWNER: &str = "helios.export";
 

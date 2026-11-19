@@ -1,14 +1,14 @@
-account.signedOut
-  1. import.cancel-picking (owner helios.import): local
-  2. accounts.credentials (owner helios.accounts): local; after import.cancel-picking
-  3. import.sources (owner helios.import): local; after accounts.credentials
-  4. storage.owners (owner helios.storage): local; after import.sources
-  5. settings.accounts (owner helios.settings): local; after storage.owners
-  6. health.accounts (owner helios.health): local; after settings.accounts
-account.removed
-  1. import.cancel-picking (owner helios.import): local
-  2. accounts.credentials (owner helios.accounts): local; after import.cancel-picking
-  3. import.sources (owner helios.import): local; after accounts.credentials
-  4. storage.owners (owner helios.storage): local; after import.sources
-  5. settings.accounts (owner helios.settings): local; after storage.owners
-  6. health.accounts (owner helios.health): local; after settings.accounts
+helios.account.signedOut
+  1. helios.import.cancel-picking (owner helios.import): local
+  2. helios.accounts.credentials (owner helios.accounts): local; after helios.import.cancel-picking
+  3. helios.import.sources (owner helios.import): local; after helios.accounts.credentials
+  4. helios.storage.owners (owner helios.storage): local; after helios.import.sources
+  5. helios.settings.accounts (owner helios.settings): local; after helios.storage.owners
+  6. helios.health.accounts (owner helios.health): local; after helios.settings.accounts
+helios.account.removed
+  1. helios.import.cancel-picking (owner helios.import): local
+  2. helios.accounts.credentials (owner helios.accounts): local; after helios.import.cancel-picking
+  3. helios.import.sources (owner helios.import): local; after helios.accounts.credentials
+  4. helios.storage.owners (owner helios.storage): local; after helios.import.sources
+  5. helios.settings.accounts (owner helios.settings): local; after helios.storage.owners
+  6. helios.health.accounts (owner helios.health): local; after helios.settings.accounts
