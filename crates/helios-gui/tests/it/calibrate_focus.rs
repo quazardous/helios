@@ -506,3 +506,135 @@ fn calibrate_focus_snapshots() {
     drop(results);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// One pass of a window's own OS window (egui's deferred viewport), as
+/// eframe runs it apart from the main window's: no input.
+fn window_pass(h: &mut Harness<'static, Shell>, window: ViewportId) -> egui::FullOutput {
+    use egui::{RawInput, Rect, ViewportInfo};
+    let cb = h.output().viewport_output[&window]
+        .viewport_ui_cb
+        .clone()
+        .expect("the window is declared by the main window's last pass");
+    let rect = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0));
+    let mut input = RawInput {
+        viewport_id: window,
+        screen_rect: Some(rect),
+        time: Some(h.ctx.input(|i| i.time) + 1.0 / 60.0),
+        ..Default::default()
+    };
+    input.viewports.insert(
+        window,
+        ViewportInfo {
+            inner_rect: Some(rect),
+            ..Default::default()
+        },
+    );
+    input
+        .viewports
+        .insert(ViewportId::ROOT, ViewportInfo::default());
+    let mut out = h.ctx.run_ui(input, |ui| cb(ui));
+    out.textures_delta.clear();
+    out
+}
+
+/// Whether `out` asks for a pass of `window` at once.
+fn asks(out: &egui::FullOutput, window: ViewportId) -> bool {
+    out.viewport_output
+        .get(&window)
+        .is_some_and(|o| o.repaint_delay == std::time::Duration::ZERO)
+}
+
+/// The windows' passes run as a runner would, until neither asks one
+/// after a main window's pass.
+fn quiet(h: &mut Harness<'static, Shell>, windows: &[ViewportId]) {
+    for _ in 0..20 {
+        for &window in windows {
+            let mut again = asks(h.output(), window);
+            let mut passes = 0;
+            while again {
+                passes += 1;
+                assert!(passes <= 8, "window {window:?} keeps asking passes");
+                again = asks(&window_pass(h, window), window);
+            }
+        }
+        h.step();
+        if !windows.iter().any(|w| asks(h.output(), *w)) {
+            return;
+        }
+    }
+    panic!("the windows keep asking passes");
+}
+
+/// What a window's listener hears wakes that window and no other: with
+/// the Library and calibration windows open in OS windows of their own,
+/// `helios.library.window.news` said from another thread (thumbnails,
+/// renders) asks for the Library window's pass only, and
+/// `helios.calibrate.window.news` (an answer landed) the calibration
+/// window's only. No hand repaint of either viewport.
+#[test]
+fn news_heard_for_a_window_wake_that_window_and_not_the_others() {
+    use helios_gui::shell::{CalibrateNews, LIBRARY_WINDOW, LIBRARY_WINDOW_COMMAND, LibraryNews};
+    let (dir, picture) = chart_picture("calibrate-window-news");
+    let (shell, _setup) = shell();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.state_mut().draw_frame(true);
+    h.run();
+    h.state_mut()
+        .run(
+            CALIBRATE_COMMAND,
+            json!({ "path": picture, "corners": CORNERS }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run_steps(3);
+    settle(&mut h);
+    h.state_mut()
+        .run(LIBRARY_WINDOW_COMMAND, Value::Null, Origin::User)
+        .unwrap();
+    h.run_steps(3);
+    let app = h.state().app().handle().clone();
+    let library = app
+        .window_viewport(&WindowId::new(LIBRARY_WINDOW))
+        .expect("the Library window open");
+    let calibrate = app
+        .window_viewport(&WindowId::new(CALIBRATE_WINDOW))
+        .expect("the calibration window open");
+    assert_ne!(library, calibrate);
+    let windows = [library, calibrate];
+    quiet(&mut h, &windows);
+
+    let bus = app.bus();
+    let out = std::thread::spawn(move || bus.alter::<LibraryNews>((), ()))
+        .join()
+        .unwrap();
+    assert_eq!(
+        out.deferred,
+        ["helios.library.window"],
+        "queued for the interface's thread"
+    );
+    // The main window's pass runs it, and asks for the Library window's.
+    h.step();
+    assert!(asks(h.output(), library), "the Library window's pass asked");
+    assert!(
+        !asks(h.output(), calibrate),
+        "the calibration window woken by the Library's news"
+    );
+    quiet(&mut h, &windows);
+
+    let bus = app.bus();
+    let out = std::thread::spawn(move || bus.alter::<CalibrateNews>((), ()))
+        .join()
+        .unwrap();
+    assert_eq!(out.deferred, ["helios.calibrate.window"]);
+    h.step();
+    assert!(
+        asks(h.output(), calibrate),
+        "the calibration window's pass asked"
+    );
+    assert!(
+        !asks(h.output(), library),
+        "the Library window woken by the calibration's news"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

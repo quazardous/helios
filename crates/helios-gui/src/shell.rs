@@ -106,7 +106,9 @@ mod import_detail;
 mod import_history;
 mod import_merge;
 mod import_news;
+mod window_news;
 pub use import_news::ImportNews;
+pub use window_news::{CalibrateNews, LibraryNews};
 mod import_profile_editor;
 mod import_profile_store;
 mod import_profiles;
@@ -1588,6 +1590,26 @@ impl Shell {
         // What comes in for the import window off the interface's thread
         // wakes it, on the bus.
         import_news::listen(shell.core.app.handle(), import_window::WINDOW);
+        // So does what comes in for the Library window (thumbnails,
+        // renders) and the calibration window (its answers landed).
+        window_news::listen::<LibraryNews>(
+            shell.core.app.handle(),
+            library_focus::WINDOW,
+            "helios.library.window",
+        );
+        window_news::listen::<CalibrateNews>(
+            shell.core.app.handle(),
+            calibrate_focus::WINDOW,
+            "helios.calibrate.window",
+        );
+        {
+            let bus = std::sync::Arc::downgrade(&shell.core.app.handle().bus());
+            shell
+                .focus
+                .library
+                .borrow()
+                .set_news(move || window_news::say::<LibraryNews>(&bus));
+        }
         *shell
             .import
             .get_mut()
