@@ -539,7 +539,7 @@ pub struct CallMeta {
   connection: the node remembers recent keys and answers the first result
   again instead of running twice.
 - **Long work** is a job (built): the call answers the job's id at once;
-  progress and the end come as `job.*` events, as LSP ties
+  progress and the end come as `helios.job.*` events, as LSP ties
   `workDoneProgress` to a token. `$/cancel {id}` cancels a request still
   running; `job.cancel` a job.
 

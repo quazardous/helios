@@ -235,9 +235,9 @@ fn a_node_job_s_end_is_notified_once_per_client() {
         let mut ended = helios_gui::jobs::Ended::after(app.last_event());
         // The node's events, as its jobs or its relay publish them.
         let started = json!({ "id": id, "title": "Back up to Disk A", "kind": "backup" });
-        bus.publish_value("jobs", None, "job.started", started);
+        bus.publish_value("jobs", None, "helios.job.started", started);
         let end = json!({ "id": id, "kind": "backup", "seconds": 42.0 });
-        bus.publish_value("jobs", None, "job.finished", end);
+        bus.publish_value("jobs", None, "helios.job.finished", end);
         h.run();
 
         let desktop = Simulated::default();

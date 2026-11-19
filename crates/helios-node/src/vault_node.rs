@@ -6,13 +6,13 @@
 //! As it opens, the node starts the work that outlives a window, as the
 //! desktop's does: it watches the machine's volumes, runs the backups
 //! (a backup disk of the strategy plugged in starts one) and keeps the
-//! health check's schedule, each run a job on the node's jobs (`job.*`
+//! health check's schedule, each run a job on the node's jobs (`helios.job.*`
 //! on its bus). Without a window, the check's inputs keep a windowless
 //! node's defaults ([`HealthInputs::checks`]: no cards, no snapshots).
 //!
 //! Imports done through the node ([`Importer`], the control endpoint's
 //! `library.import`) publish their report on its bus
-//! ([`Imported`], `library.imported`); the node hears it and starts the
+//! ([`Imported`], `helios.library.imported`); the node hears it and starts the
 //! strategy's after-import backup, as the desktop does after its imports.
 //!
 //! The saved sources that import on their own (a card when plugged in, a

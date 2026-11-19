@@ -325,10 +325,10 @@ fn every_computed_step_is_an_event_caused_by_its_render() {
     assert_eq!(
         kinds,
         [
-            "engine.render_requested",
-            "engine.step_computed",
-            "engine.step_computed",
-            "engine.cache_settled"
+            "helios.engine.render_requested",
+            "helios.engine.step_computed",
+            "helios.engine.step_computed",
+            "helios.engine.cache_settled"
         ]
     );
     // The cache after the render: the two steps, no budget.

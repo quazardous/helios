@@ -325,7 +325,7 @@ fn a_backup_pauses_while_its_destination_is_unplugged() {
                 Some(cancel.clone()),
             )
         });
-        let paused = event(&w.bus, "job.paused", 30);
+        let paused = event(&w.bus, "helios.job.paused", 30);
         if paused.is_some() {
             // Back, at another mount point.
             let mut back = w.backup.clone();
@@ -333,7 +333,7 @@ fn a_backup_pauses_while_its_destination_is_unplugged() {
             std::fs::rename(w.p.join("A"), w.p.join("A2")).unwrap();
             w.plugged.plug(back);
         }
-        if paused.is_none() || event(&w.bus, "job.finished", 30).is_none() {
+        if paused.is_none() || event(&w.bus, "helios.job.finished", 30).is_none() {
             // Never hang: a job that did not pause or end is stopped.
             cancel.store(true, Ordering::SeqCst);
         }
@@ -343,7 +343,7 @@ fn a_backup_pauses_while_its_destination_is_unplugged() {
     assert_eq!(paused["reason"], "Plug in uuid:a to go on");
     let report = report.unwrap();
     assert_eq!((report.copied, report.cancelled), (2, false), "{report:?}");
-    assert!(event(&w.bus, "job.resumed", 1).is_some());
+    assert!(event(&w.bus, "helios.job.resumed", 1).is_some());
     for id in &ids {
         let copy = w
             .vault
@@ -380,14 +380,14 @@ fn a_paused_backup_can_be_cancelled() {
                 Some(cancel.clone()),
             )
         });
-        let paused = event(&w.bus, "job.paused", 30);
+        let paused = event(&w.bus, "helios.job.paused", 30);
         // Cancelled through the job; the caller's flag stops it whatever
         // happens, so the test never hangs.
         let by_job = paused
             .as_ref()
             .and_then(|p| p["id"].as_str())
             .map(|id| w.jobs.cancel(id));
-        if event(&w.bus, "job.cancelled", 30).is_none() {
+        if event(&w.bus, "helios.job.cancelled", 30).is_none() {
             cancel.store(true, Ordering::SeqCst);
         }
         (running.join().unwrap(), paused, by_job)

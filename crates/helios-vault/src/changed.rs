@@ -19,7 +19,7 @@ pub const CONTENT: &str = "content";
 
 /// The bus event a mark set or cleared is announced as (`count`: how
 /// many images), so a library shown reads its photos again.
-pub const CHANGED_OUTSIDE: &str = "vault.changed_outside";
+pub const CHANGED_OUTSIDE: &str = "helios.vault.changed_outside";
 
 /// One content an image's file held.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

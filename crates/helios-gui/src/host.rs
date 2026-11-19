@@ -13,7 +13,7 @@
 //!   waits for it;
 //! - **the journal** is Helios's [`Bus`]: egui-pop's events (a command
 //!   dispatched, done or failed, a dialog answered, a toast shown) go on
-//!   the bus beside the engine's, under `gui.*` kinds, with their sequence
+//!   the bus beside the engine's, under `helios.gui.*` kinds, with their sequence
 //!   number, source and cause, and egui-pop reads the bus back (`since`,
 //!   `last_seq`): the host keeps no journal of egui-pop's own;
 //! - **the store** holds the interface's own settings (focus mode, window
@@ -108,40 +108,78 @@ pub fn workspace_key(path: &std::path::Path) -> String {
 
 /// The bus kinds egui-pop's events go under, by egui-pop's name.
 const KINDS: &[(&str, &str)] = &[
-    ("command.dispatched", "gui.command.dispatched"),
-    ("command.done", "gui.command.done"),
-    ("command.failed", "gui.command.failed"),
-    ("dialog.answered", "gui.dialog.answered"),
-    ("toast.shown", "gui.toast.shown"),
-    ("edit.undone", "gui.edit.undone"),
-    ("edit.redone", "gui.edit.redone"),
-    ("edit.undo_failed", "gui.edit.undo_failed"),
-    ("edit.redo_failed", "gui.edit.redo_failed"),
-    ("history.changed", "gui.history.changed"),
-    ("history.refused", "gui.history.refused"),
+    ("command.dispatched", "helios.gui.command.dispatched"),
+    ("command.done", "helios.gui.command.done"),
+    ("command.failed", "helios.gui.command.failed"),
+    ("dialog.answered", "helios.gui.dialog.answered"),
+    ("toast.shown", "helios.gui.toast.shown"),
+    ("edit.undone", "helios.gui.edit.undone"),
+    ("edit.redone", "helios.gui.edit.redone"),
+    ("edit.undo_failed", "helios.gui.edit.undo_failed"),
+    ("edit.redo_failed", "helios.gui.edit.redo_failed"),
+    ("history.changed", "helios.gui.history.changed"),
+    ("history.refused", "helios.gui.history.refused"),
 ];
+
+/// What the kinds egui-pop's events go under start with.
+const GUI: &str = "helios.gui.";
+
+/// What a Helios job's facts start with (`helios.job.started`).
+const JOB: &str = "helios.job.";
+
+/// The name egui-pop's journal gives the fact kind `kind`: egui-pop's
+/// own events (`helios.gui.*`) and Helios's jobs, whose names are
+/// egui-pop's job protocol (`job.started`, read by its jobs centre),
+/// without their prefix; any other kind as it is.
+pub fn journal_name(kind: &str) -> &str {
+    kind.strip_prefix(GUI)
+        .or_else(|| {
+            kind.starts_with(JOB)
+                .then(|| kind.strip_prefix("helios."))
+                .flatten()
+        })
+        .unwrap_or(kind)
+}
+
+/// The fact kind behind a name of egui-pop's journal
+/// ([`journal_name`]): a job's (`job.started` is `helios.job.started`),
+/// else the name itself.
+pub fn kind_of(name: &str) -> std::borrow::Cow<'_, str> {
+    match name.strip_prefix("job.") {
+        Some(rest) => std::borrow::Cow::Owned(format!("{JOB}{rest}")),
+        None => std::borrow::Cow::Borrowed(name),
+    }
+}
 
 /// The kind of an egui-pop event whose name is not in [`KINDS`]; its
 /// name goes in the payload.
-const OTHER: &str = "gui.event";
+const OTHER: &str = "helios.gui.event";
 
 /// The fact kinds egui-pop's events go under, each with egui-pop's data.
 pub const FACTS: &[helios_core::FactDecl] = {
     use helios_core::FactDecl;
     const DATA: &str = "egui-pop's event data";
     &[
-        FactDecl::json("gui.command.dispatched", DATA, "A command was dispatched"),
-        FactDecl::json("gui.command.done", DATA, "A command ran"),
-        FactDecl::json("gui.command.failed", DATA, "A command failed"),
-        FactDecl::json("gui.dialog.answered", DATA, "A dialog was answered"),
-        FactDecl::json("gui.toast.shown", DATA, "A toast was shown"),
-        FactDecl::json("gui.edit.undone", DATA, "An edit was undone"),
-        FactDecl::json("gui.edit.redone", DATA, "An edit was redone"),
-        FactDecl::json("gui.edit.undo_failed", DATA, "An undo failed"),
-        FactDecl::json("gui.edit.redo_failed", DATA, "A redo failed"),
-        FactDecl::json("gui.history.changed", DATA, "The edit history changed"),
         FactDecl::json(
-            "gui.history.refused",
+            "helios.gui.command.dispatched",
+            DATA,
+            "A command was dispatched",
+        ),
+        FactDecl::json("helios.gui.command.done", DATA, "A command ran"),
+        FactDecl::json("helios.gui.command.failed", DATA, "A command failed"),
+        FactDecl::json("helios.gui.dialog.answered", DATA, "A dialog was answered"),
+        FactDecl::json("helios.gui.toast.shown", DATA, "A toast was shown"),
+        FactDecl::json("helios.gui.edit.undone", DATA, "An edit was undone"),
+        FactDecl::json("helios.gui.edit.redone", DATA, "An edit was redone"),
+        FactDecl::json("helios.gui.edit.undo_failed", DATA, "An undo failed"),
+        FactDecl::json("helios.gui.edit.redo_failed", DATA, "A redo failed"),
+        FactDecl::json(
+            "helios.gui.history.changed",
+            DATA,
+            "The edit history changed",
+        ),
+        FactDecl::json(
+            "helios.gui.history.refused",
             DATA,
             "The edit history refused a step",
         ),
@@ -181,9 +219,9 @@ impl HeliosHost {
                 // published on its thread, which is awake already. A burst
                 // (a node's progress, relayed) asks for one frame.
                 while let Ok(first) = events.recv() {
-                    let mut from_elsewhere = !first.kind.starts_with("gui.");
+                    let mut from_elsewhere = !first.kind.starts_with(GUI);
                     for e in events.try_iter() {
-                        from_elsewhere |= !e.kind.starts_with("gui.");
+                        from_elsewhere |= !e.kind.starts_with(GUI);
                     }
                     if from_elsewhere {
                         let w = wake.lock().unwrap_or_else(PoisonError::into_inner).clone();
@@ -333,10 +371,7 @@ impl Host for HeliosHost {
                         e.payload["data"].clone(),
                     )
                 } else {
-                    (
-                        e.kind.strip_prefix("gui.").unwrap_or(e.kind).to_string(),
-                        e.payload,
-                    )
+                    (journal_name(e.kind).to_string(), e.payload)
                 };
                 Event {
                     seq: e.seq,
@@ -487,7 +522,7 @@ mod tests {
         all.sort_unstable();
         all.dedup();
         assert_eq!(all.len(), n, "a kind declared twice");
-        assert!(crate::bus().declared("node.link").is_some());
+        assert!(crate::bus().declared("helios.node.link").is_some());
     }
 
     #[test]
@@ -507,7 +542,10 @@ mod tests {
         // On the bus: dispatched, then done caused by it.
         let events = bus.since(0);
         let kinds: Vec<_> = events.iter().map(|e| e.kind).collect();
-        assert_eq!(kinds, ["gui.command.dispatched", "gui.command.done"]);
+        assert_eq!(
+            kinds,
+            ["helios.gui.command.dispatched", "helios.gui.command.done"]
+        );
         assert_eq!(events[1].cause, Some(events[0].seq));
         assert_eq!(events[0].source, "agent:a1");
         // egui-pop reads them back under its names.
@@ -536,7 +574,26 @@ mod tests {
         assert!(!app.handle().running(&id));
         let last = app.handle().history().last().unwrap().clone();
         assert_eq!(last.result, Err("the vault is read-only".into()));
-        assert_eq!(bus.since(0).last().unwrap().kind, "gui.command.failed");
+        assert_eq!(
+            bus.since(0).last().unwrap().kind,
+            "helios.gui.command.failed"
+        );
+    }
+
+    #[test]
+    fn a_job_s_facts_are_egui_pop_s_job_events_in_its_journal() {
+        let (app, bus, _) = app();
+        bus.publish_value(
+            "jobs",
+            None,
+            helios_core::jobs::STARTED,
+            json!({ "id": "export-1" }),
+        );
+        let e = app.handle().events_since(0);
+        assert_eq!(e[0].name, "job.started");
+        assert_eq!(kind_of(&e[0].name), helios_core::jobs::STARTED);
+        assert_eq!(journal_name("helios.node.link"), "helios.node.link");
+        assert_eq!(kind_of("helios.node.link"), "helios.node.link");
     }
 
     #[test]

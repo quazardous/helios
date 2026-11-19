@@ -92,7 +92,7 @@ fn a_gpu_lost_reaches_its_named_listener_once_through_the_journal() {
         .since(before)
         .iter()
         .map(|e| e.kind)
-        .filter(|k| k.starts_with("engine."))
+        .filter(|k| k.starts_with("helios.engine."))
         .collect();
     assert_eq!(on_journal, [GpuLost::KIND], "only the notice is relayed");
     h.run();

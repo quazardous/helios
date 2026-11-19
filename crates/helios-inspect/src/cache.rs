@@ -71,25 +71,28 @@ pub enum Touched {
 ///
 /// | Event | Drops |
 /// |---|---|
-/// | `vault.field_changed`, `vault.version_added`, `edit.saved` | the reads naming its `image` |
-/// | `vault.stack_changed`, `library.decision` | the stacks' reads |
-/// | `settings.layerChanged` | the settings' reads |
-/// | `library.imported`, `vault.locations_changed`, `vault.library_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
+/// | `helios.vault.field_changed`, `helios.vault.version_added`, `helios.edit.saved` | the reads naming its `image` |
+/// | `helios.vault.stack_changed`, `helios.library.decision` | the stacks' reads |
+/// | `helios.settings.layerChanged` | the settings' reads |
+/// | `helios.library.imported`, `helios.vault.locations_changed`, `helios.vault.library_changed`, `helios.vault.captures_set`, `helios.vault.changed_outside`, `helios.node.ready` | everything |
+///
+/// A node of an older release names them without their prefix
+/// (`helios_core::legacy_kinds`): the same.
 pub fn touched_by(kind: &str, payload: &Value) -> Touched {
-    match kind {
-        "vault.field_changed" | "vault.version_added" | "edit.saved" => {
+    match helios_core::legacy_kinds::current(kind) {
+        "helios.vault.field_changed" | "helios.vault.version_added" | "helios.edit.saved" => {
             payload["image"].as_str().map_or(Touched::All, |image| {
                 Touched::Images(BTreeSet::from([image.to_string()]))
             })
         }
-        "vault.stack_changed" | "library.decision" => Touched::Area(Area::Stacks),
-        "settings.layerChanged" => Touched::Area(Area::Settings),
-        "library.imported"
-        | "vault.locations_changed"
-        | "vault.library_changed"
-        | "vault.captures_set"
-        | "vault.changed_outside"
-        | "node.ready" => Touched::All,
+        "helios.vault.stack_changed" | "helios.library.decision" => Touched::Area(Area::Stacks),
+        "helios.settings.layerChanged" => Touched::Area(Area::Settings),
+        "helios.library.imported"
+        | "helios.vault.locations_changed"
+        | "helios.vault.library_changed"
+        | "helios.vault.captures_set"
+        | "helios.vault.changed_outside"
+        | "helios.node.ready" => Touched::All,
         _ => Touched::Nothing,
     }
 }
@@ -422,7 +425,7 @@ mod tests {
     }
 
     fn changed(seq: u64, image: &str) -> Value {
-        json!({ "seq": seq, "kind": "vault.field_changed", "payload": { "image": image } })
+        json!({ "seq": seq, "kind": "helios.vault.field_changed", "payload": { "image": image } })
     }
 
     #[test]
@@ -437,9 +440,9 @@ mod tests {
         assert!(cache.get("cursor.window", &page(0)).is_some());
         assert!(cache.get("cursor.window", &page(2)).is_none());
         assert!(cache.get("library.stacks.list", &json!({})).is_some());
-        cache.event(&json!({ "seq": 3, "kind": "vault.stack_changed", "payload": {} }));
+        cache.event(&json!({ "seq": 3, "kind": "helios.vault.stack_changed", "payload": {} }));
         assert!(cache.get("library.stacks.list", &json!({})).is_none());
-        cache.event(&json!({ "seq": 4, "kind": "library.imported", "payload": {} }));
+        cache.event(&json!({ "seq": 4, "kind": "helios.library.imported", "payload": {} }));
         assert_eq!(cache.stats().entries, 0);
         assert!(cache.get("cursor.open", &json!({})).is_none(), "never kept");
     }
@@ -462,7 +465,7 @@ mod tests {
         let cache = ReadCache::new();
         let page = json!({ "cursor": 1, "offset": 0, "len": 1 });
         cache.instance("one");
-        cache.event(&json!({ "seq": 3, "kind": "job.started", "payload": {} }));
+        cache.event(&json!({ "seq": 3, "kind": "helios.job.started", "payload": {} }));
         cache.put("cursor.window", &page, &window(3, &["a"]));
         assert_eq!(cache.stats().entries, 1, "an event of nothing kept");
         cache.reset("events were missed");

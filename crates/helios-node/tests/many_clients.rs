@@ -19,7 +19,7 @@
 //!   image's versions in the vault are exactly the saves acknowledged, the
 //!   images are the base ones plus those the imports said they added, and
 //!   no stack is left;
-//! - each subscriber saw every save announced (`control.command`), once,
+//! - each subscriber saw every save announced (`helios.control.command`), once,
 //!   in increasing order;
 //! - the node's memory, threads and file descriptors stay bounded, and
 //!   the descriptors and threads come back once the clients have gone.
@@ -615,7 +615,7 @@ fn subscribe(
             seen.events += 1;
             if event["kind"]
                 .as_str()
-                .is_some_and(|k| k.starts_with("control.command"))
+                .is_some_and(|k| k.starts_with("helios.control.command"))
                 && event["payload"]["id"] == "library.edit.save"
             {
                 let origin = event["payload"]["origin"]
@@ -848,7 +848,7 @@ fn many_clients(name: &str, scale: Scale, soak: Option<Soak>) {
     // in the bus's own sequence numbers.
     let (count, prefix) = match soak {
         Some(_) => (2, ""),
-        None => (scale.clients.div_ceil(8), "control.command"),
+        None => (scale.clients.div_ceil(8), "helios.control.command"),
     };
     let subscribers: Vec<_> = (0..count)
         .map(|_| {

@@ -900,7 +900,7 @@ documents still read):
 
 | `auto` | Offered for | Fires |
 |---|---|---|
-| `plugged` | a card | when the card is mounted (the node's volume watch, `volume.mounted`), a card already in at start included |
+| `plugged` | a card | when the card is mounted (the node's volume watch, `helios.volume.mounted`), a card already in at start included |
 | `new-files` | a folder | when files appear in it, each once its size and time held still for a few seconds |
 
 It is set in the source's menu ("Import automatically": Off, or the
@@ -930,7 +930,7 @@ the path it was saved at, is copied; a watched folder is looked at every
 node's own job, followed by the strategy's after-import backup. With no
 window to ask in, a batch the safeguards hold (paused, a first run not
 confirmed, above the limits) is left alone, said on the node's error
-output and on its bus (`import.automatic.held`: source, root, verdict,
+output and on its bus (`helios.import.automatic.held`: source, root, verdict,
 files, bytes); a first run is confirmed in a desktop's import window on
 the same vault. A source without choices of its own takes the local
 sources' defaults on the node (the window's last choices live on the
@@ -954,7 +954,7 @@ file is sent once it kept its size and modification time for 3 seconds
 watched. Turning the trigger off takes the folder off the watch at once.
 
 **Another client's change.** The desktop follows the node's
-`settings.layerChanged` for `user/import-sources`: the document is read
+`helios.settings.layerChanged` for `user/import-sources`: the document is read
 again off the interface's thread and replaces the list when it differs,
 so a trigger set elsewhere is watched at once.
 
@@ -1333,7 +1333,7 @@ stages, says what a hook may do at each, and moves those steps onto it.
 | Events for agents | `helios_events`, `helios_wait_event` (`crates/helios-node/src/mcp.rs`) | agents read import stages with the tools they already use |
 | The scheduler | `helios_core::scheduler` (`JobSpec`, `Priority`: batch, prefetch, interactive), job kinds `import`, `backup`, `map`, `stacks.suggest` | **follow-up work** is a job request, never a thread a hook starts |
 | The plugin broker | `crates/helios-plugin` (activation events `onStartup`, `onService:`, `onCommand:`, `onImporter:`; timeouts and `$/cancelRequest`; crash backoff) | out-of-process hooks: one more activation event and one more service |
-| The audit trail and undo | `helios_vault` catalog (`AuditEntry`, `vault.field_changed`), the import's one undo step (`library_by: import-<n>`) | what a hook writes goes through the import's transaction and its undo step |
+| The audit trail and undo | `helios_vault` catalog (`AuditEntry`, `helios.vault.field_changed`), the import's one undo step (`library_by: import-<n>`) | what a hook writes goes through the import's transaction and its undo step |
 
 **Prior art.** darktable's Lua API has `pre-import` (the list of files,
 which a script may change), `post-import-image` (per image, blocking,

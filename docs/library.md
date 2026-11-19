@@ -191,12 +191,12 @@ A sidecar whose image is not imported (an orphan) is left to `helios
 import-darktable`, which keeps it in the vault's import record.
 
 **One job.** An import reports as a job (see [jobs.md](jobs.md)), so the
-desktop shows it in the jobs centre: `job.started` (kind `import`, id
-`import-<n>`, its title and the number of files), one `job.progress` per
+desktop shows it in the jobs centre: `helios.job.started` (kind `import`, id
+`import-<n>`, its title and the number of files), one `helios.job.progress` per
 file (`done` of `total`, the file at hand as its `item`, the files failed
-and skipped so far), a `job.log` line per file brought in, a
-`job.item_failed` per file that failed, then `job.finished`, or
-`job.failed` when it cannot start (a missing source, no library folder for
+and skipped so far), a `helios.job.log` line per file brought in, a
+`helios.job.item_failed` per file that failed, then `helios.job.finished`, or
+`helios.job.failed` when it cannot start (a missing source, no library folder for
 a copy). A file that fails does not stop the others.
 
 **Safe to format.** At the end of a copy, each card read (a source
@@ -211,17 +211,17 @@ never formats a card itself.
 
 **A lost source pauses.** A card taken out or unmounted (its `DCIM`
 gone), or a folder moved away, mid-import does not fail every file left:
-the job pauses (`job.paused`, its reason also a log line: "Reinsert
+the job pauses (`helios.job.paused`, its reason also a log line: "Reinsert
 EOS_DIGITAL to go on", the card's name being its mount folder's), looks
 for the source again every quarter of a second, and resumes
-(`job.resumed`) once it is back, the file under way tried again. A paused
+(`helios.job.resumed`) once it is back, the file under way tried again. A paused
 import can still be cancelled.
 
 **Cancel.** The jobs centre's Cancel (`job.cancel` with the job's id), or
 Ctrl-C for `helios import`, stops the import before its next file. A copy
 under way stops too, and its hidden part (in `.helios-part/`) is removed: no
 half-written file is left. The files done stay imported; the job ends
-`job.cancelled` and the report says `"cancelled": true`.
+`helios.job.cancelled` and the report says `"cancelled": true`.
 
 The CLI prints one JSON line per file (`path`, `id`, `status`, and
 `duplicate`, `to`, `sidecars`, `signals`, `error` when they apply; a file
@@ -336,7 +336,7 @@ the model they answered; a declined suggestion is recorded as a human
 answer with no stacks. Each accepted group becomes a stack made by
 `decision:<id>`, its proposed best on top. A decision is answered once;
 asking again makes a new one. Changes are announced on the bus
-(`library.decision`, `vault.stack_changed`).
+(`helios.library.decision`, `helios.vault.stack_changed`).
 
 Resolvers are picked by name (`--resolver NAME`): `rules` is the only one
 today. A resolver that calls a model plugs in under its own name, through

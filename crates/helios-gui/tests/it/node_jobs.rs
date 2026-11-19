@@ -193,7 +193,7 @@ fn a_node_batch_shows_as_a_parent_with_its_children() {
     let second = node
         .jobs
         .start(Start::new("export-2", "Export b.png", "export").parent("batch-1", 1.0));
-    wait_for(&events, "job.started", "node:box/export-2");
+    wait_for(&events, "helios.job.started", "node:box/export-2");
     h.run();
 
     let centre = app.service(&JOBS).unwrap();
@@ -217,7 +217,7 @@ fn a_node_batch_shows_as_a_parent_with_its_children() {
     batch.progress(Progress::new().counts(1, 2));
     second.finished();
     batch.finished();
-    wait_for(&events, "job.finished", "node:box/batch-1");
+    wait_for(&events, "helios.job.finished", "node:box/batch-1");
     h.run();
     assert_eq!(
         centre.job("node:box/batch-1").unwrap().state,
@@ -248,15 +248,15 @@ fn a_reconnection_keeps_the_jobs_consistent() {
     h.state_mut()
         .follow_node_with(node.link("box"), FAST)
         .unwrap();
-    wait_for(&events, "job.started", "node:box/export-1");
+    wait_for(&events, "helios.job.started", "node:box/export-1");
     h.run();
 
     // The link drops and the node is out of reach: its jobs are lost,
     // not ended.
     node.go_away();
     assert!(h.state().drop_node_link("box"));
-    wait_for(&events, "job.paused", "node:box/batch-1");
-    wait_for(&events, "job.paused", "node:box/export-1");
+    wait_for(&events, "helios.job.paused", "node:box/batch-1");
+    wait_for(&events, "helios.job.paused", "node:box/export-1");
     h.run();
     let centre = app.service(&JOBS).unwrap();
     let lost = centre.job("node:box/batch-1").unwrap();
@@ -278,7 +278,7 @@ fn a_reconnection_keeps_the_jobs_consistent() {
 
     // Back: the desktop catches up.
     node.come_back();
-    wait_for(&events, "job.started", "node:box/export-2");
+    wait_for(&events, "helios.job.started", "node:box/export-2");
     h.run();
     let parent = centre.job("node:box/batch-1").unwrap();
     assert_eq!(parent.state, JobState::Running);
@@ -295,7 +295,7 @@ fn a_reconnection_keeps_the_jobs_consistent() {
     // And follows on.
     second.finished();
     batch.finished();
-    wait_for(&events, "job.finished", "node:box/batch-1");
+    wait_for(&events, "helios.job.finished", "node:box/batch-1");
     h.run();
     assert_eq!(
         centre.job("node:box/batch-1").unwrap().state,
@@ -323,7 +323,7 @@ fn a_node_lost_for_too_long_has_its_jobs_forgotten() {
     let _first = node
         .jobs
         .start(Start::new("export-1", "Export a.png", "export").parent("batch-1", 1.0));
-    wait_for(&events, "job.started", "node:box/export-1");
+    wait_for(&events, "helios.job.started", "node:box/export-1");
     h.run();
     assert!(
         app.service(&JOBS)
@@ -334,7 +334,7 @@ fn a_node_lost_for_too_long_has_its_jobs_forgotten() {
 
     node.go_away();
     h.state().drop_node_link("box");
-    let failed = wait_for(&events, "job.failed", "node:box/batch-1");
+    let failed = wait_for(&events, "helios.job.failed", "node:box/batch-1");
     assert!(
         failed.payload["error"]
             .as_str()
@@ -383,7 +383,7 @@ fn cancel_from_the_centre_stops_it_on_the_node() {
     batch.on_cancel(move || {
         let _ = asked.lock().unwrap().send(());
     });
-    wait_for(&events, "job.started", "node:box/batch-1");
+    wait_for(&events, "helios.job.started", "node:box/batch-1");
     h.run();
 
     // The jobs centre's Cancel: `job.cancel` sent to the node.
@@ -392,9 +392,9 @@ fn cancel_from_the_centre_stops_it_on_the_node() {
     cancelled
         .recv_timeout(LONG)
         .expect("the node's job was asked to stop");
-    wait_for(&events, "job.cancelling", "node:box/batch-1");
+    wait_for(&events, "helios.job.cancelling", "node:box/batch-1");
     batch.cancelled();
-    wait_for(&events, "job.cancelled", "node:box/batch-1");
+    wait_for(&events, "helios.job.cancelled", "node:box/batch-1");
     h.run();
     let centre = app.service(&JOBS).unwrap();
     let job = centre.job("node:box/batch-1").unwrap();
@@ -431,7 +431,7 @@ fn a_node_s_events_reach_listeners_resumed_and_resynced() {
         .unwrap();
     // Followed once a job of the node shows.
     let job = node.jobs.start(Start::new("scan-1", "Scan", "scan"));
-    wait_for(&shell_events, "job.started", "node:box/scan-1");
+    wait_for(&shell_events, "helios.job.started", "node:box/scan-1");
     let says = |kind: &'static str, n: u64, cause: Option<u64>| {
         node.bus
             .publish_value("test", cause, kind, json!({ "n": n }))
@@ -570,7 +570,10 @@ fn a_relayed_fact_lands_once_and_a_restart_resyncs_once() {
         .build();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     let shell_bus = h.state().jobs().bus().subscribe();
-    let by_table = h.state().node_events().listen("test", &["settings.*"]);
+    let by_table = h
+        .state()
+        .node_events()
+        .listen("test", &["helios.settings.*"]);
     h.state_mut()
         .follow_node_with(node.link("box"), FAST)
         .unwrap();
@@ -635,6 +638,158 @@ fn a_relayed_fact_lands_once_and_a_restart_resyncs_once() {
         more.is_empty(),
         "one resync per hole: {first:?} then {more:#?}"
     );
+}
+
+/// A node of 0.92 or before, which names its fact kinds without their
+/// `helios.` prefix: a proxy in front of `node`'s inspect endpoint that
+/// drops the `prefixed` each request of the desktop says, so the node
+/// writes every kind under its old name, as such a node does
+/// (`helios_core::legacy_kinds`). It keeps the kinds it hands on.
+struct OldNode {
+    path: PathBuf,
+    kinds: Arc<Mutex<Vec<String>>>,
+}
+
+impl OldNode {
+    fn in_front_of(node: &Node) -> OldNode {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::{UnixListener, UnixStream};
+        let path = node.dir.join("old.sock");
+        let upstream = node.dir.join("node.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let kinds: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = kinds.clone();
+        std::thread::spawn(move || {
+            for desktop in listener.incoming() {
+                let Ok(desktop) = desktop else { return };
+                let Ok(node) = UnixStream::connect(&upstream) else {
+                    continue;
+                };
+                let (mut to_node, from_node) = (node.try_clone().unwrap(), node);
+                let mut to_desktop = desktop.try_clone().unwrap();
+                std::thread::spawn(move || {
+                    for line in BufReader::new(desktop).lines() {
+                        let Ok(line) = line else { break };
+                        let mut request: serde_json::Value =
+                            serde_json::from_str(&line).unwrap_or_default();
+                        if let Some(r) = request.as_object_mut() {
+                            r.remove("prefixed");
+                        }
+                        if writeln!(to_node, "{request}").is_err() {
+                            break;
+                        }
+                    }
+                    let _ = to_node.shutdown(std::net::Shutdown::Both);
+                });
+                let seen = seen.clone();
+                std::thread::spawn(move || {
+                    for line in BufReader::new(from_node).lines() {
+                        let Ok(line) = line else { break };
+                        let value: serde_json::Value =
+                            serde_json::from_str(&line).unwrap_or_default();
+                        for at in ["event", "relayed"] {
+                            if let Some(kind) = value[at]["kind"].as_str() {
+                                seen.lock().unwrap().push(kind.to_string());
+                            }
+                        }
+                        if writeln!(to_desktop, "{line}").is_err() {
+                            break;
+                        }
+                    }
+                    let _ = to_desktop.shutdown(std::net::Shutdown::Both);
+                });
+            }
+        });
+        OldNode { path, kinds }
+    }
+
+    fn link(&self, name: &str) -> NodeLink {
+        NodeLink {
+            name: name.into(),
+            inspect: Address::Unix(self.path.clone()),
+            control: None,
+        }
+    }
+}
+
+/// A node of an older release says its facts without their prefix
+/// (`settings.layerChanged`, `job.started`): the desktop takes each in
+/// under its new name, once, and no bus holds the old one.
+#[test]
+fn an_older_node_s_fact_lands_under_its_new_name_once() {
+    let node = Node::relaying("legacy");
+    let old = OldNode::in_front_of(&node);
+    let facts = helios_gui::bus();
+    let desktop = journaled(facts.clone());
+    let (point_tx, by_point) = channel();
+    let point_tx = Mutex::new(point_tx);
+    desktop
+        .listen::<FactPoint<LayerChanged>>("test", ListenOpts::new(), move |fact, ()| {
+            let n = fact.payload["n"].as_u64().unwrap_or(0);
+            let _ = point_tx.lock().unwrap().send(n);
+            Ok(())
+        })
+        .unwrap();
+    let shell = Shell::builder(helios_panels(), None)
+        .bus(desktop.clone())
+        .build();
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    let shell_bus = h.state().jobs().bus().subscribe();
+    let by_table = h
+        .state()
+        .node_events()
+        .listen("test", &["helios.settings.*"]);
+    h.state_mut()
+        .follow_node_with(old.link("box"), FAST)
+        .unwrap();
+    let layer = |n: u64| {
+        node.bus.publish_value(
+            "settings",
+            None,
+            LayerChanged::KIND,
+            json!({ "layer": "user", "n": n }),
+        )
+    };
+    let deadline = Instant::now() + LONG;
+    while by_point.recv_timeout(Duration::from_millis(50)).is_err() {
+        layer(1);
+        assert!(Instant::now() < deadline, "no relayed fact within {LONG:?}");
+    }
+    wait_for_link(&shell_bus);
+
+    layer(2);
+    assert_eq!(heard_n(&by_point, 2), 1, "the point's listener, once");
+    let table: Vec<NodeEvent> = std::iter::from_fn(|| by_table.recv_timeout(QUIET).ok())
+        .filter(|e| e.event.payload["n"] == 2)
+        .collect();
+    assert_eq!(table.len(), 1, "the node table's listener: {table:#?}");
+    assert_eq!(table[0].event.kind, LayerChanged::KIND);
+    let landed: Vec<&str> = facts
+        .since(0)
+        .iter()
+        .filter(|e| e.payload["n"] == 2)
+        .map(|e| e.kind)
+        .collect();
+    assert_eq!(
+        landed,
+        [LayerChanged::KIND],
+        "on the desktop's fact bus once"
+    );
+
+    // A job's events, by the event stream: under their new names too.
+    let job = node.jobs.start(Start::new("legacy-1", "Scan", "scan"));
+    wait_for(&shell_bus, helios_core::jobs::STARTED, "node:box/legacy-1");
+    job.finished();
+    wait_for(&shell_bus, helios_core::jobs::FINISHED, "node:box/legacy-1");
+
+    // The node did say them by their old names.
+    let said = old.kinds.lock().unwrap().clone();
+    assert!(
+        said.iter().any(|k| k == "settings.layerChanged"),
+        "{said:?}"
+    );
+    assert!(said.iter().any(|k| k == "job.started"), "{said:?}");
+    assert!(!said.iter().any(|k| k.starts_with("helios.")), "{said:?}");
 }
 
 /// How long a test waits to be sure nothing more comes.

@@ -58,7 +58,7 @@ pub struct StackChanged {
 }
 
 impl Event for StackChanged {
-    const KIND: &'static str = "vault.stack_changed";
+    const KIND: &'static str = "helios.vault.stack_changed";
 }
 
 fn stack_id(members: &[ImageId]) -> String {

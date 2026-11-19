@@ -3,7 +3,7 @@
 //! it is unsettled; Retry when it failed and may be retried.
 //!
 //! The line draws a [`Promise`] as the node answers it (`promises.get`, or
-//! a `promise.progress` / `promise.done` event's payload) and says which
+//! a `helios.promise.progress` / `helios.promise.done` event's payload) and says which
 //! button was clicked; the caller sends `promises.cancel` or
 //! `promises.retry`. It holds no state, so any screen can show the
 //! promises it holds: the import window, the Library, a job's console.

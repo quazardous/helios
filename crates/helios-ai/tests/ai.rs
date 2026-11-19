@@ -282,7 +282,7 @@ fn prompt_versions_are_added_and_a_pin_keeps_its_version() {
 fn progress(ai: &Ai) -> Vec<Value> {
     ai.events(0)
         .into_iter()
-        .filter(|e| e.kind == "job.progress")
+        .filter(|e| e.kind == "helios.job.progress")
         .map(|e| e.payload)
         .collect()
 }
@@ -489,11 +489,11 @@ fn a_remote_provider_gets_downscaled_images_and_its_key_stays_in_the_keyring() {
     assert_eq!(last["remote"], true);
     assert_eq!(last["prompt"], "image.describe@1");
     assert!(!log.contains("sk-secret") && !log.contains(b64));
-    assert!(s.ai.events(0).iter().any(|e| e.kind == "ai.call"));
+    assert!(s.ai.events(0).iter().any(|e| e.kind == "helios.ai.call"));
     assert!(
         s.ai.events(0)
             .iter()
-            .any(|e| e.kind == "scheduler.job_ended")
+            .any(|e| e.kind == "helios.scheduler.job_ended")
     );
 
     let removed = s.ai.remove_provider("cloud").unwrap();

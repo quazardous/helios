@@ -66,7 +66,7 @@ Read from `main` at release 0.24.0.
   held on a connection so the batch fails if the client dies), and for
   each image sends `load-source` then `export` (a scheduler job holding
   its destination, the network snapshotted when asked), keeping `--jobs`
-  exports in flight (2 by default). It waits on `scheduler.job_ended`,
+  exports in flight (2 by default). It waits on `helios.scheduler.job_ended`,
   prints a JSON line per image, and ends the batch. Nothing is durable:
   a crash loses where the batch was, and output names are chosen against
   the files already on disk, so a re-run names them differently.
@@ -79,13 +79,13 @@ Read from `main` at release 0.24.0.
   tool, one to one. The batch endpoint answers a subset in every build;
   the debug control endpoint exists in debug builds only.
 - **The desktop's jobs relay** (`helios_gui::relay`) follows a node
-  process: `describe jobs` to catch up, then `subscribe` to `job.*`,
+  process: `describe jobs` to catch up, then `subscribe` to `helios.job.*`,
   republished as `node:<name>/<id>`; Cancel goes back as `job.cancel`; a
   silent link marks the jobs lost, then failed after a minute; a
   restarted node (another instance) fails its old jobs.
 - **The Queue panel** (branch `wip/queue-panel`) reads a `QueueSource`:
   `queue(app, node) -> Option<NodeQueue>` and `act(app, id, Action)`.
-  Its interim source, `JobsQueue`, lists the jobs whose `job.started`
+  Its interim source, `JobsQueue`, lists the jobs whose `helios.job.started`
   names the graph node. Its item states are waiting, running, paused,
   cancelling, done, failed and cancelled; its only action is Cancel,
   because no job can be retried or moved in its queue.
@@ -370,8 +370,8 @@ transient write or a rate limit, not a broken file.
 - `workflow.items`: one page of a node's items (above), each with its
   row, title (the file name), output path and error.
 - Events on the node's bus, which `subscribe` already pushes:
-  `workflow.rows` (the rows one write changed: run, node, items with
-  status, attempts, since, due, error), `workflow.run` (a run created,
+  `helios.workflow.rows` (the rows one write changed: run, node, items with
+  status, attempts, since, due, error), `helios.workflow.run` (a run created,
   paused, resumed, finished, forgotten).
 
 `monitor` stops reading every row: the runner keeps the counts per
@@ -392,7 +392,7 @@ for nodes that have runs (and `JobsQueue` stays for the rest):
 - `queue(app, node)`: the summary from the counts the relay keeps; the
   rows from `workflow.items`, fetched a page at a time for the selected
   node only (off the UI thread, through the relay) and kept current by
-  `workflow.rows`. Several runs at a node are listed together, each
+  `helios.workflow.rows`. Several runs at a node are listed together, each
   item titled with its file name and its run;
 - states: no row and claimable → Waiting; `scheduled` → Waiting, with
   "retry at" and its attempts; `running` → Running; `waiting` → a new
@@ -453,7 +453,7 @@ pays only when there are many items or a restart to survive.
 
 | What | What is lost | What resumes |
 |---|---|---|
-| A node process crashes (or `kill -9`) mid-batch, with a vault | the exports running then (their files are written whole or not at all) | at its next start on the same vault, each run it owned is opened: running rows are given back without counting the attempt, scheduled retries keep their due time, waiting rows keep waiting, and the run goes on, **unless it was paused**; `workflow.run` says `resumed` |
+| A node process crashes (or `kill -9`) mid-batch, with a vault | the exports running then (their files are written whole or not at all) | at its next start on the same vault, each run it owned is opened: running rows are given back without counting the attempt, scheduled retries keep their due time, waiting rows keep waiting, and the run goes on, **unless it was paused**; `helios.workflow.run` says `resumed` |
 | The same, without a vault | the run | nothing: as today, the client is told the batch failed |
 | `helios batch` (the client) dies | nothing | the run goes on in the node it attached to; a node it started itself in a sandbox stops with it, and with `--vault` the run resumes at the next `helios batch` with the same network and settings (same run id) |
 | The desktop crashes | nothing | the node process is not touched; at its next start the relay catches up from `describe workflow` |
@@ -487,7 +487,7 @@ bench box (see [bench.md](bench.md)).
 2. **Runs in the node** (`helios-node`). Deriving the workflow from the
    network, the run and item documents, `workflow.submit`, `.runs`,
    `.items`, `describe workflow`, the runner over the batch export with
-   leases and retries, the `workflow.rows` and `workflow.run` events, and
+   leases and retries, the `helios.workflow.rows` and `helios.workflow.run` events, and
    the run as a job. Tests (in `tests/`, through the batch endpoint, with
    deadlines): a batch of synthetic images exports each once; re-submitted,
    nothing is redone and the counts say so; an injected fault (`fault`) is
@@ -548,7 +548,7 @@ bench box (see [bench.md](bench.md)).
    *As delivered (2026-10-28):* the client works out each image's
    sidecar, then submits every image at once (a sidecar's edit as the
    item's parameters), and follows the rows at the export: the
-   `workflow.rows` events wake it, and it reads the run whole
+   `helios.workflow.rows` events wake it, and it reads the run whole
    (`workflow.items`, `workflow.runs`) every two seconds, which catches up
    what the bounded event journal let go. Its lines keep their fields; an
    image given twice is one item, with one line. `--jobs` reaches the run
@@ -559,7 +559,7 @@ bench box (see [bench.md](bench.md)).
    `workflow.submit` answers its id. The runner keeps a failure's message
    by key (a file it cannot load says `node-load-refused`, as a single
    export does) beside the row's English, in memory, and gives it in
-   `workflow.rows` and `workflow.items`. `--vault` on the batch's own
+   `helios.workflow.rows` and `workflow.items`. `--vault` on the batch's own
    node is `helios-node --runs-vault`: the runs only, not the vault's
    settings layers nor an edit of the network's source, which `--vault`
    would bring; with a node attached to, `--vault` keeps sidecars only.
@@ -598,7 +598,7 @@ bench box (see [bench.md](bench.md)).
    running exports, and its job stays open. `job.cancel` of a run's job
    was already `workflow.cancel` of the whole run (step 2); `forget` came
    with step 3. `helios batch` cancels only its own items on Ctrl-C.
-   `workflow.run` events add `paused`, `resumed` (with `asked`) and
+   `helios.workflow.run` events add `paused`, `resumed` (with `asked`) and
    `reordered`.
 6. **Decision nodes in runs** (`helios-node`, `helios-decision`). Workers
    for decision nodes, waits and signals, answers kept per item,

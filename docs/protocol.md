@@ -270,7 +270,7 @@ rule the `backup` facet counts against (`{"volumes": [{"id", "drive",
 
 `library.fields.set` (`changes`: `{image, field, value, op}`) writes
 photos' fields, audited under the call's origin and announced as
-`vault.field_changed`. `op` is `set` when not given (a null value
+`helios.vault.field_changed`. `op` is `set` when not given (a null value
 clears the field), `set_if_absent` (only an empty field), `add` or
 `remove` (the name `value` put in or taken out of a set field, such as
 the colour labels, the others kept). `library.fields.get` (`images`,
@@ -283,7 +283,7 @@ the call's origin; their files, fields, versions and sightings stay,
 and an import finds them again by their hash. It answers `removed` (how
 many were in it) and `changes`, the step as the vault records it, which
 its revert puts back: the desktop's Ctrl+Z. Announced as
-`vault.library_changed`, as an undo or a redo of a library step is.
+`helios.vault.library_changed`, as an undo or a redo of a library step is.
 
 `library.images.rotate` (`images`, `turn`: `left`, `right` or `reset`)
 turns photos a quarter counter-clockwise or clockwise, or back to their
@@ -293,7 +293,7 @@ clockwise, on top of the file's orientation), set by the call's origin
 with its audit row; no file is touched and no pixel decoded. A photo
 named twice turns once, and a reset leaves an unturned photo out. It
 answers `rotated` and `changes`, the step its revert undoes (the
-desktop's Ctrl+Z), and announces each turn as `vault.field_changed`.
+desktop's Ctrl+Z), and announces each turn as `helios.vault.field_changed`.
 
 `library.images.duplicate` (`images`, `from`: `current`, the default,
 or `original`) makes a new version of each photo, a new head beside the
@@ -305,7 +305,7 @@ copies of one edit stay two versions; it is labelled `Duplicate`, made
 by the call's origin, and, being the newest head, is the one an edit
 opens next. A photo named twice is copied once. It answers `duplicated`,
 the new version of each photo (`versions`) and each photo's head count
-(`heads`), and announces each copy as `vault.version_added`.
+(`heads`), and announces each copy as `helios.vault.version_added`.
 `library.versions.heads` (no params, read-only)
 answers the head count of every photo with more than one, for the
 grid's versions badge:
@@ -354,7 +354,7 @@ photo on top is `top`, else the first merged stack's top, else the
 first photo. `library.stacks.ungroup` (`images`) dissolves the stacks
 any of them is in; the photos stay. Both, and `library.stacks.top`,
 answer `changes`, the step the vault's revert undoes (the desktop's
-Ctrl+Z); each change is announced as `vault.stack_changed`:
+Ctrl+Z); each change is announced as `helios.vault.stack_changed`:
 
 ```json
 {"id": 12, "method": "library.stacks.group",
@@ -376,7 +376,7 @@ that photos carry already is refused (a merge). `library.keywords.merge`
 becoming one keyword. A branch never goes inside itself. Both set each
 photo's `tags` by the call's origin with its audit row, answer how many
 `photos` changed and `changes`, the step the vault's revert undoes (the
-desktop's Ctrl+Z), and announce each photo as `vault.field_changed`:
+desktop's Ctrl+Z), and announce each photo as `helios.vault.field_changed`:
 
 ```json
 {"id": 14, "method": "library.keywords.rename",
@@ -398,7 +398,7 @@ takes it off, with those below it; `labels` (`add`, `remove`) does the
 same for colour labels, one by one, each photo's others kept. Read-only
 fields (the capture's) are refused. It answers how many photos
 `changed` and `changes`, the step the vault's revert undoes, and
-announces each field as `vault.field_changed`. In a `command.batch`
+announces each field as `helios.vault.field_changed`. In a `command.batch`
 the desktop records the batch's steps as one:
 
 ```json
@@ -453,7 +453,7 @@ with the `reason`), written as it goes. Files on a memory card, on a
 backup or archive volume, in a `Helios Backup/` or `Helios Archive/`
 folder, or on a volume not plugged in are refused, with the reason. The
 trashed files' locations are marked missing, and a photo with a file
-trashed and none left to do leaves the Library (`vault.library_changed`;
+trashed and none left to do leaves the Library (`helios.vault.library_changed`;
 not a library step: the system trash is the undo). It answers `job`,
 `trashed`, `missing`, `refused` and `failed` (the files, with their
 `reason`) and `removed`. With `plan`, it only says what it would do:
@@ -570,7 +570,7 @@ whole version (`id`, also as `version`, `image`, `parents`, `edit`,
 its side (its versions' ids are computed from their content):
 `version`, in the form `head` has, `step`, the session's step number,
 and `inProgress`, a step saved during a gesture. It refuses a version
-whose parents are not written, and announces the step as `edit.saved`.
+whose parents are not written, and announces the step as `helios.edit.saved`.
 `library.snapshots.get` (`image`) reads an image's snapshots, oldest
 first (`snapshots`: `id`, `name`, `origin`, `at`, the `version` each is
 pinned to, null for the image with no edit, and that version's `edit`,
@@ -671,7 +671,7 @@ them (they survive a restart), and every client of the node sees them.
   work's own answer), `failed` (`reason`, and `retryable`: running it
   again may work) or `cancelled`. A settled promise never changes again,
   except a failed one retried, which goes back to `pending`.
-- **Its owner** is the job its work reports under (`job.*`, the jobs
+- **Its owner** is the job its work reports under (`helios.job.*`, the jobs
   centre); `kind` names the work, so a node knows how to run it again.
 
 | Method | Params | Answers |
@@ -686,8 +686,8 @@ them (they survive a restart), and every client of the node sees them.
   timeout with `settled: false`: wait again. It is cancellable
   (`$/cancel`) and stops at once. An agent reaches it through
   `helios_command_run`; the 10-minute cap is the MCP wait cap.
-- **Events.** `promise.progress` (created, progressing, retried) and
-  `promise.done` (settled, once), each with the promise as its payload,
+- **Events.** `helios.promise.progress` (created, progressing, retried) and
+  `helios.promise.done` (settled, once), each with the promise as its payload,
   on the node's bus.
 - **After a stop or a crash.** As the node starts, a promise left
   `pending` or `running` with no runner is taken up again when its kind
@@ -696,7 +696,7 @@ them (they survive a restart), and every client of the node sees them.
   `interrupted`, `retryable` when the node knows its kind. No promise
   stays running with nobody working on it.
 - **Every long job is one.** The desktop's jobs and the headless
-  `helios-node`'s (`job.*`: an export, a batch, the trash, a backup, a
+  `helios-node`'s (`helios.job.*`: an export, a batch, the trash, a backup, a
   catalogue snapshot, a calibration, a workshop run, the capture and cull
   passes, the health check) are mirrored as promises of their node
   (`helios_node_core::job_promises`), owned by the job's id, their
@@ -711,7 +711,7 @@ them (they survive a restart), and every client of the node sees them.
   through the promise (`cancellable: false`); when that node can cancel
   it, its request says `"relayed": true` and the desktop sends the cancel
   to that node. A job inside another (an export of a batch), a job naming
-  the promise it is the work of (`promise` in `job.started`: an import by
+  the promise it is the work of (`promise` in `helios.job.started`: an import by
   rule, already a promise) and the background upkeep (`map`,
   `stacks.suggest`, `importer.scan`) are left out. The newest 100 settled
   ones are kept.
@@ -845,10 +845,10 @@ reads), keyed by method and params, and follows the node's events
 
 | Event | Drops |
 |---|---|
-| `vault.field_changed`, `vault.version_added`, `edit.saved` | the reads naming its `image` |
-| `vault.stack_changed`, `library.decision` | the stacks' reads |
-| `settings.layerChanged` | the settings' reads |
-| `library.imported`, `vault.locations_changed`, `vault.library_changed`, `vault.captures_set`, `vault.changed_outside`, `node.ready` | everything |
+| `helios.vault.field_changed`, `helios.vault.version_added`, `helios.edit.saved` | the reads naming its `image` |
+| `helios.vault.stack_changed`, `helios.library.decision` | the stacks' reads |
+| `helios.settings.layerChanged` | the settings' reads |
+| `helios.library.imported`, `helios.vault.locations_changed`, `helios.vault.library_changed`, `helios.vault.captures_set`, `helios.vault.changed_outside`, `helios.node.ready` | everything |
 
 - An answer read at a sequence older than an event already heard is
   checked against that event before it is kept.
@@ -895,9 +895,9 @@ greyed, `disabledReason`, the reason its menu entry gives ("Only in the
 Helios window", "Does not apply here (…)"). `command.run` (`id`,
 `params`, `origin`, `window`, `scope` to pick one where both have the
 id) runs a window command on the interface's thread in that open window,
-announced on the bus once run as `control.command` with its origin, and
+announced on the bus once run as `helios.control.command` with its origin, and
 refuses it with that reason where it does not apply, announced as
-`control.command.refused` (`id`, `origin`, `reason`). A `dry_run` (or
+`helios.control.command.refused` (`id`, `origin`, `reason`). A `dry_run` (or
 `dryRun`) that is not `false` is refused unless the command takes one
 (its declared arguments name it) or only reads: a command that ignores
 it would run for real.
@@ -953,3 +953,12 @@ facts after the cursor left the journal, else `null`. Then one
 the point's codec (JSON that a reader of another version reads,
 unknown fields ignored), a later `{"lost": "gap", "next"}` if the
 reader fell behind, and `{"heartbeat": seq}` when quiet.
+
+Both streams name the fact kinds under their `helios.` prefix only for
+a client that says it reads them so (`"prefixed": true`, which the
+desktop sends from 0.93 on). Without it, as a desktop of 0.92 or before
+asks, each `event` and `relayed` line names its kind as that release did
+(`job.started`, not `helios.job.started`), and `prefix` is read in those
+names. A `wait_event` on an old name waits for the kind under its new
+one. The desktop maps the old names an older node writes to the new ones
+as it reads them. Both go in 0.94 (`helios_core::legacy_kinds`).

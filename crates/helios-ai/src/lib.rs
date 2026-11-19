@@ -51,7 +51,7 @@ use serde::{Deserialize, Serialize};
 
 /// The fact kinds this crate publishes (its jobs' are the core's).
 pub const FACTS: &[helios_core::FactDecl] = &[helios_core::FactDecl::typed::<CallRecord>(
-    "ai.call",
+    "helios.ai.call",
     "A model was called: the call's record",
 )];
 

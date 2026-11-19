@@ -177,7 +177,7 @@ pub fn destination_days(store: &egui_pop::core::binding::SharedStore) -> u64 {
 /// seconds.
 pub const LONG_JOB_SECONDS: f64 = 10.0;
 
-/// A job whose end may be notified, by its kind (`job.started`'s `kind`).
+/// A job whose end may be notified, by its kind (`helios.job.started`'s `kind`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Job {
     Export,

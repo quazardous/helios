@@ -1723,7 +1723,7 @@ pub const TOOLS: &[Tool] = &[
             Param {
                 name: "kind",
                 schema: string,
-                description: "Event kind, e.g. node.render_done",
+                description: "Event kind, e.g. helios.node.render_done",
                 default: None,
             },
             SINCE,
@@ -2412,7 +2412,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_ai_local_pull",
         endpoint: Endpoint::Ai,
         cmd: "ai.local.pull",
-        description: "Downloads a model into the local runtime as a job, after checking the disk; follow it with helios_ai_jobs_events (job.progress) and helios_ai_jobs_wait, stop it with helios_ai_jobs_cancel",
+        description: "Downloads a model into the local runtime as a job, after checking the disk; follow it with helios_ai_jobs_events (helios.job.progress) and helios_ai_jobs_wait, stop it with helios_ai_jobs_cancel",
         params: &[
             Param {
                 name: "model",
@@ -2479,7 +2479,7 @@ pub const TOOLS: &[Tool] = &[
         name: "helios_ai_jobs_events",
         endpoint: Endpoint::Ai,
         cmd: "ai.jobs.events",
-        description: "Events of the AI service after a sequence number: job.progress, ai.call, scheduler.job_*",
+        description: "Events of the AI service after a sequence number: helios.job.progress, helios.ai.call, helios.scheduler.job_*",
         params: &[SINCE],
     },
     Tool {
@@ -3533,10 +3533,12 @@ mod tests {
             .iter()
             .find(|t| t.name == "helios_wait_event")
             .unwrap();
-        let request = wait.request(&json!({ "kind": "node.idle" })).unwrap();
+        let request = wait
+            .request(&json!({ "kind": "helios.node.idle" }))
+            .unwrap();
         assert_eq!(
             request,
-            json!({ "cmd": "wait_event", "kind": "node.idle", "since": 0, "timeout_ms": 10000 })
+            json!({ "cmd": "wait_event", "kind": "helios.node.idle", "since": 0, "timeout_ms": 10000 })
         );
         assert!(
             wait.request(&json!({}))
@@ -4082,7 +4084,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|e| e["kind"] == "job.progress")
+                .any(|e| e["kind"] == "helios.job.progress")
         );
         assert!(runtime.installed().contains(&"qwen3:8b".to_string()));
 
@@ -4191,7 +4193,7 @@ mod tests {
         // The node ran the read and the save, for the agent.
         let ran: Vec<(String, String)> = heard
             .try_iter()
-            .filter(|e| e.kind == "control.command")
+            .filter(|e| e.kind == "helios.control.command")
             .map(|e| {
                 (
                     e.payload["id"].as_str().unwrap().to_string(),
@@ -4446,7 +4448,7 @@ mod tests {
         assert!(!failed, "{stacks}");
         let ran: Vec<(String, String)> = heard
             .try_iter()
-            .filter(|e| e.kind == "control.command")
+            .filter(|e| e.kind == "helios.control.command")
             .map(|e| {
                 (
                     e.payload["id"].as_str().unwrap().to_string(),
@@ -4839,7 +4841,7 @@ mod tests {
         assert_eq!(result["isError"], false, "{result}");
         let ran: Vec<String> = heard
             .try_iter()
-            .filter(|e| e.kind == "control.command")
+            .filter(|e| e.kind == "helios.control.command")
             .map(|e| format!("{} {}", e.payload["id"], e.payload["origin"]))
             .collect();
         assert_eq!(ran, ["\"library.stacks.list\" \"agent:mcp\""]);

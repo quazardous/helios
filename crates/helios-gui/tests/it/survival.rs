@@ -10,7 +10,7 @@
 //! the desktop's own step after it. A history snapshot pinned by a save
 //! survives a kill; one taken after the last save does not.
 //!
-//! The child says what it saved on stdout from the `edit.saved` events of
+//! The child says what it saved on stdout from the `helios.edit.saved` events of
 //! the bus: the parent reads those lines, it never sleeps. These scenarios
 //! gate a release: `cargo survival` runs them alone.
 
@@ -169,7 +169,7 @@ fn survival_child() {
     let mut frame = |shell: &mut Shell, persist: &mut Persist<SqliteStore>, now: f64| {
         persist.frame_settled(shell, now);
         while let Ok(e) = events.try_recv() {
-            if e.kind == "edit.saved" {
+            if e.kind == "helios.edit.saved" {
                 writeln!(
                     out,
                     "saved {} {}",

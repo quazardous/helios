@@ -30,7 +30,7 @@
 //!
 //! Windows, panels and services never subscribe to a node themselves:
 //! they ask [`NodeEvents::listen`], under an id of their own, for the
-//! kinds they need by pattern (`volume.*`, `settings.layerChanged`,
+//! kinds they need by pattern (`helios.volume.*`, `helios.settings.layerChanged`,
 //! `storage.*`, `*`), and read [`NodeEvent`]s from their [`Listener`].
 //! [`NodeEvents::listeners`] is the one table of who listens to what
 //! (agents, the inspector); a listener dropped stops being listed and
@@ -46,7 +46,7 @@
 //!   node's `seq` of the event that caused it) and the payload keeps the
 //!   promise or job id where the node puts one, so a window tells the
 //!   change it asked for from another client's.
-//! - **What is not relayed.** A node's `job.*` events go through the jobs
+//! - **What is not relayed.** A node's `helios.job.*` events go through the jobs
 //!   relay only (ids `node:<name>/<id>`, the jobs centre).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -62,9 +62,9 @@ use serde_json::{Value, json};
 pub const SOURCE: &str = "node:";
 /// Said to every listener when a node's events cannot be followed on
 /// without a hole: read the state again (`reason` in the payload).
-pub const RESYNC: &str = "node.resync";
+pub const RESYNC: &str = "helios.node.resync";
 /// The kinds the jobs relay carries, never relayed here.
-const JOBS: &str = "job.";
+const JOBS: &str = "helios.job.";
 /// The id of [`NodeEvents`]' listener on each relayable fact point.
 pub const LISTENER: &str = "helios.node-events";
 
@@ -561,7 +561,7 @@ mod tests {
         // The jobs relay's.
         assert!(
             events
-                .publish("box", &json!({ "seq": 9, "kind": "job.started" }))
+                .publish("box", &json!({ "seq": 9, "kind": "helios.job.started" }))
                 .is_none()
         );
         events.resync("box", "restarted");
@@ -583,11 +583,17 @@ mod tests {
 
     #[test]
     fn patterns_match_kinds() {
-        assert!(matches("*", "volume.mounted"));
-        assert!(matches("volume.*", "volume.mounted"));
-        assert!(matches("volume.", "volume.mounted"));
-        assert!(!matches("volume.*", "volumes.x"));
-        assert!(matches("settings.layerChanged", "settings.layerChanged"));
-        assert!(!matches("settings.layer", "settings.layerChanged"));
+        assert!(matches("*", "helios.volume.mounted"));
+        assert!(matches("helios.volume.*", "helios.volume.mounted"));
+        assert!(matches("helios.volume.", "helios.volume.mounted"));
+        assert!(!matches("helios.volume.*", "helios.volumes.x"));
+        assert!(matches(
+            "helios.settings.layerChanged",
+            "helios.settings.layerChanged"
+        ));
+        assert!(!matches(
+            "helios.settings.layer",
+            "helios.settings.layerChanged"
+        ));
     }
 }

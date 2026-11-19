@@ -174,7 +174,7 @@ fn a_node_read_over_different_regions_is_computed_once_over_their_union() {
     let out = e.render(&g, sum, "output", r).unwrap();
     let steps: Vec<(String, String)> = events
         .try_iter()
-        .filter(|ev| ev.kind == "engine.step_computed")
+        .filter(|ev| ev.kind == "helios.engine.step_computed")
         .map(|ev| {
             let region: Region = serde_json::from_value(ev.payload["region"].clone()).unwrap();
             (

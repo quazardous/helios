@@ -287,7 +287,7 @@ pub trait Load: Send {
     fn busy(&mut self) -> Option<String>;
 }
 
-/// The jobs running on a bus, from their `job.*` events: busy while one of
+/// The jobs running on a bus, from their `helios.job.*` events: busy while one of
 /// [`YIELDS_TO`]'s kinds runs (started after this was made).
 pub struct BusLoad {
     events: Receiver<Envelope>,

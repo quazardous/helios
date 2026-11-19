@@ -236,7 +236,7 @@ fn a_batch_job_is_cancelled_by_its_id() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|e| e["kind"].as_str().unwrap().starts_with("job."))
+        .filter(|e| e["kind"].as_str().unwrap().starts_with("helios.job."))
         .map(|e| {
             (
                 e["kind"].as_str().unwrap(),
@@ -247,9 +247,9 @@ fn a_batch_job_is_cancelled_by_its_id() {
     assert_eq!(
         jobs,
         [
-            ("job.started", id.as_str()),
-            ("job.cancelling", id.as_str()),
-            ("job.cancelled", id.as_str())
+            ("helios.job.started", id.as_str()),
+            ("helios.job.cancelling", id.as_str()),
+            ("helios.job.cancelled", id.as_str())
         ]
     );
     // A job the node does not run: refused, never out of scope.
@@ -273,7 +273,7 @@ fn a_node_s_jobs_are_pushed_and_described() {
 
     let node = Node::start("subscribe");
     let inspect = Address::Unix(node.dir.join("node.sock"));
-    let (ack, mut stream) = helios_inspect::subscribe(&inspect, "job.", None).unwrap();
+    let (ack, mut stream) = helios_inspect::subscribe(&inspect, "helios.job.", None).unwrap();
     assert_eq!(ack["ok"], true, "{ack}");
     let control =
         |r: &ControlRequest| helios_inspect::request(&node.dir.join("batch.sock"), r).unwrap();
@@ -285,7 +285,7 @@ fn a_node_s_jobs_are_pushed_and_described() {
     });
     let id = started["id"].as_str().unwrap().to_string();
     let first = next_job(&mut stream);
-    assert_eq!(first["kind"], "job.started", "{first}");
+    assert_eq!(first["kind"], "helios.job.started", "{first}");
     assert_eq!(first["payload"]["id"], id.as_str());
     assert_eq!(first["payload"]["total"], 3);
 
@@ -306,11 +306,11 @@ fn a_node_s_jobs_are_pushed_and_described() {
         cancelled: false,
     });
     let ended = next_job(&mut stream);
-    assert_eq!(ended["kind"], "job.finished", "{ended}");
+    assert_eq!(ended["kind"], "helios.job.finished", "{ended}");
     assert_eq!(ended["payload"]["id"], id.as_str());
 }
 
-/// The next `job.*` event of a subscription, heartbeats skipped.
+/// The next `helios.job.*` event of a subscription, heartbeats skipped.
 fn next_job(stream: &mut helios_inspect::Client) -> Value {
     loop {
         let line = stream.read().unwrap();
@@ -331,7 +331,7 @@ fn an_orphaned_batch_ends() {
     let node = Node::start("orphan");
     let inspect = Address::Unix(node.dir.join("node.sock"));
     let batch = Address::Unix(node.dir.join("batch.sock"));
-    let (_, mut stream) = helios_inspect::subscribe(&inspect, "job.", None).unwrap();
+    let (_, mut stream) = helios_inspect::subscribe(&inspect, "helios.job.", None).unwrap();
 
     // Held: the client's connection drops, the batch ends.
     let mut client = Client::connect(&batch).unwrap();
@@ -344,10 +344,10 @@ fn an_orphaned_batch_ends() {
         })
         .unwrap();
     let id = held["id"].as_str().unwrap().to_string();
-    assert_eq!(next_job(&mut stream)["kind"], "job.started");
+    assert_eq!(next_job(&mut stream)["kind"], "helios.job.started");
     drop(client);
     let ended = next_job(&mut stream);
-    assert_eq!(ended["kind"], "job.failed", "{ended}");
+    assert_eq!(ended["kind"], "helios.job.failed", "{ended}");
     assert_eq!(ended["payload"]["id"], id.as_str());
     assert!(
         ended["payload"]["error"]
@@ -369,9 +369,9 @@ fn an_orphaned_batch_ends() {
     )
     .unwrap();
     let id = asked["id"].as_str().unwrap().to_string();
-    assert_eq!(next_job(&mut stream)["kind"], "job.started");
+    assert_eq!(next_job(&mut stream)["kind"], "helios.job.started");
     let ended = next_job(&mut stream);
-    assert_eq!(ended["kind"], "job.failed", "{ended}");
+    assert_eq!(ended["kind"], "helios.job.failed", "{ended}");
     assert_eq!(ended["payload"]["id"], id.as_str());
     assert!(
         ended["payload"]["error"]

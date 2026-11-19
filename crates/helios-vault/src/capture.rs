@@ -64,7 +64,7 @@ pub const NAMES: [&str; 14] = [
 /// The library document the backfill's progress is kept in.
 /// Announced on the bus when captures were written (`count`: how many
 /// images): a library shown reads their rows again.
-pub const CAPTURES_SET: &str = "vault.captures_set";
+pub const CAPTURES_SET: &str = "helios.vault.captures_set";
 
 /// The library document the backfill's progress is kept in.
 pub const BACKFILL_NS: &str = "library/capture";

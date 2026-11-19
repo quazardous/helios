@@ -1848,7 +1848,7 @@ mod tests {
         }
         let saved: Vec<_> = heard
             .try_iter()
-            .filter(|e| e.kind == "edit.saved")
+            .filter(|e| e.kind == "helios.edit.saved")
             .collect();
         assert_eq!(saved.len(), 2);
         assert_eq!(saved[1].payload["in_progress"], true);

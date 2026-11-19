@@ -16,7 +16,7 @@
 //!   from another origin is refused. Otherwise the last writer wins; a
 //!   writer may ask to write only if nothing changed since it read
 //!   (`if_seq`).
-//! - Every change is announced on the bus (`param.changed`: path, old, new,
+//! - Every change is announced on the bus (`helios.values.param_changed`: path, old, new,
 //!   origin, sequence); a write equal to the value changes nothing and
 //!   announces nothing, so a change never loops back.
 //! - A change hook ([`Store::on_change`]): the host hears each change in
@@ -519,7 +519,7 @@ pub struct ParamChanged {
 }
 
 impl Event for ParamChanged {
-    const KIND: &'static str = "param.changed";
+    const KIND: &'static str = "helios.values.param_changed";
 }
 
 /// What changed in one go, as the change hook hears it

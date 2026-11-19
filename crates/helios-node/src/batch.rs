@@ -5,7 +5,7 @@
 //! `docs/workflow-level.md`), which the node works itself, an item at a
 //! time under a lease, retried when another attempt may pass, each output
 //! path decided once at submission. The batch then follows the run's rows
-//! at its export (`workflow.rows`, and the run read whole every two
+//! at its export (`helios.workflow.rows`, and the run read whole every two
 //! seconds) and prints an image's line when its export settles. Up to
 //! `jobs` exports of the run are out at once; the node's scheduler runs
 //! them side by side.
@@ -584,7 +584,7 @@ impl Follow {
 ///
 /// The images are submitted as one run of the workflow level
 /// (`workflow.submit`), which the node works with leases and retries; the
-/// batch then follows the run's rows (`workflow.rows` events, and the run
+/// batch then follows the run's rows (`helios.workflow.rows` events, and the run
 /// read whole every two seconds) and prints each image's line when its
 /// export settles. The same batch run again extends the same run: what it
 /// wrote is not written again (`again` starts a new run).
@@ -819,7 +819,7 @@ pub fn run(
         }
         // Bounded, so an interrupt is seen soon.
         let woken = node.inspect(&Request::WaitEvent {
-            kind: "workflow.rows".into(),
+            kind: "helios.workflow.rows".into(),
             since: cursor,
             timeout_ms: 250,
         });
@@ -832,7 +832,7 @@ pub fn run(
         for event in events["events"].as_array().into_iter().flatten() {
             cursor = cursor.max(event["seq"].as_u64().unwrap_or(cursor));
             let payload = &event["payload"];
-            if event["kind"] != "workflow.rows" || payload["run"] != run.as_str() {
+            if event["kind"] != "helios.workflow.rows" || payload["run"] != run.as_str() {
                 continue;
             }
             if payload["node"] != export.as_str() {

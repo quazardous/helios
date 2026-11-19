@@ -2,7 +2,7 @@
 //! egui-pop's jobs centre.
 //!
 //! - Helios's background work (an export, a batch, the GPU calibration,
-//!   an import) reports through [`helios_core::jobs`]: `job.*` events on
+//!   an import) reports through [`helios_core::jobs`]: `helios.job.*` events on
 //!   the shell's bus, which egui-pop reads as its journal. The shell's
 //!   [`Jobs`] is [`Shell::jobs`](crate::Shell::jobs); work started in the
 //!   desktop's process reports there.
@@ -10,7 +10,7 @@
 //!   jobs centre (the Jobs panel and the status bar's popover, a bar,
 //!   "n of m", the item, the time left, Cancel), the status bar's jobs
 //!   item, and each job's log console (`JobConsolesPlugin`, a terminal
-//!   over the job's `job.log` lines).
+//!   over the job's `helios.job.log` lines).
 //! - Cancel runs `job.cancel` in the desktop's process ([`plugin`]):
 //!   [`Jobs::cancel`], which stops the job the way it gave when it
 //!   started; a node's job (`node:<name>/<id>`) is cancelled on its node,
@@ -18,7 +18,7 @@
 //!   and resume run [`Jobs::pause`] for a job that offered it (the image
 //!   map's `map` job); retry is refused: no Helios job offers it yet.
 //! - A long job that ends while no Helios window has the focus says so
-//!   on the desktop ([`Ended`], from the journal's `job.*` events alone,
+//!   on the desktop ([`Ended`], from the journal's `helios.job.*` events alone,
 //!   then `platform::job_finished`), whoever
 //!   started it: a window, the node on its own (a backup, the health
 //!   check's schedule), an agent, or a followed node (its relayed jobs).
@@ -64,7 +64,7 @@ pub fn plugin(jobs: Jobs, relays: Relays) -> JobsPlugin {
 
 /// The jobs' ends seen in the journal, for the desktop notification.
 /// What each job is (its title, its kind, whether it is inside another)
-/// comes from its `job.started`, heard in the same journal: it needs no
+/// comes from its `helios.job.started`, heard in the same journal: it needs no
 /// jobs centre.
 #[derive(Debug, Default)]
 pub struct Ended {
@@ -75,7 +75,7 @@ pub struct Ended {
     running: BTreeMap<String, Started>,
 }
 
-/// What a job's `job.started` said of it.
+/// What a job's `helios.job.started` said of it.
 #[derive(Debug)]
 struct Started {
     title: String,
@@ -109,14 +109,14 @@ impl Ended {
         let mut ends = Vec::new();
         for e in app.events_since(self.seen) {
             self.seen = e.seq;
-            if let Some(end) = self.hear(&e.name, &e.data) {
+            if let Some(end) = self.hear(&crate::host::kind_of(&e.name), &e.data) {
                 ends.push(end);
             }
         }
         ends
     }
 
-    /// Folds one journal event: a job's end, said.
+    /// Folds one journal event, by its fact kind: a job's end, said.
     fn hear(&mut self, name: &str, data: &serde_json::Value) -> Option<JobEnd> {
         let id = data["id"].as_str().unwrap_or_default();
         let ok = match name {
@@ -171,7 +171,7 @@ impl Ended {
 /// The nodes the desktop follows, by name.
 pub type Relays = Rc<RefCell<BTreeMap<String, crate::relay::Relay>>>;
 
-/// The node jobs a relay forgot (`node.jobs_forgotten` in the journal),
+/// The node jobs a relay forgot (`helios.node.jobs_forgotten` in the journal),
 /// taken out of the jobs centre.
 #[derive(Debug, Default)]
 pub struct Forgotten {

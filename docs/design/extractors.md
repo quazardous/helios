@@ -137,9 +137,9 @@ beside the export runs, not yet behind a node verb:
   chooses the image sent (embedded preview, or a head version as
   `image_version`). A reply that never fits fails for good; another
   failure is retried twice (2 s, then 4 s).
-- **Facts on the bus:** `extract.run` (`submitted` with what leaves
+- **Facts on the bus:** `helios.extract.run` (`submitted` with what leaves
   the machine, `refused`, `progress` with the counts, `finished`,
-  `stopped`) and `extract.item` (one per concluded row: `done` with
+  `stopped`) and `helios.extract.item` (one per concluded row: `done` with
   `hit`, or `failed` with the error).
 - Cancel turns the rows not concluded into `cancelled`; what concluded
   stays. Removing the run drops its run-only results.

@@ -53,7 +53,7 @@ pub struct LayerChanged {
 }
 
 impl Event for LayerChanged {
-    const KIND: &'static str = "settings.layerChanged";
+    const KIND: &'static str = "helios.settings.layerChanged";
 }
 
 /// A client's way to the settings layers the node keeps.

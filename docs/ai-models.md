@@ -252,7 +252,7 @@ photographer, in steps it can inspect:
    ever shown, never run. Helios refuses to run any step when it runs as
    root itself.
 5. `helios_ai_local_pull`: downloads a model as a job, after checking the
-   disk has room for it, with `job.progress` events on the AI bus;
+   disk has room for it, with `helios.job.progress` events on the AI bus;
    `helios_ai_jobs_cancel` stops it.
 6. `helios_ai_local_bench`: runs every shipped prompt (or the ones named)
    on every local model able to, measures the latency, validates the
@@ -281,7 +281,7 @@ photographer, in steps it can inspect:
 - **Every call is logged and published as a job.** Each call runs as a
   scheduler job (`scheduler.job_*` events, limited per provider, see
   "Limits"), is
-  published as an `ai.call` event, and is appended to `calls.jsonl`: when,
+  published as an `helios.ai.call` event, and is appended to `calls.jsonl`: when,
   the provider, the model, the prompt and its content hash, local or remote,
   how many images and bytes left, how long, and the error if any. Never the
   images or the key.

@@ -27,7 +27,7 @@
 //! put on its raws at import (`library.import`'s `camera_look`).
 //!
 //! Each run goes through the node's client and is announced on the
-//! node's bus with who ran it (`control.command`). What the header asks
+//! node's bus with who ran it (`helios.control.command`). What the header asks
 //! (a profile chosen, a camera look fitted or the camera's default put
 //! on) runs off the UI thread when the user asks it; its result lands in
 //! the edit at a coming frame. So does what the Calibration window asks

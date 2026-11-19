@@ -351,7 +351,9 @@ fn run(store: &MemoryStore, case: &Case) -> Outcome {
                 .map(|e| e.kind)
                 // A job's own life (started, then failed) is not a change:
                 // an import refused for a missing path still ran as a job.
-                .filter(|kind| *kind != "control.command" && !kind.starts_with("job."))
+                .filter(|kind| {
+                    *kind != "helios.control.command" && !kind.starts_with("helios.job.")
+                })
                 .collect();
             if changed.is_empty() {
                 Outcome::Refused

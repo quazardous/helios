@@ -158,9 +158,9 @@ link is lost.
 
 ### Which bus
 
-The desktop has several buses today: the shell's (`gui.*`, `job.*`,
-`param.changed`, read back by egui-pop as its journal), the one given to
-`Persist` and the vault (`vault.*`, `edit.saved`), and the viewport
+The desktop has several buses today: the shell's (`helios.gui.*`, `helios.job.*`,
+`helios.values.param_changed`, read back by egui-pop as its journal), the one given to
+`Persist` and the vault (`helios.vault.*`, `helios.edit.saved`), and the viewport
 engine's. `context.*` goes on the **shell's bus**: it is the one egui-pop
 reads, the one the relay republishes node events onto, and the one an
 inspect endpoint on the desktop would serve. On a node there is one bus
@@ -251,7 +251,7 @@ K    : the gesture is a kernel-known guard (no interface hold needed)
 agent: helios_context_request {set_mode orientation=review, if_rev 8}
 K    : guard: gesture in progress → Refused {by: "user gesture", reason}
 K    : B: context.refused {request, by, rev 8}
-agent: helios_wait_event context.released, or param.changed with the
+agent: helios_wait_event context.released, or helios.values.param_changed with the
        gesture's end, then retries
 user : releases → gesture ends → K: context.released
 agent: retries {if_rev 8} → Applied {rev 9} → context.changed → UI
