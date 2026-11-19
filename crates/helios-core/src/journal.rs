@@ -542,7 +542,9 @@ impl Journal for BusJournal {
             (SOURCE, payload)
         };
         let mut inputs = shared.inputs.lock().unwrap_or_else(PoisonError::into_inner);
-        let seq = shared.bus.publish_value(source, cause, point.id, payload);
+        let seq = shared
+            .bus
+            .publish_journaled(source, cause, point.id, payload);
         if fact.is_none() {
             inputs.insert(seq, input);
         }

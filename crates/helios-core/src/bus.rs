@@ -289,6 +289,21 @@ impl Bus {
         self.publish_inner(source, cause, kind, payload, true)
     }
 
+    /// Publishes the event of a journaled point of the application's bus
+    /// ([`crate::journal::BusJournal`]): the bus declared that point,
+    /// with its type, before handing the event to its journal, so that
+    /// declaration stands for a FACTS table (a crate may declare a
+    /// journaled point on the contract alone, with no table here).
+    pub(crate) fn publish_journaled(
+        &self,
+        source: &str,
+        cause: Option<u64>,
+        kind: &'static str,
+        payload: serde_json::Value,
+    ) -> u64 {
+        self.publish_inner(source, cause, kind, payload, false)
+    }
+
     /// Publishes again an event another bus published (a node's, relayed
     /// to the desktop): its kind was checked against the tables of the
     /// process that published it, which this one may not link.
