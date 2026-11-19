@@ -119,6 +119,7 @@ pub(crate) mod init_wizard;
 mod library_imports;
 mod library_keywords;
 mod library_meta;
+mod library_storage;
 mod lifetime;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_merge::MergeLibrary as MergeImportLibrary;
@@ -1310,6 +1311,9 @@ impl Shell {
         shell.listen_import_ended();
         // What follows a backup's end, then the cards found safe.
         shell.listen_backup_points();
+        shell.listen_cards_safe();
+        // The Library's volumes and backup badges, from what storage read.
+        shell.listen_storage_read();
         // What follows the Library read again, once shown.
         shell.listen_library_filled();
         // The Library's import sessions, read again once an import is
@@ -6628,6 +6632,7 @@ impl Shell {
         LibraryParts {
             library: self.focus.library.clone(),
             storage: self.core.storage.read.clone(),
+            bus: Arc::downgrade(&self.core.app.handle().bus()),
             stack_review: self.core.stack_review.clone(),
             import_source: self.focus.import_source.clone(),
         }
@@ -8532,6 +8537,8 @@ fn suggests_stacks(source: Option<&helios_template::ImportDesc>) -> bool {
 pub(crate) struct LibraryParts {
     library: Rc<RefCell<crate::library::Library>>,
     storage: Rc<RefCell<storage::StorageRead>>,
+    /// The bus what storage reads passes through (`storage.read`).
+    bus: std::sync::Weak<dyn egui_pop::api::bus::bus_contract::Bus>,
     stack_review: Rc<RefCell<crate::stack_review::Review>>,
     import_source: Rc<RefCell<Option<helios_template::ImportDesc>>>,
 }
@@ -8603,7 +8610,9 @@ impl LibraryParts {
     /// `library.volumes`: the volumes read again (the Storage page, the
     /// Library's volume names and badges).
     pub(crate) fn refresh_volumes(&self) {
-        storage::refresh_volumes(&self.storage, &self.library);
+        if let Some(bus) = self.bus.upgrade() {
+            storage::refresh_volumes(&self.storage, &*bus);
+        }
     }
 
     /// `library.albums`: the albums and the quick collection read again.

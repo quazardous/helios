@@ -1225,15 +1225,17 @@ fn a_refresh_never_blanks_the_page() {
     });
 }
 
-/// The listeners of `backup.ended` and `card.safe` as the desktop
-/// registers them, in the order they run: a reviewed dump
+/// The listeners of `backup.ended`, `card.safe` and `storage.read` as
+/// the desktop registers them, in the order they run: a reviewed dump
 /// (`tests/bus/backups.txt`). The badges, then the cards checked; the
-/// toast, then the Storage page and the health check.
+/// toast, then the Storage page and the health check; the Library
+/// showing what storage read.
 #[test]
 fn the_backup_points_listeners_run_in_a_declared_order() {
     let shell = Shell::new(helios_panels(), None);
+    let bus = shell.app().handle().bus();
     assert_eq!(
-        helios_gui::backup_end::order(&*shell.app().handle().bus()),
+        helios_gui::backup_end::order(&*bus) + &helios_gui::storage_read::order(&*bus),
         include_str!("../bus/backups.txt")
     );
 }

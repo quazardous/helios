@@ -488,6 +488,14 @@ that became safe through `card.safe`: `cards.toast` (toast, Log),
 pass. Both are said on the journal with the listeners that ran (`ran`).
 The order is a reviewed dump (`crates/helios-gui/tests/bus/backups.txt`).
 
+Since 2026-11-19 (storage proof slice, step 2): `health.cards` is the
+health check's own listener (owner `helios.health`), registered by the
+health check, not by storage. Storage no longer writes into the Library
+either: what it read (the volumes, each photo's backups, the strategy's
+rule) passes through `helios.storage.read` (`helios_gui::storage_read`),
+and the Library's listener `helios.library.storage` names the offline
+photos' volumes and sets the badges and `backup:` filters. Same dump.
+
 ### Slice 2e: an import account signed out or removed
 
 Signing an account out wrote the account book and the keyring directly
