@@ -798,9 +798,17 @@ impl LibraryHistory {
                 };
                 (inner.apply.clone(), f.entries.clone(), f.redo)
             };
+            // A walk that panics is refused like one that fails: the
+            // thread goes on to its end, so `working` is cleared and
+            // `join` (the shell's drop) never waits on a dead thread.
             let result = apply.map_or_else(
                 || Err("no library to undo in".to_string()),
-                |a| apply_walk(&a, &entries, redo),
+                |a| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        apply_walk(&a, &entries, redo)
+                    }))
+                    .unwrap_or_else(|_| Err("the walk failed unexpectedly".to_string()))
+                },
             );
             let mut inner = self.lock();
             let flight = inner.flights.pop_front().expect("in flight");
@@ -1085,6 +1093,24 @@ mod tests {
             h.undo_later(&Request::new(LIBRARY), &agent),
             Answer::Done(Err(_))
         ));
+    }
+
+    /// A walk whose apply panics is refused and put back: the thread
+    /// ends, so waiting for it and joining it return.
+    #[test]
+    fn a_walk_that_panics_is_refused_and_its_thread_ends() {
+        let h = LibraryHistory::default();
+        h.set_apply(Arc::new(|_, _| panic!("the writer's lock is poisoned")));
+        h.record(import_label(1), changes_of(1), 1.0);
+        let Answer::Done(Ok(_)) = h.undo_later(&Request::new(LIBRARY), &PopOrigin::User) else {
+            panic!("undone");
+        };
+        assert!(h.wait_idle(Duration::from_secs(10)), "the thread ended");
+        let line = h.line();
+        assert_eq!((line.undo.len(), line.redo.len()), (1, 0), "{line:?}");
+        assert!(!line.undo[0].in_progress);
+        assert_eq!(h.take_refusals(), ["the walk failed unexpectedly"]);
+        h.join();
     }
 
     #[test]

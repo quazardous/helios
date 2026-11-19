@@ -18,8 +18,8 @@
 //! carry photos out on a drag; a narrow bar keeps Compare on one line.
 //!
 //! #5345: the grid's thumbnails keep their size as the view widens, which
-//! shows more columns, as catalogue apps do; the workspace keeps the size,
-//! an older count per row turned into one once.
+//! shows more columns, as catalogue apps do; the workspace keeps the size
+//! the user zooms to, an older count per row turned into one as it shows.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -265,7 +265,7 @@ fn the_grid_keeps_its_thumbnails_size_and_adds_columns_as_the_view_widens() {
 }
 
 #[test]
-fn an_older_count_per_row_becomes_the_size_it_gave_once() {
+fn an_older_count_per_row_becomes_the_size_it_gave_without_an_edit() {
     const N: usize = 60;
     let lib = library_of(N);
     lib.borrow_mut().set_results(&ResultsDesc {
@@ -282,10 +282,11 @@ fn an_older_count_per_row_becomes_the_size_it_gave_once() {
         results.size.is_some() && results.per_row.is_none(),
         "turned into a size: {results:?}"
     );
-    assert_eq!(
-        lib.borrow_mut().take_results_changes(),
-        [(MAIN_GALLERY.to_string(), results)],
-        "and the host asked to keep it"
+    // The same thumbnails show: no zoom of the user's, nothing for the
+    // host to keep (kept, it would be an undo step nobody made, #5357).
+    assert!(
+        lib.borrow_mut().take_results_changes().is_empty(),
+        "the host not asked to keep it"
     );
     // From then on, a wider view shows more of them.
     h.set_size(egui::vec2(960.0, 640.0));
