@@ -10,7 +10,8 @@ inputs:
   base:
     description: >
       The ref a pull request merges into: code changed since it comes with
-      a changelog fragment. Empty on a push.
+      a changelog fragment, and the guards with a backlog report only what
+      the change adds since its merge base with it. Empty on a push.
     default: ""
 runs:
   using: composite
@@ -27,9 +28,19 @@ runs:
     # rustfmt, clippy, deps-worlds, cargo-deny, cargo-machete, taplo, typos,
     # shellcheck, ruff. The steps after it run even when it fails, so one
     # run names everything there is to fix.
+    # A pull request (a base given): the guards with a backlog (raw-egui,
+    # bus) fail only on what it adds since its merge base; a push to next
+    # runs them in full.
     - name: cargo xtask lint
       shell: bash
-      run: cargo xtask lint --require-all
+      env:
+        BASE: ${{ inputs.base }}
+      run: |
+        if [ -n "$BASE" ]; then
+          cargo xtask lint --require-all --base "$BASE"
+        else
+          cargo xtask lint --require-all
+        fi
     - name: documentation without a warning
       if: ${{ !cancelled() }}
       shell: bash

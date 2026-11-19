@@ -100,7 +100,16 @@ A pull request is merged only when its tests passed on the box and its
    check ends), or a single `gh pr checks <n>`; that is all the CI an
    author watches. Red: fix it on the branch, as for a box job. A pull
    request may not add raw egui widgets to helios-gui (`cargo xtask
-   raw-egui`; after removing some, `--update` lowers the baseline). The
+   raw-egui`; after removing some, `--update` lowers the baseline).
+   On a pull request the guards with a backlog (`raw-egui`, `bus`) run
+   in their delta mode (`--base origin/next`): they check the merge base
+   too and fail only on what the pull request adds, each finding known
+   by its file and code, not its line, and print what went down as
+   progress ("raw egui calls: 300 → 297 (−3)"); a push to `next` runs
+   them in full. Run it locally with `cargo xtask raw-egui --check
+   --base origin/next` or `cargo xtask bus --check --base origin/next`.
+   The idea comes from darktable's `dt-lockcheck` diff mode
+   ([darktable#23056](https://github.com/darktable-org/darktable/pull/23056)). The
    box's `lint` job runs a part of it before a push (clippy,
    `cargo xtask check`, `cargo xtask i18n check`); the linters, the
    documentation and the generated files are checked by `pr-lint` alone. Then
