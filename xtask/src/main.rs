@@ -43,6 +43,8 @@
 //! - `ci-history ingest | rebuild | report`: the per-test history of CI
 //!   runs on the `ci-history` branch, and what it says: the slowest, the
 //!   flakiest, the tests never failed (see `ci_history.rs`, `ci_broker/`).
+//! - `ci-broker select [--base REF] [--explain TEST]`: the always-run set
+//!   of a change, as a nextest filter (see `ci_select.rs`).
 //! - `check-commits [--full] [--first-parent] [RANGE]`: every commit of a series, but its
 //!   head, builds, passes clippy, the tests it touches (every fast test
 //!   with `--full`) and `check` (see `commits.rs`).
@@ -85,6 +87,7 @@ mod bench;
 mod bus;
 mod ci_broker;
 mod ci_history;
+mod ci_select;
 mod commits;
 mod delta;
 mod deps_worlds;
@@ -767,7 +770,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-broker select [--base REF] [--history DIR] [--runs N] [--explain TEST] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -888,6 +891,10 @@ fn main() -> ExitCode {
         }),
         ["test-times", rest @ ..] => test_times::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", test_times::USAGE);
+            ExitCode::from(2)
+        }),
+        ["ci-broker", rest @ ..] => ci_select::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", ci_select::USAGE);
             ExitCode::from(2)
         }),
         ["ci-history", rest @ ..] => ci_history::run(&root, rest).unwrap_or_else(|| {

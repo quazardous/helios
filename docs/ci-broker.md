@@ -13,8 +13,8 @@ It is built in steps:
 | Step | What | State |
 |---|---|---|
 | B1 | The per-test history, written nightly to the `ci-history` branch | done |
-| B2 | The always-run set: file-level `affected`, new or changed tests, recent failures, a smoke set | next |
-| B3 | A shadow week: the broker prints its choice and skips nothing, to measure what it would have missed | |
+| B2 | The always-run set: file-level `affected`, new or changed tests, recent failures, a smoke set | done |
+| B3 | A shadow week: the broker prints its choice and skips nothing, to measure what it would have missed | next |
 | B4 | Confidence rhythm, seeded per commit | |
 | B5 | A time budget per pull request | |
 | B6 | Full runs nightly, at release and on demand; bisect-back tickets | |
@@ -142,6 +142,71 @@ cargo xtask ci-history report --history DIR
   by default), longest record first.
 
 These lists are the input for B2's always-run set and B3's shadow week.
+
+## The always-run set
+
+`cargo xtask ci-broker select` prints the tests a change always runs, as
+one nextest filter expression on stdout, and per source what it chose and
+why on stderr. It changes no CI yet: B3 runs it beside the full suite.
+
+```sh
+cargo xtask ci-broker select [--base origin/next] [--history DIR] [--runs 20]
+cargo nextest run --workspace -E "$(cargo xtask ci-broker select)"
+cargo xtask ci-broker select --explain 'helios-gui::it import::a_card_imports'
+```
+
+The set is the union of four sources:
+
+1. **affected**, at file level. The changed files are those `cargo xtask
+   affected` reads: commits since the merge base with `--base`, the
+   working tree and untracked files.
+   - A path outside a crate follows `affected`'s rules. `Cargo.toml`,
+     `Cargo.lock`, the toolchain, xtask, `.github/`, `.config/` and any
+     path no rule knows select **every test**; data a crate reads selects
+     that crate; docs select nothing.
+   - A crate's integration test file, `tests/<target>.rs`, selects that
+     test binary alone. Other files in `tests/` (data, shared helpers)
+     select the crate.
+   - Any other file of a crate (sources, manifest, `build.rs`) selects the
+     crate and every crate depending on it, as `affected` does. A change
+     in a crate the others share, such as helios-core, so selects nearly
+     everything.
+   - **helios-gui** is finer. Its integration tests are the modules of one
+     binary, `it` (830 tests). A changed source file is mapped to the `it`
+     modules that exercise it:
+     - by name: `src/import_scan.rs` selects `import` and `import_scan`;
+       `src/library/…` selects `library_*`. A file under `src/shell/` is
+       mapped by its own name, since the shell reaches everything;
+     - by `use` path: a module whose source names `helios_gui::import_scan`
+       (or `helios_gui::shell::import_window` for a shell file);
+     - by the checked-in override table, `OVERRIDES` in
+       `xtask/src/ci_select.rs`, and `affected`'s `GUI_SUITES`.
+
+     When no module is found, or for `lib.rs` and `main.rs`, the whole
+     `it` binary runs. helios-gui's other tests (unit tests) and the crates
+     depending on it run too. A changed `it` module selects itself and the
+     modules naming it (`crate::<module>`: shared helpers).
+2. **changed tests**: the `#[test]` functions whose lines the diff adds or
+   edits (`git diff -U0`), all of them for a new file. Mostly inside
+   source 1 already; listed so `--explain` says it.
+3. **recent failures**: the tests whose last failure or last flake is
+   among the last `--runs` runs (20) of the history's `summary.json`, read
+   from `origin/ci-history` or `--history DIR`. With no history yet the
+   source is skipped and the summary says so. A history that doesn't read
+   runs every test.
+4. **smoke**: `ci/smoke.txt`, about twenty fast, broad tests: `affected`'s
+   critical set (a render, an export, round trips, survival) and a short
+   journey through the desktop (first start, import, library, edit,
+   settings, quit). A unit test checks each entry still exists.
+
+The map is coarse on purpose. It may select too much; it should not
+select too little, and B3 measures that: each test the shadow week sees
+fail outside the set becomes an override line, or a reason to widen the
+map. The full suite still runs on `next` after every merge.
+
+The policy (`xtask/src/ci_broker/select.rs`) knows nothing of Helios:
+scopes, the filter, `--explain`, the history and smoke sources. The
+Helios map lives in `xtask/src/ci_select.rs`.
 
 ## The nightly job
 
