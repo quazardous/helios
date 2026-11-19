@@ -1395,7 +1395,7 @@ when a command whose title names a `path`, `folder`, `source`,
 
 **Destructive commands and argument schemas (2026-11-19).** The commands
 that delete or forget data (photos to the trash, albums, keywords,
-versions, nodes), overwrite files (export), sign an account out or reset
+versions, nodes), overwrite marks or settings, sign an account out or reset
 more than one value are declared destructive to egui-pop (the list is
 `destructive::DESTRUCTIVE` in helios-gui): an agent's call opens a
 confirmation naming the agent and its arguments, and runs only once the

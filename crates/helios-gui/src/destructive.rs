@@ -34,8 +34,7 @@ pub const DESTRUCTIVE: &[&str] = &[
     "network.disconnect",
     "network.remove",
     "subworkspace.delete",
-    // Overwrites: files on export (`clash: overwrite`), marks, settings.
-    "library.export",
+    // Overwrites: marks, settings.
     "library.marks.paste",
     "profile.import.apply",
     // Signs out or disconnects an account, its tokens forgotten.
@@ -128,6 +127,11 @@ mod tests {
         (
             "macro.fold",
             "folds a macro back; a change made while open is asked first",
+        ),
+        (
+            "library.export",
+            "writes new files; it overwrites only with `clash: overwrite`, which needs \
+             a per-call flag (egui-pop flags a command whole)",
         ),
         (
             "mask.point.remove",
