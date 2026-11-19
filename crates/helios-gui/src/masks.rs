@@ -816,7 +816,51 @@ pub enum Command {
     Paste { clip: serde_json::Value },
 }
 
+/// A handle of the selected shape, as an edit area of the image
+/// (`docs/design/panel-kinds.md`): where it is in image pixels, its
+/// area id, and the parameter its drag writes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HandleArea {
+    pub at: [f64; 2],
+    /// `mask.handle.<node>.<handle>`.
+    pub id: String,
+    /// The parameter it writes (`node/<node>/<param>`): a case's handle
+    /// its first parameter (the one it adjusts), a path's point the
+    /// path's points.
+    pub path: String,
+}
+
 impl Masks {
+    /// The handles of the overlays drawn last frame, each an edit area
+    /// of the image.
+    pub fn handle_areas(&self) -> Vec<HandleArea> {
+        let mut out = Vec::new();
+        for o in &self.overlays {
+            let Some(m) = self.member(&o.id) else {
+                continue;
+            };
+            let case = gizmo::of_module(&m.module);
+            for k in &o.handles {
+                let Some(h) = m.outline.handles.get(k.index as usize) else {
+                    continue;
+                };
+                let param = match &case {
+                    Some(g) => match g.handle(&h.name).and_then(|s| s.writes.first()) {
+                        Some(p) => (*p).to_string(),
+                        None => continue,
+                    },
+                    None => "points".to_string(),
+                };
+                out.push(HandleArea {
+                    at: k.at,
+                    id: format!("mask.handle.{}.{}", o.id, h.name),
+                    path: node_path(&o.id, &param),
+                });
+            }
+        }
+        out
+    }
+
     /// The overlays drawn last frame (the selected shape's).
     pub fn overlays(&self) -> &[Overlay] {
         &self.overlays

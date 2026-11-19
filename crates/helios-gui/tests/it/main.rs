@@ -14,6 +14,7 @@
 
 mod accounts;
 mod activity_focus;
+mod area_kinds;
 mod background_jobs;
 mod batch_undo;
 mod bus_names;
