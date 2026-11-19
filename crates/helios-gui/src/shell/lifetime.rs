@@ -27,6 +27,11 @@
 //! or closes the vault. The node also runs the work that outlives a
 //! window (the exports): the question before quitting counts its jobs,
 //! and a confirmed quit asks the node to cancel them.
+//!
+//! Whether a quit may go is one request on the bus,
+//! [`crate::app_quit::AppQuit`] (`helios.app.quit`), asked by the main
+//! window's `window.close` before-hook: its listeners, the running jobs'
+//! question among them, refuse in order, and a refusal vetoes the close.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -122,6 +127,11 @@ pub(crate) struct Quit {
     quitting: Cell<bool>,
     /// The quit cancels the running jobs (asked, or nothing to ask).
     cancel_jobs: Cell<bool>,
+    /// The question about the running jobs was answered Quit: the next
+    /// quit's request does not ask it again.
+    jobs_confirmed: Cell<bool>,
+    /// What the last quit's request did.
+    report: RefCell<Option<crate::app_quit::QuitReport>>,
     /// Confirmations are answered yes by policy: nothing is asked.
     assume_yes: Cell<bool>,
     /// The local node, asked to quit when Helios quits.
@@ -147,6 +157,8 @@ impl Quit {
             last_window: Cell::new(LastWindow::platform()),
             quitting: Cell::new(false),
             cancel_jobs: Cell::new(false),
+            jobs_confirmed: Cell::new(false),
+            report: RefCell::new(None),
             assume_yes: Cell::new(false),
             node: RefCell::new(None),
             jobs,
@@ -186,9 +198,13 @@ impl Quit {
     }
 
     /// The before-hook of `window.close`: the main window's close that
-    /// would end Helios while jobs run is vetoed, and the question asked;
-    /// its Quit ([`QUIT_CONFIRMED`]) asks the close again, which goes.
+    /// would end Helios asks the quit's request
+    /// ([`crate::app_quit::AppQuit`]); a listener refusing vetoes the
+    /// close. Refused by the running jobs' listener, the question is
+    /// asked; its Quit ([`QUIT_CONFIRMED`]) asks the close again, which
+    /// goes.
     fn before_close(&self, app: &AppHandle, args: &Value) -> Before {
+        use crate::app_quit::{self, QuitAsk, QuitWhy};
         let Ok(req) = serde_json::from_value::<WindowRequest>(args.clone()) else {
             return Before::Go;
         };
@@ -196,11 +212,29 @@ impl Quit {
             return Before::Go;
         }
         let running = self.running_jobs();
-        if running == 0 || self.assume_yes.get() {
+        let ask = QuitAsk {
+            why: if req.reason == Reason::Quit {
+                QuitWhy::Quit
+            } else {
+                QuitWhy::LastWindow
+            },
+            running_jobs: running,
+            jobs_confirmed: self.jobs_confirmed.get() || self.assume_yes.get(),
+        };
+        let report = app_quit::ask(&*app.bus(), ask);
+        let refused = report.refused.clone();
+        *self.report.borrow_mut() = Some(report);
+        let Some((listener, reason)) = refused else {
             return Before::Go;
+        };
+        if listener == app_quit::JOBS {
+            self.ask(app, running);
+        } else {
+            // Kept open for another reason: the jobs are asked about
+            // again at the next quit.
+            self.jobs_confirmed.set(false);
         }
-        self.ask(app, running);
-        Before::Veto(format!("{running} jobs are running: asked first"))
+        Before::Veto(format!("{listener}: {reason}"))
     }
 
     /// The after-hook of `window.close`: the main window closed, Helios
@@ -277,6 +311,10 @@ impl Plugin for QuitHooks {
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
         let before = self.0.clone();
         let after = self.0.clone();
+        // Helios's own listeners on the quit's request.
+        if let Err(e) = crate::app_quit::listen(&*ctx.app().bus()) {
+            log::error!(target: "helios", "{}: {e}", crate::app_quit::QUIT);
+        }
         ctx.before(STEP_WINDOW_CLOSE, move |app, args| {
             before.before_close(app, args)
         })
@@ -325,12 +363,20 @@ impl Shell {
         self.core.app.handle().quit();
     }
 
-    /// Quits, whatever runs: the running jobs cancelled. egui-pop closes
-    /// the main window, and every other window with it, none moving into
-    /// the main one.
+    /// Quits, cancelling what runs (the question answered Quit): the
+    /// quit's request is asked again, its running jobs' listener lets it
+    /// go, and egui-pop closes the main window, every other window with
+    /// it, none moving into the main one. Another listener may still
+    /// refuse (an edit not saved).
     pub(super) fn quit_confirmed(&mut self) {
-        self.lifetime.quit.quitting(true);
+        self.lifetime.quit.jobs_confirmed.set(true);
         self.core.app.handle().quit();
+    }
+
+    /// What the last quit's request did (`helios.app.quit`): each
+    /// listener's line, the failures, the refusal.
+    pub fn quit_report(&self) -> Option<crate::app_quit::QuitReport> {
+        self.lifetime.quit.report.borrow().clone()
     }
 
     /// Whether Helios is quitting: the main window's close ends it.

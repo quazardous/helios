@@ -41,7 +41,7 @@
 //! which then ends the process.
 
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 pub use helios_node_core::quit::{MarkOnDrop, TRACE_ENV, mark, requested, started};
@@ -123,30 +123,43 @@ pub const GRACE_AFTER_SPLASH: Duration = Duration::from_millis(50);
 /// The work left for after the window: run once, by whoever comes first
 /// (the host as eframe returns, or the watch past [`GRACE`]).
 #[derive(Clone)]
-pub struct AfterClose(Arc<Mutex<Option<Work>>>);
+pub struct AfterClose(Arc<(Mutex<Option<Work>>, Condvar)>);
 
 /// A piece of work run once, on any thread.
 type Work = Box<dyn FnOnce() + Send>;
 
 impl AfterClose {
     pub fn new(work: impl FnOnce() + Send + 'static) -> Self {
-        AfterClose(Arc::new(Mutex::new(Some(Box::new(work)))))
+        AfterClose(Arc::new((Mutex::new(Some(Box::new(work))), Condvar::new())))
     }
 
-    /// Runs the work unless it ran already: whether it ran now.
+    /// Runs the work unless it ran already: whether it ran now. The
+    /// watch is woken: it has nothing left to wait for.
     pub fn run(&self) -> bool {
-        let work = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let (work, taken) = &*self.0;
+        let work = work.lock().unwrap_or_else(PoisonError::into_inner).take();
+        taken.notify_all();
         work.map(|w| w()).is_some()
     }
 
     /// Starts the watch: past `grace`, the work not run yet runs on the
-    /// watch's thread, then `end` (the process ends there).
+    /// watch's thread, then `end` (the process ends there). The watch
+    /// waits on the work being taken, not on a clock: taken by the host
+    /// first, it ends at once and ends nothing.
     pub fn watch(&self, grace: Duration, end: impl FnOnce() + Send + 'static) {
         let me = self.clone();
         let started = std::thread::Builder::new()
             .name("helios-quit-watch".into())
             .spawn(move || {
-                std::thread::sleep(grace);
+                {
+                    let (work, taken) = &*me.0;
+                    let left = work.lock().unwrap_or_else(PoisonError::into_inner);
+                    drop(
+                        taken
+                            .wait_timeout_while(left, grace, |w| w.is_some())
+                            .unwrap_or_else(PoisonError::into_inner),
+                    );
+                }
                 if me.run() {
                     end();
                 }

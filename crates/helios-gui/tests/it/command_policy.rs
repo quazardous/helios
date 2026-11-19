@@ -116,10 +116,17 @@ fn requests(source: &str) -> Vec<String> {
     found
 }
 
+/// The request points that are fail-open on purpose, each with its
+/// reason. The list only shrinks.
+const FAIL_OPEN: &[(&str, &str)] = &[(
+    "AppQuit",
+    "quitting must stay possible: a listener that fails or hangs is reported and the quit goes on; a listener keeping Helios open refuses",
+)];
+
 /// Every request point Helios declares is fail-closed
 /// (`PointDecl::fail_closed`): a listener that fails, panics or misses
 /// its deadline refuses the request instead of being skipped, so a
-/// refusal can never be lost.
+/// refusal can never be lost. The exceptions are listed ([`FAIL_OPEN`]).
 #[test]
 fn every_helios_request_point_is_declared_fail_closed() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -139,7 +146,16 @@ fn every_helios_request_point_is_declared_fail_closed() {
         );
     }
     let mut open = Vec::new();
-    for point in &points {
+    for (point, _why) in FAIL_OPEN {
+        assert!(
+            points.iter().any(|p| p.as_str() == *point),
+            "{point}: listed fail-open but no longer a request point"
+        );
+    }
+    for point in points
+        .iter()
+        .filter(|p| !FAIL_OPEN.iter().any(|(open, _)| *open == p.as_str()))
+    {
         let decl = format!("PointDecl::of::<{point}>(");
         let n = decl.len();
         let declared: Vec<&str> = texts
