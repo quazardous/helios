@@ -342,7 +342,7 @@ impl Summary {
         for t in &run.tests {
             let s = self.tests.entry(t.id.clone()).or_default();
             if s.first_seen.is_empty() {
-                s.first_seen = run.date.clone();
+                s.first_seen.clone_from(&run.date);
             }
             s.last_seen = seq;
             if t.outcome == Outcome::Skip {
