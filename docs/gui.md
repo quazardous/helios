@@ -1381,7 +1381,9 @@ command `about.read` is the tool `about_read`), plus `snapshot` and
 `wait`.
 
 **Writing agents and scenarios (2026-11-08).** `HELIOS_AGENT_WRITE=1`
-makes the bridge writable: the agent may then import, open images,
+makes the bridge writable, and lets the unpaired clients scenarios use
+write through it (egui-pop-agent 0.10 holds them read-only otherwise): the
+agent may then import, open images,
 change parameters and undo, as a person would. It is meant for runs on a
 throwaway library, never set by Helios itself. Quick open's
 `workbench.quickOpen.go` also takes `file:<path>`, so an agent opens an

@@ -288,8 +288,9 @@ fn a_detached_panel_follows_its_own_screen_and_the_main_window_its_own() {
     // handles at 1.5 and 3 points whatever the scale, blurred at 1.25 and
     // 1.5 (and the handles' 1.5 at 1); they are left out here until it
     // snaps them.
-    // upstream: egui_stack 0.28 draws the icons of a native float's tab
-    // bar buttons (the move handle's arrows) 1 point wide whatever the
+    // upstream: egui_stack (0.28, still 0.29) draws the icons of a native
+    // float's tab bar buttons (the move handle's arrows, the Close button)
+    // 1 point wide whatever the
     // scale, blurred at 1.25 and 1.5; its tab bar (the window's top) is
     // left out here until an egui_stack with whole-pixel icons reaches
     // egui-pop.

@@ -210,7 +210,7 @@ impl Duplicates {
         let mut clear = false;
         ui.horizontal(|ui| {
             if waiting > 0 {
-                ui.strong(text(
+                ui.strong_text(text(
                     Message::new(
                         "gui-duplicates-waiting",
                         "{ $count } duplicates wait for an answer",

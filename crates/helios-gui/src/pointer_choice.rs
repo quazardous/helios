@@ -19,6 +19,7 @@
 use std::sync::PoisonError;
 
 use egui_pop::api::AppHandle;
+use egui_pop::core::ui::UiPop as _;
 use egui_pop::model::commands::Origin;
 use egui_pop::model::ids::OwnerId;
 use egui_pop::model::values::{Change, Descriptor, Set, Value};
@@ -127,7 +128,7 @@ pub fn body(ui: &mut egui::Ui, app: &AppHandle) {
     let mut closed = false;
     ui.set_max_width(440.0);
     ui.horizontal(|ui| {
-        ui.strong(&title);
+        ui.strong_text(&title);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let r = ui.small_button("×").on_hover_text(&close);
             egui_pop::core::a11y::name(&r, egui::Role::Button, &close);

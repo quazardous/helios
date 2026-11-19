@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+use egui_pop::core::ui::UiPop as _;
 use helios_core::Message;
 use helios_core::config::Level;
 
@@ -213,7 +214,7 @@ impl ImportWindow {
             .and_then(|b| helios_plugin::source::plugin_of(b, &detail.connector))
             .unwrap_or_else(|| detail.connector.clone());
         let t = |m: Message| texts(m);
-        ui.strong(t(Message::new("gui-editor-params", "Parameters")));
+        ui.strong_text(t(Message::new("gui-editor-params", "Parameters")));
         let fit = contract_ui(ui, &t, &owner, Level::Source, &contract, &mut values);
         let fits = fit.is_ok();
         refused_ui(ui, &t, fit);

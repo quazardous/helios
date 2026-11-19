@@ -627,8 +627,14 @@ trait DebugBridgeIf {
 
 impl DebugBridgeIf for AppBuilder {
     fn debug_bridge_if(self, on: bool) -> Self {
+        use egui_pop_agent::{AgentGrants, AgentGrantsExt as _};
         if on {
+            // Since egui-pop-agent 0.10 an unpaired client is read-only
+            // even with the bridge On. Scenario runs (`examples/scenarios.rs`,
+            // `egui_pop_test::scenario::live`) do not pair, so they are let
+            // write here, on the throwaway library this switch is for.
             self.debug_bridge(egui_pop::core::debug::BridgeMode::On)
+                .agent_grants(AgentGrants::new().allow_unpaired_writes())
         } else {
             self
         }
