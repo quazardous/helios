@@ -159,8 +159,9 @@ impl Scope {
         match (self, other) {
             (Scope::All, _) => true,
             (_, Scope::All) => false,
-            (Scope::Package(p), Scope::PackageBut { package, .. }) => p == package,
-            (Scope::Package(p), Scope::Fn { package, .. }) => p == package,
+            (Scope::Package(p), Scope::PackageBut { package, .. } | Scope::Fn { package, .. }) => {
+                p == package
+            }
             (Scope::Package(p), other) => other.binary().is_some_and(|b| package_of(b) == p),
             (Scope::PackageBut { package, binary }, other) => other
                 .binary()
@@ -592,8 +593,10 @@ mod tests {
                 date: "2026-11-19T09:00:00Z".into(),
             })
         };
-        let mut summary = Summary::default();
-        summary.ingested = (1..=30).map(|i| i.to_string()).collect();
+        let mut summary = Summary {
+            ingested: (1..=30).map(|i| i.to_string()).collect(),
+            ..Summary::default()
+        };
         summary.tests.insert(
             "helios-gui::it a::flaky".into(),
             TestStats {

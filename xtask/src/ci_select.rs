@@ -120,6 +120,10 @@ fn gui_unit(path: &str) -> Option<(String, String)> {
     Some((top.clone(), top))
 }
 
+fn is_rust(path: &str) -> bool {
+    Path::new(path).extension().is_some_and(|e| e == "rs")
+}
+
 fn idents(s: &str) -> impl Iterator<Item = &str> {
     s.split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .filter(|w| !w.is_empty())
@@ -221,7 +225,7 @@ fn affected_file(input: &Input, path: &str, s: &mut Selection) {
     if let Some(test) = rest.strip_prefix("tests/") {
         let parts: Vec<&str> = test.split('/').collect();
         match parts.as_slice() {
-            [file] if file.ends_with(".rs") => {
+            [file] if is_rust(file) => {
                 let target = file.trim_end_matches(".rs");
                 s.add(
                     src,
@@ -305,7 +309,7 @@ fn affected_file(input: &Input, path: &str, s: &mut Selection) {
 
 /// Source 2, for one file.
 fn changed_tests(input: &Input, change: &Change, s: &mut Selection) {
-    let (Some(content), true) = (&change.content, change.path.ends_with(".rs")) else {
+    let (Some(content), true) = (&change.content, is_rust(&change.path)) else {
         return;
     };
     let Some(owner) = input.graph.owner(&change.path) else {
@@ -472,26 +476,22 @@ pub fn gather(
 }
 
 fn read_history(root: &Path, dir: Option<&Path>) -> History {
-    let text = match dir {
-        Some(dir) => match std::fs::read_to_string(dir.join("summary.json")) {
+    let text = if let Some(dir) = dir {
+        match std::fs::read_to_string(dir.join("summary.json")) {
             Ok(t) => t,
             Err(e) => return History::Missing(format!("{}/summary.json: {e}", dir.display())),
-        },
-        None => {
-            let out = std::process::Command::new("git")
-                .args(["show", "origin/ci-history:summary.json"])
-                .current_dir(root)
-                .output();
-            match out {
-                Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
-                _ => {
-                    return History::Missing(
-                        "no summary.json on origin/ci-history (`git fetch origin ci-history`)"
-                            .into(),
-                    );
-                }
-            }
         }
+    } else {
+        let out = std::process::Command::new("git")
+            .args(["show", "origin/ci-history:summary.json"])
+            .current_dir(root)
+            .output();
+        let Some(out) = out.ok().filter(|o| o.status.success()) else {
+            return History::Missing(
+                "no summary.json on origin/ci-history (`git fetch origin ci-history`)".into(),
+            );
+        };
+        String::from_utf8_lossy(&out.stdout).into_owned()
     };
     match Summary::from_json(&text) {
         Ok(s) => History::Read(Box::new(s)),
@@ -760,9 +760,11 @@ mod tests {
 
     #[test]
     fn a_flaky_test_in_the_history_is_selected() {
-        let mut summary = Summary::default();
-        summary.runs = 3;
-        summary.ingested = ["1", "2", "3"].iter().map(|s| (*s).to_string()).collect();
+        let mut summary = Summary {
+            runs: 3,
+            ingested: ["1", "2", "3"].iter().map(|s| (*s).to_string()).collect(),
+            ..Summary::default()
+        };
         summary.tests.insert(
             "helios-gui::it undo::a_redo".into(),
             TestStats {
@@ -829,9 +831,11 @@ mod tests {
                     assert!(src.contains(&format!("fn {f}(")), "{binary} {name}");
                 }
                 Scope::Module { binary, module } => {
-                    assert!(file(&binary, Some(&module)).exists(), "{binary} {module}")
+                    assert!(file(&binary, Some(&module)).exists(), "{binary} {module}");
                 }
-                Scope::Binary(binary) => assert!(file(&binary, None).exists(), "{binary}"),
+                Scope::Binary(binary) => {
+                    assert!(file(&binary, None).exists(), "{binary}");
+                }
                 other => panic!("{other:?}"),
             }
         }
