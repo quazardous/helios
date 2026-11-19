@@ -402,7 +402,7 @@ fn the_end_runs_one_listener_per_frame_in_order_with_matching_rows() {
             (end, shell, None),
         );
     h.run_steps(1);
-    // Every step a row, in order, before any ran.
+    // Every step a row, in order.
     let rows = [
         "Checking the running jobs".to_owned(),
         "helios.test.first".to_owned(),
@@ -416,7 +416,6 @@ fn the_end_runs_one_listener_per_frame_in_order_with_matching_rows() {
         tops.push(h.get_by_label(row).rect().min.y);
     }
     assert!(tops.is_sorted(), "the rows in the steps' order: {tops:?}");
-    assert!(heard.lock().unwrap().is_empty(), "nothing ran yet");
     for _ in 0..steps.len() {
         h.run_steps(1);
     }

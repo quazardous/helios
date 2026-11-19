@@ -112,6 +112,18 @@ pub(super) struct Lifetime {
     quit: Rc<Quit>,
 }
 
+impl Drop for Lifetime {
+    /// The shell goes while Helios quits and the end's turns did not tell
+    /// the node ("Quit now", the end's limit, a host without the end
+    /// splash): told now, so it still closes the vault once its last
+    /// client is gone.
+    fn drop(&mut self) {
+        if self.quit.quitting.get() {
+            self.quit.slots.tell(self.quit.cancel_jobs.get());
+        }
+    }
+}
+
 impl Lifetime {
     pub(super) fn new(quit: Rc<Quit>) -> Self {
         Self {
@@ -287,17 +299,6 @@ impl Quit {
             }
             (None, _) => log::warn!(target: "helios", "no dialogs to ask before quitting"),
             (_, Err(e)) => log::warn!(target: "helios", "the question before quitting: {e}"),
-        }
-    }
-}
-
-impl Drop for Quit {
-    /// The quit's state goes while Helios quits and the end's turns did
-    /// not tell the node ("Quit now", the end's limit): told now, so it
-    /// still closes the vault once its last client is gone.
-    fn drop(&mut self) {
-        if self.quitting.get() {
-            self.slots.tell(self.cancel_jobs.get());
         }
     }
 }
