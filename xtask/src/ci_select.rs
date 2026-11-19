@@ -25,6 +25,12 @@
 //!
 //! The filter goes to stdout, the summary per source to stderr.
 //! `--explain '<binary id> <test name>'` says why one test runs.
+//!
+//! The shadow week (step B3): `--committed --shadow FILE --run ID --commit
+//! SHA --junit FILE` reads the commits since `--base` only (CI's working
+//! tree holds untracked checkouts), and writes the `broker-shadow`
+//! artifact: the tests of the run's JUnit report the set holds, with the
+//! changed files and every pick (`ci_broker/shadow.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -35,9 +41,9 @@ use crate::ci_broker::history::Summary;
 use crate::ci_broker::select::{
     Scope, Selection, Source, hunks, parse_smoke, recent_failures, test_scope, touched_tests,
 };
+use crate::ci_broker::shadow::artifact_json;
 
-pub const USAGE: &str =
-    "ci-broker select [--base REF] [--history DIR] [--runs N] [--explain '<binary id> <test>']";
+pub const USAGE: &str = "ci-broker select [--base REF] [--history DIR] [--runs N] [--committed] [--explain '<binary id> <test>' | --shadow FILE --run ID --commit SHA --junit FILE]";
 
 /// The base a change is computed against: pull requests go into `next`.
 pub const DEFAULT_BASE: &str = "origin/next";
@@ -411,22 +417,27 @@ pub fn gather(
     base: &str,
     history: Option<&Path>,
     runs: usize,
+    committed: bool,
 ) -> Result<Input, String> {
-    let paths = affected::changed_paths(root, base)?;
     let merge_base = affected::git(root, &["merge-base", base, "HEAD"])?
         .into_iter()
         .next()
         .ok_or_else(|| format!("no merge base between {base} and HEAD"))?;
+    // `--committed`: the commits alone, not the working tree nor the
+    // untracked files (CI's checkout holds a few: vkdt, reports).
+    let head: &[&str] = if committed { &["HEAD"] } else { &[] };
+    let paths = if committed {
+        affected::git(
+            root,
+            &["diff", "--name-only", "--no-renames", &merge_base, "HEAD"],
+        )?
+    } else {
+        affected::changed_paths(root, base)?
+    };
     let diff = std::process::Command::new("git")
-        .args([
-            "diff",
-            "-U0",
-            "--no-renames",
-            "--no-color",
-            &merge_base,
-            "--",
-            "*.rs",
-        ])
+        .args(["diff", "-U0", "--no-renames", "--no-color", &merge_base])
+        .args(head)
+        .args(["--", "*.rs"])
         .current_dir(root)
         .output()
         .map_err(|e| format!("cannot run git: {e}"))?;
@@ -504,6 +515,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         return None;
     };
     let (mut base, mut history, mut runs, mut explain) = (DEFAULT_BASE, None, DEFAULT_RUNS, None);
+    let (mut committed, mut shadow, mut run_id, mut commit, mut junit) =
+        (false, None, None, None, None);
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         match *a {
@@ -511,10 +524,20 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
             "--history" => history = Some(Path::new(*it.next()?)),
             "--runs" => runs = it.next()?.parse().ok()?,
             "--explain" => explain = Some(*it.next()?),
+            "--committed" => committed = true,
+            "--shadow" => shadow = Some(Path::new(*it.next()?)),
+            "--run" => run_id = Some(*it.next()?),
+            "--commit" => commit = Some(*it.next()?),
+            "--junit" => junit = Some(Path::new(*it.next()?)),
             _ => return None,
         }
     }
-    let input = match gather(root, base, history, runs) {
+    // The shadow artifact needs its run, commit and JUnit report.
+    let shadow = match shadow {
+        Some(file) => Some((file, run_id?, commit?, junit?)),
+        None => None,
+    };
+    let input = match gather(root, base, history, runs, committed) {
         Ok(i) => i,
         Err(e) => return Some(crate::fail(&[format!("ci-broker select: {e}")])),
     };
@@ -541,6 +564,26 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     );
     eprint!("{}", selection.summary());
     println!("{}", selection.filter());
+    if let Some((file, run_id, commit, junit)) = shadow {
+        let changed: Vec<String> = input.changes.iter().map(|c| c.path.clone()).collect();
+        let written = std::fs::read_to_string(junit)
+            .map_err(|e| format!("{}: {e}", junit.display()))
+            .and_then(|xml| crate::test_times::parse_junit(&xml))
+            .and_then(|report| {
+                let tests: Vec<String> = report
+                    .cases
+                    .iter()
+                    .map(|c| format!("{} {}", c.binary, c.name))
+                    .collect();
+                let json = artifact_json(run_id, commit, base, &selection, &changed, &tests);
+                std::fs::write(file, json).map_err(|e| format!("{}: {e}", file.display()))?;
+                Ok(tests.len())
+            });
+        match written {
+            Ok(n) => eprintln!("broker shadow: {} ({n} tests listed)", file.display()),
+            Err(e) => return Some(crate::fail(&[format!("ci-broker select --shadow: {e}")])),
+        }
+    }
     Some(ExitCode::SUCCESS)
 }
 

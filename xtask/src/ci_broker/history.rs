@@ -11,6 +11,8 @@ use std::fmt::Write as _;
 
 use serde_json::{Value, json};
 
+use super::shadow::{Shadow, ShadowSummary};
+
 /// The format version written in `summary.json` and each run line.
 pub const FORMAT: u64 = 1;
 /// How many recent durations a test keeps for its median.
@@ -88,6 +90,9 @@ pub struct Run {
     /// The fold order, set by `Summary::fold`: a rebuild replays the lines
     /// in that order whatever day file they sit in.
     pub seq: Option<u64>,
+    /// What the broker would have selected (step B3), when the run
+    /// uploaded its `broker-shadow` artifact.
+    pub shadow: Option<Shadow>,
 }
 
 impl Run {
@@ -142,7 +147,7 @@ impl Run {
             .iter()
             .map(|t| json!([t.id, t.outcome.name(), round_ms(t.seconds)]))
             .collect();
-        json!({
+        let mut line = json!({
             "format": FORMAT,
             "seq": self.seq,
             "run": self.id,
@@ -151,8 +156,11 @@ impl Run {
             "source": self.source,
             "wall_s": self.wall_seconds.map(round_ms),
             "tests": tests,
-        })
-        .to_string()
+        });
+        if let Some(shadow) = &self.shadow {
+            line["shadow"] = shadow.to_json();
+        }
+        line.to_string()
     }
 
     pub fn from_line(line: &str) -> Result<Run, String> {
@@ -166,6 +174,10 @@ impl Run {
             wall_seconds: v["wall_s"].as_f64(),
             tests: Vec::new(),
             seq: v["seq"].as_u64(),
+            shadow: match &v["shadow"] {
+                Value::Null => None,
+                s => Some(Shadow::from_json(s)?),
+            },
         };
         for t in v["tests"].as_array().ok_or("no `tests`")? {
             let (Some(id), Some(outcome), Some(seconds)) = (
@@ -318,6 +330,8 @@ pub struct Summary {
     /// The last `RUNS_REMEMBERED` run ids folded, oldest first.
     pub ingested: VecDeque<String>,
     pub tests: BTreeMap<String, TestStats>,
+    /// The shadow runs (step B3): what selection would have missed.
+    pub shadow: ShadowSummary,
 }
 
 impl Summary {
@@ -377,6 +391,7 @@ impl Summary {
         }
         self.tests
             .retain(|_, s| seq.saturating_sub(s.last_seen) < prune_after);
+        self.shadow.fold(run);
         self.last_run = Some(stamp);
         self.ingested.push_back(run.id.clone());
         while self.ingested.len() > RUNS_REMEMBERED {
@@ -408,6 +423,7 @@ impl Summary {
             self.last_run.as_ref().map_or(Value::Null, Stamp::to_json)
         );
         let _ = writeln!(out, "  \"ingested\": {},", json!(self.ingested));
+        let _ = writeln!(out, "  \"shadow\": {},", self.shadow.to_json());
         out.push_str("  \"tests\": {");
         for (i, (id, s)) in self.tests.iter().enumerate() {
             out.push_str(if i == 0 { "\n" } else { ",\n" });
@@ -443,6 +459,7 @@ impl Summary {
                 .filter_map(|r| r.as_str().map(str::to_string))
                 .collect(),
             tests,
+            shadow: ShadowSummary::from_json(&v["shadow"])?,
         })
     }
 }

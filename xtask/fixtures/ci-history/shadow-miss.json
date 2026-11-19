@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "run": "201",
+  "commit": "sha201",
+  "base": "sha200",
+  "everything": false,
+  "filter": "binary_id(=helios-gui::it)",
+  "tests": 3,
+  "selected": ["helios-gui::it import::the_old_name"],
+  "changed": ["crates/helios-gui/src/import_scan.rs", "crates/helios-gui/tests/it/import.rs"],
+  "sources": [
+    {"source": "affected", "filter": "binary_id(=helios-gui::it)", "why": "crates/helios-gui/tests/it/import.rs"}
+  ],
+  "notes": [{"source": "recent failures", "note": "skipped, no history yet"}]
+}
