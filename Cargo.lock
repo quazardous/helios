@@ -2707,7 +2707,6 @@ dependencies = [
 name = "helios-inspect"
 version = "0.92.0"
 dependencies = [
- "bus-contract",
  "bus-contract-crossing",
  "helios-core",
  "serde",
