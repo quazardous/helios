@@ -1,10 +1,12 @@
 volume.mounted
   1. import.cards (owner helios.import): before library.scan
   2. library.scan (owner helios.library): nothing
-  3. backups.on-connect (owner helios.backups): after library.scan
-  4. map.plugged (owner helios.map): after library.scan
-  5. health.recheck (owner helios.health): after library.scan
+  3. helios.reads (owner helios.reads): after library.scan
+  4. backups.on-connect (owner helios.backups): after library.scan
+  5. map.plugged (owner helios.map): after library.scan
+  6. health.recheck (owner helios.health): after library.scan
 volume.unmounted
   1. import.cards (owner helios.import): before library.scan
   2. library.scan (owner helios.library): nothing
-  3. health.recheck (owner helios.health): after library.scan
+  3. helios.reads (owner helios.reads): after library.scan
+  4. health.recheck (owner helios.health): after library.scan
