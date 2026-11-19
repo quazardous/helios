@@ -158,12 +158,12 @@ pub fn added<T: Clone>(base: &[T], head: &[T], key: impl Fn(&T) -> String) -> Ve
 
 /// `label: before → after (±n)`, or `label: n (unchanged)`.
 pub fn progress(label: &str, before: usize, after: usize) -> String {
-    if before == after {
-        format!("{label}: {after} (unchanged)")
-    } else if after < before {
-        format!("{label}: {before} → {after} (−{})", before - after)
-    } else {
-        format!("{label}: {before} → {after} (+{})", after - before)
+    match after.cmp(&before) {
+        std::cmp::Ordering::Equal => format!("{label}: {after} (unchanged)"),
+        std::cmp::Ordering::Less => format!("{label}: {before} → {after} (−{})", before - after),
+        std::cmp::Ordering::Greater => {
+            format!("{label}: {before} → {after} (+{})", after - before)
+        }
     }
 }
 
