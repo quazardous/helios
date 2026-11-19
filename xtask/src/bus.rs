@@ -43,6 +43,13 @@
 //! older release names them without it; the relay maps those names
 //! (`helios_core::legacy_kinds`), the bus never holds one.
 //!
+//! `bus --check --base REF` (what a pull request's `pr-lint` runs) checks
+//! the merge base with REF too and fails only on the findings the change
+//! adds, each known by its file and text, not its line (see
+//! [`crate::delta`], an idea from darktable's `dt-lockcheck` diff mode,
+//! <https://github.com/darktable-org/darktable/pull/23056>); the desktop's
+//! hand-rolled subscriptions are counted as progress.
+//!
 //! `bus --timings <file>` reads the bus debug collector saved by a run
 //! (the journey's `bus-timings-*.json`) and prints, per point, its passes
 //! (count, p50, p95, max), its budget and the passes over it, and its
@@ -53,7 +60,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-pub const USAGE: &str = "bus --check | bus --timings <file>";
+pub const USAGE: &str = "bus --check [--base [REF]] | bus --timings <file>";
 
 /// How many listeners `--timings` names per point.
 const SLOWEST: usize = 3;
@@ -87,23 +94,36 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     if let ["--timings", file] = args {
         return Some(timings(Path::new(file)));
     }
+    let (args, base) = crate::delta::take_base(args)?;
     if args != ["--check"] {
         return None;
     }
-    let mut found = problems(root);
-    let subscriptions = subscriptions(root);
-    found.extend(judge_subscriptions(root, &subscriptions));
-    let named = point_names(root);
-    found.extend(named.problems.iter().cloned());
-    let kinds = fact_kinds(root);
-    found.extend(kinds.problems.iter().cloned());
-    let facts = facts(root);
-    found.extend(
-        facts
-            .undeclared
-            .iter()
-            .map(|e| format!("{e}: a fact in no FACTS table")),
-    );
+    if let Some(base) = base {
+        return Some(match check_delta(root, base) {
+            Ok(found) if found.is_empty() => {
+                println!("bus: nothing added since {base}");
+                ExitCode::SUCCESS
+            }
+            Ok(found) => {
+                for f in &found {
+                    eprintln!("bus: {f}");
+                }
+                eprintln!("bus: {} problem(s) added since {base}", found.len());
+                ExitCode::from(1)
+            }
+            Err(e) => {
+                eprintln!("bus: {e}");
+                ExitCode::from(1)
+            }
+        });
+    }
+    let Check {
+        found,
+        subscriptions,
+        named,
+        kinds,
+        facts,
+    } = check(root);
     if found.is_empty() {
         println!("no library crate constructs a bus (the application supplies it)");
         println!(
@@ -143,6 +163,69 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         found.len()
     );
     Some(ExitCode::from(1))
+}
+
+/// Everything `bus --check` looks at in a tree.
+pub struct Check {
+    /// The problems, as `path:line: text` where they have a place.
+    pub found: Vec<String>,
+    pub subscriptions: Vec<String>,
+    pub named: PointNames,
+    pub kinds: FactKinds,
+    pub facts: Facts,
+}
+
+/// Runs every rule of `bus --check` on the tree at `root`.
+pub fn check(root: &Path) -> Check {
+    let mut found = problems(root);
+    let subscriptions = subscriptions(root);
+    found.extend(judge_subscriptions(root, &subscriptions));
+    let named = point_names(root);
+    found.extend(named.problems.iter().cloned());
+    let kinds = fact_kinds(root);
+    found.extend(kinds.problems.iter().cloned());
+    let facts = facts(root);
+    found.extend(
+        facts
+            .undeclared
+            .iter()
+            .map(|e| format!("{e}: a fact in no FACTS table")),
+    );
+    Check {
+        found,
+        subscriptions,
+        named,
+        kinds,
+        facts,
+    }
+}
+
+/// The paths `bus --check` reads, checked out of the base for `--base`.
+const READ: &[&str] = &["crates", "modules", "plugins", ALLOW_LIST];
+
+/// `bus --check --base REF`: the findings the head has and the merge base
+/// with REF has not, each known by its message without its line number.
+pub fn check_delta(root: &Path, base: &str) -> Result<Vec<String>, String> {
+    let rev = crate::delta::merge_base(root, base)?;
+    let tree = crate::delta::BaseTree::extract(root, &rev, READ)?;
+    let (before, after) = (check(&tree.dir), check(root));
+    println!(
+        "{}",
+        crate::delta::progress(
+            "hand-rolled bus subscriptions on the desktop",
+            before.subscriptions.len(),
+            after.subscriptions.len()
+        )
+    );
+    if before.found.len() != after.found.len() {
+        println!(
+            "{}",
+            crate::delta::progress("bus problems", before.found.len(), after.found.len())
+        );
+    }
+    Ok(crate::delta::added(&before.found, &after.found, |f| {
+        crate::delta::without_line(f)
+    }))
 }
 
 /// `bus --timings <file>`: the report, or why the file cannot be read.

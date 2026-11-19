@@ -28,6 +28,13 @@
 //!
 //! Layout calls (`ui.horizontal`, `ui.add`, `ui.group`…) are not counted:
 //! the widget they hold is.
+//!
+//! `--check --base REF` (what a pull request's `pr-lint` runs) compares
+//! the merge base with REF and the head call by call (see
+//! [`crate::delta`], an idea from darktable's `dt-lockcheck` diff mode,
+//! <https://github.com/darktable-org/darktable/pull/23056>): it fails only
+//! on the calls the change adds, or a baseline it leaves stale, and prints
+//! the count as progress ("raw egui calls: 300 → 297 (−3)").
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -36,7 +43,7 @@ use std::process::ExitCode;
 
 use crate::vault_access::{strip_comments_and_strings, strip_tests};
 
-pub const USAGE: &str = "raw-egui [--check | --update]";
+pub const USAGE: &str = "raw-egui [--check [--base [REF]] | --update]";
 
 /// The baseline, relative to the workspace root.
 pub const BASELINE: &str = "xtask/allow/raw-egui.toml";
@@ -189,12 +196,63 @@ fn imports(code: &str) -> (Vec<&'static str>, Vec<(usize, usize)>) {
 /// The raw egui widget calls of one file, by kind; test code, comments
 /// and strings are not counted.
 pub fn count(text: &str) -> Kinds {
+    let mut kinds = Kinds::new();
+    for (kind, _) in calls(text) {
+        *kinds.entry(kind).or_default() += 1;
+    }
+    kinds
+}
+
+/// One raw call, as the delta mode tells it apart: its file, its kind and
+/// its line of code with white space collapsed. No line number, so a call
+/// moved within its file is the same call.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Site {
+    pub file: String,
+    pub kind: String,
+    pub snippet: String,
+}
+
+impl Site {
+    fn key(&self) -> String {
+        format!("{}\u{0}{}\u{0}{}", self.file, self.kind, self.snippet)
+    }
+}
+
+/// The raw calls of one file (`rel`, relative to [`SCANNED`]), each with
+/// its snippet.
+pub fn sites(rel: &str, text: &str) -> Vec<Site> {
+    let lines: Vec<&str> = text.lines().collect();
+    calls(text)
+        .into_iter()
+        .map(|(kind, line)| Site {
+            file: rel.to_string(),
+            kind,
+            snippet: lines
+                .get(line)
+                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// The raw calls of one file: their kind and their line (from 0).
+fn calls(text: &str) -> Vec<(String, usize)> {
     let code = strip_tests(&strip_comments_and_strings(text));
     let c: Vec<char> = code.chars().collect();
     let (imported, uses) = imports(&code);
     let words = idents(&c);
     let word = |n: usize| -> String { c[words[n].0..words[n].1].iter().collect() };
-    let mut kinds = Kinds::new();
+    // The line of each char: blanking keeps the newlines where they were.
+    let mut line_of = Vec::with_capacity(c.len());
+    let mut line = 0;
+    for ch in &c {
+        line_of.push(line);
+        if *ch == '\n' {
+            line += 1;
+        }
+    }
+    let mut kinds = Vec::new();
     for n in 0..words.len() {
         let (start, end) = words[n];
         if uses.iter().any(|(a, b)| start >= *a && start < *b) {
@@ -217,11 +275,11 @@ pub fn count(text: &str) -> Kinds {
         let called = c.get(after) == Some(&'(');
         if before.is_some_and(|p| c[p] == '.') && called {
             if HOVER_METHODS.contains(&name.as_str()) {
-                *kinds.entry("on_hover_text".into()).or_default() += 1;
+                kinds.push(("on_hover_text".into(), line_of[start]));
             } else if UI_METHODS.contains(&name.as_str())
                 && previous(&['.']).is_some_and(|r| r == "ui" || r.ends_with("_ui"))
             {
-                *kinds.entry(format!("ui.{name}")).or_default() += 1;
+                kinds.push((format!("ui.{name}"), line_of[start]));
             }
             continue;
         }
@@ -229,7 +287,7 @@ pub fn count(text: &str) -> Kinds {
             let from_egui = previous(&[':', ':']).is_some_and(|p| p == "egui");
             let bare = before.is_none_or(|p| c[p] != ':') && imported.contains(ty);
             if from_egui || bare {
-                *kinds.entry(format!("egui::{ty}")).or_default() += 1;
+                kinds.push((format!("egui::{ty}"), line_of[start]));
             }
         }
     }
@@ -254,13 +312,14 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every file of the scanned folder that has raw calls, by its path
-/// relative to that folder.
-pub fn scan(root: &Path) -> BTreeMap<String, Kinds> {
+/// Every file of the scanned folder but test code, by its path relative
+/// to that folder, with its text.
+fn sources(root: &Path) -> Vec<(String, String)> {
     let base = root.join(SCANNED);
     let mut files = Vec::new();
     walk(&base, &mut files);
-    let mut out = BTreeMap::new();
+    files.sort();
+    let mut out = Vec::new();
     for path in files {
         let rel = path
             .strip_prefix(&base)
@@ -270,15 +329,115 @@ pub fn scan(root: &Path) -> BTreeMap<String, Kinds> {
         if test_path(&rel) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let kinds = count(&text);
-        if !kinds.is_empty() {
-            out.insert(rel, kinds);
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            out.push((rel, text));
         }
     }
     out
+}
+
+/// Every file of the scanned folder that has raw calls, by its path
+/// relative to that folder.
+pub fn scan(root: &Path) -> BTreeMap<String, Kinds> {
+    sources(root)
+        .into_iter()
+        .filter_map(|(rel, text)| {
+            let kinds = count(&text);
+            (!kinds.is_empty()).then_some((rel, kinds))
+        })
+        .collect()
+}
+
+/// Every raw call of the scanned folder.
+pub fn scan_sites(root: &Path) -> Vec<Site> {
+    sources(root)
+        .into_iter()
+        .flat_map(|(rel, text)| sites(&rel, &text))
+        .collect()
+}
+
+/// What a change does to the raw calls (`--base`).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Delta {
+    /// Raw calls on the base and on the head.
+    pub before: usize,
+    pub after: usize,
+    /// How many raw calls the change adds.
+    pub new: usize,
+    /// The calls added, where the change adds some: in a file and of a
+    /// kind with more calls added than removed. A call whose line was
+    /// edited (one removed, one added, same file and kind) is not new.
+    pub added: Vec<Site>,
+}
+
+/// Compares the raw calls of the base and of the head, each call known by
+/// its file, kind and snippet (see [`crate::delta`]).
+pub fn delta(base: &[Site], head: &[Site]) -> Delta {
+    let added = crate::delta::added(base, head, Site::key);
+    let removed = crate::delta::added(head, base, Site::key);
+    let group = |s: &Site| (s.file.clone(), s.kind.clone());
+    let mut balance: BTreeMap<(String, String), isize> = BTreeMap::new();
+    for s in &added {
+        *balance.entry(group(s)).or_default() += 1;
+    }
+    for s in &removed {
+        *balance.entry(group(s)).or_default() -= 1;
+    }
+    let new = balance
+        .values()
+        .filter(|n| **n > 0)
+        .map(|n| n.unsigned_abs())
+        .sum();
+    Delta {
+        before: base.len(),
+        after: head.len(),
+        new,
+        added: added
+            .into_iter()
+            .filter(|s| balance.get(&group(s)).is_some_and(|n| *n > 0))
+            .collect(),
+    }
+}
+
+/// The baseline problems of a tree but the raw calls gone up (the delta
+/// reports those call by call): a stale or missing baseline.
+fn baseline_problems(root: &Path) -> Vec<String> {
+    problems(root)
+        .into_iter()
+        .filter(|p| !p.contains(" allowed:") && !p.contains("in a file that had none"))
+        .collect()
+}
+
+/// `raw-egui --check --base REF`: the raw calls the change adds, and the
+/// baseline problems it brings; the count printed as progress.
+pub fn check_delta(root: &Path, base: &str) -> Result<Vec<String>, String> {
+    let rev = crate::delta::merge_base(root, base)?;
+    let tree = crate::delta::BaseTree::extract(root, &rev, &[SCANNED, BASELINE])?;
+    let d = delta(&scan_sites(&tree.dir), &scan_sites(root));
+    println!(
+        "{}",
+        crate::delta::progress("raw egui calls", d.before, d.after)
+    );
+    let mut out: Vec<String> = d
+        .added
+        .iter()
+        .map(|s| {
+            format!(
+                "{SCANNED}/{}: new {}: `{}`: draw it through helios-ui (forms) or helios-rack (visual modules)",
+                s.file, s.kind, s.snippet
+            )
+        })
+        .collect();
+    if d.new > 0 {
+        out.push(format!("{} raw egui widget call(s) added", d.new));
+    }
+    let file = |p: &String| p.split(':').next().unwrap_or("").to_string();
+    out.extend(crate::delta::added(
+        &baseline_problems(&tree.dir),
+        &baseline_problems(root),
+        file,
+    ));
+    Ok(out)
 }
 
 fn totals(found: &BTreeMap<String, Kinds>) -> BTreeMap<String, usize> {
@@ -448,8 +607,17 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         }
         ExitCode::from(1)
     };
-    match args {
-        [] | ["--check"] => {
+    let (args, base) = crate::delta::take_base(args)?;
+    match (args.as_slice(), base) {
+        (["--check"], Some(base)) => Some(match check_delta(root, base) {
+            Ok(problems) if problems.is_empty() => {
+                println!("Raw egui widgets in {SCANNED}: none added since {base}.");
+                ExitCode::SUCCESS
+            }
+            Ok(problems) => fail(&problems),
+            Err(e) => fail(&[e]),
+        }),
+        ([] | ["--check"], None) => {
             if args.is_empty() {
                 report(&scan(root));
             }
@@ -461,7 +629,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
                 fail(&problems)
             })
         }
-        ["--update"] => {
+        (["--update"], None) => {
             let found = totals(&scan(root));
             let (next, up) = match read_baseline(root) {
                 // The first baseline is what is there today.
@@ -612,6 +780,87 @@ mod tests {
         assert!(parse_baseline("[files]\n\"a.rs\" = 0\n").is_err());
         assert!(parse_baseline("[files]\n\"a.rs\" = 1\n\"a.rs\" = 2\n").is_err());
         assert!(parse_baseline("[files]\na.rs = many\n").is_err());
+    }
+
+    const BEFORE: &str = r#"
+fn draw(ui: &mut egui::Ui) {
+    ui.label("one");
+    ui.button("two");
+    ui.weak("three");
+}
+
+fn other(ui: &mut egui::Ui) {
+    ui.heading("four");
+}
+"#;
+
+    fn delta_of(base: &str, head: &str) -> Delta {
+        delta(&sites("a.rs", base), &sites("a.rs", head))
+    }
+
+    #[test]
+    fn raw_egui_delta_a_branch_adding_one_call_gives_one_finding() {
+        let head = BEFORE.replace(
+            "    ui.weak(\"three\");\n",
+            "    ui.weak(\"three\");\n    ui.small(\"new\");\n",
+        );
+        let d = delta_of(BEFORE, &head);
+        assert_eq!((d.before, d.after, d.new), (4, 5, 1), "{d:?}");
+        assert_eq!(
+            d.added,
+            [Site {
+                file: "a.rs".into(),
+                kind: "ui.small".into(),
+                snippet: "ui.small(\"new\");".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn raw_egui_delta_a_branch_removing_two_shows_the_decrease() {
+        let head = BEFORE
+            .replace("    ui.label(\"one\");\n", "")
+            .replace("    ui.heading(\"four\");\n", "");
+        let d = delta_of(BEFORE, &head);
+        assert_eq!((d.before, d.after, d.new), (4, 2, 0), "{d:?}");
+        assert!(d.added.is_empty());
+        assert_eq!(
+            crate::delta::progress("raw egui calls", d.before, d.after),
+            "raw egui calls: 4 → 2 (−2)"
+        );
+    }
+
+    #[test]
+    fn raw_egui_delta_moving_code_gives_nothing() {
+        // `other` moved above `draw`, re-indented, with lines added above.
+        let head = r#"
+// A comment that shifts every line.
+fn other(ui: &mut egui::Ui) {
+        ui.heading("four");
+}
+
+fn draw(ui: &mut egui::Ui) {
+    ui.label("one");
+    ui.button("two");
+    ui.weak("three");
+}
+"#;
+        assert_eq!(
+            delta_of(BEFORE, head),
+            Delta {
+                before: 4,
+                after: 4,
+                new: 0,
+                added: Vec::new()
+            }
+        );
+    }
+
+    #[test]
+    fn raw_egui_delta_an_edited_call_is_not_new() {
+        let head = BEFORE.replace("ui.label(\"one\")", "ui.label(\"uno\")");
+        let d = delta_of(BEFORE, &head);
+        assert_eq!((d.new, d.added.len()), (0, 0), "{d:?}");
     }
 
     #[test]
