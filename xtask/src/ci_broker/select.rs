@@ -159,8 +159,9 @@ impl Scope {
         match (self, other) {
             (Scope::All, _) => true,
             (_, Scope::All) => false,
-            (Scope::Package(p), Scope::PackageBut { package, .. }) => p == package,
-            (Scope::Package(p), Scope::Fn { package, .. }) => p == package,
+            (Scope::Package(p), Scope::PackageBut { package, .. } | Scope::Fn { package, .. }) => {
+                p == package
+            }
             (Scope::Package(p), other) => other.binary().is_some_and(|b| package_of(b) == p),
             (Scope::PackageBut { package, binary }, other) => other
                 .binary()
