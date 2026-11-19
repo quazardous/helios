@@ -160,16 +160,19 @@ impl Shell {
         let app = self.core.app.handle().clone();
         FRAME.follow(&app, ctx, &self.library_focus.state);
         // Something came in for the window (thumbnails, renders, a read
-        // answered, a mark, what its own input asked): egui-pop wakes it
-        // (the main window, where it is drawn, needs no other pass). A
-        // main pass that brought nothing (a hover, a drag elsewhere)
-        // leaves it idle.
+        // answered, a mark, what its own input asked): it is said on the
+        // bus, whose listener, registered for the window, wakes it
+        // (`super::window_news`; the main window, where it is drawn,
+        // needs no other pass). A main pass that brought nothing (a
+        // hover, a drag elsewhere) leaves it idle.
         if self.library_focus.state.borrow().has_news()
             && app
                 .window_viewport(&FRAME.id())
                 .is_some_and(|v| app.window_group(v) != egui::ViewportId::ROOT)
         {
-            app.wake_window(&FRAME.id());
+            super::window_news::say::<super::window_news::LibraryNews>(&std::sync::Arc::downgrade(
+                &app.bus(),
+            ));
         }
     }
 }

@@ -103,6 +103,7 @@ pub mod thumbnails;
 pub mod tips;
 pub mod values_changed;
 pub mod viewport;
+pub mod warm;
 pub mod window_commands;
 mod windows;
 mod workbench;

@@ -252,9 +252,28 @@ struct Wake {
     /// The window's context, known once the library is first drawn: until
     /// then, its first frame takes whatever was sent.
     ctx: OnceLock<egui::Context>,
+    /// How the host is told something came in, from any thread (the
+    /// desktop says it on its bus: `helios.library.window.news`, whose
+    /// listener wakes the window it is drawn in); without one, the
+    /// window's context is repainted.
+    news: OnceLock<News>,
     /// A thumbnail was sent since the window last took them: a repaint is
     /// already on its way.
     pending: AtomicBool,
+}
+
+/// What tells the host something came in (see [`Library::set_news`]).
+type News = Box<dyn Fn() + Send + Sync>;
+
+impl Wake {
+    /// Something came in: the host told, else the window repainted.
+    fn wake(&self) {
+        if let Some(news) = self.news.get() {
+            news();
+        } else if let Some(ctx) = self.ctx.get() {
+            ctx.request_repaint();
+        }
+    }
 }
 
 impl ThumbnailSink {
@@ -293,10 +312,8 @@ impl ThumbnailSink {
 
     fn arrive(&self, id: String, arrival: Arrival) -> Result<(), SendError<(String, Arrival)>> {
         self.sender.send((id, arrival))?;
-        if !self.wake.pending.swap(true, Ordering::SeqCst)
-            && let Some(ctx) = self.wake.ctx.get()
-        {
-            ctx.request_repaint();
+        if !self.wake.pending.swap(true, Ordering::SeqCst) {
+            self.wake.wake();
         }
         Ok(())
     }
@@ -314,11 +331,8 @@ pub struct HeadSink {
 impl HeadSink {
     /// Sends a render; ignored once the library is gone.
     pub fn send(&self, render: HeadRender) {
-        if self.sender.send(render).is_ok()
-            && !self.wake.pending.swap(true, Ordering::SeqCst)
-            && let Some(ctx) = self.wake.ctx.get()
-        {
-            ctx.request_repaint();
+        if self.sender.send(render).is_ok() && !self.wake.pending.swap(true, Ordering::SeqCst) {
+            self.wake.wake();
         }
     }
 }
@@ -3284,6 +3298,13 @@ impl Library {
     /// without a texture ([`WARM_FRAME_BUDGET`] by default).
     pub fn set_warm_budget(&mut self, budget: std::time::Duration) {
         self.warm_budget = budget;
+    }
+
+    /// How the host is told, from any thread, that thumbnails or renders
+    /// came in, instead of a repaint of the window's context: once; a
+    /// second is ignored.
+    pub fn set_news(&self, news: impl Fn() + Send + Sync + 'static) {
+        let _ = self.sink.wake.news.set(Box::new(news));
     }
 
     pub fn set_on_view(&mut self, on_view: impl Fn(&[String]) + 'static) {
