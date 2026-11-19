@@ -16,6 +16,8 @@ The design and research documents of Helios. The crates and modules are describe
   they contain and how to check their checksums.
 - [bench.md](./bench.md): the bench box, a remote runner for full
   builds, the test suite, timings and GPU tests (`cargo xtask bench-remote`).
+- [ci-broker.md](./ci-broker.md): the CI broker that chooses which tests
+  a run needs; its per-test history on the `ci-history` branch.
 - [performance.md](./performance.md): the performance budgets
   (thumbnails first) and the dated measurements against them.
 - [ui-index.md](./ui-index.md): the "use these" index, generated: a UI

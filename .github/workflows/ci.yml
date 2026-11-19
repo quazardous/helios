@@ -76,6 +76,8 @@ jobs:
       - name: slowest tests
         if: ${{ !cancelled() }}
         run: cargo xtask test-times --from-junit target/nextest/ci/junit.xml --summary >> "$GITHUB_STEP_SUMMARY"
+      # Read nightly by ci-history.yml (the per-test history, docs/ci-broker.md):
+      # keep the name `junit`, and upload it from failed runs too.
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
