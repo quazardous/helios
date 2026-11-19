@@ -760,9 +760,11 @@ mod tests {
 
     #[test]
     fn a_flaky_test_in_the_history_is_selected() {
-        let mut summary = Summary::default();
-        summary.runs = 3;
-        summary.ingested = ["1", "2", "3"].iter().map(|s| (*s).to_string()).collect();
+        let mut summary = Summary {
+            runs: 3,
+            ingested: ["1", "2", "3"].iter().map(|s| (*s).to_string()).collect(),
+            ..Summary::default()
+        };
         summary.tests.insert(
             "helios-gui::it undo::a_redo".into(),
             TestStats {
