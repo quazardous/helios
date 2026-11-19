@@ -1183,7 +1183,7 @@ impl Viewport {
         mapping: Option<&egui_pop::viewport::Mapping>,
         store: &Store,
     ) {
-        let image = if crate::masks::tool(store).is_empty() {
+        let image = if crate::masks::tool(store) != "path" {
             AreaSpec::navigate("viewport.image")
         } else {
             AreaSpec::new("viewport.image", AreaKind::Edit)

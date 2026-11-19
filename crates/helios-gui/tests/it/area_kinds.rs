@@ -199,7 +199,10 @@ fn shell(mask: bool) -> Shell {
 }
 
 fn harness_on(shell: Shell, panel: &str) -> Harness<'static, Shell> {
-    egui_pop::api::palettes::set_hidden(shell.app().handle(), true);
+    if panel == "helios.viewport" {
+        // The palettes off the image, so its handles are reached.
+        egui_pop::api::palettes::set_hidden(shell.app().handle(), true);
+    }
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.step();
     h.state_mut()
@@ -372,6 +375,8 @@ fn an_edit_from_an_undeclared_area_fails_the_audit() {
         let store = std::sync::Mutex::new(store);
         let mut h = Harness::builder()
             .with_size(vec2(300.0, 100.0))
+            // A bare egui slider: what an undeclared area looks like.
+            .with_accessibility_check(false)
             .build_ui(|ui| {
                 let mut s = store.lock().unwrap();
                 let mut v = s.get(EV).unwrap().value.as_f64().unwrap();
