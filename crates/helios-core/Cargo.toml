@@ -15,6 +15,7 @@ serde_json.workspace = true
 log = "0.4"
 
 [dev-dependencies]
+bus-kernel.workspace = true
 egui-pop-hooks.workspace = true
 
 [lints]
