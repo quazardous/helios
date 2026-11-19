@@ -56,7 +56,7 @@ pub fn compute(path: PathBuf, bundle: Bundle) -> Compute {
 }
 
 /// How long an open waits for a decode a warm-up started.
-const OPEN_WAIT: Duration = Duration::from_secs(600);
+const OPEN_WAIT: Duration = Duration::from_mins(10);
 
 /// `photo`'s file at `path` through `bundle`'s network, for the darkroom:
 /// the router's `decoded` state, ready (warmed), joined (a warm-up in
