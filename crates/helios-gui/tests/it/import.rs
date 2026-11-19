@@ -1268,12 +1268,10 @@ fn the_embedded_import_window_is_centred_and_closes() {
 
 /// The import window's body fits the window at any size: only the grid
 /// scrolls (the Choices column would on its own, taller than the window),
-/// never the body as a whole; the grid takes the width it has, its count
-/// per row held as the window widens and its thumbnails grown (egui-pop's
-/// zoom is a count per row since 0.16; fixed-size thumbnails, a wider
-/// window adding columns, are a planned follow-up that will turn this
-/// back into a column count that grows); its last row, scrolled to, ends above the
-/// footer; the backup line, last of the Choices column, is in view. Opened
+/// never the body as a whole; the grid takes the width it has, its
+/// thumbnails keeping their size and a wider window showing more columns
+/// (`GridResize::FixedSize`, as catalogue apps do); its last row, scrolled
+/// to, ends above the footer; the backup line, last of the Choices column, is in view. Opened
 /// in main windows of two sizes, on a folder of 120 photos.
 #[test]
 fn the_import_body_fits_the_window_and_only_its_grid_scrolls() {
@@ -1365,16 +1363,18 @@ fn the_import_body_fits_the_window_and_only_its_grid_scrolls() {
             .count();
         assert_eq!(bars, 1, "{size:?}: scrolled, only the grid scrolls");
     }
-    // The count per row holds and the thumbnails grow with the window.
+    // The thumbnails keep their size and the wider window shows more
+    // columns. A cell takes at most one column's share of what is left of
+    // a row on top of the size, so the sizes differ by that at most.
     let ((narrow, small), (wide, big)) = (columns[0], columns[1]);
     assert!(narrow > 1, "a single column: {columns:?}");
-    assert_eq!(
-        narrow, wide,
-        "the grid keeps its count per row as the window widens: {columns:?}"
+    assert!(
+        wide > narrow,
+        "the wider window shows more columns: {columns:?}"
     );
     assert!(
-        big > small,
-        "the thumbnails grow as the window widens: {columns:?}"
+        (big - small).abs() <= small / narrow as f32 + 8.0,
+        "the thumbnails keep their size as the window widens: {columns:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

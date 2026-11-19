@@ -91,7 +91,8 @@ use crate::import_scan::{
     Connectors, Contents, Counts, Known, MapRecorder, Recorded, Scan, Scanned, Types,
 };
 use egui_pop::api::files::browser::{
-    DropOrigin, EntryKind, EntryMarks, FileBrowser, MarkChip, SourceEntry, ViewModes,
+    DropOrigin, EntryKind, EntryMarks, FileBrowser, GridResize, MarkChip, SourceEntry, ThumbZoom,
+    ViewModes,
 };
 use egui_pop::core::kit::Tone;
 use egui_pop::core::progress::Spinner;
@@ -2430,6 +2431,11 @@ impl ImportWindow {
 const SOURCES_WIDTH: f32 = 220.0;
 const CHOICES_WIDTH: f32 = 300.0;
 
+/// The import grid's thumbnails' size at first, in points (egui-pop's
+/// thumbnails mode's own default): the grid keeps it as the window is
+/// resized, showing more columns as it widens.
+const THUMBNAIL_POINTS: f32 = 128.0;
+
 /// The import window's least size and the largest it opens at, in points.
 const MIN_SIZE: egui::Vec2 = egui::vec2(560.0, 360.0);
 const MAX_DEFAULT_SIZE: egui::Vec2 = egui::vec2(1200.0, 800.0);
@@ -2843,6 +2849,9 @@ impl ImportWindow {
             // The photos alone: no folder above them in Finder's columns.
             .with_root(NOWHERE)
             .with_thumbnails(thumbs)
+            // The thumbnails keep their size: a wider window shows more
+            // columns, as catalogue apps do.
+            .with_resize(GridResize::FixedSize)
             .with_marks(move |e| {
                 marks
                     .lock()
@@ -2856,6 +2865,9 @@ impl ImportWindow {
             // An import starts on its thumbnails, until another mode is
             // kept for the window.
             b.set_mode("thumbnails");
+            // At a size of their own, whatever the window's: a larger
+            // window shows more of them.
+            b.set_zoom(ThumbZoom::Points(THUMBNAIL_POINTS));
             b
         });
         if made {

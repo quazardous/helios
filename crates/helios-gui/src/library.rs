@@ -3890,9 +3890,10 @@ impl Library {
                     }
                 }
                 Signal::Activate { key } => self.activated = Some(key),
-                // A zoom, by count or (a `GridResize::FixedSize` grid
-                // only; the library keeps egui-pop's default `PerRow`) by
-                // size. A selection: the gallery's state holds it, cursor
+                // A zoom: by size (the grid keeps the size on a resize,
+                // `GridResize::FixedSize`; an older count per row turned
+                // into one included), or by count from a grid that does
+                // not. A selection: the gallery's state holds it, cursor
                 // included, already.
                 Signal::Zoom { .. } | Signal::ZoomSize { .. } => self.view.results_changed = true,
                 Signal::Select { .. } | Signal::DragOut { .. } => {}
@@ -4300,8 +4301,10 @@ impl Library {
 
     /// How the results show, as a file browser's dialog offers it:
     /// thumbnails so many per row (one fills the view), a list, or
-    /// details in columns. A count zoomed to (Ctrl and the wheel, + and
-    /// -) shows as one more choice.
+    /// details in columns. A count picked is the size that shows it at
+    /// the view's width, kept as the window is resized (more columns as it
+    /// widens). A count zoomed to (Ctrl and the wheel, + and -) shows as
+    /// one more choice.
     fn view_menu(&mut self, ui: &mut Ui) {
         /// A choice of the menu: thumbnails so many per row, a list,
         /// details.
@@ -4318,6 +4321,7 @@ impl Library {
             .state
             .zoom()
             .per_row()
+            .or(self.view.shown_per_row)
             .unwrap_or(grid::DEFAULT_PER_ROW);
         let mut current = match self.view.mode {
             ResultsMode::List => Shown::List,
@@ -4977,14 +4981,27 @@ impl Library {
                 in_view: Some(&self.in_view),
                 changed: Some(&self.view_changed),
             };
+            // The zoom is a size: a wider view shows more columns of
+            // thumbnails that keep their size, as catalogue apps do.
             let mut grid = ThumbGrid::new("grid")
                 .label(label)
                 .keymap(keymap)
-                .drag_out(true);
+                .drag_out(true)
+                .resize(grid::GridResize::FixedSize);
             if let Some(app) = &self.app {
                 grid = grid.app(app);
             }
+            // The room the grid has, as it reads it: the view menu names
+            // the zoom by the count per row its size shows there.
+            let width = ui.available_width() - ui.spacing().scroll.allocated_width();
+            let gap = egui_pop::core::theme::Tokens::of(ui.ctx()).space.s;
             let out = grid.show(ui, &mut self.view.state, &items, &thumbs);
+            self.view.shown_per_row = match self.view.state.zoom() {
+                grid::Zoom::Points(p) => grid::Zoom::from_points(p, width, gap)
+                    .per_row()
+                    .map(|n| n.min(grid::Zoom::most_per_row(width, gap))),
+                grid::Zoom::PerRow(n) => Some(n),
+            };
             (out.response, out.signals)
         };
         let out = Drawn {
