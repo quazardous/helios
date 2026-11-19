@@ -292,10 +292,9 @@ impl Quit {
 }
 
 impl Drop for Quit {
-    /// The shell goes while Helios quits and the end's turns did not tell
-    /// the node ("Quit now", the end's limit, a host without the end
-    /// splash): told now, so it still closes the vault once its last
-    /// client is gone.
+    /// The quit's state goes while Helios quits and the end's turns did
+    /// not tell the node ("Quit now", the end's limit): told now, so it
+    /// still closes the vault once its last client is gone.
     fn drop(&mut self) {
         if self.quitting.get() {
             self.slots.tell(self.cancel_jobs.get());
@@ -359,6 +358,15 @@ impl Shell {
         quit.slots.set_node(node);
         // Attached late (the start handing the library over after the
         // close): told at once.
+        if quit.quitting.get() {
+            quit.slots.tell(quit.cancel_jobs.get());
+        }
+    }
+
+    /// Tells the node to quit when Helios quits and the end's turn of
+    /// [`crate::app_quit::NODE`] did not yet (once either way).
+    pub(super) fn tell_node_if_quitting(&self) {
+        let quit = &self.lifetime.quit;
         if quit.quitting.get() {
             quit.slots.tell(quit.cancel_jobs.get());
         }

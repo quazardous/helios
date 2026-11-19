@@ -1826,6 +1826,9 @@ impl Shell {
         use egui_pop::api::steps::Outcome;
         // Agents write the workspace's files again from now on.
         self.release_workspace();
+        // A host that ends without the end splash's turns (tests, a
+        // host of its own): the node is told here.
+        self.tell_node_if_quitting();
         match self.core.app.exit() {
             Outcome::Done(r) => r.map(|_| ()),
             Outcome::Vetoed { by, reason } => Err(format!("exit stopped by `{by}`: {reason}")),
