@@ -1,7 +1,17 @@
 # Panel kinds: what shows, what edits
 
-Status: study (2026-11-17), options A, B and C for the owner; nothing
-built.
+Status: option B chosen by the owner (2026-11-17) and built: egui-pop's
+`PanelSpec::kind` and area registry, egui_hud's `render::handle`, and
+Helios's declarations (2026-11-19): each panel's kind in
+`helios_gui::PANEL_KINDS`; edit areas for the parameters' controls, the
+Modules' Bypass, the histogram's drag (named "Exposure") and the selected
+shape's handles on the image (each named with its parameter and value);
+navigate areas for the image, the Modules' rows and the scopes' modes;
+display areas for the waveform and the parade. The test `area_kinds`
+fails when an edit of the photo made with the pointer comes from an area
+not declared `edit`. Left: the Graph's, Masks tree's, Decisions' and
+History's own areas, and the mask handles sensed by their own
+`render::handle` once helios-rack draws them.
 
 The owner's ask (2026-11-17): one cannot tell which panels only show and
 which change the render. It must be obvious at a glance. The example: the

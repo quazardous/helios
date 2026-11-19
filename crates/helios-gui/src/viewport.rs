@@ -39,6 +39,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Ui;
+use egui_pop::core::areas::{self, AreaKind, AreaSpec};
 use egui_pop::viewport::display::{
     DisplayTarget, DisplayTransform, Primaries, Stage, SurfaceFormat, Transfer,
 };
@@ -266,6 +267,10 @@ fn scaled_to(image: &Image, extent: Region) -> Image {
 
 /// The image's id as egui-pop's canvas in use (`egui_pop::core::canvas`).
 pub const CANVAS: &str = "helios.viewport.canvas";
+
+/// The side of a mask handle's edit area, in points (the viewport's
+/// overlay senses its drag over about as much).
+const HANDLE_AREA: f32 = 14.0;
 
 /// What the zoom commands ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1164,6 +1169,49 @@ impl Viewport {
         ui.ctx().request_repaint();
     }
 
+    /// Declares the image's areas to egui-pop's area registry
+    /// (`docs/design/panel-kinds.md`): the picture navigates (pan, zoom,
+    /// the split), or edits while a path is being drawn on it; each
+    /// handle of the selected shape edits the parameter it drags, named
+    /// with its value in its hover card. The viewport keeps sensing the
+    /// handles' drags (its overlays) and their cursor: their areas sense
+    /// the hover alone.
+    fn declare_areas(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        mapping: Option<&egui_pop::viewport::Mapping>,
+        store: &Store,
+    ) {
+        let image = if crate::masks::tool(store).is_empty() {
+            AreaSpec::navigate("viewport.image")
+        } else {
+            AreaSpec::new("viewport.image", AreaKind::Edit)
+        };
+        areas::register(ui, response, image);
+        let Some(m) = mapping else { return };
+        let ctx = ui.ctx();
+        let locale = crate::i18n::locale(ctx);
+        for h in self.masks.handle_areas() {
+            let at = m.image_to_screen(h.at);
+            let rect = egui::Rect::from_center_size(at, egui::vec2(HANDLE_AREA, HANDLE_AREA));
+            if !response.rect.contains(at) {
+                continue;
+            }
+            let r = ui.interact(rect, ui.scope_id().with(&h.id), egui::Sense::hover());
+            let entry = store.get(&h.path);
+            let control = entry.map_or_else(
+                || h.path.clone(),
+                |e| crate::params::label(ctx, &h.path, &e.descriptor),
+            );
+            let mut spec = AreaSpec::edit(h.id, control).path(h.path.clone());
+            if let Some(e) = entry.filter(|e| matches!(e.value, Value::Float(_) | Value::Int(_))) {
+                spec = spec.value(crate::params::shown_in(&locale, &e.descriptor, &e.value));
+            }
+            areas::register(ui, &r, spec);
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut Ui, store: &Mutex<Store>) {
         // Asked of the window the viewport is in (the main one, or its
         // own once detached); egui-pop resolves it against the surface.
@@ -1243,6 +1291,7 @@ impl Viewport {
         }
         self.readout = out.readout;
         let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
+        self.declare_areas(ui, &out.response, out.mapping.as_ref(), &store);
         let now = ui.input(|i| i.time);
         self.masks.signals(&out.signals, &mut store, now);
         if self.masks.take_left() {
