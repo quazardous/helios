@@ -26,6 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
+use egui_pop::core::ui::UiPop as _;
 use helios_core::Message;
 use helios_library::import::{Duplicates, Layout};
 use helios_library::import_profile::{Apply, Filter};
@@ -522,7 +523,7 @@ pub(super) fn copy_choices_ui(
 ) {
     let c = &mut w.choices;
     ui.horizontal(|ui| {
-        ui.strong(&words.into);
+        ui.strong_text(&words.into);
         let shown = c
             .into
             .as_deref()
@@ -542,7 +543,7 @@ pub(super) fn copy_choices_ui(
         None => ui.weak(&words.no_sample),
     };
     ui.add_space(4.0);
-    ui.strong(&words.name);
+    ui.strong_text(&words.name);
     let preset = words.names.iter().position(|(p, _)| *p == c.rename);
     ui.horizontal_wrapped(|ui| {
         for (pattern, label) in &words.names {

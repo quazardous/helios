@@ -1199,7 +1199,7 @@ impl Params {
 /// offered only then.
 fn header_ui(ui: &mut Ui, node: &str, changed: bool) {
     ui.horizontal(|ui| {
-        ui.strong(node);
+        ui.strong_text(node);
         if changed {
             crate::modules::changed_mark(ui, node);
             let ctx = ui.ctx().clone();

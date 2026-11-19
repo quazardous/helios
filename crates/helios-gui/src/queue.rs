@@ -413,7 +413,7 @@ impl QueuePanel {
         };
         let locale = crate::i18n::locale(&ctx);
         let summary = queue.summary();
-        ui.strong(text(
+        ui.strong_text(text(
             Message::new("gui-queue-title", "Queue of { $node }").with("node", node.as_str()),
         ));
         ui.label(text(
@@ -449,7 +449,7 @@ impl QueuePanel {
                             Message::new("gui-queue-column-attempts", "Attempts"),
                             Message::new("gui-queue-column-where", "Where"),
                         ] {
-                            ui.strong(text(header));
+                            ui.strong_text(text(header));
                         }
                         ui.label("");
                         ui.end_row();

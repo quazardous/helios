@@ -281,7 +281,7 @@ pub fn ui(
                             {
                                 run = Some(("macro.fold", serde_json::json!({ "node": m })));
                             }
-                            ui.strong(m);
+                            ui.strong_text(m);
                             ui.weak(tr(Message::new("gui-modules-macro", "macro { $version }")
                                 .with("version", version)));
                         });

@@ -17,7 +17,7 @@ To add an entry, give the public item a doc line
 `/// Need (group): a search field.`, a preset using the same words as
 the widget it wraps; the group is one of: `text`, `layout`, `action`, `input`, `state`, `status`, `icon`, `help`, `dialog`, `data`, `image`.
 
-egui-pop in the lock: 0.15.0.
+egui-pop in the lock: 0.17.0.
 
 ## Text and titles
 
@@ -155,6 +155,7 @@ egui-pop in the lock: 0.15.0.
 | a confirmation dialog | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action. |
 | a file or folder picker | `FileBrowser` (egui-pop)<br>`egui_pop::api::files::browser::FileBrowser` | The file browser: entries from a `FileSource`, shown by a `ViewMode` chosen in its toolbar (or with `Ctrl+1` to `Ctrl+9`), kept per dialog in the host's store when drawn with `FileBrowser::show_in`. |
 | a settings or admin page declared as a manifest | `Admin` (egui-pop)<br>`egui_pop::api::admin::Admin` | The administration app's state, manifests, hooks, widget kinds and value layers. |
+| a side panel of places, with sections of an application's | `PlacesPanel` (egui-pop)<br>`egui_pop::api::files::places::PlacesPanel` | A side panel of places: sections, each a heading over its items, as the in-app picker lists them (an import window's sources column). |
 | a submenu in a context menu drawn by hand | `menus::submenu(..)` (egui-pop)<br>`egui_pop::api::menus::submenu` | A submenu item in a menu drawn by hand (a context menu built in a closure, `egui_pop_core::pointer::claim::context_menu`), drawn as the declared menus' submenu items: the kit's `menu-item` with the submenu arrow, `selected` while its submenu is open. |
 | ask before a destructive action | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action. |
 

@@ -479,13 +479,14 @@ fn browse_walks_folders_in_the_own_picker_and_fills_the_field() {
     ));
     let mut h = harness(shell);
     click(&mut h, "Browse…");
-    // The folder's subfolders, no files when choosing a folder.
-    assert!(h.query_by_label("a/").is_some() && h.query_by_label("b/").is_some());
+    // The folder's subfolders, no files when choosing a folder. A folder
+    // row is named by its name alone (egui-pop 0.16).
+    assert!(h.query_by_label("a").is_some() && h.query_by_label("b").is_some());
     assert!(h.query_by_label("notes.txt").is_none());
-    go_into(&mut h, "a/");
-    assert!(h.query_by_label("inner/").is_some(), "in a");
+    go_into(&mut h, "a");
+    assert!(h.query_by_label("inner").is_some(), "in a");
     click(&mut h, "Up");
-    go_into(&mut h, "b/");
+    go_into(&mut h, "b");
     click(&mut h, "Choose this folder");
     let form = current(&mut h);
     assert_eq!(form["kind"], json!("form"));

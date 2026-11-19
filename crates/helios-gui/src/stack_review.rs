@@ -247,7 +247,7 @@ impl Review {
             |ui| {
                 for d in &decisions {
                     ui.separator();
-                    ui.strong(text(
+                    ui.strong_text(text(
                         Message::new(
                             "gui-stacks-proposal",
                             "{ $groups } stacks proposed by { $resolver }",
