@@ -2738,8 +2738,10 @@ mod tests {
                 section.contains(r#"f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }""#),
                 "{job} decodes filter="
             );
+            // test-crate takes several targets (`test=a+b`), the others one.
             assert!(
-                section.contains("lib) sel=\"--lib\""),
+                section.contains("lib) sel=\"--lib\"")
+                    || section.contains(r#"if [ "$m" = lib ]; then sel="$sel --lib""#),
                 "{job} runs test=lib"
             );
             assert!(

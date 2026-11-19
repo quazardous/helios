@@ -543,10 +543,13 @@ fn an_import_shows_in_the_jobs_model_and_is_cancelled_midway() {
     }
     assert_eq!(copies, ["a.png"], "no half-written copy");
 
+    // egui-pop's jobs model reads its own protocol (`job.started`), as
+    // helios-gui's host hands it on: the old names.
     let mut model = Model::new();
     for e in bus.since(0) {
         model.apply(
-            &Incoming::new(e.seq, e.kind, &e.payload).source(&e.source),
+            &Incoming::new(e.seq, helios_core::legacy_kinds::legacy(e.kind), &e.payload)
+                .source(&e.source),
             0.0,
         );
     }

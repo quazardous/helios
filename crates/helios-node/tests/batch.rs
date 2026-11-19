@@ -973,12 +973,14 @@ fn a_batch_shows_as_a_parent_with_its_exports_as_children() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+    // egui-pop's jobs model reads its own protocol (`job.started`), as
+    // helios-gui's host hands it on: the old names.
     let mut model = Model::new();
     for e in job_events(&node) {
         model.apply(
             &Incoming::new(
                 e["seq"].as_u64().unwrap(),
-                e["kind"].as_str().unwrap(),
+                helios_core::legacy_kinds::legacy(e["kind"].as_str().unwrap()),
                 &e["payload"],
             ),
             0.0,
