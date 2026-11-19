@@ -12,7 +12,7 @@ library (`--vault`), a workspace, a configuration with the first-run
 questions answered, and a folder of known photos (the plugin tests'
 JPEG fixtures and a synthetic picture). `helios-gui` starts in its own
 compositor with its agent socket on and writable (`EGUI_POP_AGENT_SOCKET`,
-`HELIOS_AGENT_WRITE=1`); the runner (`--runner`, the `scenarios`
+`HELIOS_AGENT_PRESET=scenario+private`); the runner (`--runner`, the `scenarios`
 example: egui-pop's scenario command line) replays the scenario over the
 socket, with `$folder`, `$image` and `$count` (the photos in
 `$folder`) set and `gui.snapshot` as the shot
@@ -163,7 +163,7 @@ def run_one(args, scenario: Path) -> dict:
             "XDG_CONFIG_HOME": str(work / "config"),
             "XDG_STATE_HOME": str(work / "state"),
             "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
-            "HELIOS_AGENT_WRITE": "1",
+            "HELIOS_AGENT_PRESET": "scenario+private",
             "HELIOS_SCENARIO_STDERR": str(keep / "stderr.txt"),
         }
         entry["launch"] = comp.launch(cmd, env)

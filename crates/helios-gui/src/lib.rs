@@ -10,6 +10,7 @@ pub const INTERFACE_PASS_BUDGET: std::time::Duration = std::time::Duration::from
 
 pub mod account_gone;
 pub mod activity;
+pub mod agent_preset;
 pub mod agent_state;
 pub mod app_quit;
 pub mod backup_end;
@@ -24,6 +25,7 @@ pub mod config;
 pub mod contexts;
 pub mod controls;
 pub mod decisions;
+pub mod destructive;
 pub mod dialogs;
 pub mod display;
 pub mod duplicates;
@@ -86,6 +88,7 @@ pub mod relay;
 pub mod report;
 pub mod rule_editor;
 pub mod rule_editor_ui;
+pub mod schemas;
 pub mod scopes;
 pub mod settings_changed;
 pub mod shell;

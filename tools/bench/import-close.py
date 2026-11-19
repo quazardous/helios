@@ -10,7 +10,7 @@ Python that has the wbox library:
                     [--budget-ms MS]
 
 `helios-gui` starts in its own compositor on a throwaway library, with its
-agent socket on (`EGUI_POP_AGENT_SOCKET`, `HELIOS_AGENT_WRITE=1`) and its
+agent socket on (`EGUI_POP_AGENT_SOCKET`, `HELIOS_AGENT_PRESET=scenario+private`) and its
 frame trace (`HELIOS_FRAME_TRACE`: a line on standard error per frame
 begun, with the viewport, and when the import window closes). For each
 way of closing, in turn: the import window is opened on `--folder` (a
@@ -394,7 +394,7 @@ def run(args, index: int, way: str, cover: str) -> dict:
             "XDG_STATE_HOME": str(w["state"]),
             "XDG_CACHE_HOME": str(work / "cache"),
             "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
-            "HELIOS_AGENT_WRITE": "1",
+            "HELIOS_AGENT_PRESET": "scenario+private",
             "HELIOS_FRAME_TRACE": "1",
             "HELIOS_TRACE_FILE": str(trace),
         }

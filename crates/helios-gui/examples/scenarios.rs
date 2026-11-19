@@ -2,7 +2,7 @@
 //! (`egui_pop_test::scenario::live::cli`), built in this workspace so the
 //! box's `scenarios` job (tools/bench/scenarios.py) needs no other
 //! checkout. It drives a `helios-gui` already running with its agent
-//! socket on (`EGUI_POP_AGENT_SOCKET`) and writable (`HELIOS_AGENT_WRITE=1`);
+//! socket on (`EGUI_POP_AGENT_SOCKET`) and writable (`HELIOS_AGENT_PRESET=scenario+private`);
 //! see docs/gui.md, "Agents".
 //!
 //! ```text

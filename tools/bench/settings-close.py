@@ -515,7 +515,7 @@ def main() -> int:
             "XDG_STATE_HOME": str(w["state"]),
             "XDG_CACHE_HOME": str(args.work / "cache"),
             "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
-            "HELIOS_AGENT_WRITE": "1",
+            "HELIOS_AGENT_PRESET": "scenario+private",
             "HELIOS_STDERR": str(args.out / "helios.stderr"),
             "RUST_LOG": "info,egui_pop=debug",
         }
