@@ -878,16 +878,19 @@ fn first_paint(path: &Path) -> Option<(helios_core::Graph, helios_core::NodeId)>
 
 /// Starts making an image of the library ready, off the window's thread:
 /// a raw's embedded preview first, then the image through `bundle`'s
-/// network (the darkroom applies its head version's edit).
+/// network (the darkroom applies its head version's edit), the `decoded`
+/// state of `states` (a warm-up may have computed it, or be computing it).
 fn prepare_library(
     id: &str,
     image: helios_vault::ImageId,
     path: PathBuf,
     bundle: helios_template::Bundle,
+    states: helios_node_core::image_states::ImageStates,
 ) -> Preparing {
     let (tx, ready) = std::sync::mpsc::channel();
     let file = path.clone();
     let sender = tx.clone();
+    let photo = id.to_string();
     let spawned = std::thread::Builder::new()
         .name("helios-image-open".into())
         .spawn(move || {
@@ -900,7 +903,8 @@ fn prepare_library(
             if let Some((graph, node)) = first {
                 let _ = sender.send(Ready::First(graph, node));
             }
-            let prepared = image_graph(&file, &bundle).map(|(graph, node)| Prepared {
+            let decoded = helios_gui::warm::open(&states, &photo, &file, &bundle);
+            let prepared = decoded.map(|(graph, node)| Prepared {
                 path: file,
                 image: Some(image),
                 graph,
@@ -1024,6 +1028,12 @@ struct App {
     library_reading: Option<LibraryReading>,
     /// Images being made ready, opened in the viewport as each is.
     preparing: Vec<Preparing>,
+    /// The photos the darkroom shows and those near, said on the bus.
+    photos: helios_node_core::warm::Lifecycle,
+    /// Where the photos near are, for the warmer's recipe.
+    warm_book: helios_gui::warm::Book,
+    /// Decodes the photos near ahead; ends with the application.
+    _warmer: helios_node_core::warm::Warmer,
     /// Starts the exports the shell asks for (`export.run`, on
     /// `export.start`, holds it weakly); the node runs them. Held here: it
     /// ends with the application.
@@ -1075,11 +1085,45 @@ impl App {
         })?;
         // A newer opening replaces one still being made ready.
         self.preparing.retain(|p| p.library.is_none());
+        let states = self.shell.image_states().clone();
         self.preparing
-            .push(prepare_library(id, image, path, bundle));
+            .push(prepare_library(id, image, path, bundle, states));
+        self.say_around(id);
         // Its large thumbnail drawn until its render is complete.
         self.shell.open_from_library(Some(id));
         Ok(())
+    }
+
+    /// Says `id` shown and its neighbours in the Library's order near
+    /// (`helios.photo.*`), the photos leaving said hidden: the warmer
+    /// decodes the near ones ahead, from the files and network kept in
+    /// the book.
+    fn say_around(&mut self, id: &str) {
+        let order = self.shell.library().shown();
+        let Some(at) = order.iter().position(|o| o == id) else {
+            self.photos
+                .publish(self.shell.image_states().bus(), Some(id), &[]);
+            return;
+        };
+        let bundle = self.bundle();
+        let mut near = Vec::new();
+        let mut book = Vec::new();
+        let around = [at.checked_sub(1), Some(at + 1)];
+        for other in around.into_iter().flatten().filter_map(|i| order.get(i)) {
+            let file = helios_vault::ImageId::from_hex(other)
+                .ok()
+                .and_then(|image| {
+                    let persist = self.persist.as_ref()?;
+                    persist.library().file_to_read(&image).ok().flatten()
+                });
+            if let Some(path) = file {
+                near.push(other.clone());
+                book.push((other.clone(), path, bundle.clone()));
+            }
+        }
+        self.warm_book.set(book);
+        self.photos
+            .publish(self.shell.image_states().bus(), Some(id), &near);
     }
 
     /// The darkroom the workspace was left in, its image opened again;
@@ -2495,7 +2539,15 @@ fn main() -> Result<(), String> {
                     log::error!("{}: {e}", helios_gui::workspace_applied::NETWORK);
                 }
             }
+            let warm_book = helios_gui::warm::Book::default();
+            let warmer = helios_node_core::warm::Warmer::start(
+                shell.image_states().clone(),
+                warm_book.recipe(),
+            );
             let mut app = App {
+                photos: helios_node_core::warm::Lifecycle::default(),
+                warm_book,
+                _warmer: warmer,
                 node: node_client,
                 _exporter: exporter,
                 network_changed,

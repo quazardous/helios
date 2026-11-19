@@ -12,7 +12,9 @@
 //!   again;
 //! - runs the computations on a bounded pool, highest [`Priority`] first
 //!   (Interactive / Prefetch / Batch: shown / near / background); an ask
-//!   of higher priority joining a waiting computation raises it;
+//!   of higher priority joining a waiting computation raises it, and no
+//!   background computation starts while an interactive one runs (a
+//!   warm-up, [`crate::warm`], never competes with the shown photo);
 //! - says each transition on the bus as an `image.state.*` fact
 //!   ([`facts`]), never pixels: those travel by handle.
 //!
@@ -85,6 +87,11 @@ pub enum StateKind {
     /// The fit, a zoom and the preview read them instead of demosaicing
     /// again.
     FullSize,
+    /// The photo's file through the workspace's network, before its edit:
+    /// the raw decoded and its graph built, its `development` the file and
+    /// the network. An open clones the graph (its images shared) rather
+    /// than decoding again; a warm-up computes it ahead.
+    Decoded,
 }
 
 impl StateKind {
@@ -92,6 +99,7 @@ impl StateKind {
         match self {
             StateKind::Preview => "preview",
             StateKind::FullSize => "full_size",
+            StateKind::Decoded => "decoded",
         }
     }
 }
@@ -289,6 +297,9 @@ struct Table {
     pins: HashMap<StateKey, usize>,
     queue: BinaryHeap<Queued>,
     seq: u64,
+    /// Interactive computations running: no background one starts while
+    /// there is one.
+    interactive: usize,
     closed: bool,
 }
 
@@ -413,7 +424,7 @@ impl ImageStates {
     /// ready or in flight. The ask lasts as long as the handle.
     pub fn ask(&self, key: StateKey, priority: Priority, compute: Compute) -> Handle {
         let token = cancel::Token::new();
-        let found = self.inner.ask(&key, priority, &compute, &token);
+        let (found, _) = self.inner.ask(&key, priority, &compute, &token, false);
         Handle {
             router: self.inner.clone(),
             key,
@@ -422,6 +433,44 @@ impl ImageStates {
             token,
             found,
         }
+    }
+
+    /// The bus its facts go to: the photos' lifecycle facts
+    /// ([`crate::warm::facts`]) are said there too.
+    pub fn bus(&self) -> &Arc<Bus> {
+        &self.inner.bus
+    }
+
+    /// The state `key` at once: ready, it is handed back; in flight (a
+    /// warm-up), this ask joins it, raising it to `priority`; else it is
+    /// computed by `compute` on the calling thread, never queued behind
+    /// the pool's work (an open on its own thread), and kept as the
+    /// pool's are. Counted as interactive while it runs at that priority:
+    /// no background state starts meanwhile.
+    ///
+    /// # Errors
+    /// The computation's, or [`StateError::Timeout`] past `timeout`.
+    pub fn get_here(
+        &self,
+        key: StateKey,
+        priority: Priority,
+        compute: Compute,
+        timeout: Duration,
+    ) -> Result<Value, StateError> {
+        let token = cancel::Token::new();
+        let (found, lead) = self.inner.ask(&key, priority, &compute, &token, true);
+        if let Some(job) = lead {
+            self.inner.run(&job, priority >= Priority::Interactive);
+        }
+        Handle {
+            router: self.inner.clone(),
+            key,
+            priority,
+            compute,
+            token,
+            found,
+        }
+        .wait(timeout)
     }
 
     /// What the router did so far.
@@ -639,13 +688,16 @@ impl Inner {
         self.bus.publish_value(SOURCE, None, kind, payload);
     }
 
+    /// Asks for `key`; `inline`, a computation it leads is not queued
+    /// but handed back to run on the calling thread ([`Inner::run`]).
     fn ask(
         &self,
         key: &StateKey,
         priority: Priority,
         compute: &Compute,
         token: &cancel::Token,
-    ) -> Found {
+        inline: bool,
+    ) -> (Found, Option<Arc<Job>>) {
         self.asks.fetch_add(1, Ordering::SeqCst);
         let mut table = self.table();
         table.seq += 1;
@@ -655,7 +707,7 @@ impl Inner {
             let now = self.now();
             table.order.touch(key, now);
             self.ready_hits.fetch_add(1, Ordering::SeqCst);
-            return Found::Ready(value);
+            return (Found::Ready(value), None);
         }
         // Every flight begins under the table's lock, so a key flying is a
         // key in `jobs`.
@@ -671,7 +723,7 @@ impl Inner {
                         self.work.notify_one();
                     }
                 }
-                Found::Flying(waiter)
+                (Found::Flying(waiter), None)
             }
             Begin::Lead(lead) => {
                 let waiter = lead.waiter();
@@ -681,23 +733,31 @@ impl Inner {
                     key: key.clone(),
                     askers,
                     priority: Mutex::new(priority),
-                    started: AtomicBool::new(false),
+                    started: AtomicBool::new(inline),
                     compute: compute.clone(),
                     lead: Mutex::new(Some(lead)),
                 });
                 table.jobs.insert(key.clone(), job.clone());
-                table.queue.push(Queued { priority, seq, job });
                 self.publish(facts::REQUESTED, key, priority, None);
+                if inline {
+                    if priority >= Priority::Interactive {
+                        table.interactive += 1;
+                    }
+                    return (Found::Flying(waiter), Some(job));
+                }
+                table.queue.push(Queued { priority, seq, job });
                 self.work.notify_one();
-                Found::Flying(waiter)
+                (Found::Flying(waiter), None)
             }
         }
     }
 
-    /// A pool thread: runs the queue's jobs, highest priority first.
+    /// A pool thread: runs the queue's jobs, highest priority first; a
+    /// background one (below Interactive) waits while an interactive one
+    /// runs.
     fn work(&self) {
         loop {
-            let job = {
+            let (job, interactive) = {
                 let mut table = self.table();
                 loop {
                     if table.closed {
@@ -706,8 +766,22 @@ impl Inner {
                     match table.queue.pop() {
                         // An older entry of a job whose priority was
                         // raised, already taken.
-                        Some(q) if q.job.started.swap(true, Ordering::SeqCst) => {}
-                        Some(q) => break q.job,
+                        Some(q) if q.job.started.load(Ordering::SeqCst) => {}
+                        Some(q) if q.priority < Priority::Interactive && table.interactive > 0 => {
+                            table.queue.push(q);
+                            table = self
+                                .work
+                                .wait(table)
+                                .unwrap_or_else(PoisonError::into_inner);
+                        }
+                        Some(q) => {
+                            q.job.started.store(true, Ordering::SeqCst);
+                            let interactive = q.priority >= Priority::Interactive;
+                            if interactive {
+                                table.interactive += 1;
+                            }
+                            break (q.job, interactive);
+                        }
                         None => {
                             table = self
                                 .work
@@ -717,19 +791,30 @@ impl Inner {
                     }
                 }
             };
-            let started = Instant::now();
-            let outcome = if job.askers.is_cancelled() {
-                Err(StateError::Cancelled)
-            } else {
-                self.publish(facts::COMPUTING, &job.key, job.priority(), None);
-                self.computed.fetch_add(1, Ordering::SeqCst);
-                let compute = job.compute.clone();
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    cancel::scope(&job.askers, || compute())
-                }))
-                .unwrap_or_else(|_| Err(StateError::Failed("the computation panicked".into())))
-            };
-            self.finish(&job, outcome, started.elapsed());
+            self.run(&job, interactive);
+        }
+    }
+
+    /// Runs a job taken (counted among the interactive ones when
+    /// `interactive`) and ends it.
+    fn run(&self, job: &Arc<Job>, interactive: bool) {
+        let started = Instant::now();
+        let outcome = if job.askers.is_cancelled() {
+            Err(StateError::Cancelled)
+        } else {
+            self.publish(facts::COMPUTING, &job.key, job.priority(), None);
+            self.computed.fetch_add(1, Ordering::SeqCst);
+            let compute = job.compute.clone();
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cancel::scope(&job.askers, || compute())
+            }))
+            .unwrap_or_else(|_| Err(StateError::Failed("the computation panicked".into())))
+        };
+        self.finish(job, outcome, started.elapsed());
+        if interactive {
+            self.table().interactive -= 1;
+            // The background jobs held back may start.
+            self.work.notify_all();
         }
     }
 
@@ -853,7 +938,8 @@ impl Handle {
     fn again(&mut self) {
         self.found = self
             .router
-            .ask(&self.key, self.priority, &self.compute, &self.token);
+            .ask(&self.key, self.priority, &self.compute, &self.token, false)
+            .0;
     }
 }
 
