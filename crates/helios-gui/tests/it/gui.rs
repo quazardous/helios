@@ -641,12 +641,17 @@ fn previews_read_while_the_window_is_idle_show_by_the_next_frame() {
     for id in ["a", "b", "c"] {
         assert!(h.state().library().has_thumbnail(id), "{id}");
     }
-    // One repaint asked for the burst, not one per preview.
+    // One repaint asked for the burst, not one per preview: by the
+    // library itself, or, in the desktop, by the window-addressed wake its
+    // news reaches on egui-pop's bus.
     let asked = h
         .ctx
         .repaint_causes()
         .into_iter()
-        .filter(|c| c.file.ends_with("library.rs"))
+        .filter(|c| {
+            c.file.ends_with("library.rs")
+                || c.file.contains("egui-pop-api") && c.file.ends_with("bus.rs")
+        })
         .count();
     assert_eq!(asked, 1, "{:?}", h.ctx.repaint_causes());
     // Once that frame has taken them and the window is idle again, the next
