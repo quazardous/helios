@@ -1,0 +1,54 @@
+name: windows-tests
+
+# The workspace's tests on Windows (MSVC), nightly on `next` and on demand.
+# They left ci.yml's per-push `windows` job (2026-11-19): they took 20 of its
+# 33 minutes and made it the slowest path of every run, while they blocked
+# nothing. The build stays in ci.yml, on every push, so a Windows compile
+# break is still seen at once.
+#
+# Nothing waits on this workflow: promote.yml follows `ci` only, and no
+# release step reads it.
+on:
+  # Scheduled runs use the default branch's copy of this file; the job
+  # checks out `next` itself.
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to test
+        default: next
+
+# Its own group: never cancels, nor is cancelled by, a ci.yml run.
+concurrency:
+  group: windows-tests
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # No GPU on the runner: the GPU tests run on WARP (DX12 in software).
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      # Text fixtures (JSON, TOML, catalogues) are compared byte for byte:
+      # check them out as they are committed, with LF.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'next' }}
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The same build as ci.yml's `windows` job (debug, all targets).
+          shared-key: windows
+          # A failing test must not cost the next night a full build.
+          cache-on-failure: true
+      # Not continue-on-error, unlike the step it was in ci.yml: alone in
+      # its workflow, a swallowed failure would leave nothing to see. The
+      # run goes red while test targets still fail on Windows (listed in
+      # docs/windows-port.md, "Where it stands"); `--no-fail-fast` runs them
+      # all, so one run shows everything that fails.
+      - run: cargo test --locked --workspace --no-fail-fast
