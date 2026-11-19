@@ -241,7 +241,7 @@ def main() -> int:
             cmd = [
                 "sh",
                 "-c",
-                'exec flatpak run --user --env=EGUI_POP_AGENT_SOCKET="$1" --env=HELIOS_AGENT_WRITE=1 '
+                'exec flatpak run --user --env=EGUI_POP_AGENT_SOCKET="$1" --env=HELIOS_AGENT_PRESET=scenario+private '
                 '"$0" --vault "$2" "$3" 2>"$4"',
                 APP,
                 str(w["socket"]),

@@ -239,7 +239,7 @@ def profile(work: Path) -> dict[str, str]:
         "XDG_CACHE_HOME": str(dirs["cache"]),
         "XDG_PICTURES_DIR": str(dirs["home"] / "Pictures"),
         "EGUI_POP_AGENT_SOCKET": str(dirs["agent"] / "helios.sock"),
-        "HELIOS_AGENT_WRITE": "1",
+        "HELIOS_AGENT_PRESET": "scenario+private",
     }
 
 

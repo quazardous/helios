@@ -607,36 +607,35 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
         // read-only (docs/gui.md, "Agents").
         .app_id(AGENT_APP_ID)
         .agent_socket_from_env_or_setting()
-        .debug_bridge_if(agent_writes(|n| std::env::var(n).ok()))
+        .debug_bridge_if(agent_preset(|n| std::env::var(n).ok()))
 }
 
-/// `HELIOS_AGENT_WRITE=1`: the agents may change the image and the
-/// library, not only read them. For scenario runs on a throwaway library
-/// (docs/gui.md, "Agents"); the bridge stays read-only otherwise.
-pub const AGENT_WRITE: &str = "HELIOS_AGENT_WRITE";
-
-/// Whether the environment lets agents write.
-fn agent_writes(env: impl Fn(&str) -> Option<String>) -> bool {
-    env(AGENT_WRITE).is_some_and(|v| v == "1")
+/// The agents' preset the environment asks for (`HELIOS_AGENT_PRESET`,
+/// or the deprecated `HELIOS_AGENT_WRITE=1`), its warning logged.
+fn agent_preset(env: impl Fn(&str) -> Option<String>) -> Option<crate::agent_preset::Preset> {
+    let (preset, warning) = crate::agent_preset::Preset::from_env(env);
+    if let Some(w) = warning {
+        log::warn!("{w}");
+    }
+    preset
 }
 
-/// The bridge made writable when asked, left to its default otherwise.
+/// The bridge made writable under a preset, left to its default otherwise.
 trait DebugBridgeIf {
-    fn debug_bridge_if(self, on: bool) -> Self;
+    fn debug_bridge_if(self, preset: Option<crate::agent_preset::Preset>) -> Self;
 }
 
 impl DebugBridgeIf for AppBuilder {
-    fn debug_bridge_if(self, on: bool) -> Self {
-        use egui_pop_agent::{AgentGrants, AgentGrantsExt as _};
-        if on {
-            // Since egui-pop-agent 0.10 an unpaired client is read-only
-            // even with the bridge On. Scenario runs (`examples/scenarios.rs`,
-            // `egui_pop_test::scenario::live`) do not pair, so they are let
-            // write here, on the throwaway library this switch is for.
-            self.debug_bridge(egui_pop::core::debug::BridgeMode::On)
-                .agent_grants(AgentGrants::new().allow_unpaired_writes())
-        } else {
-            self
+    fn debug_bridge_if(self, preset: Option<crate::agent_preset::Preset>) -> Self {
+        use egui_pop_agent::AgentGrantsExt as _;
+        match preset {
+            // A preset is for runs on a throwaway library: the bridge
+            // writes, and the agents get the preset's grant
+            // (crate::agent_preset).
+            Some(p) => self
+                .debug_bridge(egui_pop::core::debug::BridgeMode::On)
+                .agent_grants(p.grants()),
+            None => self,
         }
     }
 }
@@ -647,15 +646,6 @@ mod tests {
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_string()).collect()
-    }
-
-    #[test]
-    fn agents_write_only_when_the_environment_says_1() {
-        assert!(agent_writes(|n| (n == AGENT_WRITE).then(|| "1".to_string())));
-        assert!(!agent_writes(
-            |n| (n == AGENT_WRITE).then(|| "yes".to_string())
-        ));
-        assert!(!agent_writes(|_| None));
     }
 
     #[test]

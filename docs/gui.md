@@ -1393,12 +1393,34 @@ since egui-pop's MCP bridge reads it back from there; a unit test fails
 when a command whose title names a `path`, `folder`, `source`,
 `account` or `item` argument is not in the list.
 
-**Writing agents and scenarios (2026-11-08).** `HELIOS_AGENT_WRITE=1`
-makes the bridge writable, and lets the unpaired clients scenarios use
-write through it (egui-pop-agent 0.10 holds them read-only otherwise): the
-agent may then import, open images,
-change parameters and undo, as a person would. It is meant for runs on a
-throwaway library, never set by Helios itself. Quick open's
+**Destructive commands and argument schemas (2026-11-19).** The commands
+that delete or forget data (photos to the trash, albums, keywords,
+versions, nodes), overwrite files (export), sign an account out or reset
+more than one value are declared destructive to egui-pop (the list is
+`destructive::DESTRUCTIVE` in helios-gui): an agent's call opens a
+confirmation naming the agent and its arguments, and runs only once the
+user accepts; the user's own runs are never asked. The commands agents
+use most, and every destructive and private one, declare their
+arguments' JSON Schema (`schemas::schema`): egui-pop refuses a call whose
+arguments do not match before it runs (`command.refused`, by
+`pop.command.args`), and MCP publishes it as the tool's `inputSchema`.
+The schemas are loose on purpose (no `additionalProperties: false`),
+since the user's own runs are checked too. Unit tests fail when a
+command whose words say it may destroy is in neither list, or when a
+command with arguments has no schema and no reason.
+
+**Writing agents and scenarios (2026-11-19).**
+`HELIOS_AGENT_PRESET=scenario` makes the bridge writable and gives every
+agent, paired or not, the scenario grant: every command, value writes
+and `ui` actions, private data withheld; `scenario+private` adds private
+data, which importing a folder or opening a file by its path needs.
+Destructive commands are still confirmed by the user. Scenario runners
+do not say `hello` yet, so the grant goes to unpaired clients too. The
+agent may then import, open images, change parameters and undo, as a
+person would. It is meant for runs on a throwaway library, never set by
+Helios itself. `HELIOS_AGENT_WRITE=1`, the switch before it, still works
+for one release as an alias of `scenario+private`, with a warning in the
+log. Quick open's
 `workbench.quickOpen.go` also takes `file:<path>`, so an agent opens an
 image by its path. Helios's scenarios (`crates/helios-gui/tests/scenarios`,
 egui-pop's `docs/scenarios.md`) are replayed that way by the box's
