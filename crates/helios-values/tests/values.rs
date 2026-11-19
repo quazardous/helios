@@ -1029,6 +1029,7 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
             seq: Some((seq, seq)),
             origin: Some(Origin::User),
             history: true,
+            gesture: false,
         }]
     );
     // A write that changes nothing is not heard.
@@ -1054,6 +1055,10 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
     let lift = take();
     assert_eq!(lift.len(), 3, "{lift:?}");
     assert!(!lift[0].history && !lift[1].history, "no step yet");
+    assert!(
+        lift[0].gesture && lift[1].gesture,
+        "written inside the group"
+    );
     // Ended, it becomes a step: the history moved, nothing written.
     assert_eq!(
         lift[2],
@@ -1062,6 +1067,7 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
             seq: None,
             origin: Some(agent()),
             history: true,
+            gesture: false,
         }
     );
     assert!(store.history_rev() > rev);
@@ -1089,6 +1095,26 @@ fn the_change_hook_hears_each_write_and_each_step_in_one_go() {
     let cancelled = take();
     assert_eq!(cancelled.len(), 1);
     assert!(!cancelled[0].history, "a gesture cancelled makes no step");
+    assert!(!cancelled[0].gesture, "the cancel closes the gesture");
+
+    // A gesture of transient values only (the view moved): no step, its
+    // end heard all the same, closing its writes.
+    let zoom = "view/zoom";
+    store.declare(zoom, Descriptor::float("zoom", 0.01, 64.0, 1.0).transient());
+    let pan = store.begin_gesture(Origin::User, "move the view");
+    for v in [2.0, 4.0] {
+        store
+            .set(Set::new(zoom, Change::To(Value::Float(v)), Origin::User).gesture(pan))
+            .unwrap();
+    }
+    let moved = take();
+    assert!(moved.iter().all(|c| c.gesture), "{moved:?}");
+    let rev = store.history_rev();
+    store.end(pan);
+    let ended = take();
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    assert!(!ended[0].gesture && !ended[0].history && ended[0].paths.is_empty());
+    assert_eq!(store.history_rev(), rev, "no step made");
 
     // A preview shown and left: heard, nothing written.
     assert!(store.set_preview(vec![(ev_path.into(), Value::Float(0.5))]));

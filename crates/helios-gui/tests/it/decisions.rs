@@ -54,6 +54,37 @@ impl Module for HowBright {
     }
 }
 
+/// A judgment asked a question: how much to brighten, for a `target`
+/// (its question, set like any parameter).
+struct HowBrightFor;
+
+impl Module for HowBrightFor {
+    type Plan = f32;
+
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            name: "how_bright_for".into(),
+            params: vec![
+                ParamSpec::float("gain", "decided factor", 0.0, 4.0, 1.0),
+                ParamSpec::float("target", "the brightness aimed at", 0.0, 1.0, 0.5),
+            ],
+            ..HowBright.manifest()
+        }
+    }
+
+    fn question(&self) -> Vec<String> {
+        vec!["target".into()]
+    }
+
+    fn prepare(&self, params: &Params, c: &Context) -> Result<f32, String> {
+        HowBright.prepare(params, c)
+    }
+
+    fn process(&self, gain: &f32, inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+        HowBright.process(gain, inputs, output)
+    }
+}
+
 fn gain(g: f64) -> Params {
     Params::new().with("gain", Value::Float(g))
 }
@@ -380,4 +411,60 @@ fn decisions_snapshots() {
     let mut results = egui_kittest::SnapshotResults::new();
     let rect = h.state().target_rect(PANEL).unwrap();
     results.add(h.try_shot_of("decisions-pop-dark-1x", rect));
+}
+
+/// A decision's question written while the panels draw (a surface
+/// editing the parameter) is on its card in the same pass: the cards
+/// follow the graph on `values.changed`, after the darkroom brought it up
+/// to the values.
+#[test]
+fn a_question_written_while_the_panels_draw_is_on_the_card_in_the_same_pass() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "source",
+        Image::from_fn(Region::sized(64, 48), 4, |_, _, _| 0.2),
+    );
+    let sky = g
+        .add_module("sky", ModuleRef::new(HowBrightFor), &Params::new())
+        .unwrap();
+    g.connect(src, graph::SOURCE_PORT, sky, "input").unwrap();
+    let mut book = Book::new();
+    book.declare("sky", Mode::Human);
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_view_source(g, sky, "output").unwrap();
+    shell.set_decisions(book).unwrap();
+    let armed = Rc::new(Cell::new(None::<f64>));
+    let (values, arm) = (shell.values().clone(), armed.clone());
+    shell.set_content(PANEL, move |_ui| {
+        if let Some(t) = arm.take() {
+            values
+                .lock()
+                .unwrap()
+                .set(helios_values::Set::new(
+                    "node/sky/target",
+                    helios_values::Change::To(Value::Float(t)),
+                    Origin::User,
+                ))
+                .unwrap();
+        }
+    });
+    let mut h = harness(shell);
+    let target = |s: &Shell| {
+        s.decisions().cards()[0]
+            .question
+            .get("target")
+            .and_then(Value::as_f64)
+    };
+    assert_eq!(target(h.state()), Some(0.5));
+    armed.set(Some(0.8));
+    h.step();
+    assert_eq!(armed.get(), None, "the panel drew and wrote");
+    assert_eq!(
+        target(h.state()),
+        Some(0.8),
+        "the card follows in the pass the question was written in"
+    );
 }

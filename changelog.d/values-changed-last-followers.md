@@ -1,0 +1,3 @@
+kind: internal
+
+The Decisions panel's cards and the Queue panel follow the values on the application's bus (`values.changed`, after the darkroom; the Queue panel also hears the jobs' events) instead of being read every frame, so no per-frame value follower is left in the shell. The journal says `helios.param.changed` once per undo step or gesture (a slider's drag is one event when it ends, not one per frame), with the paths, the sequence numbers, who wrote and whether it made a step. The value store says which changes are written inside an open gesture, and hears a gesture that wrote only transient values when it ends.

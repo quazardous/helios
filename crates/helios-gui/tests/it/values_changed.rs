@@ -221,3 +221,83 @@ fn the_edit_s_marks_follow_a_value_written_outside_the_pass_or_on_another_thread
     h.step();
     assert!(!marked(h.state()));
 }
+
+/// What the journal said of values changed since `before`.
+fn said(shell: &Shell, before: egui_pop::api::host::Seq) -> Vec<serde_json::Value> {
+    shell
+        .app()
+        .handle()
+        .events_since(before)
+        .into_iter()
+        .filter(|e| e.name == helios_gui::values_changed::PARAM_CHANGED)
+        .map(|e| e.data)
+        .collect()
+}
+
+#[test]
+fn a_slider_drag_is_said_once_on_the_journal_when_it_ends() {
+    let mut h = harness(shell());
+    let before = h.state().app().handle().last_event();
+    let slider = h.state().target_rect(&format!("param:{EV}")).unwrap();
+    let from = slider.center();
+    h.hover_at(from);
+    h.step();
+    h.drag_at(from);
+    h.step();
+    let mut moved = Vec::new();
+    for k in 1..=8 {
+        h.hover_at(from + vec2(6.0 * k as f32, 0.0));
+        h.step();
+        moved.push(shown(h.state()));
+    }
+    assert!(
+        moved.windows(2).any(|w| w[0] != w[1]),
+        "the graph follows the drag frame by frame: {moved:?}"
+    );
+    assert!(
+        said(h.state(), before).is_empty(),
+        "nothing said while the drag goes on"
+    );
+    h.drop_at(from + vec2(48.0, 0.0));
+    for _ in 0..3 {
+        h.step();
+    }
+    let said = said(h.state(), before);
+    assert_eq!(said.len(), 1, "one change for the whole drag: {said:?}");
+    assert_eq!(said[0]["paths"], json!([EV]));
+    assert_eq!(said[0]["step"], true);
+    assert_eq!(said[0]["origin"]["kind"], "user");
+    assert_eq!(said[0]["surface"], helios_gui::values_changed::MAIN_SURFACE);
+    let (first, last) = (
+        said[0]["seq"][0].as_u64().unwrap(),
+        said[0]["seq"][1].as_u64().unwrap(),
+    );
+    assert!(first < last, "the drag's frames gathered: {said:?}");
+    assert_eq!(
+        h.state().values().lock().unwrap().undo_steps().len(),
+        1,
+        "one undo step"
+    );
+}
+
+#[test]
+fn a_write_and_its_undo_are_said_once_each() {
+    let mut h = harness(shell());
+    let before = h.state().app().handle().last_event();
+    write(h.state(), 0.5);
+    h.step();
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    h.step();
+    let said = said(h.state(), before);
+    assert_eq!(said.len(), 2, "{said:?}");
+    for s in &said {
+        assert_eq!(s["paths"], json!([EV]));
+        assert_eq!(s["step"], true);
+    }
+    assert_eq!(shown(h.state()), 0.0, "undone");
+}

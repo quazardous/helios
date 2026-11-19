@@ -167,6 +167,13 @@ pub trait QueueSource {
 
     /// Asks for `action` on the item `id` of a queue it gave.
     fn act(&mut self, app: &AppHandle, id: &str, action: Action);
+
+    /// Now, by the clock its items' [`QueueItem::since`] are on: the
+    /// panel's waits move on as it is drawn, the queue read only when it
+    /// changes. `None` keeps the time the queue was read at.
+    fn now(&self, _app: &AppHandle) -> Option<f64> {
+        None
+    }
 }
 
 /// The interim source: the jobs that name a node of the graph, from
@@ -254,6 +261,10 @@ impl QueueSource for JobsQueue {
         })
     }
 
+    fn now(&self, app: &AppHandle) -> Option<f64> {
+        app.service(&JOBS).map(|centre| centre.now())
+    }
+
     fn act(&mut self, app: &AppHandle, id: &str, action: Action) {
         match action {
             // The jobs centre's way: `job.cancel`, run in the desktop or
@@ -335,7 +346,9 @@ impl QueuePanel {
 
     /// Follows `node` (the selection), reads its queue, and closes or
     /// opens the panel as the setting says: closed while empty when it is
-    /// off, opened again once there is work if it closed itself.
+    /// off, opened again once there is work if it closed itself. Called
+    /// when the selection changed or a job event was said, not each
+    /// frame.
     ///
     /// Whether what the panel shows changed (the node or its items): it
     /// was drawn already this frame, so the caller asks for another.
@@ -376,6 +389,10 @@ impl QueuePanel {
     /// Draws the panel.
     pub fn ui(&mut self, ui: &mut Ui, app: &AppHandle) {
         let ctx = ui.ctx().clone();
+        // Read when it changes; its waits counted to now.
+        if let (Some(queue), Some(now)) = (&mut self.queue, self.source.now(app)) {
+            queue.now = now;
+        }
         let text = |m: Message| crate::i18n::text(&ctx, m);
         let Some(node) = self.node.clone() else {
             ui.weak(text(Message::new(

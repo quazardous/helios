@@ -102,6 +102,7 @@ impl Store {
                 seq: None,
                 origin: None,
                 history: false,
+                gesture: false,
             });
             self.announce();
         }

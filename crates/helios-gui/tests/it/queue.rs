@@ -195,3 +195,43 @@ fn an_empty_queue_closes_the_panel_when_the_setting_is_off() {
     assert!(!visible(&h));
     job.finished();
 }
+
+/// A node selected while the panels draw (the graph editor) is followed
+/// in the same pass: the Queue panel listens to the selection on
+/// `values.changed`, not each frame.
+#[test]
+fn a_node_selected_while_the_panels_draw_is_followed_in_the_same_pass() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let mut shell = Shell::new(helios_panels(), None);
+    let armed = Rc::new(Cell::new(None::<&'static str>));
+    let (values, arm) = (shell.values().clone(), armed.clone());
+    shell.set_content(PANEL, move |_ui| {
+        if let Some(node) = arm.take() {
+            values
+                .lock()
+                .unwrap()
+                .set(Set::new(
+                    helios_gui::params::SELECTION,
+                    Change::To(Value::Text(node.into())),
+                    Origin::User,
+                ))
+                .unwrap();
+        }
+    });
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
+    show_queue(&mut h);
+    let _job = h
+        .state()
+        .jobs()
+        .start(Start::new("export-a", "Export a.png", "export").node("grade"));
+    h.run();
+    assert_eq!(h.state().queue_panel().node(), None);
+    armed.set(Some("grade"));
+    h.step();
+    assert_eq!(armed.get(), None, "the panel drew and wrote");
+    assert_eq!(h.state().queue_panel().node(), Some("grade"));
+    assert_eq!(items(&h), [("export-a".to_string(), ItemState::Waiting)]);
+}

@@ -31,10 +31,6 @@ const ALLOWED: &[(&str, &str)] = &[
         "follow_photo_panels",
         "stays: the preview's render status (`panel.state`), read per frame",
     ),
-    (
-        "follow_decisions",
-        "waits: a network-shown-changed event for its refresh (the cards' clicks are answered in the pass they are made, by `answer_asks`)",
-    ),
     // Waits for an event that does not exist yet.
     (
         "contexts::follow_place",
@@ -59,10 +55,6 @@ const ALLOWED: &[(&str, &str)] = &[
     (
         "follow_language",
         "waits: egui-pop's i18n plugin saying the locale changed on the bus (it applies the language in its own per-pass block)",
-    ),
-    (
-        "follow_queue",
-        "waits: the value store's path listener for the selection (ADR 0016) and a jobs-centre point",
     ),
 ];
 
@@ -139,8 +131,10 @@ fn the_scan_finds_calls_named_or_listed() {
 /// reason; a new one fails here, and one moved to an event leaves the
 /// list (19 per-pass followers before the first moves; 16 once the
 /// snapshots' toasts were said with the asks answered after the panels;
-/// 13 now: the workspace's state, the workshop session and the edit's
-/// marks follow the values on `values.changed`).
+/// 13 once the workspace's state, the workshop session and the edit's
+/// marks followed the values on `values.changed`; 11 now: the Decisions
+/// panel's cards and the Queue panel follow them there too, the Queue
+/// panel the jobs' events as well).
 #[test]
 fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
     let found = followers();
@@ -172,7 +166,7 @@ fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
         "listed but no longer called in `Shell::ui`: {gone:?}; take them off the list"
     );
     assert!(ALLOWED.iter().all(|(_, why)| !why.is_empty()));
-    assert_eq!(found.len(), 13, "{found:?}");
+    assert_eq!(found.len(), 11, "{found:?}");
 }
 
 /// The followers moved to events are not called each pass.
@@ -186,6 +180,8 @@ fn the_followers_moved_to_events_are_not_called_each_pass() {
         "sync_workspace",
         "follow_session",
         "follow_edit_marks",
+        "follow_decisions",
+        "follow_queue",
     ] {
         assert!(
             !found.iter().any(|f| f == moved),
