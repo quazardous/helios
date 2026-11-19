@@ -275,7 +275,7 @@ impl Manager {
         if new { self.save() } else { Ok(()) }
     }
 
-    /// Calibrations report to `jobs` (`job.*` events, kind
+    /// Calibrations report to `jobs` (`helios.job.*` events, kind
     /// `calibration`): each device's families as items, its speeds as log
     /// lines, and `Jobs::cancel` stops it between two reference modules.
     pub fn report_to(&mut self, jobs: Jobs) {

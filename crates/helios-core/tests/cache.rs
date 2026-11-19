@@ -194,7 +194,7 @@ fn a_render_never_evicts_what_it_still_needs() {
     assert_eq!(d["cache"]["pinned"], 0);
     let settled: Vec<_> = events
         .try_iter()
-        .filter(|ev| ev.kind == "engine.cache_settled")
+        .filter(|ev| ev.kind == "helios.engine.cache_settled")
         .collect();
     assert_eq!(settled.len(), 1);
     assert_eq!(settled[0].payload["evicted"], 7);

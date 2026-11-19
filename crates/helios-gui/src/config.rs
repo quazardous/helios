@@ -31,7 +31,7 @@
 //! from the UI thread; they take effect at the next start.
 //!
 //! **Followed live.** A layer the node keeps that another of its clients
-//! changed (`settings.layerChanged` on its bus) is read again
+//! changed (`helios.settings.layerChanged` on its bus) is read again
 //! ([`follow`]): the Settings app shows its new
 //! values, and nothing is written back.
 
@@ -1707,7 +1707,7 @@ pub const LAYERS_LISTENER: &str = "helios.settings-layers";
 pub const BUS_OWNER: &str = "helios.settings";
 
 /// Listens, as [`LAYERS_LISTENER`], to the layers the desktop's node says
-/// changed (`settings.layerChanged`, on the application's bus `bus`); a
+/// changed (`helios.settings.layerChanged`, on the application's bus `bus`); a
 /// remote node's (`relayed:<name>`) are its own layers, left out. Each
 /// layer's name is kept in the receiver until [`follow`] reads it:
 /// registered before the settings are read, no change made between the

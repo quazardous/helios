@@ -747,9 +747,9 @@ import window keeps calling `cards()`.
 ### 4.3 Jobs
 
 - A backup is a job of kind `backup` (docs/jobs.md): a parent per run,
-  a child per destination, `job.progress` per photo, `job.paused` with
+  a child per destination, `helios.job.progress` per photo, `helios.job.paused` with
   "Plug in BACKUP_A to go on" when a destination goes away (the import's
-  pause code, reused), `job.resumed`, cancellable, at low priority so
+  pause code, reused), `helios.job.resumed`, cancellable, at low priority so
   it never slows an import or an export.
 - It is **idempotent by hash**: a copy already present and verified on
   a destination is skipped, so a cancelled or crashed job just runs
@@ -877,7 +877,7 @@ pub struct BackupStatus { pub have: u8, pub want: u8, pub off_site: bool, pub st
   "Mark this disk…" for a weak identity (never a card), confirmed by the
   user. The Library badges offline and missing photos, opening an
   offline one says which disk to plug in, and the library is read again
-  on `vault.locations_changed` (published by `update_locations`). The
+  on `helios.vault.locations_changed` (published by `update_locations`). The
   health check's free-space fix opens the page. Not yet: last verified,
   "Show its photos", "Verify now", "Forget", the amber "not seen for
   long", and write permission enforced in copy code.

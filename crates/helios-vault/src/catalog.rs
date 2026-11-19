@@ -113,7 +113,7 @@ pub struct FieldChanged {
 }
 
 impl Event for FieldChanged {
-    const KIND: &'static str = "vault.field_changed";
+    const KIND: &'static str = "helios.vault.field_changed";
 }
 
 impl<S: Store> Vault<S> {

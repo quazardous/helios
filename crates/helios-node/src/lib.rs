@@ -86,22 +86,22 @@ pub const FACTS: &[helios_core::FactDecl] = {
             "An automatic import is held for a confirmation",
         ),
         FactDecl::json(
-            "extract.run",
+            "helios.extract.run",
             "{ run, state, reason?, images?, nodes?, leaves?, tally? }",
             "An extraction run changed state",
         ),
         FactDecl::json(
-            "extract.item",
+            "helios.extract.item",
             "{ run, item, node, outcome, … }",
             "One item of an extraction run concluded at a node",
         ),
         FactDecl::json(
-            "workflow.rows",
+            "helios.workflow.rows",
             "{ run, node, items }",
             "Rows of a workflow run changed",
         ),
         FactDecl::json(
-            "workflow.run",
+            "helios.workflow.run",
             "{ run, title?, state, why?, … }",
             "A workflow run changed state",
         ),

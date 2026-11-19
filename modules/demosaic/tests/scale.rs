@@ -82,7 +82,7 @@ fn a_half_scale_render_is_the_full_render_reduced() {
     e.render_at(&g, demosaic, "output", part, 0.25).unwrap();
     let regions: Vec<Region> = events
         .try_iter()
-        .filter(|ev| ev.kind == "engine.step_computed")
+        .filter(|ev| ev.kind == "helios.engine.step_computed")
         .map(|ev| {
             let r = &ev.payload["region"];
             let n = |k: &str| r[k].as_i64().unwrap();

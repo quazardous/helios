@@ -35,7 +35,7 @@
 //! "locked": true } }`); a surface that does not use them carries them
 //! over to the versions it saves.
 //!
-//! Every save is announced on the vault's bus as `edit.saved`, with the
+//! Every save is announced on the vault's bus as `helios.edit.saved`, with the
 //! session's step number: a test waits for that event, it never sleeps.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -281,7 +281,7 @@ pub struct EditSaved {
 }
 
 impl Event for EditSaved {
-    const KIND: &'static str = "edit.saved";
+    const KIND: &'static str = "helios.edit.saved";
 }
 
 /// A surface's edit of one image, saved as versions.

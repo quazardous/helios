@@ -12,9 +12,9 @@
 //!   (`library.fields.get`) and shown as the vault holds them, so a failed
 //!   write never leaves the grid showing a value that is not stored (and
 //!   a field another process changed meanwhile shows too);
-//! - applies the vault's `vault.field_changed` events (from any writer in
+//! - applies the vault's `helios.vault.field_changed` events (from any writer in
 //!   this process sharing its bus) to the library, and reads its stacks
-//!   again on `vault.stack_changed`;
+//!   again on `helios.vault.stack_changed`;
 //! - reads the library through the node, off the UI thread: its photos
 //!   through a cursor (`cursor.open`, `cursor.window`, `cursor.refresh`)
 //!   and a [`ReadCache`] the bus's events keep true, the search filter's
@@ -27,7 +27,7 @@
 //!   turn with the library's other writes; the stacks and the proposals
 //!   waiting (`library.stacks.list`, `library.stacks.decisions`) are read
 //!   with the library, and again off the UI thread on
-//!   `vault.stack_changed` and `library.decision`;
+//!   `helios.vault.stack_changed` and `helios.library.decision`;
 //! - saves the edit of the image shown ([`Persist::open_image`]), with
 //!   the labels and locks of its mask nodes (its `marks`) and the modules
 //!   bypassed, as a version each time the value store commits a step: a
@@ -38,7 +38,7 @@
 //!   it; a drag saved that way and then cancelled saves the values it put
 //!   back, so the given-up values never stay the latest edit. Each
 //!   version names who made its step (the user, an agent, a script), and
-//!   each save is announced on the bus as `edit.saved`, and keeps whether
+//!   each save is announced on the bus as `helios.edit.saved`, and keeps whether
 //!   the edit changes the photo from its original (its `edited` field, the
 //!   Library's and the filmstrip's "edited" badge);
 //! - pins the image's history snapshots taken since (see
@@ -2874,7 +2874,7 @@ impl<S: Store + 'static> Persist<S> {
         while let Ok(event) = self.events.try_recv() {
             if let Some(kind) = Kind::of_event(event.kind) {
                 change.add(kind, BY_VAULT);
-            } else if event.kind == "vault.field_changed" {
+            } else if event.kind == "helios.vault.field_changed" {
                 let p = &event.payload;
                 if let (Some(image), Some(field)) = (p["image"].as_str(), p["field"].as_str()) {
                     let new = Some(&p["new"]).filter(|v| !v.is_null());

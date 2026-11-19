@@ -525,7 +525,7 @@ fn a_cancelled_gesture_puts_its_values_back_and_is_no_undo_step() {
     // The value put back is announced, so the graph follows.
     let news: Vec<_> = rx
         .try_iter()
-        .filter(|e| e.kind == "param.changed")
+        .filter(|e| e.kind == "helios.values.param_changed")
         .collect();
     assert_eq!(news.len(), 3, "{news:?}");
     assert!(store.take_dirty().contains(&path.to_string()));
@@ -608,7 +608,10 @@ fn a_transient_value_is_announced_but_never_undone_nor_committed() {
     assert_eq!(store.get(zoom).unwrap().value, Value::Float(3.0));
     // Announced all the same, so whoever follows the view sees it.
     let kinds: Vec<_> = events.try_iter().map(|e| e.kind).collect();
-    assert_eq!(kinds, ["param.changed", "param.changed"]);
+    assert_eq!(
+        kinds,
+        ["helios.values.param_changed", "helios.values.param_changed"]
+    );
 }
 
 #[test]
@@ -625,7 +628,7 @@ fn every_change_is_announced_once_and_no_change_is_not() {
     assert!(!a.changed);
     let events = bus.since(start);
     assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(events[0].kind, "param.changed");
+    assert_eq!(events[0].kind, "helios.values.param_changed");
     assert_eq!(
         events[0].payload,
         json!({

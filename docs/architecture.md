@@ -110,7 +110,7 @@ pixels: the CPU code is the reference a fallback runs. Accelerator
 failures are typed (`Failure`), and the engine answers each kind:
 
 - a kernel that does not compile or run: that step is computed on the
-  CPU, the rest of the chain stays on the GPU (`engine.gpu_fell_back` on
+  CPU, the rest of the chain stays on the GPU (`helios.engine.gpu_fell_back` on
   the bus, `Counters::fallbacks`);
 - an allocation over the device's memory budget: the engine evicts device
   content no render needs, least recently used first, and tries again;
@@ -123,7 +123,7 @@ failures are typed (`Failure`), and the engine answers each kind:
   content, asks the accelerator to rebuild its device and replays the
   render; if the rebuild fails, or the rebuilt device fails too, the
   engine renders on the CPU for the rest of its life
-  (`engine.gpu_lost`, with a message for the user; `Engine::gpu_off`).
+  (`helios.engine.gpu_lost`, with a message for the user; `Engine::gpu_off`).
 
 Both events carry their `message` by key (`engine-gpu-fell-back`,
 `engine-gpu-lost`, `helios_core::Message`); the desktop shows them as
@@ -182,7 +182,7 @@ in the past tense, emitted by the owner after a change.
 
 A node (`helios-node`) runs one bus for everything in its process: the
 engine, the scheduler and its jobs, the vault, decisions and its own
-`node.*` events, served by its inspect endpoint and read through it by
+`helios.node.*` events, served by its inspect endpoint and read through it by
 the MCP server, scripts and the desktop's relays. The AI service keeps a
 bus of its own for its jobs (`ai.jobs.events`).
 
@@ -192,9 +192,9 @@ events never cross from one desktop bus to another.
 
 | Bus | Created by | Published on it | Read by |
 |-----|------------|-----------------|---------|
-| Shell bus | `Shell::builder` | egui-pop's events through `HeliosHost` (`gui.command.*`, `gui.dialog.answered`, `gui.toast.shown`, `gui.edit.*`, `gui.history.changed` and `gui.history.refused`, and any other name as `gui.event` with `name` and `data`: egui-pop's context stack's `context.*` once Helios's egui-pop pin includes it, the parameter picker); `job.*` from `helios_core::jobs::Jobs` (`Shell::jobs`: an import, an export, the GPU calibration); the relay of each connected node (source `relay`: the node's `job.*` with ids `node:<name>/<id>`, `node.link`, `node.jobs_forgotten`; source `node:<name>`: the node's other events some listener asks for, and `node.resync`), and the desktop's own node's (`node:local`) | egui-pop, which reads it back as its journal (`since`, `last_seq`): the jobs centre and its consoles, `Forgotten`, every plugin reading `events_since`; the host's waker thread, which asks for a frame on an event not of kind `gui.*`; the listeners of `Shell::node_events` (the import window's `volume.*`, the import sources' `settings.layerChanged`) |
-| Vault bus | `main.rs`, handed to `Persist` when a vault is open | the vault (`vault.field_changed`, `vault.stack_changed`, `vault.version_added`, `edit.saved`); the stack commands (`library.decision`) | `Persist`, each frame: it refreshes the library's fields and stacks |
-| Viewport engine bus | `Viewport::default` | the viewport's engine (`engine.render_requested`, `engine.step_computed`, `engine.gpu_fell_back`, `engine.gpu_lost`, `engine.cache_settled`; and the image-state router's `image.state.requested` / `computing` / `ready` / `failed` / `cancelled` / `evicted`, one per transition of a state, never pixels) | the shell's `engine_notices`, which turns a GPU fallback or loss into a toast |
+| Shell bus | `Shell::builder` | egui-pop's events through `HeliosHost` (`helios.gui.command.*`, `helios.gui.dialog.answered`, `helios.gui.toast.shown`, `helios.gui.edit.*`, `helios.gui.history.changed` and `helios.gui.history.refused`, and any other name as `helios.gui.event` with `name` and `data`: egui-pop's context stack's `context.*` once Helios's egui-pop pin includes it, the parameter picker); `helios.job.*` from `helios_core::jobs::Jobs` (`Shell::jobs`: an import, an export, the GPU calibration); the relay of each connected node (source `relay`: the node's `helios.job.*` with ids `node:<name>/<id>`, `helios.node.link`, `helios.node.jobs_forgotten`; source `node:<name>`: the node's other events some listener asks for, and `helios.node.resync`), and the desktop's own node's (`node:local`) | egui-pop, which reads it back as its journal (`since`, `last_seq`): the jobs centre and its consoles, `Forgotten`, every plugin reading `events_since`; the host's waker thread, which asks for a frame on an event not of kind `helios.gui.*`; the listeners of `Shell::node_events` (the import window's `helios.volume.*`, the import sources' `helios.settings.layerChanged`) |
+| Vault bus | `main.rs`, handed to `Persist` when a vault is open | the vault (`helios.vault.field_changed`, `helios.vault.stack_changed`, `helios.vault.version_added`, `helios.edit.saved`); the stack commands (`helios.library.decision`) | `Persist`, each frame: it refreshes the library's fields and stacks |
+| Viewport engine bus | `Viewport::default` | the viewport's engine (`helios.engine.render_requested`, `helios.engine.step_computed`, `helios.engine.gpu_fell_back`, `helios.engine.gpu_lost`, `helios.engine.cache_settled`; and the image-state router's `helios.image.state.requested` / `computing` / `ready` / `failed` / `cancelled` / `evicted`, one per transition of a state, never pixels) | the shell's `engine_notices`, which turns a GPU fallback or loss into a toast |
 
 So: something the interface or the jobs centre must see (a job, a
 context change, a link going up or down) goes on the shell bus, through
@@ -212,7 +212,7 @@ node themselves. The desktop follows each node it is connected to through
 node's relay holds one `events.subscribe` with every kind. A relay
 republishes on the shell bus the events some listener asked for, with
 source `node:<name>` and the node's own envelope in the payload
-(`{"node", "event"}`); the node's `job.*` go only through the jobs
+(`{"node", "event"}`); the node's `helios.job.*` go only through the jobs
 relay, as before.
 
 (2026-11-19) The desktop's own node runs in its process on the desktop's
@@ -228,21 +228,44 @@ relay's second link takes them in once on the desktop's fact bus (source
 `relayed:<name>`), and `NodeEvents` hears them as one named listener
 (`helios.node-events`) of each relayable point, beside the point's other
 listeners; the event stream leaves those kinds out, and a node that
-restarted says one `node.resync`, from that link. Listeners hold no bus
+restarted says one `helios.node.resync`, from that link. Listeners hold no bus
 subscription of their own: `NodeEvents` is one table (id, patterns, a
 channel each). The desktop's other hand-rolled subscriptions to a bus
 are the exceptions `xtask/allow/bus.toml` lists with their reasons
 (`cargo xtask bus --check`).
 
+(2026-11-19) Every fact kind is named `helios.<subject>.<moment>`
+(bus-contract's naming rule: a typed kind is a point of the application's
+bus, beside egui-pop's `pop.*` and egui_stack's `stack.*`); up to 0.92
+they had no prefix. A desktop and a node of different releases still pair
+for one release, each side translating at the edge only, so no bus and no
+journal holds an old name (`helios_core::legacy_kinds`, an alias table):
+
+- a desktop reading an older node maps every kind it reads (an event, a
+  relayed fact, a job `describe jobs` lists) to its new name before
+  anything hears it, so the fact lands once, under its new name;
+- an older desktop never says it reads prefixed names (the `subscribe`
+  request's `prefixed`, which a newer desktop sends): a newer node then
+  writes each kind it streams to it under its old name, and reads the
+  prefix it asked for in the old names. A job that ended while such a
+  desktop's link was down shows as failed there (`describe jobs` is not
+  translated).
+
+egui-pop reads the shell bus as its journal under its own names: its
+events without `helios.gui.`, and Helios's jobs without `helios.`
+(`job.started`), the job protocol its jobs centre follows
+(`helios_gui::host::journal_name`). The aliases go in 0.94 (ROADMAP). `cargo xtask bus --check` refuses a
+fact kind declared without the prefix.
+
 - **Listening.** `Shell::node_events().listen(id, patterns)` gives a
   `Listener` of the kinds matching its patterns (`storage.*`,
-  `volume.*`, an exact kind, or `*`): each heard event is a `NodeEvent`,
+  `helios.volume.*`, an exact kind, or `*`): each heard event is a `NodeEvent`,
   the node's name and its envelope. `NodeEvents::listeners` lists who
   listens to what; a listener dropped is no longer listed nor asked for.
 - **Resume and resync.** After a dropped link, a remote relay resumes
   after the last event it read: nothing twice, nothing missed. When it
   cannot (the node restarted, or its journal no longer holds what was
-  missed), every listener hears `node.resync` for that node, and reads
+  missed), every listener hears `helios.node.resync` for that node, and reads
   the state again.
 - **Round trip.** A window sends a command to the node (commands, above);
   the facts come back as events. The relayed envelope keeps the node's
@@ -251,8 +274,8 @@ are the exceptions `xtask/allow/bus.toml` lists with their reasons
   asked for from another client's by the promise id its command answered,
   or by the `cause` chain from an event it already heard.
 - **What stays home.** The desktop's vault and viewport buses are
-  process-local and high rate: a local relay never forwards `vault.*`,
-  `edit.*` or `engine.*`; `Persist` and the shell read them directly.
+  process-local and high rate: a local relay never forwards `helios.vault.*`,
+  `helios.edit.*` or `helios.engine.*`; `Persist` and the shell read them directly.
 
 The listener API leaves room for a later event and hook model: listeners
 already have ids and patterns and can be listed; ordering between

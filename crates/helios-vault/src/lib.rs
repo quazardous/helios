@@ -148,12 +148,12 @@ pub struct Image {
 
 /// The bus event a scan's location changes are announced as
 /// ([`Vault::update_locations`]).
-pub const LOCATIONS_CHANGED: &str = "vault.locations_changed";
+pub const LOCATIONS_CHANGED: &str = "helios.vault.locations_changed";
 
 /// The bus event of photos put in or taken out of the Library, or of a
 /// library step undone or redone ([`Vault::set_in_library`],
 /// [`Vault::revert`], [`Vault::replay`]): `count`, the photos it moved.
-pub const LIBRARY_CHANGED: &str = "vault.library_changed";
+pub const LIBRARY_CHANGED: &str = "helios.vault.library_changed";
 
 /// Whether a location's file can be read now.
 #[derive(

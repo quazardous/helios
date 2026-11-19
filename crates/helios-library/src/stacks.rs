@@ -425,7 +425,7 @@ pub struct DecisionChanged {
 }
 
 impl Event for DecisionChanged {
-    const KIND: &'static str = "library.decision";
+    const KIND: &'static str = "helios.library.decision";
 }
 
 fn announce(bus: Option<&Bus>, d: &Decision) {

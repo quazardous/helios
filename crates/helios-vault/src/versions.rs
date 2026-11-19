@@ -206,7 +206,7 @@ pub struct VersionAdded {
 }
 
 impl helios_core::Event for VersionAdded {
-    const KIND: &'static str = "vault.version_added";
+    const KIND: &'static str = "helios.vault.version_added";
 }
 
 impl<S: crate::Store> crate::Vault<S> {

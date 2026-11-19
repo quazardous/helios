@@ -100,7 +100,7 @@ fn a_one_value_edit_recomputes_only_the_dirty_branch() {
     let delta = e.counters().since(&before);
     let mut computed: Vec<String> = events
         .try_iter()
-        .filter(|ev| ev.kind == "engine.step_computed")
+        .filter(|ev| ev.kind == "helios.engine.step_computed")
         .map(|ev| ev.payload["name"].as_str().unwrap().to_string())
         .collect();
     computed.sort();
@@ -198,7 +198,7 @@ fn a_full_render_computes_each_node_once() {
     e.render(&n.graph, n.output(), "output", r).unwrap();
     let mut names: Vec<String> = events
         .try_iter()
-        .filter(|ev| ev.kind == "engine.step_computed")
+        .filter(|ev| ev.kind == "helios.engine.step_computed")
         .map(|ev| ev.payload["name"].as_str().unwrap().to_string())
         .collect();
     let steps = names.len();

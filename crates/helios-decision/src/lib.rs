@@ -192,7 +192,7 @@ pub struct Answered {
 }
 
 impl Event for Answered {
-    const KIND: &'static str = "decision.answered";
+    const KIND: &'static str = "helios.decision.answered";
 }
 
 /// A model proposed answers that wait for a human.
@@ -204,7 +204,7 @@ pub struct Proposed {
 }
 
 impl Event for Proposed {
-    const KIND: &'static str = "decision.proposed";
+    const KIND: &'static str = "helios.decision.proposed";
 }
 
 /// A decision waits for an answer.
@@ -215,7 +215,7 @@ pub struct Waiting {
 }
 
 impl Event for Waiting {
-    const KIND: &'static str = "decision.pending";
+    const KIND: &'static str = "helios.decision.pending";
 }
 
 /// The decisions of an edit: modes and answers, by node name. Serializable:

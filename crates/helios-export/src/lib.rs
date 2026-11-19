@@ -320,7 +320,7 @@ pub struct Written {
 }
 
 impl Event for Written {
-    const KIND: &'static str = "export.written";
+    const KIND: &'static str = "helios.export.written";
 }
 
 /// Queues an export as a batch job holding its destination: two exports to
@@ -473,7 +473,7 @@ pub type OnEnd = Box<dyn FnOnce(End) + Send>;
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 /// [`submit_with`] reporting to `jobs`: the export is a job people follow
-/// (`job.*` on the jobs' bus: started when queued, its steps, a log line,
+/// (`helios.job.*` on the jobs' bus: started when queued, its steps, a log line,
 /// its end), and [`Jobs::cancel`] with its id (`export-<n>`) cancels it,
 /// queued or running. `node` is the graph node it renders, when there is
 /// one: the job names it, and that node's queue lists it.

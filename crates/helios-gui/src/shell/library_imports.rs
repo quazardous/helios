@@ -9,7 +9,7 @@
 //!   ([`Shell::set_import_history`]) and again on events only: an import
 //!   of this desktop ends (`import.ended`'s `library.import-session`), or
 //!   any client's import is recorded (`library.changed`'s
-//!   `library.imports`, on the node's `library.imported`). An idle pass
+//!   `library.imports`, on the node's `helios.library.imported`). An idle pass
 //!   reads nothing.
 //! - **Shown** by [`IMPORT_SESSION_COMMAND`] (`id`; `select`): the
 //!   Library scoped to the session's `import:` term, with the other
@@ -173,7 +173,7 @@ impl Shell {
 
     /// `library.imports`, the shell's listener of `library.changed`: an
     /// import recorded in the history (any client's, the node's
-    /// `library.imported`), the sessions are read again, in the pass
+    /// `helios.library.imported`), the sessions are read again, in the pass
     /// that says it.
     pub(super) fn listen_import_sessions(&self) -> Result<(), String> {
         let (imports, library) = (self.focus.imports.clone(), self.focus.library.clone());

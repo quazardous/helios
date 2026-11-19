@@ -32,6 +32,7 @@ use std::cell::RefCell;
 use std::sync::{Mutex, PoisonError};
 
 use egui::Ui;
+use egui_pop::core::areas::{self, AreaKind, AreaSpec};
 use helios_core::{Graph, Message, Value};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Set, Store, bypass_path};
@@ -319,11 +320,18 @@ pub fn ui(
                             )
                         };
                         let hint = tr(hint.with("node", &row.node).with("key", KEY));
-                        if ui
+                        let r = ui
                             .selectable_label(b, tr(Message::new("gui-modules-bypass", "Bypass")))
-                            .on_hover_text(hint)
-                            .clicked()
-                        {
+                            .on_hover_text(hint);
+                        // An edit area: it bypasses the module in the
+                        // render (its hover text says so, no card).
+                        areas::register(
+                            ui,
+                            &r,
+                            AreaSpec::new(format!("module.bypass.{}", row.node), AreaKind::Edit)
+                                .path(bypass_path(&row.node)),
+                        );
+                        if r.clicked() {
                             toggle = Some(row.node.clone());
                         }
                     }
@@ -334,6 +342,12 @@ pub fn ui(
                     let shown = selection.as_deref() == Some(row.node.as_str())
                         || many.len() > 1 && many.contains(&row.node);
                     let clicked = ui.selectable_label(shown, name);
+                    // Selecting a module moves what the other panels show.
+                    areas::register(
+                        ui,
+                        &clicked,
+                        AreaSpec::navigate(format!("module.select.{}", row.node)),
+                    );
                     if marks.changed(&row.node) {
                         changed_mark(ui, &row.node);
                     }

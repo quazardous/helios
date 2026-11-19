@@ -77,9 +77,12 @@ A pull request is merged only when its tests passed on the box and its
    - `cargo xtask manifest check <file>` (or the body on stdin) checks it.
 4. **Prove it on the box yourself** (owner, 2026-11-13: the author who
    wrote the change runs its narrowest tests; it beat batching every pull
-   request through one gate). First the branch's `check`:
+   request through one gate). The branch's `check`,
    `cargo xtask bench-remote check branch=<branch>` (clippy, every lint
-   at once). Then each manifest job with `branch=<branch>`. Wait in the
+   at once), and the manifest's jobs with `branch=<branch>`, in any
+   order: test jobs no longer wait on a check first, and the manifest's
+   tests of one crate go in one `test-crate` job (`test=a+b`, see
+   bench.md, "Rules for agents"). Wait in the
    foreground with `jbx wait <id>`: a subagent's turn stays alive. Fix
    what is red on the branch and run that job again.
 5. **Merge it yourself** when every job of the manifest is green on the
@@ -97,7 +100,16 @@ A pull request is merged only when its tests passed on the box and its
    check ends), or a single `gh pr checks <n>`; that is all the CI an
    author watches. Red: fix it on the branch, as for a box job. A pull
    request may not add raw egui widgets to helios-gui (`cargo xtask
-   raw-egui`; after removing some, `--update` lowers the baseline). The
+   raw-egui`; after removing some, `--update` lowers the baseline).
+   On a pull request the guards with a backlog (`raw-egui`, `bus`) run
+   in their delta mode (`--base origin/next`): they check the merge base
+   too and fail only on what the pull request adds, each finding known
+   by its file and code, not its line, and print what went down as
+   progress ("raw egui calls: 300 → 297 (−3)"); a push to `next` runs
+   them in full. Run it locally with `cargo xtask raw-egui --check
+   --base origin/next` or `cargo xtask bus --check --base origin/next`.
+   The idea comes from darktable's `dt-lockcheck` diff mode
+   ([darktable#23056](https://github.com/darktable-org/darktable/pull/23056)). The
    box's `lint` job runs a part of it before a push (clippy,
    `cargo xtask check`, `cargo xtask i18n check`); the linters, the
    documentation and the generated files are checked by `pr-lint` alone. Then
@@ -154,9 +166,11 @@ Every failed box job gets its reason at once:
 | Where | What | When |
 |---|---|---|
 | Local | fmt, check, typos | while coding |
-| Bench box, narrow | the manifests' jobs (clippy first) | the author, per pull request; a merger, per batch on a `gate/…` branch |
+| Bench box, narrow | the branch's `check` (clippy) and the manifests' jobs | the author, per pull request; a merger, per batch on a `gate/…` branch |
 | The pull request's `pr-lint` | the cheap checks, no test but the English catalogue's: every linter, `cargo doc` without a warning, the UI index, the catalogues, the changelog fragment | every push of our own pull request into `next` |
-| `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, Windows | every push of `next` |
+| `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, the Windows build | every push of `next` |
+| `windows-tests` workflow | the workspace's tests on Windows | nightly on `next` (02:30 UTC), and on manual dispatch |
+| `ci-history` workflow | no test: the JUnit reports of `next`'s runs folded into the per-test history, the `ci-history` branch ([ci-broker.md](ci-broker.md)) | nightly (03:45 UTC), and on manual dispatch |
 | Bench box, wide | `test-affected`, `test`, GPU, timing, `stability` | daily, before a release, on demand |
 | Bench box, `journey` | the first-user journey: a fresh profile's wizard, a card imported, the Library's count, the import session, the health fixes, Settings › Storage, quit and restart, a photo opened in the darkroom and exported, headless ([bench.md](bench.md)) | every push of `next` (queued by the watcher of `next`), and before a release |
 

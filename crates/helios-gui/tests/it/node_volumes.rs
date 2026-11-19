@@ -152,8 +152,8 @@ fn a_card_plugged_in_with_the_import_window_closed_is_seen_by_the_node() {
     let heard = watch.heard();
     let gone = heard
         .iter()
-        .find(|h| h.point == "volume.unmounted" && h.id == volume.id)
-        .expect("volume.unmounted passed");
+        .find(|h| h.point == "helios.volume.unmounted" && h.id == volume.id)
+        .expect("helios.volume.unmounted passed");
     assert_eq!(
         gone.ran,
         [
@@ -408,12 +408,12 @@ fn a_disk_plugged_in_is_scanned_before_its_backup_starts() {
         watch
             .heard()
             .iter()
-            .any(|h| h.point == "volume.mounted" && h.id.as_str() == "uuid:lib")
+            .any(|h| h.point == "helios.volume.mounted" && h.id.as_str() == "uuid:lib")
     });
     let heard = watch.heard();
     let plugged_in = heard
         .iter()
-        .find(|h| h.point == "volume.mounted" && h.id.as_str() == "uuid:lib")
+        .find(|h| h.point == "helios.volume.mounted" && h.id.as_str() == "uuid:lib")
         .unwrap();
     assert_eq!(
         plugged_in.ran,
@@ -434,7 +434,7 @@ fn a_disk_plugged_in_is_scanned_before_its_backup_starts() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The listeners of `volume.mounted` and `volume.unmounted` as the
+/// The listeners of `helios.volume.mounted` and `helios.volume.unmounted` as the
 /// desktop registers them, in the order they run: a reviewed dump
 /// (`tests/bus/volumes.txt`). The cards first, then the scan, then
 /// whoever reads where the copies are.

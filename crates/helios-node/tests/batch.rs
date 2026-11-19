@@ -509,7 +509,7 @@ fn a_batch_keeps_its_sidecars_through_the_node_holding_the_vault() {
         .unwrap()
         .iter()
         .filter(|e| {
-            e["kind"] == "control.command"
+            e["kind"] == "helios.control.command"
                 && e["payload"]["id"] == "library.keepSidecar"
                 && e["payload"]["origin"] == "cli"
         })
@@ -763,9 +763,14 @@ fn an_interrupt_cancels_the_exports_and_leaves_no_file() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let first = node.inspect(&["wait-event", "scheduler.job_queued"]);
+    let first = node.inspect(&["wait-event", "helios.scheduler.job_queued"]);
     let since = first["event"]["seq"].as_u64().unwrap().to_string();
-    let second = node.inspect(&["wait-event", "scheduler.job_queued", "--since", &since]);
+    let second = node.inspect(&[
+        "wait-event",
+        "helios.scheduler.job_queued",
+        "--since",
+        &since,
+    ]);
     assert_eq!(second["ok"], true, "two exports in flight: {second}");
     let status = Command::new("kill")
         .args(["-INT", &child.id().to_string()])
@@ -875,20 +880,20 @@ fn an_interrupt_leaves_another_clients_images_in_the_run() {
     assert_eq!(files(&p.join("out")), ["other.jpg"]);
 }
 
-/// The `job.*` events of a node, from its journal.
+/// The `helios.job.*` events of a node, from its journal.
 #[cfg(debug_assertions)]
 fn job_events(node: &Sandbox) -> Vec<Value> {
     node.inspect(&["events"])["events"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|e| e["kind"].as_str().unwrap().starts_with("job."))
+        .filter(|e| e["kind"].as_str().unwrap().starts_with("helios.job."))
         .cloned()
         .collect()
 }
 
 /// A node cancels a job on `job.cancel` with its id: a queued export
-/// says `job.cancelled` and writes nothing.
+/// says `helios.job.cancelled` and writes nothing.
 #[cfg(debug_assertions)]
 #[test]
 fn a_node_cancels_an_export_on_job_cancel() {
@@ -912,7 +917,7 @@ fn a_node_cancels_an_export_on_job_cancel() {
         out.to_str().unwrap(),
     ]);
     assert_eq!(asked["ok"], true, "{asked}");
-    let started = node.inspect(&["wait-event", "job.started"]);
+    let started = node.inspect(&["wait-event", "helios.job.started"]);
     let id = started["event"]["payload"]["id"]
         .as_str()
         .unwrap()
@@ -927,9 +932,13 @@ fn a_node_cancels_an_export_on_job_cancel() {
         .filter(|e| e["payload"]["id"] == id.as_str())
         .map(|e| e["kind"].clone())
         .collect();
-    assert_eq!(ends.first(), Some(&json!("job.started")), "{ends:?}");
-    assert!(ends.contains(&json!("job.cancelling")), "{ends:?}");
-    assert_eq!(ends.last(), Some(&json!("job.cancelled")), "{ends:?}");
+    assert_eq!(ends.first(), Some(&json!("helios.job.started")), "{ends:?}");
+    assert!(ends.contains(&json!("helios.job.cancelling")), "{ends:?}");
+    assert_eq!(
+        ends.last(),
+        Some(&json!("helios.job.cancelled")),
+        "{ends:?}"
+    );
     assert!(!out.exists(), "a cancelled export writes nothing");
 }
 
@@ -1018,13 +1027,18 @@ fn a_batch_cancelled_on_its_node_stops_and_leaves_no_file() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let first = node.inspect(&["wait-event", "scheduler.job_queued"]);
+    let first = node.inspect(&["wait-event", "helios.scheduler.job_queued"]);
     let since = first["event"]["seq"].as_u64().unwrap().to_string();
-    let second = node.inspect(&["wait-event", "scheduler.job_queued", "--since", &since]);
+    let second = node.inspect(&[
+        "wait-event",
+        "helios.scheduler.job_queued",
+        "--since",
+        &since,
+    ]);
     assert_eq!(second["ok"], true, "two exports in flight: {second}");
     let batch = job_events(&node)
         .into_iter()
-        .find(|e| e["kind"] == "job.started" && e["payload"]["kind"] == "batch")
+        .find(|e| e["kind"] == "helios.job.started" && e["payload"]["kind"] == "batch")
         .expect("the batch's job");
     let id = batch["payload"]["id"].as_str().unwrap().to_string();
     assert_eq!(node.control(&["job-cancel", &id])["ok"], true);
@@ -1035,7 +1049,7 @@ fn a_batch_cancelled_on_its_node_stops_and_leaves_no_file() {
     loop {
         let ended = node.inspect(&[
             "wait-event",
-            "job.cancelled",
+            "helios.job.cancelled",
             "--since",
             &since,
             "--timeout",
@@ -1067,7 +1081,11 @@ fn a_batch_cancelled_on_its_node_stops_and_leaves_no_file() {
         .filter(|e| e["payload"]["id"] == id.as_str())
         .map(|e| e["kind"].clone())
         .collect();
-    assert_eq!(ends.last(), Some(&json!("job.cancelled")), "{ends:?}");
+    assert_eq!(
+        ends.last(),
+        Some(&json!("helios.job.cancelled")),
+        "{ends:?}"
+    );
 }
 
 /// darktable's public test raws (`HELIOS_TEST_IMAGES`, else a darktable
@@ -1212,7 +1230,7 @@ fn the_test_raws_go_through_a_batch_as_through_a_single_export() {
     let since = asked["seq"].as_u64().unwrap().to_string();
     let ended = node.inspect(&[
         "wait-event",
-        "scheduler.job_ended",
+        "helios.scheduler.job_ended",
         "--since",
         &since,
         "--timeout",

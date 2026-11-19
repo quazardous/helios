@@ -831,7 +831,7 @@ fn an_edit_is_saved_step_by_step_and_reopened_at_its_head<S: Store>(s: S) {
     let saved: Vec<_> = bus
         .since(0)
         .into_iter()
-        .filter(|e| e.kind == "edit.saved")
+        .filter(|e| e.kind == "helios.edit.saved")
         .map(|e| {
             (
                 e.payload["step"].as_u64().unwrap(),
@@ -1444,7 +1444,7 @@ fn versions_are_content_addressed_and_heads_follow_forks_and_merges<S: Store>(st
     let announced = bus
         .since(0)
         .iter()
-        .filter(|e| e.kind == "vault.version_added")
+        .filter(|e| e.kind == "helios.vault.version_added")
         .count();
     assert_eq!(announced, 4);
 }

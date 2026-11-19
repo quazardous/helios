@@ -236,7 +236,7 @@ fn shown(shell: &Shell) -> f64 {
 fn saved(bus: &Bus) -> Vec<(u64, String)> {
     bus.since(0)
         .into_iter()
-        .filter(|e| e.kind == "edit.saved")
+        .filter(|e| e.kind == "helios.edit.saved")
         .map(|e| {
             (
                 e.payload["step"].as_u64().unwrap(),
@@ -708,7 +708,7 @@ fn each_version_names_who_made_its_step() {
         .bus()
         .since(0)
         .into_iter()
-        .filter(|e| e.kind == "edit.saved")
+        .filter(|e| e.kind == "helios.edit.saved")
         .map(|e| e.payload["origin"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(

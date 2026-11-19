@@ -6,7 +6,7 @@
 //!   a card "when plugged in", a folder "when new files appear". It is
 //!   set in the source's menu ("Import automatically") and in the
 //!   wizard's choices step, the editor's included.
-//! - **A card plugged in** (the node's volume watch, `volume.mounted`)
+//! - **A card plugged in** (the node's volume watch, `helios.volume.mounted`)
 //!   whose saved source says so has its photos imported, copied, with
 //!   the source's choices; the "inserted" toast gives way to the import's
 //!   own notice.
@@ -20,7 +20,7 @@
 //! - The import is the host's job, as the window's: one undo step of the
 //!   Library, its report in the Log panel and its end said; the import
 //!   history records it as `auto:<source>`.
-//! - **Another client's change** to the sources (`settings.layerChanged`
+//! - **Another client's change** to the sources (`helios.settings.layerChanged`
 //!   naming the document) is read again ([`Shell::follow_import_sources`]).
 //! - **Safeguards** ([`helios_library::auto_import`], section 3.3): with
 //!   automatic imports paused (`import.automatic.paused`, its command
@@ -495,7 +495,7 @@ impl Shell {
     }
 
     /// Reads the import sources again each time the desktop's node says
-    /// another client changed them (`settings.layerChanged` naming the
+    /// another client changed them (`helios.settings.layerChanged` naming the
     /// document, heard as the application bus's listener
     /// [`IMPORT_SOURCES_LISTENER`]); `read` the document's text as the
     /// node keeps it. Read off the interface's thread; the window takes

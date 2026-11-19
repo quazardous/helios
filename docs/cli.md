@@ -36,9 +36,9 @@ cancelled while rendering writes nothing). The export renders the network as
 it is when asked, over the node's whole extent unless `--region X,Y,W,H` says
 otherwise; `--set NODE.PARAM=VALUE` (repeatable) changes a parameter for this
 export only. The answer carries the job id: wait for its
-`scheduler.job_ended` event. Paths are made absolute before they are sent.
+`helios.scheduler.job_ended` event. Paths are made absolute before they are sent.
 
-Each export is also a job people follow (`job.*` events on the node's
+Each export is also a job people follow (`helios.job.*` events on the node's
 bus, see [jobs.md](jobs.md)), named by an id such as `export-3`.
 `job-cancel ID` cancels a job by that id, as the desktop's jobs centre
 does: an export queued or running (it writes nothing), or a whole batch
@@ -73,7 +73,7 @@ helios control --socket control.sock run set_param '{"node":"exp","param":"expos
 each image is exported through the network by the node itself, claimed
 under a lease, retried on a failure that another attempt may change (three
 attempts, 2 s then 4 s apart), and followed per queueing node in `describe
-workflow` and in `workflow.rows` events. Each output path is decided at
+workflow` and in `helios.workflow.rows` events. Each output path is decided at
 submission, once. Submitting the same network and settings again extends
 the same run: the images already in it are left as they are, and the
 answer counts the new ones, those already there and those given twice;

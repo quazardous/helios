@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The next run: the failure passes on its retry (flaky), and the import
+     test is renamed. -->
+<testsuites name="nextest-run" tests="3" failures="0" errors="0" uuid="u2" timestamp="2026-11-19T09:00:00Z" time="11.0">
+    <testsuite name="helios-core" tests="2" disabled="0" errors="0" failures="0">
+        <testcase name="graph::tests::a_cycle_is_refused" classname="helios-core" timestamp="2026-11-19T09:00:01Z" time="0.350">
+        </testcase>
+        <testcase name="graph::tests::an_edge_is_kept" classname="helios-core" timestamp="2026-11-19T09:00:01Z" time="0.120">
+            <flakyFailure timestamp="2026-11-19T09:00:01Z" time="0.100" type="test failure">thread panicked on the first try</flakyFailure>
+        </testcase>
+    </testsuite>
+    <testsuite name="helios-gui::it" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="import::the_new_name" classname="helios-gui::it" timestamp="2026-11-19T09:00:03Z" time="4.500">
+        </testcase>
+    </testsuite>
+</testsuites>

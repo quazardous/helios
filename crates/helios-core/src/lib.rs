@@ -14,7 +14,7 @@
 //! - [`engine`]: evaluates a network, never computing the same content twice.
 //! - [`bus`]: typed events for orchestration, with a journal.
 //! - [`scheduler`]: named, cancellable background jobs; waiting until idle.
-//! - [`jobs`]: how background work goes, as `job.*` events people follow.
+//! - [`jobs`]: how background work goes, as `helios.job.*` events people follow.
 //! - [`describe`]: every entity reports its state as structured data.
 //! - [`trace`]: timed spans of the engine's steps, for whoever listens.
 
@@ -30,6 +30,7 @@ pub mod graph;
 pub mod image;
 pub mod jobs;
 pub mod journal;
+pub mod legacy_kinds;
 pub mod manifest;
 pub mod message;
 pub mod module;

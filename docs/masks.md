@@ -520,7 +520,7 @@ and a blend. Three modules make 54 mask nodes. Its tests check that a
 tiled render equals the full render bit for bit (output and each module's
 mask) and that a one-value edit recomputes only the dirty branch: the
 seven steps from the edited member to the output, seen in the bus's
-`engine.step_computed` events and the engine's counters.
+`helios.engine.step_computed` events and the engine's counters.
 
 `cargo xtask bench masks` renders it once per mode, each in its own
 release process: `full` (one render), `tiled` (256-pixel tiles), `proxy`

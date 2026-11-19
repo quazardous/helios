@@ -83,12 +83,14 @@ fn exports_to_one_file_take_turns_and_announce_the_file() {
     for e in s.bus.since(0) {
         let job = e.payload["job"].as_u64();
         match e.kind {
-            "scheduler.job_started" if a.contains(&job.unwrap()) => {
+            "helios.scheduler.job_started" if a.contains(&job.unwrap()) => {
                 running += 1;
                 assert_eq!(running, 1, "two exports to a.png overlap");
             }
-            "scheduler.job_ended" if a.contains(&job.unwrap()) => running -= 1,
-            "export.written" => written.push(e.payload["path"].as_str().unwrap().to_string()),
+            "helios.scheduler.job_ended" if a.contains(&job.unwrap()) => running -= 1,
+            "helios.export.written" => {
+                written.push(e.payload["path"].as_str().unwrap().to_string());
+            }
             _ => {}
         }
     }
@@ -121,7 +123,7 @@ fn a_failed_export_says_why_and_an_unknown_format_is_refused_at_once() {
         .bus
         .since(0)
         .into_iter()
-        .find(|e| e.kind == "scheduler.job_ended")
+        .find(|e| e.kind == "helios.scheduler.job_ended")
         .unwrap();
     assert!(
         ended.payload["error"]
@@ -226,12 +228,12 @@ fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
         .bus
         .since(0)
         .into_iter()
-        .filter(|e| e.kind.starts_with("job."))
+        .filter(|e| e.kind.starts_with("helios.job."))
         .collect();
     let kinds: Vec<&str> = events.iter().map(|e| e.kind).collect();
-    assert_eq!(kinds.first(), Some(&"job.started"));
-    assert_eq!(kinds.last(), Some(&"job.finished"));
-    assert!(kinds.contains(&"job.log"), "{kinds:?}");
+    assert_eq!(kinds.first(), Some(&"helios.job.started"));
+    assert_eq!(kinds.last(), Some(&"helios.job.finished"));
+    assert!(kinds.contains(&"helios.job.log"), "{kinds:?}");
     let started = &events[0].payload;
     assert_eq!(started["kind"], "export");
     assert_eq!(started["title"], "Export a.png");
@@ -275,11 +277,11 @@ fn an_export_reports_its_job_and_is_cancelled_by_its_id() {
         .bus
         .since(seen)
         .iter()
-        .filter(|e| e.kind.starts_with("job."))
+        .filter(|e| e.kind.starts_with("helios.job."))
         .map(|e| e.kind)
         .collect();
-    assert!(kinds.contains(&"job.cancelling"), "{kinds:?}");
-    assert_eq!(kinds.last(), Some(&"job.cancelled"));
+    assert!(kinds.contains(&"helios.job.cancelling"), "{kinds:?}");
+    assert_eq!(kinds.last(), Some(&"helios.job.cancelled"));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -308,7 +310,7 @@ fn an_export_in_a_batch_names_its_parent() {
         .bus
         .since(0)
         .into_iter()
-        .find(|e| e.kind == "job.started")
+        .find(|e| e.kind == "helios.job.started")
         .unwrap()
         .payload;
     assert_eq!(started["parent"], "batch-1");

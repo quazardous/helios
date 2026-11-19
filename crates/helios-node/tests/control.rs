@@ -134,7 +134,7 @@ fn renders_parameters_and_pause_through_control() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|e| e["kind"] == "control.action")
+        .filter(|e| e["kind"] == "helios.control.action")
         .count();
     assert_eq!(actions, 6);
 }

@@ -13,11 +13,17 @@
 //!
 //! `--fix` applies what can be applied (rustfmt, taplo, typos, ruff) before
 //! checking.
+//!
+//! `--base REF` (a pull request's `pr-lint`) runs the guards with a
+//! backlog, `raw-egui` and `bus`, in their delta mode: only what the
+//! change adds since its merge base with REF fails, and the counts that
+//! went down are printed as progress (see `delta.rs`). A push to `next`
+//! runs without it: the full check.
 
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 
-pub const USAGE: &str = "lint [--fix] [--require-all]";
+pub const USAGE: &str = "lint [--fix] [--require-all] [--base [REF]]";
 
 /// One external program, and how to say it is missing.
 struct Tool {
@@ -125,8 +131,9 @@ impl Lint<'_> {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
+    let (args, base) = crate::delta::take_base(args)?;
     let (mut fix, mut require_all) = (false, false);
-    for a in args {
+    for a in &args {
         match *a {
             "--fix" => fix = true,
             "--require-all" => require_all = true,
@@ -165,7 +172,10 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         lint.failed.push("deps-worlds".into());
     }
     println!("\n==> raw-egui");
-    let raw = crate::raw_egui::problems(root);
+    let raw = match base {
+        Some(base) => crate::raw_egui::check_delta(root, base).unwrap_or_else(|e| vec![e]),
+        None => crate::raw_egui::problems(root),
+    };
     for p in &raw {
         eprintln!("raw-egui: {p}");
     }
@@ -173,7 +183,10 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         lint.failed.push("raw-egui".into());
     }
     println!("\n==> bus");
-    let bus = crate::bus::problems(root);
+    let bus = match base {
+        Some(base) => crate::bus::check_delta(root, base).unwrap_or_else(|e| vec![e]),
+        None => crate::bus::check(root).found,
+    };
     for p in &bus {
         eprintln!("bus: {p}");
     }

@@ -36,23 +36,17 @@ fn desktop() -> Harness<'static, Shell> {
 
 /// Every point on the desktop's bus is a library's or Helios's, and so
 /// is every listener: a point or a listener Helios adds without its
-/// `helios.` prefix fails here. The node's fact kinds (`vault.*`,
-/// `volume.*`…), declared from its contract tables, keep their names
-/// until the relay maps an older node's.
+/// `helios.` prefix fails here, the node's fact kinds (`helios.vault.*`,
+/// `helios.volume.*`…) included.
 #[test]
 fn every_point_and_listener_of_helios_has_its_prefix() {
     let h = desktop();
     let bus = h.state().app().handle().bus();
-    let kinds: Vec<&str> = helios_gui::FACTS
-        .iter()
-        .flat_map(|table| table.iter().map(|d| d.kind))
-        .chain(helios_node_core::volumes::POINTS.iter().map(|p| p.id))
-        .collect();
     let library = |id: &str| LIBRARIES.iter().any(|p| id.starts_with(p));
     let mut wrong = Vec::new();
     let (mut points, mut listeners) = (0, 0);
     for point in bus.points() {
-        if !(library(point.id) || point.id.starts_with(HELIOS) || kinds.contains(&point.id)) {
+        if !(library(point.id) || point.id.starts_with(HELIOS)) {
             wrong.push(format!("point `{}`", point.id));
         }
         points += 1;
@@ -70,6 +64,12 @@ fn every_point_and_listener_of_helios_has_its_prefix() {
         points > 20 && listeners > 30,
         "{points} points, {listeners} listeners"
     );
+    // Every fact kind the desktop declares, a point or not.
+    for decl in helios_gui::FACTS.iter().copied().flatten() {
+        if !decl.kind.starts_with(HELIOS) {
+            wrong.push(format!("fact kind `{}`", decl.kind));
+        }
+    }
     assert!(
         wrong.is_empty(),
         "without their prefix:\n{}",

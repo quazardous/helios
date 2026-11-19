@@ -139,9 +139,12 @@ fn a_batch_writes_its_files_and_lists_the_image_that_failed() {
     let events: Vec<_> = bus
         .since(0)
         .into_iter()
-        .filter(|e| e.kind.starts_with("job."))
+        .filter(|e| e.kind.starts_with("helios.job."))
         .collect();
-    let started: Vec<_> = events.iter().filter(|e| e.kind == "job.started").collect();
+    let started: Vec<_> = events
+        .iter()
+        .filter(|e| e.kind == "helios.job.started")
+        .collect();
     assert_eq!(started[0].payload["id"], parent.as_str());
     assert_eq!(started[0].payload["kind"], "batch");
     assert_eq!(started[0].payload["title"], "Export 4 photos");
@@ -153,7 +156,7 @@ fn a_batch_writes_its_files_and_lists_the_image_that_failed() {
     }
     let failed_item = events
         .iter()
-        .find(|e| e.kind == "job.item_failed" && e.payload["id"] == parent.as_str())
+        .find(|e| e.kind == "helios.job.item_failed" && e.payload["id"] == parent.as_str())
         .expect("the failure is listed under the batch");
     assert_eq!(failed_item.payload["item"], "broken.png");
     let end = events
@@ -161,7 +164,7 @@ fn a_batch_writes_its_files_and_lists_the_image_that_failed() {
         .rev()
         .find(|e| e.payload["id"] == parent.as_str())
         .unwrap();
-    assert_eq!(end.kind, "job.failed");
+    assert_eq!(end.kind, "helios.job.failed");
     assert_eq!(end.payload["error"], "1 of 4 photos failed");
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -216,7 +219,7 @@ fn a_finished_batch_offers_its_actions_and_writes_each_format() {
             .rev()
             .find(|e| e.payload["id"] == parent.as_str())
             .unwrap();
-        assert_eq!(end.kind, "job.finished");
+        assert_eq!(end.kind, "helios.job.finished");
         assert_eq!(end.payload["actions"][0]["command"], "library.openFolder");
     }
     let _ = std::fs::remove_dir_all(&d);
@@ -275,7 +278,7 @@ fn cancelling_a_batch_cancels_its_exports_and_writes_nothing() {
     let ends: Vec<(String, &str)> = bus
         .since(0)
         .into_iter()
-        .filter(|e| e.kind == "job.cancelled")
+        .filter(|e| e.kind == "helios.job.cancelled")
         .map(|e| (e.payload["id"].as_str().unwrap().to_string(), e.kind))
         .collect();
     assert_eq!(ends.len(), 4, "the three exports and the batch: {ends:?}");

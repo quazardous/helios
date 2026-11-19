@@ -76,6 +76,8 @@ jobs:
       - name: slowest tests
         if: ${{ !cancelled() }}
         run: cargo xtask test-times --from-junit target/nextest/ci/junit.xml --summary >> "$GITHUB_STEP_SUMMARY"
+      # Read nightly by ci-history.yml (the per-test history, docs/ci-broker.md):
+      # keep the name `junit`, and upload it from failed runs too.
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
@@ -92,8 +94,9 @@ jobs:
             cargo xtask check
           fi
 
-  # The workspace on Windows (MSVC): it builds, and its tests run. No GPU
-  # on the runner: the GPU tests run on WARP (DX12 in software).
+  # The workspace builds on Windows (MSVC), every push. Its tests run
+  # nightly and on demand instead (windows-tests.yml): they took 20 of this
+  # job's 33 minutes, made it the run's slowest path, and blocked nothing.
   windows:
     # Our own pull requests (branches of this repository) run none of this,
     # only their cheap checks (pr-lint.yml): they
@@ -112,14 +115,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows
-          # A failing test must not cost the next run a full build.
+          # A failing build must not cost the next run a full build.
           cache-on-failure: true
       - run: cargo build --locked --workspace --all-targets
-      # Not required yet: 22 test targets fail on Windows, listed in
-      # docs/windows-port.md ("Where it stands"). The step still runs and
-      # shows red, so a new failure is seen; the build above is required.
-      - run: cargo test --locked --workspace --no-fail-fast
-        continue-on-error: true
 
   # Every commit of the push or pull request but its head (the test job
   # gates the head) builds, passes clippy and the tests it touches (the

@@ -7,7 +7,7 @@
 //!   item with its state, since when, its attempts and where it runs.
 //! - What it shows comes from a [`QueueSource`]. Until the workflow level
 //!   runs, the source is [`JobsQueue`]: the jobs that name the node
-//!   (`node` in `job.started`, `helios_core::jobs::Start::node`), as
+//!   (`node` in `helios.job.started`, `helios_core::jobs::Start::node`), as
 //!   egui-pop's jobs model holds them, a connected node's included. The
 //!   workflow's own queue (claims, leases, retries) replaces it without
 //!   touching the panel.
@@ -182,7 +182,7 @@ pub trait QueueSource {
 pub struct JobsQueue {
     /// The journal read up to here.
     seen: Seq,
-    /// Each job's node, as its `job.started` named it.
+    /// Each job's node, as its `helios.job.started` named it.
     nodes: BTreeMap<String, String>,
 }
 
@@ -191,7 +191,7 @@ impl JobsQueue {
     fn follow(&mut self, app: &AppHandle) {
         for e in app.events_since(self.seen) {
             self.seen = e.seq;
-            if e.name != helios_core::jobs::STARTED {
+            if crate::host::kind_of(&e.name) != helios_core::jobs::STARTED {
                 continue;
             }
             if let (Some(id), Some(node)) = (e.data["id"].as_str(), e.data["node"].as_str()) {

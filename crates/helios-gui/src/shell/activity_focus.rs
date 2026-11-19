@@ -12,7 +12,7 @@
 //!   current step; the per-item outcome when it has items (an import's
 //!   added, skipped and failed files, with the reasons); its log (the
 //!   notes and states followed, [`crate::activity::LogLine`]); its
-//!   console (the lines the job wrote, `job.log`, heard in the journal);
+//!   console (the lines the job wrote, `helios.job.log`, heard in the journal);
 //!   Cancel
 //!   (unless the job says it cannot stop; a connected node's job is
 //!   cancelled on that node, through its relay), Retry when the failure may be
@@ -208,7 +208,7 @@ pub(crate) struct Jobs {
     promises: Vec<Promise>,
     /// The selected job's log.
     log: Vec<LogLine>,
-    /// Each job's console, by job id: the lines it wrote (`job.log`),
+    /// Each job's console, by job id: the lines it wrote (`helios.job.log`),
     /// heard in the journal since the shell started.
     consoles: std::collections::BTreeMap<String, Vec<String>>,
     /// The jobs in the order their console started, oldest first.
@@ -539,12 +539,12 @@ impl Jobs {
         }
     }
 
-    /// Folds the journal's `job.log` lines since the last call into the
+    /// Folds the journal's `helios.job.log` lines since the last call into the
     /// jobs' consoles.
     fn hear_consoles(&mut self, app: &egui_pop::api::AppHandle) {
         for e in app.events_since(self.console_seen) {
             self.console_seen = e.seq;
-            if e.name != helios_core::jobs::LOG {
+            if crate::host::kind_of(&e.name) != helios_core::jobs::LOG {
                 continue;
             }
             let (Some(id), Some(line)) = (e.data["id"].as_str(), e.data["text"].as_str()) else {
@@ -747,7 +747,7 @@ impl Jobs {
                 });
             }
         });
-        // What the job wrote as it went (its `job.log` lines): its
+        // What the job wrote as it went (its `helios.job.log` lines): its
         // console, newest at the bottom.
         let console = self.console(&p);
         if !console.is_empty() {

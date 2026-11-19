@@ -21,14 +21,16 @@
 //!   connection (see `vault_access.rs`).
 //! - `i18n extract | check | stamp LOCALE [--all]`: the translation
 //!   catalogs of `i18n/` (see `i18n.rs`).
-//! - `lint [--fix] [--require-all]`: rustfmt, clippy, `deps-worlds`,
-//!   `raw-egui --check`, `bus --check` and the optional linters that are
-//!   installed (see `lint.rs`).
-//! - `bus --check`: no library crate constructs the bus it declares points
+//! - `lint [--fix] [--require-all] [--base REF]`: rustfmt, clippy,
+//!   `deps-worlds`, `raw-egui --check`, `bus --check` and the optional
+//!   linters that are installed (see `lint.rs`); with `--base`, the guards
+//!   with a backlog report only what the change adds (see `delta.rs`).
+//! - `bus --check [--base REF]`: no library crate constructs the bus it declares points
 //!   or listens on; the application supplies it. Every typed fact of the
 //!   fact bus is declared in a contract table (see `bus.rs`).
-//! - `raw-egui [--check | --update]`: the raw egui widget calls of the
-//!   desktop shell, per file, may only go down (see `raw_egui.rs`).
+//! - `raw-egui [--check [--base REF] | --update]`: the raw egui widget
+//!   calls of the desktop shell, per file, may only go down (see
+//!   `raw_egui.rs`).
 //! - `deps-worlds`: each workspace crate depends only on what its world
 //!   allows (no egui in modules, forms through helios-ui, visual modules
 //!   through helios-rack), and Cargo.lock holds one version of each
@@ -38,6 +40,11 @@
 //! - `test-times [--profile P] [--top N]`: run the tests under
 //!   cargo-nextest, record their durations and show the slowest and the
 //!   ones getting slower (see `test_times.rs`).
+//! - `ci-history ingest | rebuild | report`: the per-test history of CI
+//!   runs on the `ci-history` branch, and what it says: the slowest, the
+//!   flakiest, the tests never failed (see `ci_history.rs`, `ci_broker/`).
+//! - `ci-broker select [--base REF] [--explain TEST]`: the always-run set
+//!   of a change, as a nextest filter (see `ci_select.rs`).
 //! - `check-commits [--full] [--first-parent] [RANGE]`: every commit of a series, but its
 //!   head, builds, passes clippy, the tests it touches (every fast test
 //!   with `--full`) and `check` (see `commits.rs`).
@@ -78,7 +85,11 @@
 mod affected;
 mod bench;
 mod bus;
+mod ci_broker;
+mod ci_history;
+mod ci_select;
 mod commits;
+mod delta;
 mod deps_worlds;
 mod gate;
 mod i18n;
@@ -759,7 +770,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-broker select [--base REF] [--history DIR] [--runs N] [--explain TEST] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -880,6 +891,14 @@ fn main() -> ExitCode {
         }),
         ["test-times", rest @ ..] => test_times::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", test_times::USAGE);
+            ExitCode::from(2)
+        }),
+        ["ci-broker", rest @ ..] => ci_select::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", ci_select::USAGE);
+            ExitCode::from(2)
+        }),
+        ["ci-history", rest @ ..] => ci_history::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", ci_history::USAGE);
             ExitCode::from(2)
         }),
         ["check-commits", rest @ ..] => commits::run(&root, rest).unwrap_or_else(|| {

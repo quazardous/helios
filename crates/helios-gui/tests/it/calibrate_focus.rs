@@ -280,7 +280,7 @@ fn the_calibration_focus_solves_saves_and_lists_profiles() {
     assert_eq!(doc["name"], "Studio");
     let ran: Vec<(String, String)> = heard
         .try_iter()
-        .filter(|e| e.kind == "control.command")
+        .filter(|e| e.kind == "helios.control.command")
         .map(|e| {
             (
                 e.payload["id"].as_str().unwrap().to_string(),

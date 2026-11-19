@@ -448,6 +448,19 @@ LightCraft. Design, steps and open questions:
   against Helios's journal and egui-pop's. Decided in egui-pop's ADR
   0030, "The bus is a contract the application supplies"
   (`docs/adr/0030-the-bus-is-a-contract.md`).
+- (2026-11-19, decided) **Helios's fact kinds take the `helios.`
+  prefix; a node and a desktop of different releases pair for one
+  release.** Every fact kind (the node's and the desktop's, 74) is named
+  `helios.<subject>.<moment>` (`helios.vault.field_changed`,
+  `helios.job.started`), as Helios's points already were. The two sides
+  translate at the edge only, never on a bus nor in a journal
+  (`helios_core::legacy_kinds`): a desktop maps an older node's names to
+  the new ones as it reads them; a newer node writes the old names to a
+  desktop that does not say it reads prefixed ones (`subscribe`'s
+  `prefixed`). The node does not publish both names: each fact would then
+  be journaled twice and a newer desktop would hear it twice. The aliases
+  are removed in **0.94.0**: from then on a desktop and a node pair from
+  0.93 on.
 - (2026-10-11, decided) **Data access is a framework prerogative.** Modules
   and services declare what they need and never read or write data
   themselves; the framework batches, projects, caches by content, prefetches

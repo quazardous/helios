@@ -22,8 +22,35 @@ use helios_shell::commands::Origin;
 use helios_storage::{Card, Volumes};
 use serde_json::{Value, json};
 
-/// How long the frame after the close may take.
+/// How long the frame after the close may take: enforced where the
+/// machine is not shared (`crate::wall_clock`). The fact under it, that no
+/// frame waits on the slow work, is proven without a clock where the test
+/// owns that work: [`FrameThread`].
 const DEADLINE: Duration = Duration::from_millis(500);
+
+/// The thread that runs the frames (the test's own), for the slow fakes:
+/// once armed, a slow call made on it fails at once, as a frame that would
+/// wait on the slow work. A fact, not a time: a loaded machine slows a
+/// frame, it never moves a call onto another thread.
+#[derive(Default)]
+struct FrameThread {
+    frame: std::sync::OnceLock<std::thread::ThreadId>,
+}
+
+impl FrameThread {
+    /// From now on, the calling thread is the frame's.
+    fn arm(&self) {
+        let _ = self.frame.set(std::thread::current().id());
+    }
+
+    /// Fails when `what` is called on the frame's thread.
+    fn off_frame(&self, what: &str) {
+        assert!(
+            self.frame.get() != Some(&std::thread::current().id()),
+            "{what} on the frame's thread: a frame would wait on it"
+        );
+    }
+}
 
 fn temp(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("helios-gui-close-{name}-{}", std::process::id()));
@@ -81,10 +108,10 @@ fn frames_in_time(h: &mut Harness<'_, Shell>, what: &str) {
     for frame in 0..3 {
         let at = Instant::now();
         h.step();
-        let took = at.elapsed();
-        assert!(
-            took < DEADLINE,
-            "{what}: frame {frame} after the close took {took:?}"
+        crate::wall_clock::within(
+            &format!("{what}: frame {frame} after the close"),
+            at.elapsed(),
+            DEADLINE,
         );
     }
     assert!(!h.state().import_window_open(), "{what}: still open");
@@ -151,7 +178,7 @@ fn closing_while_a_sources_connection_waits_gives_it_up_and_comes_back_at_once()
     let ctx = h.ctx.clone();
     let at = Instant::now();
     h.state_mut().close_import_window(&ctx);
-    assert!(at.elapsed() < DEADLINE, "the close took {:?}", at.elapsed());
+    crate::wall_clock::within("the close", at.elapsed(), DEADLINE);
     frames_in_time(&mut h, "a connection waiting");
     assert!(connection(&mut h).is_null(), "the connection still shown");
 }
@@ -159,10 +186,11 @@ fn closing_while_a_sources_connection_waits_gives_it_up_and_comes_back_at_once()
 /// Volumes looked at slowly, as a card being mounted or pulled out can
 /// be: each look takes a while on the watch's thread.
 #[derive(Default)]
-struct SlowVolumes(Mutex<Vec<Card>>);
+struct SlowVolumes(Mutex<Vec<Card>>, FrameThread);
 
 impl Volumes for SlowVolumes {
     fn volumes(&self) -> Vec<helios_storage::Volume> {
+        self.1.off_frame("a look at the volumes");
         std::thread::sleep(Duration::from_millis(300));
         self.0.lock().unwrap().volumes()
     }
@@ -197,7 +225,9 @@ fn closing_while_a_card_comes_and_goes_comes_back_at_once() {
             .is_some()
             && (g.read + g.cached > 0 || h.state().import_counts().photos > 0)
     });
-    // Pulled out while it is read, and the window closed meanwhile.
+    // Pulled out while it is read, and the window closed meanwhile: no
+    // frame looks at the volumes from here on.
+    volumes.1.arm();
     volumes.0.lock().unwrap().clear();
     close_in_time(&mut h, "a card pulled out");
     // Plugged in again with the window closed: frames still in time.
@@ -207,7 +237,7 @@ fn closing_while_a_card_comes_and_goes_comes_back_at_once() {
         assert!(Instant::now() < deadline, "the card not seen again");
         let at = Instant::now();
         h.step();
-        assert!(at.elapsed() < DEADLINE, "a frame took {:?}", at.elapsed());
+        crate::wall_clock::within("a frame, the card plugged in again", at.elapsed(), DEADLINE);
         std::thread::sleep(Duration::from_millis(20));
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -221,10 +251,13 @@ fn a_sources_choices_written_to_a_busy_node_hold_neither_a_frame_nor_the_close()
     // The node's vault held by another writer: each write waits 3 s.
     let written = Arc::new(Mutex::new(None::<String>));
     let into = written.clone();
+    let writer_frame = FrameThread::default();
+    writer_frame.arm();
     let mut shell = Shell::new(helios_panels(), None);
     shell.keep_import_sources_with(
         Box::new(|| Ok(None)),
         helios_gui::shell::write_import_sources_in_background(move |text| {
+            writer_frame.off_frame("a source's choices written");
             std::thread::sleep(Duration::from_secs(3));
             *into.lock().unwrap() = Some(text.to_owned());
             Ok(())
@@ -249,11 +282,7 @@ fn a_sources_choices_written_to_a_busy_node_hold_neither_a_frame_nor_the_close()
     h.get_by_label("Keep all").click();
     let at = Instant::now();
     h.step();
-    assert!(
-        at.elapsed() < DEADLINE,
-        "the choice's frame took {:?}",
-        at.elapsed()
-    );
+    crate::wall_clock::within("the choice's frame", at.elapsed(), DEADLINE);
     close_in_time(&mut h, "a source's choices being written");
     // The write lands all the same, off the interface's thread.
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -273,11 +302,13 @@ fn a_sources_choices_written_to_a_busy_node_hold_neither_a_frame_nor_the_close()
 struct HeldVault {
     accounts: MemoryAccounts,
     held: AtomicBool,
+    frame: FrameThread,
 }
 
 impl AccountBook for HeldVault {
     fn accounts(&self) -> Result<Vec<Account>, String> {
         if self.held.load(Ordering::SeqCst) {
+            self.frame.off_frame("a held vault's accounts read");
             std::thread::sleep(Duration::from_secs(3));
         }
         self.accounts.accounts()
@@ -315,13 +346,13 @@ fn a_held_vault_holds_no_frame_of_the_window_and_its_accounts_stay_shown() {
     });
     // Held for 3 s at each read: the frames go on, the account shown as
     // last read.
+    vault.frame.arm();
     vault.held.store(true, Ordering::SeqCst);
     let end = Instant::now() + Duration::from_millis(3500);
     while Instant::now() < end {
         let at = Instant::now();
         h.step();
-        let took = at.elapsed();
-        assert!(took < DEADLINE, "a frame took {took:?} with the vault held");
+        crate::wall_clock::within("a frame with the vault held", at.elapsed(), DEADLINE);
         assert!(
             h.query_by_label("Holiday server").is_some(),
             "the account no longer shown"

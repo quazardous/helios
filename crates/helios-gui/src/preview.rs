@@ -403,7 +403,7 @@ mod tests {
             .since(0)
             .into_iter()
             .map(|e| e.kind)
-            .filter(|k| k.starts_with("image.state."))
+            .filter(|k| k.starts_with("helios.image.state."))
             .collect();
         assert_eq!(kinds, [facts::REQUESTED, facts::COMPUTING, facts::READY]);
         let c = states.counters();

@@ -111,7 +111,7 @@ pub struct Progress {
 }
 
 impl helios_core::Event for Progress {
-    const KIND: &'static str = "vault.migration_progress";
+    const KIND: &'static str = "helios.vault.migration_progress";
 }
 
 /// Why a vault database could not be opened.

@@ -80,7 +80,7 @@ fn a_decision_without_a_resolver_goes_to_the_vision_route() {
     assert!(
         ai.events(0)
             .iter()
-            .any(|e| e.kind == "ai.call" && e.payload["purpose"] == "decision sky")
+            .any(|e| e.kind == "helios.ai.call" && e.payload["purpose"] == "decision sky")
     );
 }
 

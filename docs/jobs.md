@@ -2,7 +2,7 @@
 
 Background work in Helios (an export, a batch, the GPU calibration, an
 import) runs on the scheduler (`helios_core::scheduler`) and says how it
-goes through `helios_core::jobs`: `job.*` events on a bus. On the
+goes through `helios_core::jobs`: `helios.job.*` events on a bus. On the
 desktop the bus is the shell's, which egui-pop reads as its journal, so
 every job shows in the jobs centre (see [gui.md](gui.md), "Jobs") with
 its progress, its log console and Cancel. In a node the events go on the
@@ -65,11 +65,11 @@ fn import(jobs: &Jobs, files: &[std::path::PathBuf]) {
 - **Cancel.** `on_cancel` gives the way to stop the job: a flag the work
   checks between items, or the scheduler's cancel of its job
   (`Scheduler::canceller`). `Jobs::cancel(id)` publishes
-  `job.cancelling`, then runs it; the job then says `cancelled` itself.
+  `helios.job.cancelling`, then runs it; the job then says `cancelled` itself.
   A job that cannot be stopped says so when it starts
   (`Start::not_cancellable`): no Cancel button.
 - **Its node.** A job that works for a node of the graph names it
-  (`Start::node`, `node` in `job.started`): an export names the node it
+  (`Start::node`, `node` in `helios.job.started`): an export names the node it
   renders. The desktop's Queue panel lists the jobs of the selected node
   by it (see [gui.md](gui.md), "Queue panel").
 
@@ -77,14 +77,14 @@ fn import(jobs: &Jobs, files: &[std::path::PathBuf]) {
 
 | Event | Data |
 |---|---|
-| `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node` |
-| `job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
-| `job.item_failed` | `id`, `item`, `error` |
-| `job.log` | `id`, `text` |
-| `job.cancelling` | `id` |
-| `job.paused` | `id`, `reason` |
-| `job.resumed` | `id` |
-| `job.finished`, `job.failed`, `job.cancelled` | `id`, `kind`, `seconds`; `error` when failed; `actions` when finished with some |
+| `helios.job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node` |
+| `helios.job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
+| `helios.job.item_failed` | `id`, `item`, `error` |
+| `helios.job.log` | `id`, `text` |
+| `helios.job.cancelling` | `id` |
+| `helios.job.paused` | `id`, `reason` |
+| `helios.job.resumed` | `id` |
+| `helios.job.finished`, `helios.job.failed`, `helios.job.cancelled` | `id`, `kind`, `seconds`; `error` when failed; `actions` when finished with some |
 
 They are egui-pop's jobs events (its `docs/progress.md`), so its jobs
 model folds them as they are. A child job (`Start::parent(id, weight)`)
@@ -155,7 +155,7 @@ thread of its own, off the UI thread:
 
 - **Catching up, then following.** It reads the node's jobs whole
   (`describe jobs`: the running ones with their progress so far, the
-  last ones ended), then subscribes to the node's `job.*` events after
+  last ones ended), then subscribes to the node's `helios.job.*` events after
   that point (`subscribe`, pushed by the node).
 - **Republishing.** Each event goes on the shell's bus with the job's
   id, and its parent's, as `node:<name>/<id>`: the jobs centre shows a
@@ -172,5 +172,5 @@ thread of its own, off the UI thread:
   that ended meanwhile end as they did (failed when the node no longer
   remembers how), the new ones start. A node that restarted leaves its
   old jobs failed. Still lost after a minute, the jobs fail and leave
-  the jobs centre (`node.jobs_forgotten`). Each change of the link is
-  `node.link` on the bus (`node`, `up`, `error`).
+  the jobs centre (`helios.node.jobs_forgotten`). Each change of the link is
+  `helios.node.link` on the bus (`node`, `up`, `error`).

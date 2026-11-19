@@ -20,6 +20,7 @@ use std::sync::Mutex;
 
 use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
+use egui_pop::core::areas::{self, AreaSpec};
 use egui_pop::viewport::histogram::{Channel, Clipping, Histogram, HistogramOutput};
 use helios_core::{Image, Message, Value};
 use helios_scopes::{Counts, Scale, histogram, parade, waveform};
@@ -313,12 +314,21 @@ impl Scopes {
                 (Mode::Waveform, "Waveform"),
                 (Mode::Parade, "Parade"),
             ] {
-                if ui.selectable_label(self.mode == mode, label).clicked() {
+                let r = ui.selectable_label(self.mode == mode, label);
+                // A scope's mode moves what is shown, never the edit.
+                areas::register(
+                    ui,
+                    &r,
+                    AreaSpec::navigate(format!("scopes.mode.{}", label.to_lowercase())),
+                );
+                if r.clicked() {
                     self.set_mode(mode);
                 }
             }
             ui.separator();
-            if ui.selectable_label(self.stops, "Stops").clicked() {
+            let r = ui.selectable_label(self.stops, "Stops");
+            areas::register(ui, &r, AreaSpec::navigate("scopes.stops"));
+            if r.clicked() {
                 self.set_stops(!self.stops);
             }
         });
@@ -360,6 +370,12 @@ impl Scopes {
                 panel
             };
             let response = ui.add(egui::Image::new((p.texture.id(), size)));
+            // The waveform and the parade only show: no grip, no card.
+            let id = match self.mode {
+                Mode::Parade => "scopes.parade",
+                _ => "scopes.waveform",
+            };
+            areas::register(ui, &response, AreaSpec::display(id));
             crate::name_rect(ui.ctx(), "helios.scopes.picture", response.rect);
         }
     }
@@ -427,17 +443,33 @@ impl Scopes {
             .log(true)
             .clipping(*clip)
             .size(fill(ui, 1.0 / 3.0));
+        // What the drag writes, named for the area registry: its grip at
+        // rest, its hover card ("Exposure 1.00 EV").
+        let mut edits = None;
         let target = edit.and_then(|(_, store)| {
-            exposure_path(
-                &store
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner),
-            )
+            let store = store
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let path = exposure_path(&store)?;
+            if let Some(e) = store.get(&path) {
+                let locale = crate::i18n::locale(&ctx);
+                edits = Some((
+                    crate::params::label(&ctx, &path, &e.descriptor),
+                    crate::params::shown_in(&locale, &e.descriptor, &e.value),
+                ));
+            }
+            Some(path)
         });
         let out = match (edit, &target) {
-            (Some((app, _)), Some(_)) => widget
-                .on_change(egui_pop::imaging::histogram(app, "helios.scopes"))
-                .show(ui),
+            (Some((app, _)), Some(_)) => {
+                let widget = match edits {
+                    Some((control, value)) => widget.edits(control, value),
+                    None => widget,
+                };
+                widget
+                    .on_change(egui_pop::imaging::histogram(app, "helios.scopes"))
+                    .show(ui)
+            }
             _ => widget.draggable(false).show(ui),
         };
         crate::name_rect(ui.ctx(), "helios.scopes.picture", out.response.rect);

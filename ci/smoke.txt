@@ -1,0 +1,38 @@
+# The CI broker's smoke set (docs/ci-broker.md, step B2): fast, broad tests
+# every pull request runs, whatever it changes. One entry a line:
+#   <binary id> <test name>    one test, named as nextest names it
+#   <binary id> <module>::     the tests of one module
+#   <binary id> *              a whole test binary
+# `cargo test -p xtask ci_select` checks that each entry still exists.
+
+# affected's critical set: a smoke render, an export, load and save
+# round trips, survival
+helios-core::engine renders_a_chain
+helios-export::export every_format_decodes_to_the_right_size
+helios-gui::it persist::each_edit_step_is_a_version_and_reopening_loads_the_head
+helios-vault-sqlite::contract a_sqlite_vault_survives_reopening
+helios-gui::it survival::
+helios-node::survival *
+
+# the core: the bus and a raw decoded
+helios-core::journal facts_published_on_the_bus_reach_their_named_listeners_in_order
+helios-load::load a_bayer_raw_loads_as_a_mosaic_with_its_camera
+
+# the library and the node
+helios-library::library a_card_is_copied_renamed_with_its_sidecars_as_a_job
+helios-library::library an_export_is_planned_with_each_image_s_head_and_its_name
+helios-node::commands the_list_has_every_verb_with_its_schema_and_state
+
+# the desktop, a journey in short: first start, import, browse, edit,
+# settings, quit
+helios-gui::it init_wizard::a_fresh_profile_opens_the_setup_and_a_folder_finishes_it
+helios-gui::it gui::draws_every_area_and_pictures_a_panel
+helios-gui::it import::an_empty_library_offers_import_photos_without_an_import_source
+helios-gui::it import::the_import_window_lists_a_card_first_ticks_it_and_imports_it
+helios-gui::it library_window::a_click_on_a_cell_of_the_library_window_selects_it
+helios-gui::it control_names::the_main_window_s_controls_say_what_they_do
+helios-gui::it edited_badge::an_edited_photo_is_badged_until_reset_all_and_after_a_restart
+helios-gui::it batch_undo::an_agent_batch_is_one_step_undone_and_redone_whole
+helios-gui::it settings_window::closing_the_settings_window_leaves_the_main_window
+helios-gui::it dialogs::a_destructive_confirmation_starts_on_cancel_and_enter_keeps_it_safe
+helios-gui::it exit::a_quit_with_nothing_running_ends_quickly

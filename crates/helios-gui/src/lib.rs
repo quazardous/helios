@@ -11,6 +11,7 @@ pub const INTERFACE_PASS_BUDGET: std::time::Duration = std::time::Duration::from
 pub mod account_gone;
 pub mod activity;
 pub mod agent_state;
+pub mod app_quit;
 pub mod backup_end;
 pub mod caches;
 pub mod calibrate;
@@ -114,7 +115,7 @@ pub use shell::{Shell, headless, name_rect};
 pub use workbench::{IMAGE_FIRST, area_named, beside_the_end_side, gather_palettes, image_first};
 
 use egui_pop::model::ids::PanelId;
-use egui_pop::model::panels::{Area, PanelSpec};
+use egui_pop::model::panels::{Area, PanelKind, PanelSpec};
 
 /// Every fact kind the desktop's buses carry, by the table of the crate
 /// that publishes it: what `main` declares on them ([`helios_core::Bus::declare`]).
@@ -175,6 +176,32 @@ pub const PANEL_ICONS: &[(&str, &str)] = &[
     ("helios.duplicates", "copy"),
     ("helios.decisions", "phosphor:seal-question"),
     (workshops::PANEL, "phosphor:flask"),
+];
+
+/// What each panel does to the photo's edit (`PanelSpec::kind`,
+/// `docs/design/panel-kinds.md`): a **control** panel is there to edit
+/// it, a **mixed** one shows and holds an edit area or two (the Image's
+/// mask handles, the Scopes' histogram drag), a **view** one only shows
+/// and navigates (the Library's marks are catalogue data, not the
+/// render). egui-pop's chrome marks the panels that edit.
+pub const PANEL_KINDS: &[(&str, PanelKind)] = &[
+    ("helios.viewport", PanelKind::Mixed),
+    ("helios.graph", PanelKind::Control),
+    ("helios.vault", PanelKind::View),
+    ("helios.filters", PanelKind::View),
+    ("helios.modules", PanelKind::Control),
+    ("helios.masks", PanelKind::Control),
+    ("helios.navigator", PanelKind::View),
+    ("helios.params", PanelKind::Control),
+    ("helios.scopes", PanelKind::Mixed),
+    ("helios.filmstrip", PanelKind::View),
+    ("helios.queue", PanelKind::View),
+    ("helios.log", PanelKind::View),
+    ("helios.compare", PanelKind::View),
+    ("helios.stacks", PanelKind::View),
+    ("helios.duplicates", PanelKind::View),
+    ("helios.decisions", PanelKind::Control),
+    (workshops::PANEL, PanelKind::Control),
 ];
 
 /// The panels Helios declares today, with the areas each may be moved to
@@ -239,7 +266,11 @@ pub fn helios_panels_with(experimental: Experimental) -> Vec<PanelSpec> {
         let id = PanelId::new(id).expect("Helios's panel ids are valid");
         let floats = FLOATABLE.contains(&id.as_str());
         let icon = PANEL_ICONS.iter().find(|(p, _)| *p == id.as_str());
-        let mut spec = PanelSpec::new(id, title, area).only_in(areas);
+        let kind = PANEL_KINDS
+            .iter()
+            .find(|(p, _)| *p == id.as_str())
+            .map_or(PanelKind::View, |(_, k)| *k);
+        let mut spec = PanelSpec::new(id, title, area).only_in(areas).kind(kind);
         if floats {
             spec = spec.palette();
         }

@@ -447,20 +447,24 @@ timeout = "40m"
 # in CI): every PNG of crates/helios-gui/tests/snapshots lands in
 # /out/snapshots, to review and commit; `test=` names a module of the `it`
 # test executable (import_snapshots by default, `test=it` for all), or
-# several joined by `+` (`test=chrome_snapshots+import_snapshots`)
+# several joined by `+` (`test=chrome_snapshots+import_snapshots`).
+# Under nextest, one process per test as the `it` suite expects (a single
+# `cargo test` process running all of it reached 18 GB and was killed),
+# 5 tests at a time: 5 GB covers them and their links (snapshots-refresh
+# peaks at 4.6 GB with 12)
 [jobs.gui-snapshots]
 about = "helios-gui's snapshots regenerated, every PNG returned"
-first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
-memory = "6g"
+memory = "5g"
 cwd = "/work/${src:-helios}"
 command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-t="${test:-import_snapshots}"; if [ -f crates/helios-gui/tests/it/main.rs ]; then [ "$t" = it ] && t=""; sel="--test it ${t:+-- $(printf '%s:: ' ${t//+/ })}"; else sel="--test $t"; fi; \
-UPDATE_SNAPSHOTS=${update:-1} cargo test --locked -p helios-gui $sel; rc=$?; \
+t="${test:-import_snapshots}"; x=""; if [ -f crates/helios-gui/tests/it/main.rs ]; then sel="--test it"; [ "$t" = it ] || x="test(/^(${t//+/|})::/)"; else sel="--test ${t//+/ --test }"; fi; \
+UPDATE_SNAPSHOTS=${update:-1} cargo nextest run --locked --profile ci --test-threads 5 -p helios-gui $sel ${x:+-E "$x"}; rc=$?; \
+cp target/nextest/ci/junit.xml /out/ 2> /dev/null; \
 mkdir -p /out/snapshots && find crates/helios-gui/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.old.png' ! -name '*.diff.png' -exec cp -t /out/snapshots/ {} + ; \
 exit $rc"""
-env = { CARGO_NET_OFFLINE = "true" }
+env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "1h"
 
@@ -475,7 +479,6 @@ timeout = "1h"
 # unexplained image or a failing test
 [jobs.snapshots-refresh]
 about = "every snapshot suite regenerated in a workspace build; changed images, diffs and likely causes"
-first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -506,7 +509,7 @@ mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", c
 timeout = "1h"
 
 # HELIOS_SHARED_MACHINE=1 in the test jobs that share the box (test,
-# test-crate, test-affected, release): frame-time budgets only warn there,
+# test-crate, test-affected, release, the snapshot jobs): frame-time budgets only warn there,
 # since other jobs and the box's throttling slow every frame. They fail on
 # CI and in test-times, which holds the machine alone (docs/bench.md).
 
@@ -514,7 +517,6 @@ timeout = "1h"
 # summary of the slowest tests in /out
 [jobs.test]
 about = "the whole test suite (CI profile), with its JUnit report and the slowest tests"
-first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
@@ -530,10 +532,10 @@ timeout = "1h"
 # the code a job will build type-checks, tests included, and nothing more
 # (`cargo check --tests`: no code generated, no link; cargo stops at the
 # first crate that fails): `crate=` one crate, else the workspace. The
-# `first` of every job runs it without `crate=`: one workspace check per
-# branch head, shared by every job queued on it and run once per commit
-# (per-crate checks queued one per job and serialised on the branch's
-# target). It warms the branch's target the jobs use
+# `first` of the build and GUI jobs runs it without `crate=`: one workspace
+# check per branch head, shared by every job queued on it and run once per
+# commit. Test jobs have no `first`: an agent runs `check` once per branch
+# head, beside its tests (it peaks at 2.0 GB, 3 threads and 3 GB fit)
 [jobs.check]
 # Clippy (which checks too) runs here, never on the developer's machine:
 # a compile error or a lint stops a branch before any of its test jobs.
@@ -542,8 +544,8 @@ timeout = "1h"
 # unlinted): one pass shows them all, and any warning makes the job red.
 about = "clippy on a crate or the workspace with its tests, every lint in one pass, red on any warning"
 checkouts = ["helios", "vkdt", "egui-pop"]
-cores = 4
-memory = "4g"
+cores = 3
+memory = "3g"
 cwd = "/work/${src:-helios}"
 command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 c="${crate:-}"; cargo clippy --locked --tests --keep-going --message-format short ${c:+-p $c} ${c:---workspace} > /tmp/clippy.log 2>&1; s=$?; cat /tmp/clippy.log; \
@@ -566,25 +568,31 @@ env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "4" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "20m"
 
-# a fix loop's run: one crate's tests, one test target (`test=`; `test=lib`
-# for the crate's unit tests; none for all its targets), a name
+# a fix loop's run: one crate's tests, its test targets (`test=`; `test=lib`
+# for the crate's unit tests; several joined by `+`; none for all its
+# targets), a name
 # filter (`filter=`; bench-remote sends a test path's `::` as `@` and a
 # space as `+`, turned back here), stopped at the first failure; seconds of tests, in
 # the branch's target that test-affected reuses before the merge. helios-gui's
 # integration tests are modules of one executable, `it`: there `test=<module>`
 # (the name of a former test target, `test=library_filter`) runs that
-# module alone, and `filter=` is joined to the module's path (a branch
-# from before the change, its tests still separate targets, runs as it did)
+# module alone, `test=a+b+lib` those modules and the unit tests in one run,
+# and `filter=` narrows them by name (a branch from before the change, its
+# tests still separate targets, runs as it did). 3 threads and 3 GB: its
+# peak is 3.0 GB with 4 threads on all of helios-gui, 2.2 GB on a batch
+# (2026-11-19), so three run side by side. No `check` first: the test
+# build type-checks, and a branch's `check` is run once on its own
 [jobs.test-crate]
 about = "one crate's tests, one test target, a name filter (a fix loop's run)"
-first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
-cores = 4
-memory = "4g"
+cores = 3
+memory = "3g"
 cwd = "/work/${src:-helios}"
 command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
-t="${test:-}"; case "$t" in lib) sel="--lib";; "") sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; x=""; \
-if [ "${crate}" = helios-gui ] && [ -f crates/helios-gui/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else x="test(/^$t::/)"; fi; fi; \
+t="${test:-}"; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; sel=""; mods=""; whole=""; lib=""; x=""; \
+gui=""; [ "${crate}" = helios-gui ] && [ -f crates/helios-gui/tests/it/main.rs ] && gui=1; \
+for m in ${t//+/ }; do if [ "$m" = lib ]; then sel="$sel --lib"; lib=1; elif [ -z "$gui" ]; then sel="$sel --test $m"; elif [ "$m" = it ]; then whole=1; else mods="$mods|$m"; fi; done; \
+if [ -n "$whole$mods" ]; then sel="$sel --test it"; [ -z "$whole" ] && x="binary(=it) & test(/^(${mods#|})::/)"; [ -n "$x" ] && [ -n "$lib" ] && x="kind(lib) | ($x)"; fi; \
 cargo nextest run --locked --fail-fast -p ${crate} $sel ${x:+-E "$x"} $f"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
@@ -600,7 +608,6 @@ timeout = "30m"
 # computes it and passes it
 [jobs.test-affected]
 about = "the tests a change affects since a base commit, plus the critical set"
-first = [{ job = "check", pass = ["branch", "src"] }]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
@@ -618,7 +625,6 @@ timeout = "1h"
 # quit, kill -9 and reopen: the scenarios that gate a release
 [jobs.survival]
 about = "quit, kill -9 and reopen: the survival scenarios that gate a release"
-first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -638,7 +644,6 @@ timeout = "15m"
 # /out/many-clients.json
 [jobs.stability]
 about = "kill -9 in the node's own jobs and restart, many clients on one node: the stability scenarios, not run by CI"
-first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
@@ -663,7 +668,6 @@ timeout = "20m"
 # in /out/soak.json, JUnit and a summary in /out
 [jobs.soak]
 about = "a moderate mix of clients on one headless node for an hour, sampled: nothing may grow; not run by CI"
-first = [{ job = "check", pass = ["branch", "src"] }]
 checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"

@@ -294,7 +294,7 @@ fn a_run_on_the_debug_endpoint_keeps_its_undo_group() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|e| e["kind"] == "control.command")
+        .filter(|e| e["kind"] == "helios.control.command")
         .collect();
     assert_eq!(ran.len(), 1, "{events}");
     assert_eq!(
@@ -317,7 +317,7 @@ fn helios(args: &[&str]) -> (i32, String, String) {
     )
 }
 
-/// The `control.command` events of the node: (id, origin).
+/// The `helios.control.command` events of the node: (id, origin).
 fn ran(node: &Node) -> Vec<(String, String)> {
     let out = Command::new(env!("CARGO_BIN_EXE_helios"))
         .args(["inspect", "--socket"])
@@ -330,7 +330,7 @@ fn ran(node: &Node) -> Vec<(String, String)> {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|e| e["kind"] == "control.command")
+        .filter(|e| e["kind"] == "helios.control.command")
         .map(|e| {
             (
                 e["payload"]["id"].as_str().unwrap().to_string(),

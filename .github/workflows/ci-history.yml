@@ -1,0 +1,85 @@
+name: ci-history
+
+# The per-test history of next's CI runs, nightly (docs/ci-broker.md): the
+# JUnit report each ci.yml run on `next` uploads (artifact `junit`) is
+# folded by `cargo xtask ci-history ingest` into the orphan branch
+# `ci-history`, one commit a night, as the bot.
+#
+# - It reads the runs of the last two days: a run still going at the last
+#   night, or a night that did not run, is caught up. A run already in the
+#   history is left out, so the overlap counts nothing twice.
+# - A run with no `junit` artifact (it stopped before the tests: lint,
+#   build) is skipped.
+# - Scheduled runs use the default branch's copy of this file: the nightly
+#   run starts only once this file reaches `main` through promotion. The
+#   job checks out `next` itself, for the newest xtask.
+on:
+  schedule:
+    - cron: "45 3 * * *"
+  workflow_dispatch:
+
+# One at a time, never cancelled: two writers would race on the branch.
+concurrency:
+  group: ci-history
+  cancel-in-progress: false
+
+# `contents: write` is repository-wide for GITHUB_TOKEN; the job pushes one
+# ref only, `refs/heads/ci-history`, and `next` and `main` stay behind
+# their own protection. `actions: read` lists the runs and downloads their
+# artifacts.
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-history
+      - run: cargo build -p xtask
+      - name: the ci-history branch
+        run: |
+          if git fetch --depth 1 origin ci-history; then
+            git worktree add -B ci-history history FETCH_HEAD
+          else
+            git worktree add --orphan -b ci-history history
+          fi
+      - name: ingest the last two days of next's runs
+        run: |
+          since=$(date -u -d '2 days ago' +%F)
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch next \
+            --event push --status completed --created ">=$since" --limit 200 \
+            --json databaseId,headSha,createdAt \
+            --jq 'sort_by(.createdAt) | .[] | "\(.databaseId) \(.headSha) \(.createdAt)"' > runs.txt
+          echo "$(wc -l < runs.txt) completed runs since $since"
+          while read -r id sha created; do
+            dir="junit/$id"
+            if ! gh run download "$id" --repo "$GITHUB_REPOSITORY" --name junit --dir "$dir" 2>/dev/null; then
+              echo "run $id: no junit artifact, skipped"
+              continue
+            fi
+            find "$dir" -name '*.xml' -print0 | xargs -0 cargo xtask ci-history ingest \
+              --history history --run "$id" --commit "$sha" --date "$created" --source ci
+          done < runs.txt
+          cargo xtask ci-history report --history history --top 15 >> "$GITHUB_STEP_SUMMARY"
+      - name: commit and push
+        working-directory: history
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "nothing new"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898283+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "ci-history: runs up to $(date -u +%F)"
+          git push origin HEAD:refs/heads/ci-history

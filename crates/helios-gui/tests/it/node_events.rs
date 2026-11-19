@@ -31,14 +31,14 @@ fn a_local_node_s_fact_is_heard_once_by_a_named_listener_of_its_point() {
     let events = shell.node_events().clone();
     // A listener of the table, as `reads` is: a remote node's facts come
     // through the table, the local node's through the point's listener.
-    let table = events.listen("test", &["settings.*"]);
+    let table = events.listen("test", &["helios.settings.*"]);
     let (tx, rx) = std::sync::mpsc::channel();
     let hand = table.hand();
     let refused = events.listen_local(
         &*bus,
         "test.local",
         "test",
-        &["settings.*"],
+        &["helios.settings.*"],
         helios_gui::FACTS.iter().copied(),
         move |e| {
             tx.send(e.clone()).unwrap();
@@ -46,7 +46,7 @@ fn a_local_node_s_fact_is_heard_once_by_a_named_listener_of_its_point() {
         },
     );
     assert!(refused.is_empty(), "{refused:?}");
-    let order = bus_contract::order_dump(&*bus, &["settings.layerChanged"]);
+    let order = bus_contract::order_dump(&*bus, &["helios.settings.layerChanged"]);
     assert!(order.contains("test.local"), "{order}");
 
     facts.publish(
@@ -59,7 +59,7 @@ fn a_local_node_s_fact_is_heard_once_by_a_named_listener_of_its_point() {
     let by_point = heard(&rx);
     assert_eq!(by_point.len(), 1, "{by_point:?}");
     assert_eq!(by_point[0].node, LOCAL);
-    assert_eq!(by_point[0].event.kind, "settings.layerChanged");
+    assert_eq!(by_point[0].event.kind, "helios.settings.layerChanged");
     assert_eq!(by_point[0].event.payload["layer"], "user");
     // The table's listener, once too: no second path copies it.
     let mut by_table = Vec::new();
@@ -81,10 +81,10 @@ fn the_desktop_s_node_listeners_are_named_on_the_application_bus() {
     shell.follow_import_sources(|| Ok(None));
     shell.watch_cards(Arc::new(Vec::<helios_storage::Card>::new()));
     let points = [
-        "settings.layerChanged",
-        "library.imported",
-        "volume.mounted",
-        "volume.unmounted",
+        "helios.settings.layerChanged",
+        "helios.library.imported",
+        "helios.volume.mounted",
+        "helios.volume.unmounted",
     ];
     let order = bus_contract::order_dump(&*bus, &points);
     for listener in ["helios.import-sources", "helios.reads", "import.cards"] {

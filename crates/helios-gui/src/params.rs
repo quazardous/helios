@@ -45,6 +45,7 @@ use std::sync::Mutex;
 
 use egui::{Sense, Ui};
 use egui_pop::api::sliders;
+use egui_pop::core::areas::{self, AreaKind, AreaSpec};
 use egui_pop::core::icon::{Icon, Tone};
 use egui_pop::core::slider::{Change as SliderChange, Slider, Verdict};
 use egui_pop::core::ui::UiPop as _;
@@ -351,6 +352,7 @@ impl Drawings for Host<'_> {
             }
             _ => return None,
         };
+        declare_edit(ui, &path, &response);
         self.touch(&ctx, &path, &response, menu_on.as_ref());
         Some(Vec::new())
     }
@@ -429,6 +431,7 @@ impl Drawings for Host<'_> {
             // Drawn here: touched as it was drawn.
             return;
         };
+        declare_edit(ui, &path, response);
         // A list's own response keeps its popup: a context menu on it
         // shares the popup's id and closes the list on the click that
         // opens it. Its label takes the menu; a list with none, none.
@@ -463,6 +466,19 @@ impl Drawings for Host<'_> {
             ));
         }
     }
+}
+
+/// Declares a parameter's control to egui-pop's area registry as an edit
+/// area writing `path` (`docs/design/panel-kinds.md`): agents and tests
+/// read it on the bus (`pop.ui.areas`). No control name is given, so the
+/// framework draws no hover card over the row's own hover text (its
+/// description, default and gestures); a slider shows its value at rest.
+fn declare_edit(ui: &Ui, path: &str, response: &egui::Response) {
+    areas::register(
+        ui,
+        response,
+        AreaSpec::new(format!("param:{path}"), AreaKind::Edit).path(path),
+    );
 }
 
 /// What a slider's change becomes, once its control's detents held it:

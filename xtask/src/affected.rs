@@ -195,6 +195,8 @@ pub fn rules() -> &'static [(&'static str, Rule)] {
         (".github/", Everything),
         (".config/", Everything),
         (".cargo/", Everything),
+        // the CI broker's smoke list (ci/smoke.txt) and other CI inputs
+        ("ci/", Everything),
         // data the crates read
         ("i18n/", Crates(&["helios-i18n", "helios-i18n-extract"])),
         ("tests/masks/", Crates(&["helios-parity"])),
@@ -252,7 +254,7 @@ pub fn rules() -> &'static [(&'static str, Rule)] {
     ]
 }
 
-fn rule_for(path: &str) -> Option<Rule> {
+pub fn rule_for(path: &str) -> Option<Rule> {
     rules().iter().find_map(|(prefix, rule)| {
         let hit = if prefix.ends_with('/') {
             path.starts_with(prefix)
@@ -585,7 +587,7 @@ impl Selection {
     }
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<Vec<String>, String> {
+pub fn git(root: &Path, args: &[&str]) -> Result<Vec<String>, String> {
     let out = Command::new("git")
         .args(args)
         .current_dir(root)

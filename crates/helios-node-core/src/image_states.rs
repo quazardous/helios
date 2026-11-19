@@ -15,7 +15,7 @@
 //!   of higher priority joining a waiting computation raises it, and no
 //!   background computation starts while an interactive one runs (a
 //!   warm-up, [`crate::warm`], never competes with the shown photo);
-//! - says each transition on the bus as an `image.state.*` fact
+//! - says each transition on the bus as an `helios.image.state.*` fact
 //!   ([`facts`]), never pixels: those travel by handle.
 //!
 //! The engine stays a provider with its own step cache: the computations
@@ -50,18 +50,18 @@ pub const SOURCE: &str = "image_states";
 /// The facts the router publishes, one per transition of a state.
 pub mod facts {
     /// A state nobody computes yet was asked for.
-    pub const REQUESTED: &str = "image.state.requested";
+    pub const REQUESTED: &str = "helios.image.state.requested";
     /// Its computation started.
-    pub const COMPUTING: &str = "image.state.computing";
+    pub const COMPUTING: &str = "helios.image.state.computing";
     /// It is ready.
-    pub const READY: &str = "image.state.ready";
+    pub const READY: &str = "helios.image.state.ready";
     /// Its computation failed (the error in `reason`).
-    pub const FAILED: &str = "image.state.failed";
+    pub const FAILED: &str = "helios.image.state.failed";
     /// Every asker cancelled before it was ready: nothing is kept.
-    pub const CANCELLED: &str = "image.state.cancelled";
+    pub const CANCELLED: &str = "helios.image.state.cancelled";
     /// A ready state was let go to stay within the budget (or cleared):
     /// the next ask computes it again.
-    pub const EVICTED: &str = "image.state.evicted";
+    pub const EVICTED: &str = "helios.image.state.evicted";
     /// Every fact, in lifecycle order.
     pub const ALL: [&str; 6] = [REQUESTED, COMPUTING, READY, FAILED, CANCELLED, EVICTED];
 }

@@ -126,7 +126,7 @@ pub struct RenderRequested {
 }
 
 impl Event for RenderRequested {
-    const KIND: &'static str = "engine.render_requested";
+    const KIND: &'static str = "helios.engine.render_requested";
 }
 
 /// A step was computed (not found in the cache).
@@ -140,7 +140,7 @@ pub struct StepComputed {
 }
 
 impl Event for StepComputed {
-    const KIND: &'static str = "engine.step_computed";
+    const KIND: &'static str = "helios.engine.step_computed";
 }
 
 /// A step's GPU variant failed: the step was computed on the CPU instead.
@@ -176,7 +176,7 @@ impl GpuFellBack {
 }
 
 impl Event for GpuFellBack {
-    const KIND: &'static str = "engine.gpu_fell_back";
+    const KIND: &'static str = "helios.engine.gpu_fell_back";
 }
 
 /// The accelerator's device was lost or hung during a render. Either it
@@ -193,7 +193,7 @@ pub struct GpuLost {
 }
 
 impl Event for GpuLost {
-    const KIND: &'static str = "engine.gpu_lost";
+    const KIND: &'static str = "helios.engine.gpu_lost";
 }
 
 /// Where an injected fault strikes.
@@ -219,7 +219,7 @@ pub struct CacheSettled {
 }
 
 impl Event for CacheSettled {
-    const KIND: &'static str = "engine.cache_settled";
+    const KIND: &'static str = "helios.engine.cache_settled";
 }
 
 /// What the engine did, since it was created.

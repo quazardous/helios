@@ -1,0 +1,3 @@
+kind: internal
+
+Every fact kind Helios declares takes the `helios.` prefix, the node's included (`helios.vault.field_changed`, `helios.job.started`, `helios.image.state.ready`, `helios.node.ready`; a value written is `helios.values.param_changed`), so its whole vocabulary on the bus follows the bus-contract naming rule; `cargo xtask bus --check` refuses a kind declared without it. A desktop and a node of different releases still pair for one release: the desktop reads an older node's kinds under their new names, and a node writes the old names to an older desktop. The old names stop being understood in 0.94.0.

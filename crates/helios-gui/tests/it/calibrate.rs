@@ -101,7 +101,7 @@ fn the_shell_answers_a_chart_dry_run() {
     let id = saved["profile"]["id"].as_str().unwrap().to_string();
     let ran: Vec<(String, String)> = heard
         .try_iter()
-        .filter(|e| e.kind == "control.command")
+        .filter(|e| e.kind == "helios.control.command")
         .map(|e| {
             (
                 e.payload["id"].as_str().unwrap().to_string(),
@@ -168,7 +168,7 @@ fn the_shell_answers_a_chart_dry_run() {
     assert_eq!(
         heard
             .try_iter()
-            .filter(|e| e.kind == "control.command")
+            .filter(|e| e.kind == "helios.control.command")
             .map(|e| (e.payload["id"].clone(), e.payload["origin"].clone()))
             .last(),
         Some((json!("calibrate.apply"), json!("user")))

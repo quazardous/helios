@@ -802,7 +802,7 @@ Built, first part (2026-11-14): "Remove from Library",
 darktable, and the grid's context menu), through the node's new
 `library.images.remove`, which answers the vault's step; the desktop
 records it in the library's history (Ctrl+Z), and the vault announces
-`vault.library_changed` (also on a library step undone or redone) so
+`helios.vault.library_changed` (also on a library step undone or redone) so
 the read cache and the grid follow. Not asked first: nothing is lost.
 Built, second part (2026-11-14): "Move to Trash…"
 (`library.trash`, Ctrl+Alt+Shift+Delete) and "Delete Rejected…"

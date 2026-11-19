@@ -23,8 +23,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::Duration;
 
 /// The window's own share of the quit: the end splash's steps on the
 /// interface's thread (the last changes written, the interface's
@@ -55,7 +55,9 @@ pub struct Ending {
     /// The library open, if any: whether it is closed.
     library: Mutex<Option<Closed>>,
     asked: AtomicBool,
-    finished: AtomicBool,
+    /// The quit is done; its waiters are woken ([`Ending::finish`]).
+    finished: Mutex<bool>,
+    done: Condvar,
 }
 
 impl std::fmt::Debug for Ending {
@@ -63,7 +65,7 @@ impl std::fmt::Debug for Ending {
         f.debug_struct("Ending")
             .field("deadline", &self.deadline)
             .field("asked", &self.asked)
-            .field("finished", &self.finished)
+            .field("finished", &self.finished())
             .finish_non_exhaustive()
     }
 }
@@ -83,7 +85,8 @@ impl Ending {
             crashes,
             library: Mutex::new(None),
             asked: AtomicBool::new(false),
-            finished: AtomicBool::new(false),
+            finished: Mutex::new(false),
+            done: Condvar::new(),
         })
     }
 
@@ -174,24 +177,23 @@ impl Ending {
 
     /// The quit is done: the deadline no longer applies.
     pub fn finish(&self) {
-        self.finished.store(true, Ordering::SeqCst);
+        *self.finished.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.done.notify_all();
     }
 
     pub fn finished(&self) -> bool {
-        self.finished.load(Ordering::SeqCst)
+        *self.finished.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Waits up to `limit` for the quit to be done: whether it is.
+    /// Waits up to `limit` for the quit to be done, woken as it is:
+    /// whether it is.
     pub fn wait(&self, limit: Duration) -> bool {
-        let until = Instant::now() + limit;
-        while !self.finished() {
-            let now = Instant::now();
-            if now >= until {
-                return false;
-            }
-            std::thread::sleep((until - now).min(Duration::from_millis(20)));
-        }
-        true
+        let finished = self.finished.lock().unwrap_or_else(PoisonError::into_inner);
+        let (finished, _) = self
+            .done
+            .wait_timeout_while(finished, limit, |done| !*done)
+            .unwrap_or_else(PoisonError::into_inner);
+        *finished
     }
 }
 

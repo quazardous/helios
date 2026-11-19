@@ -16,7 +16,7 @@
 //! `decisions.answer`), asked while the panel draws and heard after it in
 //! the same pass (`Defer`); the shell's listener answers it through the
 //! book on the viewport's graph, as the
-//! `decision.*` commands agents run do, so the render goes on once the
+//! `helios.decision.*` commands agents run do, so the render goes on once the
 //! last decision on its way is answered. Cards are made again from the
 //! book each frame ([`Decisions::refresh`]): an answer from anywhere (an
 //! agent, a script) removes its card.

@@ -373,7 +373,7 @@ fn stability_a_backup_killed_while_copying_counts_no_half_copy_and_the_next_copi
     // Killed while it copies: a few photos in.
     let mut node = p.node("backup", 0);
     node.until("a backup a few photos in", |l| {
-        l["kind"] == "job.progress"
+        l["kind"] == "helios.job.progress"
             && l["payload"]["id"]
                 .as_str()
                 .is_some_and(|id| id.starts_with("backup-"))
@@ -462,7 +462,7 @@ fn stability_a_health_run_killed_leaves_nothing_running_and_the_next_start_runs_
     let mut node = p.node("health-loop", 0);
     for _ in 0..3 {
         node.until("a health run", |l| {
-            l["kind"] == "job.started"
+            l["kind"] == "helios.job.started"
                 && l["payload"]["id"]
                     .as_str()
                     .is_some_and(|id| id.starts_with("health-"))
@@ -599,7 +599,7 @@ fn node_process() {
     let heard = bus.subscribe();
     std::thread::spawn(move || {
         for e in heard {
-            if e.kind.starts_with("job.") || e.kind.starts_with("library.") {
+            if e.kind.starts_with("helios.job.") || e.kind.starts_with("helios.library.") {
                 say(&json!({ "kind": e.kind, "payload": e.payload }));
             }
         }
