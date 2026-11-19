@@ -1149,9 +1149,10 @@ fn a_vault_held_locked_does_not_delay_the_storage_pages_frames() {
         world.link.busy(),
         "the writes wait for the vault, not the frame"
     );
-    assert!(
-        slowest < Duration::from_secs(1),
-        "the frames waited {slowest:?} for the vault"
+    crate::wall_clock::within(
+        "the frames with the vault held",
+        slowest,
+        Duration::from_secs(1),
     );
     // Shown at once all the same.
     assert!(h.state().storage_strategy().is_some());

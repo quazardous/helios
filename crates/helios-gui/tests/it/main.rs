@@ -129,6 +129,7 @@ mod thumbnails;
 mod tips;
 mod values_changed;
 mod viewport;
+mod wall_clock;
 mod window_close;
 mod window_commands;
 mod window_keys;

@@ -402,12 +402,7 @@ fn within_budget(what: &str, mean: std::time::Duration) {
     if mean <= FRAME_BUDGET {
         return;
     }
-    let message = format!("{what}: {mean:?} a frame, over {FRAME_BUDGET:?}");
-    if std::env::var_os("HELIOS_SHARED_MACHINE").is_some_and(|v| !v.is_empty() && v != "0") {
-        eprintln!("warning (shared machine, budget not enforced): {message}");
-    } else {
-        panic!("{message}");
-    }
+    crate::wall_clock::within(&format!("{what}, a frame"), mean, FRAME_BUDGET);
 }
 
 /// The masks stress network (three masked modules, 58 nodes) as a
