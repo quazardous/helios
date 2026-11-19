@@ -16,7 +16,7 @@ does with it.
 
 | Where | What |
 |-------|------|
-| Locally | `cargo fmt`, `cargo check --tests`, `cargo xtask check`; never clippy (the box lints first in every test job) |
+| Locally | `cargo fmt`, `cargo check --tests`, `cargo xtask check`; never clippy (the box's `check` job lints, once per branch head) |
 | CI (GitHub Actions) | the full gate on every push to `next` and `main`, and on contributors' pull requests from forks: lint, tests, doctests, survival, check-commits. Our own pull requests run one cheap check, `pr-lint` (every linter, `cargo doc` without a warning, the generated files: see [next.md](next.md)), and none of the rest: the box tests them and `next`'s run decides |
 | The bench box | the same jobs on demand, on a pushed branch or on uncommitted code, plus timings on an otherwise idle machine and the tests on a real GPU |
 
@@ -27,7 +27,7 @@ Jobs of the Benchfile:
 | `build` | `cargo build --workspace --all-targets` | 8 cores, 6 GB |
 | `lint` | fast compile feedback: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask check`, then `cargo xtask i18n check` (its report in `out/i18n.txt`) | 8 cores, 6 GB |
 | `test` | `cargo nextest run --workspace --profile ci`, its JUnit report and a summary of the slowest tests in `out/` | 6 cores, 6 GB |
-| `test-crate` | a fix loop's run: `crate=` (required), `test=` (one test target, `test=lib` for the crate's unit tests) and `filter=` (a name filter, a test path such as `filter=undo::tests::redo`, or several names separated by spaces), stopped at the first failure, in the branch's target. helios-gui's integration tests are modules of one executable, `it`: `test=library_filter` runs the `library_filter` module alone, `filter=` then joined to its path (`test=it` for them all) | 4 cores, 4 GB |
+| `test-crate` | a fix loop's run: `crate=` (required), `test=` (test targets, `test=lib` for the crate's unit tests, several joined by `+`: `test=lib+albums`) and `filter=` (a name filter, a test path such as `filter=undo::tests::redo`, or several names separated by spaces), stopped at the first failure, in the branch's target. helios-gui's integration tests are modules of one executable, `it`: `test=library_filter` runs the `library_filter` module alone, `test=import+storage+lib` those two modules and the unit tests in one run, `filter=` then narrowing them by name (`test=it` for them all) | 3 cores, 3 GB |
 | `test-affected` | the tests a change touches since `base=` (`origin/main` by default), or the `crates=` given (as `--push` does), and the critical set: see "Running what a change touches"; the selection in `out/affected.json`, the JUnit report and the slowest tests in `out/` | 6 cores, 6 GB |
 | `survival` | `cargo survival`: quit, `kill -9` and reopen | 4 cores, 4 GB |
 | `stability` | `cargo stability`: the headless node (`helios-node --vault`) killed with `kill -9` in the middle of its own jobs (a backup copying, an import, a health run, a settings layer write), then started again on the same vault; and many clients on one node at once (`clients=`, 32 by default, for `seconds=`, 60 by default, `seed=`): each a real client over the node's socket, mixing reads, saves, stacks made and undone, imports and cancelled imports, disconnections, while subscribers follow the bus, then the vault checked against every acknowledged write; JUnit and a summary in `out/`, where each kill landed in the log, the stress report (calls per second, p50 and p99 latency, errors, the node's memory, threads and descriptors) in `out/many-clients.json`. Not run by CI, which is for compatibility breaks: run it on demand and before a release (the tests sit behind the `helios-node` feature `stability`, which no CI run enables) | 4 cores, 4 GB |
@@ -51,7 +51,7 @@ Jobs of the Benchfile:
 | `masks-shots` | `helios-gui` in release in a headless labwc (wbox) at 1920×1080, the raw corpus's first image, driven through the command palette in each theme (`themes=`): the empty mask, then two parametric members and two shapes, then the mask display on the selected shape (`M`, then grey from the palette); the screenshots and each step's answers in `out/` (`tools/bench/masks-shots.py`). `doc=yes` draws the two masks pictures of [gui.md](gui.md) instead, at 1280×800 in the default theme on a synthetic picture: `out/masks-wbox.png` and `out/mask-tree-wbox.png`, to copy into `docs/gui/` | 5 cores, 6 GB |
 | `scenarios` | Helios's scenarios (`crates/helios-gui/tests/scenarios/*.ron`) replayed live: `helios-gui` in release in a headless labwc (wbox), each scenario on a throwaway library with a folder of known photos, driven over its agent socket by the `scenarios` example (egui-pop's scenario runner), the invariants checked after every step; the shots, journals, failure reports and helios-gui's logs in `out/`, one line per scenario in `out/scenarios.jsonl`; `only=<name>[,<name>]` picks scenarios (`tools/bench/scenarios.py`) | 5 cores, 6 GB |
 | `journey` | the first-user journey (`tools/bench/journey/*.ron`, driven by `tools/bench/journey.py`): `helios-gui` in release in a headless labwc (wbox) on a fresh profile (its own HOME and XDG folders), the init wizard finished on its defaults, a fixture card (two RAW+JPEG pairs, a raw and a JPEG alone: CC0 raws of the `raw-corpus` volume and the plugin tests' JPEGs) imported through the import window, the Library's count (a pair is one photo), a click on the import session in the Library's Imports section (the grid scoped to its photos), the health check run and each fix it offers applied (the screen must not go black after one), Settings › Health check opened in its own window and closed by its title bar (the compositor and Helios must list the windows open before, none left behind, the screen not one flat colour), Settings › Storage (the library's disk online) and Backup › Strategy (its line), a quit that must exit 0, then a restart that still shows the photos, a RAW+JPEG pair opened in the darkroom (its render ends, the image region not one flat colour) and exported with the default settings (the file decodes, at the raw's size in the corpus manifest), and a last quit; after every step the scenario invariants and no error or panic line in helios-gui's stderr and logs. A failure names the step in `out/journey-failure.txt`, with its screen, each window's accessibility tree and the logs in `out/logs/`; one line per step in `out/journey.jsonl`. Before each quit, the session's listener timings go to `out/bus-timings-<step>.json` (`cargo xtask bus --timings <file>` prints the slowest listeners per point and the budgets breached; a budget only reports, it fails nothing). Run on every `next` and before a release | 5 cores, 6 GB |
-| `gui-snapshots` | helios-gui's snapshot tests (the import window's, or those of the `it` module `test=<module>` names, several joined by `+` as in `test=chrome_snapshots+import_snapshots`; `test=it` for all) with `UPDATE_SNAPSHOTS=1`, on lavapipe (`update=force` rewrites every snapshot, not only those past their threshold); every PNG of `crates/helios-gui/tests/snapshots` in `out/snapshots/`, to review and commit | 5 cores, 6 GB |
+| `gui-snapshots` | helios-gui's snapshot tests (the import window's, or those of the `it` module `test=<module>` names, several joined by `+` as in `test=chrome_snapshots+import_snapshots`; `test=it` for all) with `UPDATE_SNAPSHOTS=1`, on lavapipe (`update=force` rewrites every snapshot, not only those past their threshold), under nextest (one process per test, 5 at a time) with `HELIOS_SHARED_MACHINE=1`; every PNG of `crates/helios-gui/tests/snapshots` in `out/snapshots/`, to review and commit, the JUnit report in `out/` | 5 cores, 5 GB |
 | `snapshots-refresh` | the release step (see [releases.md](releases.md), "Snapshots before a release"): every snapshot suite of the workspace (`cargo xtask snapshots filter`) with `UPDATE_SNAPSHOTS=1` in a workspace build, then `cargo xtask snapshots report`: each image changed with its pixels and its likely cause, the pull requests merged since the last tag (`since=` another ref) that touched what draws it; `out/snapshots.md` and `.json`, the images with their `.old.png` and `.diff.png` under `out/snapshots/`. Red on an unexplained image | 5 cores, 6 GB |
 | `check-commits` | `cargo xtask check-commits <base>` (`base=`, `origin/main` by default): each commit but the head builds, passes clippy and the tests it touches; `full=yes` runs every fast test on each; the per-commit report in `out/check-commits.md` | 8 cores, 6 GB |
 | `gpu` | the GPU backend's tests on the box's NVIDIA GPU; the adapter used in `out/adapter.txt` | 4 cores, 4 GB, the GPU alone |
@@ -176,19 +176,26 @@ current branch while it has commits origin lacks). Before queueing it also
 checks, when the box runs this checkout's code, that Cargo.lock is up to
 date and that the changelog fragments are well formed (at most 600
 characters): a few seconds here instead of a failed job on the box.
-It also refuses a job missing a parameter its command needs. Before any job
-that builds, the box itself runs the short `check` job (`egui-pop-check` for
-egui-pop's jobs), declared as the job's `first` in the Benchfile and run
-once per commit: `cargo clippy --tests --keep-going` on the workspace,
+It also refuses a job missing a parameter its command needs. Before a build,
+GUI or release job, the box itself runs the short `check` job
+(`egui-pop-check` for egui-pop's jobs), declared as the job's `first` in the
+Benchfile and run once per commit: `cargo clippy --tests --keep-going` on the workspace,
 with no code generated and no link. The `first` passes no `crate=`, so
 every job on a branch head shares one check: the box runs one identical
 check for jobs queued together, and one that already passed on that commit
 (the branch's own `check branch=<branch>` included) ends at once. Lints are
 warnings rather than errors, so one pass shows every lint of every crate,
 dependents and tests included; any warning or compile error makes the
-check red. The job itself is queued only if that check passes:
-**a compile error never takes a test job's place** (owner, 2026-11-08). The
-check also warms the branch's target for the job that follows.
+check red. The job itself is queued only if that check passes. The check also warms
+the branch's target for the job that follows.
+
+Helios's test jobs (`test-crate`, `test`, `test-affected`, `survival`,
+`stability`, `soak`, `gui-snapshots`, `snapshots-refresh`) have no `first`
+since 2026-11-19: the chained check waited about 20 min at the
+median before each of them, and a test build type-checks anyway (a compile
+error fails the job in its first minutes). Lints still come from `check`:
+an agent runs it once per branch head (`cargo xtask bench-remote check`),
+and the gate runs it for each pull request.
 `first=none` on a run skips it; `HELIOS_BENCH_LOCAL_CHECK=1` also runs the
 same `cargo check` here first. `HELIOS_BENCH_NO_PREFLIGHT=1` queues it anyway; never for a
 compile error.
@@ -606,6 +613,22 @@ Every agent follows them.
   does the waiting, so the agents writing code never wait on the box.
 
 **Before queuing**
+- **One job for all the tests you need, never one per test.** Each job
+  pays its own place in the queue (5 min at the median, 17 at p90 on
+  2026-11-19) for a run of a minute or two. Join test targets or helios-gui
+  modules with `+` in `test=` and test names with `+` in `filter=`:
+
+  ```bash
+  cargo xtask bench-remote test-crate crate=helios-gui test=import+storage+import_close+lib
+  cargo xtask bench-remote test-crate crate=helios-gui test=accounts+storage \
+      filter=accounts::an_expired_session+storage::a_vault_held_locked
+  cargo xtask bench-remote check                                   # once per branch head: clippy, every lint
+  ```
+
+  A different crate is a second job. A branch's jobs take turns on its
+  target, so they run one after the other; jobs of different branches run
+  side by side: `test-crate` and `check` take 3 threads and 3 GB each, so
+  three fit in the box's 10 threads and 14 GB.
 - Run the narrowest job first. A Helios change is tested with `test-crate
   crate=<crate> test=<target> filter=<name>` on the crates and targets it
   touched, and nothing wider: no `test-affected` and no `--affected` in a

@@ -77,9 +77,12 @@ A pull request is merged only when its tests passed on the box and its
    - `cargo xtask manifest check <file>` (or the body on stdin) checks it.
 4. **Prove it on the box yourself** (owner, 2026-11-13: the author who
    wrote the change runs its narrowest tests; it beat batching every pull
-   request through one gate). First the branch's `check`:
+   request through one gate). The branch's `check`,
    `cargo xtask bench-remote check branch=<branch>` (clippy, every lint
-   at once). Then each manifest job with `branch=<branch>`. Wait in the
+   at once), and the manifest's jobs with `branch=<branch>`, in any
+   order: test jobs no longer wait on a check first, and the manifest's
+   tests of one crate go in one `test-crate` job (`test=a+b`, see
+   bench.md, "Rules for agents"). Wait in the
    foreground with `jbx wait <id>`: a subagent's turn stays alive. Fix
    what is red on the branch and run that job again.
 5. **Merge it yourself** when every job of the manifest is green on the
@@ -154,7 +157,7 @@ Every failed box job gets its reason at once:
 | Where | What | When |
 |---|---|---|
 | Local | fmt, check, typos | while coding |
-| Bench box, narrow | the manifests' jobs (clippy first) | the author, per pull request; a merger, per batch on a `gate/…` branch |
+| Bench box, narrow | the branch's `check` (clippy) and the manifests' jobs | the author, per pull request; a merger, per batch on a `gate/…` branch |
 | The pull request's `pr-lint` | the cheap checks, no test but the English catalogue's: every linter, `cargo doc` without a warning, the UI index, the catalogues, the changelog fragment | every push of our own pull request into `next` |
 | `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, the Windows build | every push of `next` |
 | `windows-tests` workflow | the workspace's tests on Windows | nightly on `next` (02:30 UTC), and on manual dispatch |
