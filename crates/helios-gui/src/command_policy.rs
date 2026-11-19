@@ -34,7 +34,7 @@ pub const BUS_OWNER: &str = "helios.policy";
 /// # Errors
 /// The bus refused it.
 pub fn listen(bus: &dyn Bus) -> Result<(), String> {
-    bus.unlisten(CommandRun::ID, POLICY);
+    bus.unlisten(&CommandRun::ID, POLICY);
     bus.listen::<CommandRun>(POLICY, ListenOpts::new().owner(BUS_OWNER), |ask, _| {
         check(ask).map_err(HookError::refuse)
     })

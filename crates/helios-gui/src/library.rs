@@ -3890,6 +3890,9 @@ impl Library {
                     }
                 }
                 Signal::Activate { key } => self.activated = Some(key),
+                // Only a `GridResize::FixedSize` grid signals a size; the
+                // library grid keeps egui-pop's default (`PerRow`).
+                Signal::ZoomSize { .. } => self.view.results_changed = true,
                 // A selection: the gallery's state holds it, cursor
                 // included, already.
                 Signal::Zoom { .. } => self.view.results_changed = true,

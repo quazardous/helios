@@ -15,6 +15,7 @@
 use std::sync::Weak;
 
 use egui_pop::api::app::AppHandle;
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
@@ -31,7 +32,7 @@ const HEARD_BY: &str = "helios.import.window";
 pub struct ImportNews;
 
 impl Point for ImportNews {
-    const ID: &'static str = NEWS;
+    const ID: PointId = PointId::new(NEWS);
     type Input = ();
     type Value = ();
     const KIND: PointKind = PointKind::Alter;

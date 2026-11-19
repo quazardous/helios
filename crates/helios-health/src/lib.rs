@@ -39,6 +39,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
+use bus_contract::PointId;
 use bus_contract::{Bus, ListenOpts, Point, PointDecl, PointKind, Refused};
 use helios_core::Message;
 use serde::{Deserialize, Serialize};
@@ -262,7 +263,7 @@ pub trait Check: Send + Sync {
 pub struct HealthReport;
 
 impl Point for HealthReport {
-    const ID: &'static str = "helios.health.report";
+    const ID: PointId = PointId::new("helios.health.report");
     type Input = Report;
     type Value = Option<Vec<Finding>>;
     const KIND: PointKind = PointKind::Collect;
@@ -402,7 +403,7 @@ impl Registry {
             self.checks.remove(at);
             self.owners.remove(at);
             self.bus
-                .unlisten(HealthReport::ID, &listener_of(check.id()));
+                .unlisten(&HealthReport::ID, &listener_of(check.id()));
         }
         self.listen(owner, check.clone());
         self.checks.push(check);
@@ -1041,7 +1042,7 @@ mod tests {
             .unwrap();
         r.add("fans", fake("fans.speed", Level::Ok, None)).unwrap();
         // The point lists each module's listener, in order, with its owner.
-        let listeners = r.bus().listeners(HealthReport::ID).unwrap();
+        let listeners = r.bus().listeners(&HealthReport::ID).unwrap();
         let who: Vec<(&str, Option<&str>)> = listeners
             .iter()
             .map(|l| (l.id.as_str(), l.owner.as_deref()))
@@ -1070,7 +1071,7 @@ mod tests {
         // The module goes: its listener and its findings with it.
         assert_eq!(r.remove_owner("disks"), 1);
         assert_eq!(ids(&r), ["fans.speed"]);
-        assert_eq!(r.bus().listeners(HealthReport::ID).unwrap().len(), 1);
+        assert_eq!(r.bus().listeners(&HealthReport::ID).unwrap().len(), 1);
         assert_eq!(r.owner("disks.space"), None);
         // A second registry on the same bus finds the point declared and
         // adds its own listeners beside the first's.
@@ -1078,7 +1079,7 @@ mod tests {
         other
             .add("disks", fake("disks.space", Level::Ok, None))
             .unwrap();
-        assert_eq!(r.bus().listeners(HealthReport::ID).unwrap().len(), 2);
+        assert_eq!(r.bus().listeners(&HealthReport::ID).unwrap().len(), 2);
         assert_eq!(ids(&other), ["disks.space"]);
         assert_eq!(ids(&r), ["fans.speed"]);
     }
@@ -1113,7 +1114,9 @@ mod tests {
         // Another listener of the point, not a check, that fails: dropped
         // and logged, the checks' answers stand.
         r.bus()
-            .listen::<HealthReport>("broken", ListenOpts::new(), |_, _| Err("on purpose".into()))
+            .listen::<HealthReport>("test.broken", ListenOpts::new(), |_, _| {
+                Err("on purpose".into())
+            })
             .unwrap();
         let found = r.run(&Context::default());
         assert_eq!(found.len(), 1);

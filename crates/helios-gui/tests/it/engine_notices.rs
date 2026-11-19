@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use egui::vec2;
-use egui_pop::api::bus::bus_contract::Journal;
+use egui_pop::api::bus::bus_contract_journal::Journal;
 use egui_pop::api::bus::egui_pop_hooks::Kernel;
 use helios_core::bus::JOURNAL;
 use helios_core::engine::{GpuLost, StepComputed};

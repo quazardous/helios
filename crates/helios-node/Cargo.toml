@@ -31,6 +31,7 @@ helios-template.workspace = true
 helios-journal.workspace = true
 blake3.workspace = true
 bus-contract.workspace = true
+bus-contract-crossing.workspace = true
 egui-pop-hooks.workspace = true
 helios-module-exposure = { path = "../../modules/exposure" }
 helios-module-rawprepare = { path = "../../modules/rawprepare" }

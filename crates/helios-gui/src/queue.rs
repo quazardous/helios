@@ -191,7 +191,7 @@ impl JobsQueue {
     fn follow(&mut self, app: &AppHandle) {
         for e in app.events_since(self.seen) {
             self.seen = e.seq;
-            if crate::host::kind_of(&e.name) != helios_core::jobs::STARTED {
+            if e.name != helios_core::jobs::STARTED {
                 continue;
             }
             if let (Some(id), Some(node)) = (e.data["id"].as_str(), e.data["node"].as_str()) {

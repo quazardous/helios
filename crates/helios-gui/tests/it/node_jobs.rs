@@ -485,7 +485,7 @@ fn a_node_s_relayable_facts_reach_the_desktop_s_listeners_and_a_restart_resyncs(
     let (heard_tx, heard) = channel();
     let heard_tx = Mutex::new(heard_tx);
     desktop
-        .listen::<FactPoint<LayerChanged>>("test", ListenOpts::new(), move |fact, ()| {
+        .listen::<FactPoint<LayerChanged>>("test.layer", ListenOpts::new(), move |fact, ()| {
             let n = fact.payload["n"].as_u64().unwrap_or(0);
             let _ = heard_tx.lock().unwrap().send((fact.source.clone(), n));
             Ok(())
@@ -559,7 +559,7 @@ fn a_relayed_fact_lands_once_and_a_restart_resyncs_once() {
     let (point_tx, by_point) = channel();
     let point_tx = Mutex::new(point_tx);
     desktop
-        .listen::<FactPoint<LayerChanged>>("test", ListenOpts::new(), move |fact, ()| {
+        .listen::<FactPoint<LayerChanged>>("test.layer", ListenOpts::new(), move |fact, ()| {
             let n = fact.payload["n"].as_u64().unwrap_or(0);
             let _ = point_tx.lock().unwrap().send(n);
             Ok(())
@@ -724,7 +724,7 @@ fn an_older_node_s_fact_lands_under_its_new_name_once() {
     let (point_tx, by_point) = channel();
     let point_tx = Mutex::new(point_tx);
     desktop
-        .listen::<FactPoint<LayerChanged>>("test", ListenOpts::new(), move |fact, ()| {
+        .listen::<FactPoint<LayerChanged>>("test.layer", ListenOpts::new(), move |fact, ()| {
             let n = fact.payload["n"].as_u64().unwrap_or(0);
             let _ = point_tx.lock().unwrap().send(n);
             Ok(())

@@ -636,17 +636,58 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "bus-contract"
-version = "0.3.3"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca7f10309d0163ba09e7b0649d2d2ea100f64823dcdb5a5ea97cde92a69ad36c"
+checksum = "ba445cf665b95f93e2c9d33e10556d9efad68b8719e286fe2b96e5f829ad7566"
+
+[[package]]
+name = "bus-contract-crossing"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e2fd12a6e93df12de5360efcd21187a664f6e6f3448098e652c69f0db8ebca4"
+dependencies = [
+ "bus-contract",
+ "bus-contract-journal",
+]
+
+[[package]]
+name = "bus-contract-defer"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c26252cd230e17ffcfa7d51bed9c2a58759d8daafd29156c832a50bc57975dd"
+dependencies = [
+ "bus-contract",
+]
+
+[[package]]
+name = "bus-contract-journal"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f622fa481c98f00b77a24a8f2b20d4f9054e6a85789d0e1ef85eedef77d10e87"
+dependencies = [
+ "bus-contract",
+]
+
+[[package]]
+name = "bus-contract-timings"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66a3f6b43a67c181bc725a0629db2d049fa7cff23e240e1c7b627efd6e33ab7d"
+dependencies = [
+ "bus-contract",
+]
 
 [[package]]
 name = "bus-kernel"
-version = "0.1.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9af623399b719ee0e6b59c86ee85103b36eaa39170dd8be464a24f7d37df9552"
+checksum = "668e9d5a127d4a412c13dd358d955895e0c687c2ecf494f357d6f26fad2f2cc5"
 dependencies = [
  "bus-contract",
+ "bus-contract-crossing",
+ "bus-contract-defer",
+ "bus-contract-journal",
+ "bus-contract-timings",
  "web-time",
 ]
 
@@ -1206,9 +1247,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7579a2c7da751941525dc5ff8952b77ad898e74d2b94a956e7dacf7bb7966fcd"
+checksum = "d6d3141a83b70ef742119500e837a935d6ef90d226090a751246f2bed72a4aac"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1226,9 +1267,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-agent"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e0972eef95ae0ed657c7cf379066794df29af5b7f7e321e9304a989aef3c55b"
+checksum = "6e43de2e3f7f720f2e5fb1bc0ebe6f5c6fec140d8c1a8e4f081312d490cfd2b4"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1245,11 +1286,15 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-api"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c7159617875f2e50af60a6359e3ef44f3c16b353ca64fd0b647b227236da2f6"
+checksum = "b49d579cebc3f2e90af0ead21797cfbfec8513284881efbcb053c4b5253ac42e"
 dependencies = [
  "bus-contract",
+ "bus-contract-crossing",
+ "bus-contract-defer",
+ "bus-contract-journal",
+ "bus-contract-timings",
  "eframe",
  "egui",
  "egui-pop-core",
@@ -1270,9 +1315,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-core"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a826813b89890f28c5462cb3c0536b5f128fc85966b9c86e082343d054028a7"
+checksum = "216cd192847456e0a06967c8cc9de37ce06f3a7734ff855ad9698baa2ef01ef3"
 dependencies = [
  "egui",
  "egui-pop-model",
@@ -1287,9 +1332,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-editors"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "885619e13eeb7a922d94b8209702af51ee5367fbd8282a28dbabfb159a021d93"
+checksum = "7d0118c9213684b64cdd8a1848444d734aa3634d0838d269b806ac1986eaa56b"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1314,18 +1359,18 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-hooks"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0cab8ed0eb5f6ac76f092a52e67d6ecc32424986f0823d1f6da0372c22a9615"
+checksum = "d85de0c9823c1b3fb601ac58a0b0d671b13b4f6f302d7bfd4b79c6ea0eddf10e"
 dependencies = [
  "bus-kernel",
 ]
 
 [[package]]
 name = "egui-pop-i18n"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3474e94479deeffe40156e4785ee16d97adeccee54178304f35c054cd02565f2"
+checksum = "6ad379bfaf5609c231919f304f2487e58d62fdbfbf55e610ff965f0afcdedff0"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1344,9 +1389,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-imaging"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e14b98acc75ebb1d73e099ddb84f2e4e350b138820d9f880a61d3bf47e05dbca"
+checksum = "381767c7e9d95a0434aa5522eccde6c91f74f60108faed70f26756a921c94993"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1357,9 +1402,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-model"
-version = "0.11.2"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99a529719fdf45903a31aebc4fbf188a26639d10adf2e1310a0cf097bdb26d36"
+checksum = "3d19ae6ee7c485454f145e67fe90988fc18bfbdb6a82e3e497aae8c1f9705ed5"
 dependencies = [
  "idna",
  "log",
@@ -1379,9 +1424,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-platform"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "026b39265cf68b4e9998bc3ff12338b6822466bf36b0c1bea1bd28b17b241194"
+checksum = "9f4955da58204e685ac99e36783aa41931623ea43177a4f1c99a1adf10098e8b"
 dependencies = [
  "ashpd",
  "async-io",
@@ -1402,9 +1447,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-test"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fddb4d2ce0eb7cd12c434ef34149136c74a63227907cefd42f52dece52ddda1"
+checksum = "b53a6aafc55002ec53760fa64aeb515e58ec9d499ab013a7a5bda99c223226c6"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1435,9 +1480,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-viewport"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c737f77c5ed51101c181c4b91b6b09b7d0859efab740385d8cb29c482460bfe"
+checksum = "d3ec52a6465888c0659f25b37c9117b311e74ef1558c342e82c3c653aa5d4f2a"
 dependencies = [
  "egui",
  "egui-pop-core",
@@ -1451,9 +1496,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-views"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20412c79e4880127f5029c87b631d7803d8be52be66dec9114ff83f71eeb05a9"
+checksum = "9132efa533ff249656f6ab7e5e744e68c8b922db8d2fe9181d0331b3f35bbbf3"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1558,7 +1603,7 @@ dependencies = [
 [[package]]
 name = "egui_hud"
 version = "0.10.0"
-source = "git+https://github.com/quazardous/egui_hud?rev=c1c3b00349919adf02622265022c2cc2222ee377#c1c3b00349919adf02622265022c2cc2222ee377"
+source = "git+https://github.com/quazardous/egui_hud?rev=d9cbed55ede4d7e6476f0cb5aa69f5ac7f900027#d9cbed55ede4d7e6476f0cb5aa69f5ac7f900027"
 dependencies = [
  "egui-pop",
  "egui-pop-fit",
@@ -1602,9 +1647,9 @@ dependencies = [
 
 [[package]]
 name = "egui_stack"
-version = "0.29.1"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d077c0bea43c021222e5b6a65b4ad61e3f3763a13909c331ff13e65625cedbff"
+checksum = "e4c81cb8ce1d9c24d3dfff80bce1ada4cff75b29ccde5e9aaf25c8a75f362944"
 dependencies = [
  "bus-contract",
  "duplicate",
@@ -2454,6 +2499,8 @@ version = "0.92.0"
 dependencies = [
  "blake3",
  "bus-contract",
+ "bus-contract-crossing",
+ "bus-contract-journal",
  "bus-kernel",
  "egui-pop-hooks",
  "helios-cache",
@@ -2661,6 +2708,7 @@ name = "helios-inspect"
 version = "0.92.0"
 dependencies = [
  "bus-contract",
+ "bus-contract-crossing",
  "helios-core",
  "serde",
  "serde_json",
@@ -2862,6 +2910,7 @@ version = "0.92.0"
 dependencies = [
  "blake3",
  "bus-contract",
+ "bus-contract-crossing",
  "egui-pop-hooks",
  "egui-pop-model",
  "helios-ai",

@@ -17,6 +17,7 @@
 //! ([`listen_local`]), bound to the interface's thread, where the command
 //! runs.
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
@@ -64,7 +65,7 @@ pub struct Started {
 pub struct ExportStart;
 
 impl Point for ExportStart {
-    const ID: &'static str = START;
+    const ID: PointId = PointId::new(START);
     type Input = Asked;
     type Value = Started;
     const KIND: PointKind = PointKind::Request;

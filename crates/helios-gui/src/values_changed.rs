@@ -44,9 +44,11 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::app::AppHandle;
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
+use egui_pop::api::bus::bus_contract_defer::BusDefer as _;
 use helios_shell::commands::Origin;
 use serde_json::json;
 
@@ -109,7 +111,7 @@ pub struct Change {
 pub struct ValuesChanged;
 
 impl Point for ValuesChanged {
-    const ID: &'static str = CHANGED;
+    const ID: PointId = PointId::new(CHANGED);
     type Input = Change;
     type Value = ();
     const KIND: PointKind = PointKind::Request;
@@ -383,7 +385,7 @@ pub fn listen_queue(bus: &Arc<dyn Bus>, surface: u64, selection: &'static str, d
     if let Err(e) = listened {
         log::error!(target: "helios", "{CHANGED}: {e}");
     }
-    bus.unlisten(JobEvents::ID, QUEUE_JOBS);
+    bus.unlisten(&JobEvents::ID, QUEUE_JOBS);
     let noted = due.clone();
     let listened = bus.listen_local::<JobEvents>(
         QUEUE_JOBS,

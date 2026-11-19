@@ -39,6 +39,7 @@
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use egui_pop::api::bus::{JobEventKind, JobPublisher};
 use egui_pop::api::history::History;
 use egui_pop::api::host::{self, Dispatch, Event, Groups as _, Host, Reply, Resolver, Seq, Waker};
 use egui_pop::core::binding::SharedStore;
@@ -129,26 +130,44 @@ const GUI: &str = "helios.gui.";
 const JOB: &str = "helios.job.";
 
 /// The name egui-pop's journal gives the fact kind `kind`: egui-pop's
-/// own events (`helios.gui.*`) and Helios's jobs, whose names are
-/// egui-pop's job protocol (`job.started`, read by its jobs centre),
-/// without their prefix; any other kind as it is.
+/// own events (`helios.gui.*`) without their prefix, any other kind as
+/// it is (a job's `helios.job.started` included: egui-pop's jobs centre
+/// follows the typed events Helios publishes on `pop.job.event`, see
+/// [`job_event_kind`], never journal names).
 pub fn journal_name(kind: &str) -> &str {
-    kind.strip_prefix(GUI)
-        .or_else(|| {
-            kind.starts_with(JOB)
-                .then(|| kind.strip_prefix("helios."))
-                .flatten()
-        })
-        .unwrap_or(kind)
+    kind.strip_prefix(GUI).unwrap_or(kind)
 }
 
-/// The fact kind behind a name of egui-pop's journal
-/// ([`journal_name`]): a job's (`job.started` is `helios.job.started`),
-/// else the name itself.
-pub fn kind_of(name: &str) -> std::borrow::Cow<'_, str> {
-    match name.strip_prefix("job.") {
-        Some(rest) => std::borrow::Cow::Owned(format!("{JOB}{rest}")),
-        None => std::borrow::Cow::Borrowed(name),
+/// The egui-pop job event a Helios job fact is (`helios.job.started` is
+/// [`JobEventKind::Started`]); `None` for any other kind.
+pub fn job_event_kind(kind: &str) -> Option<JobEventKind> {
+    let moment = kind.strip_prefix(JOB)?;
+    JobEventKind::ALL
+        .into_iter()
+        .find(|k| k.name().strip_prefix("job.") == Some(moment))
+}
+
+/// Where the job facts the bus carries go: egui-pop's publisher once the
+/// application hands it over, the facts seen before kept until then.
+#[derive(Default)]
+struct JobRoute {
+    publisher: Option<JobPublisher>,
+    waiting: Vec<(String, JobEventKind, Json)>,
+}
+
+impl JobRoute {
+    fn say(&mut self, source: &str, kind: JobEventKind, data: Json) {
+        match &self.publisher {
+            Some(p) => p.publish(source, kind, data),
+            None => self.waiting.push((source.to_string(), kind, data)),
+        }
+    }
+
+    fn set(&mut self, publisher: JobPublisher) {
+        for (source, kind, data) in self.waiting.drain(..) {
+            publisher.publish(&source, kind, data);
+        }
+        self.publisher = Some(publisher);
     }
 }
 
@@ -199,6 +218,8 @@ pub struct HeliosHost {
     later: Later,
     store: SharedStore,
     waker: Arc<Mutex<Waker>>,
+    /// Where the bus's job facts go, for egui-pop's jobs centre.
+    jobs: Arc<Mutex<JobRoute>>,
     /// Helios's values, whose steps undo and redo walk.
     values: Option<Arc<Mutex<helios_values::Store>>>,
     /// The history egui-pop reaches: the steps of `values`.
@@ -211,18 +232,28 @@ impl HeliosHost {
     /// starts the thread that wakes the window on the bus's events.
     pub fn new(registry: Arc<Mutex<Registry>>, bus: Arc<Bus>, store: SharedStore) -> Self {
         let waker: Arc<Mutex<Waker>> = Arc::default();
+        let jobs: Arc<Mutex<JobRoute>> = Arc::default();
         let events = bus.subscribe();
         let wake = waker.clone();
+        let route = jobs.clone();
         std::thread::Builder::new()
             .name("helios-gui-waker".into())
             .spawn(move || {
                 // Ends when the bus is gone. The GUI's own events are
                 // published on its thread, which is awake already. A burst
-                // (a node's progress, relayed) asks for one frame.
+                // (a node's progress, relayed) asks for one frame. A job's
+                // fact (this process's or a node's, relayed) is also said
+                // to egui-pop's jobs centre, typed, in bus order.
                 while let Ok(first) = events.recv() {
-                    let mut from_elsewhere = !first.kind.starts_with(GUI);
-                    for e in events.try_iter() {
+                    let mut from_elsewhere = false;
+                    for e in std::iter::once(first).chain(events.try_iter()) {
                         from_elsewhere |= !e.kind.starts_with(GUI);
+                        if let Some(kind) = job_event_kind(e.kind) {
+                            route
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .say(&e.source, kind, e.payload);
+                        }
                     }
                     if from_elsewhere {
                         let w = wake.lock().unwrap_or_else(PoisonError::into_inner).clone();
@@ -237,6 +268,7 @@ impl HeliosHost {
             later: Later::default(),
             store,
             waker,
+            jobs,
             values: None,
             history: None,
             workspace: Workspace::default(),
@@ -395,6 +427,13 @@ impl Host for HeliosHost {
 
     fn set_waker(&mut self, waker: Waker) {
         *self.waker.lock().unwrap_or_else(PoisonError::into_inner) = waker;
+    }
+
+    fn set_job_publisher(&mut self, publisher: JobPublisher) {
+        self.jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set(publisher);
     }
 
     fn layout_document(&self) -> Option<String> {
@@ -585,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn a_job_s_facts_are_egui_pop_s_job_events_in_its_journal() {
+    fn a_job_s_facts_are_typed_job_events_for_egui_pop_s_jobs_centre() {
         let (app, bus, _) = app();
         bus.publish_value(
             "jobs",
@@ -593,11 +632,32 @@ mod tests {
             helios_core::jobs::STARTED,
             json!({ "id": "export-1" }),
         );
+        // The bus fact keeps its name in the journal egui-pop reads.
         let e = app.handle().events_since(0);
-        assert_eq!(e[0].name, "job.started");
-        assert_eq!(kind_of(&e[0].name), helios_core::jobs::STARTED);
+        assert_eq!(e[0].name, helios_core::jobs::STARTED);
+        assert_eq!(
+            job_event_kind(helios_core::jobs::STARTED),
+            Some(JobEventKind::Started)
+        );
+        assert_eq!(
+            job_event_kind(helios_core::jobs::ITEM_FAILED),
+            Some(JobEventKind::ItemFailed)
+        );
+        assert_eq!(job_event_kind("helios.node.link"), None);
+        assert_eq!(job_event_kind("job.started"), None);
         assert_eq!(journal_name("helios.node.link"), "helios.node.link");
-        assert_eq!(kind_of("helios.node.link"), "helios.node.link");
+        assert_eq!(journal_name("helios.gui.command.done"), "command.done");
+    }
+
+    #[test]
+    fn job_facts_seen_before_the_publisher_wait_for_it_in_order() {
+        let mut route = JobRoute::default();
+        route.say("jobs", JobEventKind::Started, json!({ "id": "a" }));
+        route.say("jobs", JobEventKind::Finished, json!({ "id": "a" }));
+        assert_eq!(route.waiting.len(), 2);
+        route.set(JobPublisher::default());
+        assert!(route.waiting.is_empty());
+        assert!(route.publisher.is_some());
     }
 
     #[test]

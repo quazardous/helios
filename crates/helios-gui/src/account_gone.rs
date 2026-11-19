@@ -33,6 +33,7 @@
 
 use std::rc::Rc;
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
 };
@@ -100,7 +101,7 @@ pub struct Reactions {
 pub struct SignedOut;
 
 impl Point for SignedOut {
-    const ID: &'static str = SIGNED_OUT;
+    const ID: PointId = PointId::new(SIGNED_OUT);
     type Input = Gone;
     type Value = Reactions;
 }
@@ -109,7 +110,7 @@ impl Point for SignedOut {
 pub struct Removed;
 
 impl Point for Removed {
-    const ID: &'static str = REMOVED;
+    const ID: PointId = PointId::new(REMOVED);
     type Input = Gone;
     type Value = Reactions;
 }

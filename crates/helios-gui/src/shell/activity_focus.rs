@@ -544,7 +544,7 @@ impl Jobs {
     fn hear_consoles(&mut self, app: &egui_pop::api::AppHandle) {
         for e in app.events_since(self.console_seen) {
             self.console_seen = e.seq;
-            if crate::host::kind_of(&e.name) != helios_core::jobs::LOG {
+            if e.name != helios_core::jobs::LOG {
                 continue;
             }
             let (Some(id), Some(line)) = (e.data["id"].as_str(), e.data["text"].as_str()) else {

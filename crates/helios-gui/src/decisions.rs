@@ -27,6 +27,8 @@
 use std::collections::BTreeMap;
 
 use egui::Ui;
+use egui_pop::api::bus::bus_contract::PointId;
+use egui_pop::api::bus::bus_contract_defer::BusDefer as _;
 use egui_pop::core::input::Input;
 use egui_pop::core::slider::Slider;
 use egui_pop::core::tooltip::TooltipExt as _;
@@ -60,7 +62,7 @@ pub const BUS_OWNER: &str = "helios.decisions";
 pub struct AnswerDecision;
 
 impl egui_pop::api::bus::bus_contract::Point for AnswerDecision {
-    const ID: &'static str = ANSWER;
+    const ID: PointId = PointId::new(ANSWER);
     type Input = Request;
     type Value = ();
     const KIND: egui_pop::api::bus::bus_contract::PointKind =

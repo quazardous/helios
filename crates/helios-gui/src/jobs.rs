@@ -109,7 +109,7 @@ impl Ended {
         let mut ends = Vec::new();
         for e in app.events_since(self.seen) {
             self.seen = e.seq;
-            if let Some(end) = self.hear(&crate::host::kind_of(&e.name), &e.data) {
+            if let Some(end) = self.hear(&e.name, &e.data) {
                 ends.push(end);
             }
         }

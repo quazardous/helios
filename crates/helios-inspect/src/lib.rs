@@ -42,7 +42,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use bus_contract::{Cursor, Lost, Relay};
+use bus_contract_crossing::{Cursor, Lost, Relay};
 use helios_core::{Bus, Describe, Envelope, Scheduler};
 
 pub mod batch;

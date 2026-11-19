@@ -17,7 +17,9 @@
 //! The asker gets nothing back: what the write did is said by the
 //! library's events (`library.changed`) and the history's steps.
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{self, Bus, Point, PointDecl, PointKind, Refused};
+use egui_pop::api::bus::bus_contract_defer::BusDefer as _;
 
 use crate::library::{
     AlbumEdit, Batch, KeywordAsk, MetaEdit, PairAsk, StackAsk, Template, TrashAsk, Turn, VersionAsk,
@@ -59,7 +61,7 @@ pub enum WriteAsk {
 pub struct LibraryWrite;
 
 impl Point for LibraryWrite {
-    const ID: &'static str = WRITE;
+    const ID: PointId = PointId::new(WRITE);
     type Input = WriteAsk;
     type Value = ();
     const KIND: PointKind = PointKind::Request;

@@ -52,6 +52,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, PointKind, Refused,
 };
@@ -452,7 +453,7 @@ pub struct WindowScreen;
 
 impl Point for WindowScreen {
     const KIND: PointKind = PointKind::Event;
-    const ID: &'static str = "helios.display.window_screen";
+    const ID: PointId = PointId::new("helios.display.window_screen");
     type Input = OnScreen;
     type Value = ();
 }

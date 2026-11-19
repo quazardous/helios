@@ -34,6 +34,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
 };
@@ -178,7 +179,7 @@ pub struct Reactions {
 pub struct Applied;
 
 impl Point for Applied {
-    const ID: &'static str = APPLIED;
+    const ID: PointId = PointId::new(APPLIED);
     type Input = Workspace;
     type Value = Reactions;
 }
@@ -258,7 +259,7 @@ pub const LAYOUT_COPY: &str = "helios.layout-copy";
 /// The bus refused it.
 pub fn listen_layout_copy(bus: &dyn Bus, run: impl Fn() + 'static) -> Result<(), String> {
     use egui_pop::api::bus::{LAYOUT_SAVE, LayoutChanged};
-    bus.unlisten(LayoutChanged::ID, LAYOUT_COPY);
+    bus.unlisten(&LayoutChanged::ID, LAYOUT_COPY);
     bus.listen_local::<LayoutChanged>(
         LAYOUT_COPY,
         ListenOpts::new()
@@ -275,7 +276,7 @@ pub fn listen_layout_copy(bus: &dyn Bus, run: impl Fn() + 'static) -> Result<(),
 /// The order `layout.changed`'s listeners run in on `bus`: egui-pop's
 /// save, then the workspace's copy.
 pub fn layout_order(bus: &dyn Bus) -> String {
-    bus_contract::order_dump(bus, &[egui_pop::api::bus::LayoutChanged::ID])
+    bus_contract::order_dump(bus, &[&egui_pop::api::bus::LayoutChanged::ID])
 }
 
 /// Passes `workspace` through the point on `bus`: what the listeners

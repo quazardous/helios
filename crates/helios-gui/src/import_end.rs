@@ -31,6 +31,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
+use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
 };
@@ -101,7 +102,7 @@ pub const FAILED_ORDER: &[(&str, Option<&str>)] = &[
 pub struct ImportEnded;
 
 impl Point for ImportEnded {
-    const ID: &'static str = ENDED;
+    const ID: PointId = PointId::new(ENDED);
     type Input = ImportEnd;
     type Value = Reactions;
 }
@@ -110,7 +111,7 @@ impl Point for ImportEnded {
 pub struct ImportFailed;
 
 impl Point for ImportFailed {
-    const ID: &'static str = FAILED;
+    const ID: PointId = PointId::new(FAILED);
     type Input = ImportEnd;
     type Value = Reactions;
 }

@@ -75,7 +75,7 @@ pub fn listen_caches(
     engine: Arc<Engine>,
     states: helios_node_core::image_states::ImageStates,
 ) {
-    bus.unlisten(SettingsChanged::ID, CACHES_BUDGET);
+    bus.unlisten(&SettingsChanged::ID, CACHES_BUDGET);
     let listened = bus.listen::<SettingsChanged>(CACHES_BUDGET, opts(), move |change, ()| {
         if is(change, &[crate::caches::STATES_BUDGET]) {
             let Some(app) = asking() else { return Ok(()) };
@@ -109,7 +109,7 @@ pub fn listen_thumbs(
     library: Rc<RefCell<crate::library::Library>>,
     cache: ThumbCacheSlot,
 ) {
-    bus.unlisten(SettingsChanged::ID, THUMBS_BUDGET);
+    bus.unlisten(&SettingsChanged::ID, THUMBS_BUDGET);
     let listened = bus.listen_local::<SettingsChanged>(THUMBS_BUDGET, opts(), move |change, ()| {
         let Some(app) = asking() else { return Ok(()) };
         if change.id() == crate::thumbnails::CACHE_LIMIT {
@@ -142,7 +142,7 @@ pub fn listen_plugins(
     store: crate::config::plugins::PluginSettingsStore,
     told: PluginsTold,
 ) {
-    bus.unlisten(SettingsChanged::ID, PLUGINS_VALUES);
+    bus.unlisten(&SettingsChanged::ID, PLUGINS_VALUES);
     let listened = bus.listen::<SettingsChanged>(PLUGINS_VALUES, opts(), move |change, ()| {
         let Some(plugin) = store.plugin_of(change.id()) else {
             return Ok(());

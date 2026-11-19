@@ -23,7 +23,7 @@
 //! - **The relay.** A cursor's run is this journal's, one per process: a
 //!   node restarted answers an old cursor with [`Lost::Restarted`], an
 //!   evicted range with [`Lost::Gap`]. Facts taken in from another
-//!   process ([`Relay::ingest`]) are republished here with their source
+//!   process ([`RelayHost::ingest`]) are republished here with their source
 //!   and never served again.
 //!
 //! A kind's point, its codec and its name are made in one place,
@@ -38,11 +38,15 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use bus_contract::PointId;
 use bus_contract::{
-    AnyInput, AnyValue, Cursor, FreshFn, IngestError, Journal, JournalEntry, Lost, Point,
-    PointDecl, PointKey, PointKind, PointSpec, Refused, Relay, Relayed, RelayedEntry, Resumed,
-    Since, kind_matches,
+    AnyInput, AnyValue, FreshFn, Point, PointDecl, PointKey, PointKind, PointSpec, Refused,
 };
+use bus_contract_crossing::{Cursor, IngestError, Lost, Relayed, RelayedEntry, Resumed, codec};
+use bus_contract_journal::{
+    BusJournal as _, Journal, JournalEntry, Origin, Since, is_journaled, kind_matches,
+};
+use bus_kernel::RelayHost;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -89,7 +93,7 @@ impl Fact {
 pub struct FactPoint<E>(PhantomData<fn() -> E>);
 
 impl<E: Event + 'static> Point for FactPoint<E> {
-    const ID: &'static str = E::KIND;
+    const ID: PointId = PointId::new(E::KIND);
     type Input = Fact;
     type Value = ();
     const KIND: PointKind = PointKind::Event;
@@ -215,8 +219,9 @@ struct Shared {
     /// back typed. Held across the publish, so the pump never reads a
     /// fact before its input is kept.
     inputs: Mutex<BTreeMap<u64, AnyInput>>,
-    /// The facts taken in from another process: never served again.
-    ingested: Mutex<BTreeSet<u64>>,
+    /// The facts taken in from another process, with where each came
+    /// from: never served again.
+    ingested: Mutex<BTreeMap<u64, Origin>>,
     /// The last fact the pump handed on, and its wake.
     delivered: Mutex<u64>,
     progress: Condvar,
@@ -341,9 +346,11 @@ impl BusJournal {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         for d in &decls {
-            let ours = !refused.iter().any(|r| refused_point(r) == Some(d.id));
+            let ours = !refused
+                .iter()
+                .any(|r| refused_point(r) == Some(d.id.as_str()));
             if ours {
-                facts.insert(d.id);
+                facts.insert(d.id.as_str());
             }
         }
         refused
@@ -352,12 +359,10 @@ impl BusJournal {
             .collect()
     }
 
-    fn entry(&self, e: &Envelope, ingested: &BTreeSet<u64>) -> JournalEntry {
+    fn entry(&self, e: &Envelope, ingested: &BTreeMap<u64, Origin>) -> JournalEntry {
         let mut entry = JournalEntry::new(e.seq, e.kind);
         entry.cause = e.cause;
-        if ingested.contains(&e.seq) {
-            entry.source = Some(e.source.clone());
-        }
+        entry.origin = ingested.get(&e.seq).cloned();
         entry.input = self.shared.input_of(e);
         entry.text = Some(e.payload.to_string());
         entry
@@ -368,9 +373,8 @@ fn refused_point(r: &Refused) -> Option<&'static str> {
     match r {
         Refused::AlreadyDeclared { point }
         | Refused::Unsupported { point, .. }
-        | Refused::NotEvent { point }
-        | Refused::TypeMismatch { point }
-        | Refused::NotJournaled { point } => Some(point),
+        | Refused::Contract { point, .. }
+        | Refused::TypeMismatch { point } => Some(point),
         _ => None,
     }
 }
@@ -397,7 +401,7 @@ impl Shared {
             return Some(input.clone());
         }
         let (_, spec) = (self.declaration)(e.kind)?;
-        (spec.relay?.decode)(&e.payload.to_string()).ok()
+        (codec(&spec.facets)?.decode)(&e.payload.to_string()).ok()
     }
 
     /// Hands `e` to its point's listeners, when it is a journaled point
@@ -406,7 +410,7 @@ impl Shared {
         let Some((key, spec)) = (self.declaration)(e.kind) else {
             return;
         };
-        if !spec.journaled {
+        if !is_journaled(&spec.facets) {
             return;
         }
         let input = self.input_of(e);
@@ -531,7 +535,7 @@ impl Journal for BusJournal {
             // Another point's input, written as JSON by its codec when it
             // has one; the pump hands the input itself on.
             let text = (shared.declaration)(point.id)
-                .and_then(|(_, spec)| spec.relay)
+                .and_then(|(_, spec)| codec(&spec.facets))
                 .and_then(|codec| (codec.encode)(&*input));
             let payload = text
                 .and_then(|t| serde_json::from_str(&t).ok())
@@ -572,7 +576,10 @@ impl Journal for BusJournal {
     }
 }
 
-impl Relay for BusJournal {
+/// The host half of the kernel's relay (`Kernel::with_relay`): the kernel
+/// checks authorities and versions and answers asks; this journal serves
+/// its entries from a cursor and records those taken in.
+impl RelayHost for BusJournal {
     fn cursor(&self) -> Cursor {
         Cursor {
             run: self.run,
@@ -603,13 +610,15 @@ impl Relay for BusJournal {
                 next = e.seq - 1;
                 break;
             }
-            if ingested.contains(&e.seq) {
+            if ingested.contains_key(&e.seq) {
                 continue;
             }
             let Some((_, spec)) = (self.shared.declaration)(e.kind) else {
                 continue;
             };
-            let Some(codec) = spec.relay else { continue };
+            let Some(codec) = codec(&spec.facets) else {
+                continue;
+            };
             let Some(input) = self.shared.input_of(e) else {
                 continue;
             };
@@ -631,8 +640,9 @@ impl Relay for BusJournal {
         out
     }
 
-    fn ingest(&self, source: &str, entry: RelayedEntry) -> Result<u64, IngestError> {
+    fn ingest(&self, origin: &Origin, entry: RelayedEntry) -> Result<u64, IngestError> {
         let shared = &self.shared;
+        let source = origin.process.as_str();
         let declared = (shared.declaration)(&entry.kind);
         let (kind, payload) = match declared {
             None => (
@@ -640,7 +650,7 @@ impl Relay for BusJournal {
                 serde_json::from_str(&entry.text).unwrap_or(Value::String(entry.text)),
             ),
             Some((key, spec)) => {
-                let Some(codec) = spec.relay else {
+                let Some(codec) = codec(&spec.facets) else {
                     return Err(IngestError::NotRelayable { kind: entry.kind });
                 };
                 let input = (codec.decode)(&entry.text).map_err(|reason| IngestError::Decode {
@@ -661,11 +671,11 @@ impl Relay for BusJournal {
         let seq = shared
             .bus
             .republish_value(source, entry.cause, kind, payload);
-        ingested.insert(seq);
+        ingested.insert(seq, origin.clone());
         // Forget what the bus no longer keeps (`missed(0)`: every
         // number before its oldest).
         let first_kept = shared.bus.missed(0) + 1;
-        ingested.retain(|n| *n >= first_kept);
+        ingested.retain(|n, _| *n >= first_kept);
         Ok(seq)
     }
 }
