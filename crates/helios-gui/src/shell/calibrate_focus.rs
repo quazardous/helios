@@ -835,6 +835,12 @@ impl Shell {
     /// as `ask` at a coming frame (at once when it answered at once).
     fn send(&mut self, id: &str, args: Value, ask: Ask) {
         let (landing, answer) = std::sync::mpsc::channel();
+        // Its landing is said on the bus: the window's listener wakes it
+        // (`super::window_news`).
+        let bus = std::sync::Arc::downgrade(&self.core.app.handle().bus());
+        let landing = crate::calibrate::Landing::new(landing, move || {
+            super::window_news::say::<super::window_news::CalibrateNews>(&bus);
+        });
         let (result, taken) =
             crate::calibrate::with_landing(landing, || CommandId(id).run(self, args));
         if taken && result.is_ok() {
@@ -849,7 +855,7 @@ impl Shell {
     }
 
     /// The answers landed since the last frame, read.
-    fn calibration_landings(&mut self, ctx: &Egui) {
+    fn calibration_landings(&mut self) {
         let mut landed = Vec::new();
         self.calibration.state.borrow_mut().in_flight.retain(|f| {
             match f.answer.try_recv() {
@@ -865,13 +871,12 @@ impl Shell {
         if landed.is_empty() {
             return;
         }
+        // The focus's own window shows what landed: its listener of
+        // `helios.calibrate.window.news`, said as each landed, woke it
+        // (`super::window_news`).
         for (ask, result) in landed {
             self.landed(ask, result);
         }
-        // The focus's own window shows what landed: egui-pop wakes it, or
-        // the main window where it is drawn.
-        self.core.app.handle().wake_window(&WindowId::new(WINDOW));
-        ctx.request_repaint();
     }
 
     /// What an ask's answer changes in the focus.
@@ -965,7 +970,7 @@ impl Shell {
         for event in events {
             self.calibration_event(event);
         }
-        self.calibration_landings(ctx);
+        self.calibration_landings();
         let app = self.core.app.handle().clone();
         FRAME.follow(&app, ctx, &self.calibration.state);
     }

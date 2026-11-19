@@ -122,8 +122,39 @@ impl Drop for OffFrame {
 }
 
 /// Where the answer of a command run off the frame lands
-/// (`shell::calibrate_focus`).
-pub type Landing = std::sync::mpsc::Sender<Result<Value, String>>;
+/// (`shell::calibrate_focus`), and what says it landed.
+pub struct Landing {
+    answer: std::sync::mpsc::Sender<Result<Value, String>>,
+    landed: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl Landing {
+    /// Answers sent to `answer`; `landed` runs once one is sent, or the
+    /// landing dropped without one, on the thread that had it (the
+    /// calibration window says it on the bus).
+    pub fn new(
+        answer: std::sync::mpsc::Sender<Result<Value, String>>,
+        landed: impl FnOnce() + Send + 'static,
+    ) -> Self {
+        Self {
+            answer,
+            landed: Some(Box::new(landed)),
+        }
+    }
+
+    /// Sends `result`; dropped, the landing says it landed.
+    fn land(self, result: Result<Value, String>) {
+        let _ = self.answer.send(result);
+    }
+}
+
+impl Drop for Landing {
+    fn drop(&mut self) {
+        if let Some(landed) = self.landed.take() {
+            landed();
+        }
+    }
+}
 
 thread_local! {
     /// Where the command dispatched now on this thread sends its answer.
@@ -390,7 +421,7 @@ pub fn register(
                     match take_landing() {
                         Some(landing) => {
                             off.spawn(move || {
-                                let _ = landing.send(run());
+                                landing.land(run());
                             })?;
                             Ok(serde_json::json!({ "pending": true }))
                         }
