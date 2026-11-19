@@ -97,6 +97,9 @@ pub struct NodeEvents {
     relayed: Arc<Mutex<BTreeSet<&'static str>>>,
     /// Wakes the window once a listener has something to read.
     wake: Arc<Mutex<Option<Wake>>>,
+    /// The fact bus's number of the desktop's own node's last fact
+    /// recorded on the shell bus ([`NodeEvents::record_local`]).
+    recorded: Arc<Mutex<u64>>,
 }
 
 impl NodeEvents {
@@ -107,6 +110,7 @@ impl NodeEvents {
             listening: Arc::default(),
             relayed: Arc::default(),
             wake: Arc::default(),
+            recorded: Arc::default(),
         }
     }
 
@@ -314,11 +318,36 @@ impl NodeEvents {
         }
     }
 
+    /// Records a fact of the desktop's own node on the shell bus, once
+    /// however many listeners hear it, as a remote node's event stream
+    /// records its: agents `wait` on the shell bus's journal, and see the
+    /// node's facts there until it is the application bus's journal.
+    fn record_local(&self, fact: &Fact) {
+        {
+            let mut last = self.recorded.lock().unwrap_or_else(PoisonError::into_inner);
+            if fact.seq <= *last {
+                return;
+            }
+            *last = fact.seq;
+        }
+        let event = NodeEvent::of_fact(LOCAL, fact);
+        let Ok(envelope) = serde_json::to_value(&event.event) else {
+            return;
+        };
+        self.bus.republish_value(
+            &format!("{SOURCE}{LOCAL}"),
+            None,
+            event.event.kind,
+            json!({ "node": LOCAL, "event": envelope }),
+        );
+    }
+
     /// Hears the facts the desktop's own node publishes in process, as
     /// listener `id` (owned by `owner`) of `app`'s journaled fact points
     /// (those of `tables`) whose kind matches one of `patterns`: each is
     /// handed to `heard` as node [`LOCAL`]'s event, on the thread that
-    /// runs the point's pass, then the window is woken. A fact a node's
+    /// runs the point's pass, then the window is woken; it is recorded
+    /// on the shell bus once ([`NodeEvents::record_local`]). A fact a node's
     /// relay took in (source `relayed:<name>`) is left to
     /// [`NodeEvents::attach`]'s listener, so each fact comes once. What
     /// the bus refused, as text.
@@ -344,6 +373,7 @@ impl NodeEvents {
                 if let Some(fact) = input.downcast_ref::<Fact>()
                     && !fact.source.starts_with(crate::relay::RELAYED)
                 {
+                    me.record_local(fact);
                     heard(NodeEvent::of_fact(LOCAL, fact));
                     me.wake_window();
                 }
