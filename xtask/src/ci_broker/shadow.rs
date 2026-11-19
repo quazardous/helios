@@ -159,7 +159,7 @@ impl Shadow {
             let seconds = summary
                 .tests
                 .get(&t.id)
-                .and_then(|st| st.median_seconds())
+                .and_then(super::history::TestStats::median_seconds)
                 .unwrap_or(t.seconds);
             s.total += 1;
             s.total_s += seconds;
