@@ -305,7 +305,7 @@ pub(super) fn recheck_pending(r: &CardsRecheck) {
 
 /// `health.cards`: the cards check runs again now, from the one card
 /// list; when a run is under way, once it ends ([`Shell::health_tick`]).
-pub(super) fn recheck_cards(r: &CardsRecheck) {
+fn recheck_cards(r: &CardsRecheck) {
     recheck(r, vec![helios_storage::health::backup::CARDS.to_owned()]);
 }
 
@@ -480,6 +480,21 @@ pub fn findings_answer(
 }
 
 impl Shell {
+    /// `health.cards`, the health check's listener of `card.safe`
+    /// ([`crate::backup_end`]): the cards check runs again once cards
+    /// are found safe to format, after the Storage page's reads.
+    pub(super) fn listen_cards_safe(&mut self) {
+        let runner = self.core.health.cards_runner.clone();
+        let listened = crate::backup_end::listen_local(
+            &*self.core.app.handle().bus(),
+            crate::backup_end::HEALTH,
+            move |_, _| recheck_cards(&runner),
+        );
+        if let Err(e) = listened {
+            self.notes.push(format!("{}: {e}", crate::backup_end::SAFE));
+        }
+    }
+
     /// Runs the health checks with `runner`, reported in the jobs centre;
     /// the desktop gives Helios's checks over the machine and the vault,
     /// tests their own.

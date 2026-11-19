@@ -32,6 +32,8 @@ use serde_json::{Value, json};
 use super::Shell;
 use crate::backup_end::{self, CardList};
 use crate::import_end;
+use crate::storage_read;
+use egui_pop::api::bus::bus_contract::Bus;
 
 /// Opens the Settings app at Storage › Volumes; `volume` (an id) marks
 /// that volume and scrolls to it.
@@ -384,7 +386,8 @@ pub(crate) type Owners = Arc<
 /// The volumes and the strategy as the link last answered them: shared
 /// (`Rc`) between the shell and `library.changed`'s local listener
 /// `library.volumes`, which reads them again inside the pass
-/// ([`refresh_volumes`]).
+/// ([`refresh_volumes`]). What is read is passed through
+/// `storage.read` ([`crate::storage_read`]) to whoever shows it.
 #[derive(Default)]
 pub(crate) struct StorageRead {
     link: Option<Arc<dyn StorageLink>>,
@@ -394,22 +397,21 @@ pub(crate) struct StorageRead {
     error: Option<String>,
 }
 
-/// Reads the volumes again: the page's list, and the volumes the Library
-/// names (a scan ran, a disk came or went). What the link reads off the
-/// frame shows at a coming one.
-pub(crate) fn refresh_volumes(
-    read: &RefCell<StorageRead>,
-    library: &RefCell<crate::library::Library>,
-) {
+/// Reads the volumes again: the page's list, and the volumes passed
+/// through `storage.read` on `bus` (the Library names them: a scan ran, a
+/// disk came or went). What the link reads off the frame shows at a
+/// coming one.
+pub(crate) fn refresh_volumes(read: &RefCell<StorageRead>, bus: &dyn Bus) {
     let Some(link) = read.borrow().link.clone() else {
         return;
     };
     link.refresh();
-    show_volumes(read, library);
+    show_volumes(read, bus);
 }
 
-/// The volumes and the strategy as the link answers them now.
-fn show_volumes(read: &RefCell<StorageRead>, library: &RefCell<crate::library::Library>) {
+/// The volumes and the strategy as the link answers them now; the
+/// volumes passed through `storage.read` on `bus`.
+fn show_volumes(read: &RefCell<StorageRead>, bus: &dyn Bus) {
     let Some(link) = read.borrow().link.clone() else {
         return;
     };
@@ -417,9 +419,10 @@ fn show_volumes(read: &RefCell<StorageRead>, library: &RefCell<crate::library::L
     // The import window's strategy line reads it too.
     let strategy = link.strategy();
     let mut read = read.borrow_mut();
+    let mut readout = storage_read::Readout::default();
     match volumes {
         Ok(volumes) => {
-            library.borrow_mut().set_volumes(&volumes);
+            readout.volumes = Some(volumes.clone());
             read.list = volumes;
             read.error = None;
         }
@@ -431,6 +434,10 @@ fn show_volumes(read: &RefCell<StorageRead>, library: &RefCell<crate::library::L
     }
     if let Some(e) = &read.error {
         log::warn!("storage: {e}");
+    }
+    drop(read);
+    if readout.volumes.is_some() {
+        storage_read::pass(bus, readout);
     }
 }
 
@@ -467,7 +474,7 @@ impl Shell {
     /// Library names (a scan ran, a disk came or went). What the link
     /// reads off the frame shows at a coming one.
     pub fn refresh_volumes(&mut self) {
-        refresh_volumes(&self.core.storage.read, &self.focus.library);
+        refresh_volumes(&self.core.storage.read, &*self.core.app.handle().bus());
     }
 
     /// The link the volumes are read through, once set.
@@ -479,12 +486,7 @@ impl Shell {
     /// its badges and its `backup:` filters; what the link reads off the
     /// frame shows at a coming one.
     pub fn refresh_backups(&mut self) {
-        refresh_backups(&self.core.storage.read, &self.focus.library);
-    }
-
-    /// Each photo's backups as the link answers them now.
-    fn show_backups(&mut self) {
-        show_backups(&self.core.storage.read, &self.focus.library);
+        refresh_backups(&self.core.storage.read, &*self.core.app.handle().bus());
     }
 
     /// `storage.cards-waiting`, the shell's listener of `import.ended`:
@@ -520,32 +522,37 @@ impl Shell {
             .collect()
     }
 
-    /// The shell's listeners of `backup.ended` and `card.safe`
+    /// Storage's listeners of `backup.ended` and `card.safe`
     /// ([`crate::backup_end`]), each in its declared place: the badges,
-    /// the cards checked again, then the toast, the Storage page's reads
-    /// and the health check's cards once some are safe.
+    /// the cards checked again, then the toast and the Storage page's
+    /// reads once some are safe (the health check listens on its own:
+    /// [`Shell::listen_cards_safe`]).
     pub(super) fn listen_backup_points(&mut self) {
         self.import.get_mut().card_list = self.core.storage.cards.clone();
         let bus = self.core.app.handle().bus();
-        let (read, library) = (self.core.storage.read.clone(), self.focus.library.clone());
+        let (read, on) = (self.core.storage.read.clone(), Arc::downgrade(&bus));
         let mut listened = vec![backup_end::listen_ended(
             &*bus,
             backup_end::BACKUPS,
-            move |_, _| refresh_backups(&read, &library),
+            move |_, _| {
+                if let Some(bus) = on.upgrade() {
+                    refresh_backups(&read, &*bus);
+                }
+            },
         )];
         let (read, cards, checking) = (
             self.core.storage.read.clone(),
             self.core.storage.cards.clone(),
             self.core.storage.checking.clone(),
         );
-        let wake = self.core.health.ctx.clone();
+        let app = self.core.app.handle().clone();
         listened.push(backup_end::listen_ended(
             &*bus,
             backup_end::SAFETY,
             move |_, _| {
                 let link = read.borrow().link.clone();
                 if let Some(link) = link
-                    && let Some(r) = check_cards(link, cards.waiting(), wake.clone())
+                    && let Some(r) = check_cards(link, cards.waiting(), app.egui())
                 {
                     *checking.borrow_mut() = Some(r);
                 }
@@ -583,12 +590,6 @@ impl Shell {
                 }
             },
         ));
-        let runner = self.core.health.cards_runner.clone();
-        listened.push(backup_end::listen_local(
-            &*bus,
-            backup_end::HEALTH,
-            move |_, _| super::health::recheck_cards(&runner),
-        ));
         for e in listened.into_iter().filter_map(Result::err) {
             self.notes.push(format!("{}: {e}", backup_end::ENDED));
         }
@@ -617,8 +618,9 @@ impl Shell {
             let seq = link.seq();
             if seq != self.core.storage.seen {
                 self.core.storage.seen = seq;
-                show_volumes(&self.core.storage.read, &self.focus.library);
-                self.show_backups();
+                let bus = self.core.app.handle().bus();
+                show_volumes(&self.core.storage.read, &*bus);
+                show_backups(&self.core.storage.read, &*bus);
                 // The Storage page's reads follow, their values kept
                 // while read again.
                 self.read_fact(super::reads::VOLUMES_CHANGED);
@@ -839,32 +841,38 @@ pub fn backup_line(
 /// Each photo's backups read again (one read for the Library), for its
 /// badges and its `backup:` filters; what the link reads off the frame
 /// shows at a coming one.
-fn refresh_backups(read: &RefCell<StorageRead>, library: &RefCell<crate::library::Library>) {
+fn refresh_backups(read: &RefCell<StorageRead>, bus: &dyn Bus) {
     let link = read.borrow().link.clone();
     if let Some(link) = link {
         link.refresh();
     }
-    show_backups(read, library);
+    show_backups(read, bus);
 }
 
-/// Each photo's backups as the link answers them now.
-fn show_backups(read: &RefCell<StorageRead>, library: &RefCell<crate::library::Library>) {
+/// Each photo's backups as the link answers them now, passed through
+/// `storage.read` on `bus`.
+fn show_backups(read: &RefCell<StorageRead>, bus: &dyn Bus) {
     let Some(link) = read.borrow().link.clone() else {
         return;
     };
     match link.statuses() {
         Ok(statuses) => {
-            let marks = statuses
-                .iter()
-                .map(|(id, s)| (id.clone(), crate::library::BackupMark::of(s)))
-                .collect();
             let read = read.borrow();
             let badges = read.strategy.is_some();
             let rule = strategy::rule(&read.list, read.strategy.as_ref());
             drop(read);
-            let mut library = library.borrow_mut();
-            library.set_backup_rule(rule);
-            library.set_backups(marks, badges);
+            let backups = storage_read::BackupsRead {
+                statuses,
+                badges,
+                rule,
+            };
+            storage_read::pass(
+                bus,
+                storage_read::Readout {
+                    volumes: None,
+                    backups: Some(backups),
+                },
+            );
         }
         Err(e) => log::warn!("backups: {e}"),
     }
@@ -876,7 +884,7 @@ fn show_backups(read: &RefCell<StorageRead>, library: &RefCell<crate::library::L
 fn check_cards(
     link: Arc<dyn StorageLink>,
     cards: Vec<Card>,
-    wake: Arc<Mutex<Option<egui::Context>>>,
+    wake: egui::Context,
 ) -> Option<Receiver<Checked>> {
     if cards.is_empty() {
         return None;
@@ -890,9 +898,7 @@ fn check_cards(
                 .map(|c| (c.path.clone(), link.card_safety(c)))
                 .collect();
             let _ = send.send(now);
-            if let Some(ctx) = wake.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                ctx.request_repaint();
-            }
+            wake.request_repaint();
         });
     match spawned {
         Ok(_) => Some(checked),

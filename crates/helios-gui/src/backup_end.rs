@@ -39,8 +39,10 @@ pub const ENDED: &str = "helios.backup.ended";
 /// The hook point the cards found safe to format pass through, and the
 /// journal's event once they did.
 pub const SAFE: &str = "helios.card.safe";
-/// The owner of the desktop's listeners of both points.
+/// The owner of storage's listeners of both points.
 pub const BUS_OWNER: &str = "helios.storage";
+/// The owner of the health check's listener ([`HEALTH`]).
+pub const HEALTH_OWNER: &str = "helios.health";
 
 /// Each photo's backups read again: its badges and `backup:` filters.
 pub const BACKUPS: &str = "helios.storage.backups";
@@ -117,8 +119,15 @@ pub fn declare(bus: &dyn Bus) {
     }
 }
 
-fn opts(after: Option<&str>) -> ListenOpts {
-    let opts = ListenOpts::new().owner(BUS_OWNER);
+/// Listener `id`'s options: its owner (the health check's for
+/// [`HEALTH`], storage's for the others) and the one it runs after.
+fn opts(id: &str, after: Option<&str>) -> ListenOpts {
+    let owner = if id == HEALTH {
+        HEALTH_OWNER
+    } else {
+        BUS_OWNER
+    };
+    let opts = ListenOpts::new().owner(owner);
     match after {
         Some(after) => opts.after(after),
         None => opts,
@@ -151,7 +160,7 @@ pub fn listen_ended(
     declare(bus);
     bus.unlisten(ENDED, id);
     let run = Rc::new(run);
-    bus.listen_local::<BackupEnded>(id, opts(after), move |end, reactions| {
+    bus.listen_local::<BackupEnded>(id, opts(id, after), move |end, reactions| {
         run(end, reactions);
         reactions.ran.push(id.to_owned());
         Ok::<(), HookError>(())
@@ -177,7 +186,7 @@ pub fn listen_local(
     declare(bus);
     bus.unlisten(SAFE, id);
     let run = Rc::new(run);
-    bus.listen_local::<CardSafe>(id, opts(after), move |safe, reactions| {
+    bus.listen_local::<CardSafe>(id, opts(id, after), move |safe, reactions| {
         run(safe, reactions);
         reactions.ran.push(id.to_owned());
         Ok::<(), HookError>(())

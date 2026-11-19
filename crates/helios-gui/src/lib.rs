@@ -96,6 +96,7 @@ pub mod stack_review;
 pub mod stall;
 pub mod start;
 pub mod status_items;
+pub mod storage_read;
 pub mod templates;
 pub mod theme;
 pub mod theme_editor;
