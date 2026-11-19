@@ -20,8 +20,15 @@
 
 use std::path::Path;
 
+use egui_pop::core::fold::Fold;
+use egui_pop::core::input::Input;
+use egui_pop::core::number::NumberInput;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
+use egui_pop::core::widgets;
 use helios_core::Message;
 use helios_library::import_profile::{Apply, Filter, Kind, LABELS};
+use helios_ui::Action;
 
 use super::Shell;
 use super::import_sources::SourceKey;
@@ -139,17 +146,13 @@ fn bytes(mb: u64) -> Option<u64> {
 
 /// Include: the filter of the selected source.
 pub(super) fn include_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileWords) {
-    egui::CollapsingHeader::new(&words.include)
-        .id_salt("helios.import.include")
+    Fold::new("helios.import.include", &words.include)
         .default_open(!w.choices.filter.is_all())
         .show(ui, |ui| {
             // The named filters, picked as a whole.
             ui.horizontal_wrapped(|ui| {
-                ui.label(&words.filter);
-                if ui
-                    .selectable_label(w.choices.filter.is_all(), &words.all)
-                    .clicked()
-                {
+                ui.text_role(TextRole::Body, &words.filter);
+                if widgets::selectable_label(ui, w.choices.filter.is_all(), &words.all).clicked() {
                     w.choices.filter = Filter::default();
                 }
                 let picked = w
@@ -160,8 +163,7 @@ pub(super) fn include_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Profil
                     .map(|(n, _)| n.clone());
                 let names: Vec<String> = w.profiles.filters.keys().cloned().collect();
                 for name in names {
-                    if ui
-                        .selectable_label(picked.as_ref() == Some(&name), &name)
+                    if widgets::selectable_label(ui, picked.as_ref() == Some(&name), &name)
                         .clicked()
                     {
                         w.use_filter(&name);
@@ -172,7 +174,7 @@ pub(super) fn include_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Profil
             ui.horizontal_wrapped(|ui| {
                 for (kind, label) in Kind::ALL.into_iter().zip(&words.kinds) {
                     let mut on = f.kinds.contains(&kind);
-                    if ui.checkbox(&mut on, label).changed() {
+                    if widgets::checkbox(ui, &mut on, label).changed() {
                         f.kinds.retain(|k| *k != kind);
                         if on {
                             f.kinds.push(kind);
@@ -186,32 +188,26 @@ pub(super) fn include_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Profil
                 e.names = line_of(&f.names);
             }
             ui.horizontal(|ui| {
-                ui.label(&words.names);
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut e.names)
-                            .hint_text("IMG_*, *.CR3")
-                            .desired_width(f32::INFINITY),
-                    )
-                    .on_hover_text(&words.names_help)
-                    .changed()
-                {
+                ui.text_role(TextRole::Body, &words.names);
+                let typed = Input::text(&mut e.names, &words.names)
+                    .placeholder("IMG_*, *.CR3")
+                    .width(ui.available_width())
+                    .show(ui);
+                let _ = typed.response.tip(&words.names_help);
+                if typed.changed {
                     f.names = items_of(&e.names);
                 }
             });
             ui.horizontal(|ui| {
                 for (label, day) in [(&words.from, &mut f.from), (&words.to, &mut f.to)] {
-                    ui.label(label);
+                    ui.text_role(TextRole::Body, label);
                     let mut text = day.clone().unwrap_or_default();
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut text)
-                                .hint_text("YYYY-MM-DD")
-                                .desired_width(84.0),
-                        )
-                        .on_hover_text(&words.day_help)
-                        .changed()
-                    {
+                    let typed = Input::text(&mut text, label)
+                        .placeholder("YYYY-MM-DD")
+                        .width(DAY_WIDTH)
+                        .show(ui);
+                    let _ = typed.response.tip(&words.day_help);
+                    if typed.changed {
                         *day = Some(text.trim().to_string()).filter(|t| !t.is_empty());
                     }
                 }
@@ -221,20 +217,29 @@ pub(super) fn include_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Profil
                     (&words.at_least, &mut f.min_bytes),
                     (&words.at_most, &mut f.max_bytes),
                 ] {
-                    ui.label(label);
-                    let mut mb = megabytes(*size);
-                    if ui
-                        .add(egui::DragValue::new(&mut mb).suffix(" MB"))
+                    ui.text_role(TextRole::Body, label);
+                    // Whole megabytes, as a count: the cast back is exact.
+                    #[allow(clippy::cast_precision_loss)]
+                    let mut mb = megabytes(*size) as f64;
+                    if NumberInput::new(&mut mb, label, 0.0..=f64::MAX)
+                        .integer()
+                        .unit("MB")
+                        .show(ui)
                         .changed()
                     {
-                        *size = bytes(mb);
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let whole = mb.max(0.0).round() as u64;
+                        *size = bytes(whole);
                     }
                 }
             });
-            ui.checkbox(&mut f.new_only, &words.new_only);
+            widgets::checkbox(ui, &mut f.new_only, &words.new_only);
             save_ui(ui, w, words);
         });
 }
+
+/// A day field's width: "YYYY-MM-DD" and its padding.
+const DAY_WIDTH: f32 = 100.0;
 
 /// "Save filter as…", its name typed in place, and "Delete filter" on a
 /// named one.
@@ -247,19 +252,24 @@ fn save_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileWords) {
         .map(|(n, _)| n.clone());
     ui.horizontal_wrapped(|ui| {
         if let Some(mut name) = w.profile_edit.saving.take() {
-            let typed = ui.add(egui::TextEdit::singleline(&mut name).desired_width(140.0));
-            let enter = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (ui.button(&words.save).clicked() || enter) && !name.trim().is_empty() {
+            let enter = Input::text(&mut name, &words.save_as)
+                .width(SAVE_WIDTH)
+                .show(ui)
+                .submitted;
+            let save = helios_ui::action(ui, Action::Secondary, &words.save).clicked();
+            if (save || enter) && !name.trim().is_empty() {
                 w.save_filter(name.trim());
             } else if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 w.profile_edit.saving = Some(name);
             }
         } else {
-            if !w.choices.filter.is_all() && ui.small_button(&words.save_as).clicked() {
+            if !w.choices.filter.is_all()
+                && helios_ui::row_action(ui, Action::Secondary, &words.save_as).clicked()
+            {
                 w.profile_edit.saving = Some(named.clone().unwrap_or_default());
             }
             if let Some(name) = &named
-                && ui.small_button(&words.delete).clicked()
+                && helios_ui::row_action(ui, Action::Danger, &words.delete).clicked()
             {
                 w.delete_filter(name);
             }
@@ -267,10 +277,12 @@ fn save_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileWords) {
     });
 }
 
+/// The width of the name a filter is saved as.
+const SAVE_WIDTH: f32 = 140.0;
+
 /// Apply During Import: what every photo of the selected source is given.
 pub(super) fn apply_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileWords) {
-    egui::CollapsingHeader::new(&words.apply)
-        .id_salt("helios.import.apply")
+    Fold::new("helios.import.apply", &words.apply)
         .default_open(!w.choices.apply.is_empty())
         .show(ui, |ui| {
             let a = &mut w.choices.apply;
@@ -279,27 +291,32 @@ pub(super) fn apply_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &ProfileW
                 e.keywords = line_of(&a.keywords);
             }
             ui.horizontal(|ui| {
-                ui.label(&words.keywords);
-                if ui
-                    .add(egui::TextEdit::singleline(&mut e.keywords).desired_width(f32::INFINITY))
-                    .on_hover_text(&words.keywords_help)
-                    .changed()
-                {
+                ui.text_role(TextRole::Body, &words.keywords);
+                let typed = Input::text(&mut e.keywords, &words.keywords)
+                    .width(ui.available_width())
+                    .show(ui);
+                let _ = typed.response.tip(&words.keywords_help);
+                if typed.changed {
                     a.keywords = items_of(&e.keywords);
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.label(&words.rating);
-                ui.selectable_value(&mut a.rating, None, &words.none);
+                ui.text_role(TextRole::Body, &words.rating);
+                widgets::selectable_value(ui, &mut a.rating, None, &words.none);
                 for stars in 1..=5u8 {
-                    ui.selectable_value(&mut a.rating, Some(stars), "★".repeat(stars.into()));
+                    widgets::selectable_value(
+                        ui,
+                        &mut a.rating,
+                        Some(stars),
+                        "★".repeat(stars.into()),
+                    );
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.label(&words.label);
-                ui.selectable_value(&mut a.label, None, &words.none);
+                ui.text_role(TextRole::Body, &words.label);
+                widgets::selectable_value(ui, &mut a.label, None, &words.none);
                 for (label, said) in LABELS.into_iter().zip(&words.labels) {
-                    ui.selectable_value(&mut a.label, Some(label.to_string()), said);
+                    widgets::selectable_value(ui, &mut a.label, Some(label.to_string()), said);
                 }
             });
         });
