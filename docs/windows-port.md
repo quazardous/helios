@@ -42,7 +42,9 @@ Done:
 
 **Tests on Windows: 22 test targets fail** (first run, 2026-11-08). They
 run in the nightly `windows-tests` workflow, which goes red while any
-fails; nothing waits on it. The build, in `ci.yml`, is required. Making
+fails; nothing waits on it. A night when `next` has not moved since the
+commit last tested skips the tests and stays green: the last red run
+still holds the failures. The build, in `ci.yml`, is required. Making
 the tests pass is the next task. What fails, by cause:
 
 - **The vault's snapshots (fixed, 2026-11-11).** `helios-vault-sqlite`
