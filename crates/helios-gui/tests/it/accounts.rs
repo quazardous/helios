@@ -713,7 +713,7 @@ fn a_sign_in_opens_the_browser_at_once_without_waiting_for_a_frame() {
     let clicked = Instant::now();
     h.step();
     let took = opened.nth_after(1, clicked);
-    assert!(took < Duration::from_millis(200), "opened after {took:?}");
+    crate::wall_clock::within("the browser opened", took, Duration::from_millis(200));
     assert_eq!(
         opened.urls(),
         ["https://accounts.example.org/consent?state=1"]
@@ -969,7 +969,7 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
     let clicked = Instant::now();
     h.step();
     let took = opened.nth_after(1, clicked);
-    assert!(took < Duration::from_millis(200), "opened after {took:?}");
+    crate::wall_clock::within("the browser opened", took, Duration::from_millis(200));
     assert_eq!(opened.urls(), ["https://picker.example.org/pick/s1"]);
     // The first page runs out: said so, not waited out, and a new page
     // replaces it.
