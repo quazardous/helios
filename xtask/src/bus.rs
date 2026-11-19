@@ -30,7 +30,7 @@
 //! And it holds Helios's points to the bus-contract naming rule (its
 //! README, "Naming points"): every point a Helios crate declares
 //! (`impl Point for T` with its `const ID`) is under `helios.`, so
-//! egui-pop's `pop.*` and egui_stack's `stack.*` share the bus with it.
+//! egui-pop's `pop.*` and `egui_stack`'s `stack.*` share the bus with it.
 //! A point named after a node fact kind (`const ID = E::KIND`) keeps the
 //! kind's name until the relay maps an older node's. The listeners are
 //! held to it by helios-gui's `every_point_and_listener_of_helios_has_its_prefix`,

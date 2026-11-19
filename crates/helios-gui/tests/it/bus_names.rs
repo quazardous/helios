@@ -1,7 +1,7 @@
 //! The bus-contract naming rule on the desktop's bus (its README, "Naming
 //! points"): several libraries share one bus, so each declares its points
 //! and registers its listeners under its own prefix. egui-pop's are
-//! `pop.*`, egui_stack's `stack.*`, and Helios's own `helios.*`.
+//! `pop.*`, `egui_stack`'s `stack.*`, and Helios's own `helios.*`.
 
 use egui::vec2;
 use egui_kittest::Harness;
