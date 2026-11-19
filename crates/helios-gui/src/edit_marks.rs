@@ -38,12 +38,12 @@ use serde_json::{Value as Json, json};
 
 /// The hook point a change of the edit's marks passes through, and the
 /// journal's event once it did.
-pub const CHANGED: &str = "edit.changed";
+pub const CHANGED: &str = "helios.edit.changed";
 /// The owner of the desktop's listeners.
 pub const BUS_OWNER: &str = "helios.edit";
 /// The marks shown: the Modules panel's rows, the Parameters panel's
 /// headers, the darkroom's status bar.
-pub const MARKS: &str = "edit.marks";
+pub const MARKS: &str = "helios.edit.marks";
 
 /// The listeners of [`EditChanged`], each with the one it runs after.
 pub const ORDER: &[(&str, Option<&str>)] = &[(MARKS, None)];

@@ -452,7 +452,7 @@ pub struct WindowScreen;
 
 impl Point for WindowScreen {
     const KIND: PointKind = PointKind::Event;
-    const ID: &'static str = "display.window_screen";
+    const ID: &'static str = "helios.display.window_screen";
     type Input = OnScreen;
     type Value = ();
 }
@@ -475,7 +475,7 @@ pub const POINTS: &[PointDecl] = &[PointDecl::of::<WindowScreen>(
 pub const BUS_OWNER: &str = "helios.display";
 /// The display's listener of `display.window_screen`, `screen.added` and
 /// `screen.removed`: each window's screen, which its route follows.
-pub const ROUTE_LISTENER: &str = "display.route";
+pub const ROUTE_LISTENER: &str = "helios.display.route";
 
 /// Where a window is, as the bus said it, and what its route was chosen
 /// from at its last pass.

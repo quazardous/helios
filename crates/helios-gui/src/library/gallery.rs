@@ -27,6 +27,7 @@
 
 use egui_pop::views::library::LibraryState;
 use egui_pop::views::library::filter::{Filter, SearchState};
+use egui_pop::views::library::grid::{self, Zoom};
 use egui_pop::views::list::ListState;
 use egui_pop::views::table::TableState;
 use helios_template::{LibraryDesc, ResultsColumn, ResultsDesc, ResultsMode, ViewDesc};
@@ -369,30 +370,41 @@ impl Gallery {
         }
     }
 
-    /// How the Results show the photos, as the workspace keeps it.
+    /// How the Results show the photos, as the workspace keeps it: the
+    /// zoom as a count per row, or the size in points of an older
+    /// workspace while the grid has not turned it into a count yet.
     pub fn results(&self) -> ResultsDesc {
-        let size = self.state.size().round() as u16;
-        let default = egui_pop::views::library::grid::DEFAULT_SIZE.round() as u16;
+        let (per_row, size) = match self.state.zoom() {
+            Zoom::PerRow(n) => (
+                (n != grid::DEFAULT_PER_ROW).then(|| u16::try_from(n).unwrap_or(u16::MAX)),
+                None,
+            ),
+            Zoom::Points(p) => (None, Some(p.round() as u16)),
+        };
         ResultsDesc {
             mode: self.mode,
-            size: (size != default).then_some(size),
+            per_row,
+            size,
             columns: self.columns.clone(),
         }
     }
 
-    /// Shows the photos as `results` says (thumbnails at the default
-    /// size when it says nothing).
+    /// Shows the photos as `results` says: so many thumbnails per row
+    /// (the default count when it says nothing). An older workspace's
+    /// size in points is handed to the grid, whose next pass turns it
+    /// into the count it gave at the view's width and signals it, so the
+    /// workspace keeps the count from then on.
     pub fn set_results(&mut self, results: &ResultsDesc) {
         self.mode = results.mode;
         if self.columns != results.columns {
             self.columns.clone_from(&results.columns);
             self.table_store = None;
         }
-        self.state.set_size(
-            results
-                .size
-                .map_or(egui_pop::views::library::grid::DEFAULT_SIZE, f32::from),
-        );
+        self.state.set_zoom(match (results.per_row, results.size) {
+            (Some(n), _) => Zoom::PerRow(u32::from(n)),
+            (None, Some(points)) => Zoom::Points(f32::from(points)),
+            (None, None) => Zoom::default(),
+        });
     }
 }
 

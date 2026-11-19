@@ -2995,18 +2995,10 @@ ui-empty-no-source-action = Ajouter une source…
 
 gui-library-view = Afficher en
 
-gui-library-view-custom = Vignettes, { $size } points
-
 gui-library-view-details = Détails
-
-gui-library-view-huge = Très grandes vignettes
-
-gui-library-view-large = Grandes vignettes
 
 gui-library-view-list = Liste
 
-gui-library-view-medium = Vignettes moyennes
+gui-library-view-per-row = Vignettes, { $count } par ligne
 
-gui-library-view-small = Petites vignettes
-
-gui-library-view-tip = Afficher les résultats en vignettes d'une taille, en liste, ou en détails par colonnes
+gui-library-view-tip = Afficher les résultats en vignettes, tant par ligne, en liste, ou en détails par colonnes

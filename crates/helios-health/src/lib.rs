@@ -15,7 +15,7 @@
 //!   held to it.
 //! - The [`Registry`] holds the checks by owner (the module or the
 //!   plugin that declares them), each a listener of the health report's
-//!   collect point ([`HealthReport`], `health.report`, declared in
+//!   collect point ([`HealthReport`], `helios.health.report`, declared in
 //!   [`POINTS`] on the bus the application hands the registry: one bus
 //!   with egui-pop's points in Helios). Each module adds its own (`helios_storage::health`,
 //!   `helios_library::health`…, plugins' through their process:
@@ -262,7 +262,7 @@ pub trait Check: Send + Sync {
 pub struct HealthReport;
 
 impl Point for HealthReport {
-    const ID: &'static str = "health.report";
+    const ID: &'static str = "helios.health.report";
     type Input = Report;
     type Value = Option<Vec<Finding>>;
     const KIND: PointKind = PointKind::Collect;
@@ -333,6 +333,16 @@ impl Report {
     }
 }
 
+/// What a check's listener id starts with: the bus-contract naming rule
+/// puts every listener Helios registers under `helios.`, and a check's id
+/// (kept in settings, said in findings) stays as it is behind it.
+pub const LISTENER_PREFIX: &str = "helios.check.";
+
+/// The id of `check`'s listener of [`HealthReport`].
+pub fn listener_of(check: &str) -> String {
+    format!("{LISTENER_PREFIX}{check}")
+}
+
 /// The checks, each a listener of [`HealthReport`] owned by the module or
 /// the plugin that declares it, in the order they were added. A module
 /// adds its own ([`Registry::add`]: `checks::register`,
@@ -391,7 +401,8 @@ impl Registry {
         if let Some(at) = self.checks.iter().position(|c| c.id() == check.id()) {
             self.checks.remove(at);
             self.owners.remove(at);
-            self.bus.unlisten(HealthReport::ID, check.id());
+            self.bus
+                .unlisten(HealthReport::ID, &listener_of(check.id()));
         }
         self.listen(owner, check.clone());
         self.checks.push(check);
@@ -403,7 +414,7 @@ impl Registry {
     fn listen(&self, owner: &str, check: Arc<dyn Check>) {
         let id = check.id().to_owned();
         let listened = self.bus.listen::<HealthReport>(
-            id.clone(),
+            listener_of(&id),
             ListenOpts::new().owner(owner),
             move |report, out| {
                 if report.wants(&id) {
@@ -515,16 +526,21 @@ impl Reporter {
             .collect();
         for failure in collected.failures.iter().filter(|f| f.dropped()) {
             log::warn!("health: {failure}");
-            if let Some((_, check)) = self.checks.iter().find(|(_, c)| c.id() == failure.listener) {
+            if let Some((_, check)) = self
+                .checks
+                .iter()
+                .find(|(_, c)| listener_of(c.id()) == failure.listener)
+            {
                 answers.push((failure.listener.clone(), vec![crashed(check)]));
             }
         }
         self.checks
             .iter()
             .filter_map(|(owner, check)| {
-                let at = answers.iter().position(|(id, _)| id == check.id())?;
-                let (id, found) = answers.swap_remove(at);
-                Some((owner.clone(), id, found))
+                let listener = listener_of(check.id());
+                let at = answers.iter().position(|(id, _)| *id == listener)?;
+                let (_, found) = answers.swap_remove(at);
+                Some((owner.clone(), check.id().to_owned(), found))
             })
             .collect()
     }
@@ -1032,7 +1048,10 @@ mod tests {
             .collect();
         assert_eq!(
             who,
-            [("disks.space", Some("disks")), ("fans.speed", Some("fans"))]
+            [
+                ("helios.check.disks.space", Some("disks")),
+                ("helios.check.fans.speed", Some("fans"))
+            ]
         );
         let ids = |r: &Registry| -> Vec<String> {
             r.run(&Context::default())

@@ -864,7 +864,7 @@ impl Shell {
             },
         );
         if let Err(e) = listened {
-            self.notes.push(format!("files.drop: {e}"));
+            self.notes.push(format!("pop.files.drop: {e}"));
         }
     }
 }

@@ -23,11 +23,11 @@ use helios_core::engine::Engine;
 /// The owner of Helios's listeners of `settings.changed`.
 pub const BUS_OWNER: &str = "helios.settings";
 /// The render cache's budget follows `system.cache.budget` / `share`.
-pub const CACHES_BUDGET: &str = "caches.budget";
+pub const CACHES_BUDGET: &str = "helios.caches.budget";
 /// The thumbnails' budgets follow `system.cache.thumbnails` / `textures`.
-pub const THUMBS_BUDGET: &str = "thumbs.budget";
+pub const THUMBS_BUDGET: &str = "helios.thumbs.budget";
 /// A plugin's values follow its settings.
-pub const PLUGINS_VALUES: &str = "plugins.values";
+pub const PLUGINS_VALUES: &str = "helios.plugins.values";
 
 const BUDGET: &str = "system.cache.budget";
 const SHARE: &str = "system.cache.share";

@@ -171,19 +171,19 @@ pub const POINTS: &[PointDecl] = &[
 
 /// The import window's cards and the card toast, woken at once (they read
 /// the journal's `volume.*` events).
-pub const CARDS: &str = "import.cards";
+pub const CARDS: &str = "helios.import.cards";
 /// The scan of the volumes and where each photo is (present, offline,
 /// missing), done inside the pass: whoever runs after it reads the
 /// locations it set. The Storage page and the Library's badges follow it
 /// (the vault says the locations changed: `library.changed`).
-pub const SCAN: &str = "library.scan";
+pub const SCAN: &str = "helios.library.scan";
 /// The strategy's "when a backup disk is plugged in": what is short goes
 /// to it ([`crate::jobs::Backups::follow`]).
-pub const BACKUPS: &str = "backups.on-connect";
+pub const BACKUPS: &str = "helios.backups.on-connect";
 /// The health check runs the checks that follow the volumes again.
-pub const HEALTH: &str = "health.recheck";
+pub const HEALTH: &str = "helios.health.recheck";
 /// The image map's job reads the volume plugged in.
-pub const MAP: &str = "map.plugged";
+pub const MAP: &str = "helios.map.plugged";
 
 /// The listeners of [`VolumeMounted`], each with where it runs: the order
 /// they run in.

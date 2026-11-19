@@ -59,6 +59,7 @@ const COMPARE_SURFACE: &str = "helios.compare";
 
 use crate::comparison::Comparison;
 use egui_pop::views::library::filter::{Filter, SearchField};
+use egui_pop::views::library::grid;
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
 use egui_pop::views::library::tags::TagInputState;
 use egui_pop::views::library::{
@@ -133,17 +134,14 @@ const FILTERS_WIDTH: f32 = 280.0;
 /// the user works in.
 pub const AUTO_ADVANCE_COMMAND: &str = "vault.autoAdvance";
 
-/// The thumbnail sizes the Results' view menu offers, in points.
-const THUMB_SIZES: [u16; 4] = [80, 128, 192, 288];
+/// The zooms the Results' view menu offers, as thumbnails per row, the
+/// smallest first: one per row fills the view.
+const PER_ROW_CHOICES: [u32; 5] = [8, 5, 3, 2, 1];
 
-/// The name of a thumbnail size of [`THUMB_SIZES`] in the view menu.
-fn thumb_size_name(points: u16) -> Message {
-    match points {
-        80 => Message::new("gui-library-view-small", "Small thumbnails"),
-        128 => Message::new("gui-library-view-medium", "Medium thumbnails"),
-        192 => Message::new("gui-library-view-large", "Large thumbnails"),
-        _ => Message::new("gui-library-view-huge", "Extra large thumbnails"),
-    }
+/// The name of a zoom of so many thumbnails per row in the view menu.
+fn per_row_name(per_row: u32) -> Message {
+    Message::new("gui-library-view-per-row", "Thumbnails, { $count } per row")
+        .with("count", per_row)
 }
 
 /// The labels, in the order darktable gives them F1 to F5.
@@ -4278,37 +4276,40 @@ impl Library {
     }
 
     /// How the results show, as a file browser's dialog offers it:
-    /// thumbnails at a few sizes, a list, or details in columns. A size
-    /// zoomed to (Ctrl and the wheel, + and -) shows as one more choice.
+    /// thumbnails so many per row (one fills the view), a list, or
+    /// details in columns. A count zoomed to (Ctrl and the wheel, + and
+    /// -) shows as one more choice.
     fn view_menu(&mut self, ui: &mut Ui) {
-        /// A choice of the menu: thumbnails at a size, a list, details.
+        /// A choice of the menu: thumbnails so many per row, a list,
+        /// details.
         #[derive(Clone, Copy, PartialEq)]
         enum Shown {
-            Thumbnails(u16),
+            Thumbnails(u32),
             List,
             Details,
         }
         let ctx = ui.ctx().clone();
         let word = |m: Message| crate::i18n::text(&ctx, m);
-        let size = self.view.state.size().round() as u16;
+        let per_row = self
+            .view
+            .state
+            .zoom()
+            .per_row()
+            .unwrap_or(grid::DEFAULT_PER_ROW);
         let mut current = match self.view.mode {
             ResultsMode::List => Shown::List,
             ResultsMode::Details => Shown::Details,
-            ResultsMode::Thumbnails => Shown::Thumbnails(size),
+            ResultsMode::Thumbnails => Shown::Thumbnails(per_row),
         };
-        let mut options: Vec<(Shown, String)> = THUMB_SIZES
+        let mut options: Vec<(Shown, String)> = PER_ROW_CHOICES
             .iter()
-            .map(|&points| (Shown::Thumbnails(points), word(thumb_size_name(points))))
+            .map(|&n| (Shown::Thumbnails(n), word(per_row_name(n))))
             .collect();
-        if let Shown::Thumbnails(s) = current
-            && !THUMB_SIZES.contains(&s)
+        if let Shown::Thumbnails(n) = current
+            && !PER_ROW_CHOICES.contains(&n)
         {
-            let custom = word(
-                Message::new("gui-library-view-custom", "Thumbnails, { $size } points")
-                    .with("size", u32::from(s)),
-            );
-            let at = THUMB_SIZES.iter().filter(|&&p| p < s).count();
-            options.insert(at, (Shown::Thumbnails(s), custom));
+            let at = PER_ROW_CHOICES.iter().filter(|&&c| c > n).count();
+            options.insert(at, (Shown::Thumbnails(n), word(per_row_name(n))));
         }
         options.push((
             Shown::List,
@@ -4321,16 +4322,16 @@ impl Library {
         let name = word(Message::new("gui-library-view", "View as"));
         let tip = word(Message::new(
             "gui-library-view-tip",
-            "Show the results as thumbnails of a size, as a list, or as details in columns",
+            "Show the results as thumbnails so many per row, as a list, or as details in columns",
         ));
         if helios_ui::choice(ui, "helios.library.view", &name, &mut current, &options)
             .tip(&tip)
             .changed()
         {
             match current {
-                Shown::Thumbnails(points) => {
+                Shown::Thumbnails(n) => {
                     self.view.mode = ResultsMode::Thumbnails;
-                    self.view.state.set_size(f32::from(points));
+                    self.view.state.set_zoom(grid::Zoom::PerRow(n));
                 }
                 Shown::List => self.view.mode = ResultsMode::List,
                 Shown::Details => self.view.mode = ResultsMode::Details,

@@ -39,24 +39,24 @@ use egui_pop::api::bus::bus_contract::{
 
 /// The hook point an account signed out passes through, and the
 /// journal's event once it did.
-pub const SIGNED_OUT: &str = "account.signedOut";
+pub const SIGNED_OUT: &str = "helios.account.signedOut";
 /// The hook point an account removed passes through, and the journal's
 /// event once it did.
-pub const REMOVED: &str = "account.removed";
+pub const REMOVED: &str = "helios.account.removed";
 
 /// A choice of photos under way on the account cancelled.
-pub const CANCEL_PICKING: &str = "import.cancel-picking";
+pub const CANCEL_PICKING: &str = "helios.import.cancel-picking";
 /// The token revoked, the keyring's secrets forgotten, the account
 /// written.
-pub const CREDENTIALS: &str = "accounts.credentials";
+pub const CREDENTIALS: &str = "helios.accounts.credentials";
 /// The import window's Sources and Detail columns.
-pub const SOURCES: &str = "import.sources";
+pub const SOURCES: &str = "helios.import.sources";
 /// The Storage page's volumes, named by their accounts.
-pub const STORAGE: &str = "storage.owners";
+pub const STORAGE: &str = "helios.storage.owners";
 /// Settings > Accounts' rows.
-pub const SETTINGS: &str = "settings.accounts";
+pub const SETTINGS: &str = "helios.settings.accounts";
 /// The health checks handed the accounts.
-pub const HEALTH: &str = "health.accounts";
+pub const HEALTH: &str = "helios.health.accounts";
 
 /// The listeners of both points: each with its owner and the one it runs
 /// after; the order they run in.
@@ -225,7 +225,7 @@ mod tests {
             };
             assert_eq!(pass(&bus, gone).ran, ids, "{}", name(how));
         }
-        assert!(listen_local(&bus, "cards.toast", |_, _| {}).is_err());
+        assert!(listen_local(&bus, "helios.cards.toast", |_, _| {}).is_err());
     }
 
     /// Each listener reads the account and how it goes.

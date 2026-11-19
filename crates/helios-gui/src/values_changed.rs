@@ -54,7 +54,7 @@ use crate::edit_marks::{self as em, Marks};
 use crate::viewport::Viewport;
 
 /// The request a change to the values is asked on.
-pub const CHANGED: &str = "values.changed";
+pub const CHANGED: &str = "helios.values.changed";
 /// The owner of the shell's listeners.
 pub const BUS_OWNER: &str = "helios.shell";
 /// The darkroom's listener: the graph shown follows the values.

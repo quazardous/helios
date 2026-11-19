@@ -97,12 +97,12 @@ fn a_moved_slider_marks_itself_its_module_and_the_photo_and_a_double_click_clear
         .handle()
         .events_since(before)
         .into_iter()
-        .filter(|e| e.name == "edit.changed")
+        .filter(|e| e.name == "helios.edit.changed")
         .collect();
     assert_eq!(said.len(), 1, "{said:?}");
     assert_eq!(said[0].data["edited"], true);
     assert_eq!(said[0].data["nodes"], json!(["exposure"]));
-    assert_eq!(said[0].data["ran"], json!(["edit.marks"]));
+    assert_eq!(said[0].data["ran"], json!(["helios.edit.marks"]));
     // A double click resets it, and the marks go.
     let r = h.state().target_rect(&format!("param:{EV}")).unwrap();
     h.hover_at(r.center());

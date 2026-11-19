@@ -1,7 +1,7 @@
 //! Helios's own windows on egui-pop's bus (ADR 0029, slice 8): the
 //! Library and Activity focus windows and the import window each open as
-//! their owner's `window.open` request and listen on `window.close` (a
-//! local listener, after `window.registry`, before `window.place`), so
+//! their owner's `pop.window.open` request and listen on `pop.window.close` (a
+//! local listener, after `pop.window.registry`, before `pop.window.place`), so
 //! whatever closes their window (a command, the title bar or the
 //! compositor, the main window's close) leaves their state closed in the
 //! same call, with no pass of the main window in between.
@@ -117,7 +117,7 @@ fn each_window_closed_any_way_leaves_its_state_closed_in_the_same_call() {
     }
 }
 
-/// The listeners of `window.close` in their order, Helios's marked
+/// The listeners of `pop.window.close` in their order, Helios's marked
 /// local: a reviewed dump.
 #[test]
 fn helios_windows_listen_on_window_close_in_a_declared_order() {
@@ -134,11 +134,11 @@ fn helios_windows_listen_on_window_close_in_a_declared_order() {
             .find(|l| l.contains(&format!("{owner}.close (owner {owner})")))
             .unwrap_or_else(|| panic!("no {owner} listener:\n{order}"));
         assert!(
-            line.ends_with("local; after window.registry; before window.place"),
+            line.ends_with("local; after pop.window.registry; before pop.window.place"),
             "{line}"
         );
     }
     let at = |id: &str| order.find(id).unwrap_or_else(|| panic!("{id}:\n{order}"));
-    assert!(at("window.registry (") < at("helios.import-window.close"));
-    assert!(at("helios.import-window.close") < at("window.place ("));
+    assert!(at("pop.window.registry (") < at("helios.import-window.close"));
+    assert!(at("helios.import-window.close") < at("pop.window.place ("));
 }

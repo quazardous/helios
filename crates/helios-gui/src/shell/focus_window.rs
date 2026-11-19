@@ -269,7 +269,7 @@ impl super::Shell {
             self.listen_import_window_close(),
         ];
         for e in listened.into_iter().filter_map(Result::err) {
-            self.notes.push(format!("window.close: {e}"));
+            self.notes.push(format!("pop.window.close: {e}"));
         }
     }
 

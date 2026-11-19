@@ -21,7 +21,7 @@ use egui_pop::api::bus::bus_contract::{
 use egui_pop::api::windows::WindowId;
 
 /// The point the import window's news are said on.
-pub const NEWS: &str = "import.window.news";
+pub const NEWS: &str = "helios.import.window.news";
 /// The owner of the window's listener.
 const BUS_OWNER: &str = "helios.import";
 /// The window's listener's id.

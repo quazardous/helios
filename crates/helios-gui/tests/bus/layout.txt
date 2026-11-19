@@ -1,3 +1,3 @@
-layout.changed
-  1. layout.save (owner egui_pop): local
-  2. helios.layout-copy (owner helios.workspace): local; after layout.save
+pop.layout.changed
+  1. pop.layout.save (owner egui_pop): local
+  2. helios.layout-copy (owner helios.workspace): local; after pop.layout.save

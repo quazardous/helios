@@ -31,7 +31,7 @@ use crate::library::Library;
 pub const PANEL: &str = "helios.stacks";
 
 /// The request a proposal's answer (or a new proposal) is asked on.
-pub const ANSWER: &str = "stacks.answer";
+pub const ANSWER: &str = "helios.stacks.answer";
 
 /// What the user asked of the proposals: a request, asked while the
 /// panel draws, heard after it.

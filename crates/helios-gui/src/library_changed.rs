@@ -33,26 +33,26 @@ use serde_json::{Value, json};
 
 /// The hook point a change of the library passes through, and the
 /// journal's event once it did.
-pub const CHANGED: &str = "library.changed";
+pub const CHANGED: &str = "helios.library.changed";
 /// The hook point the Library read again passes through once shown,
 /// and the journal's event once it did.
-pub const FILLED: &str = "library.filled";
+pub const FILLED: &str = "helios.library.filled";
 /// The owner of the desktop's listeners of both points.
 pub const BUS_OWNER: &str = "helios.library";
 
 /// The volumes read again (the Storage page, the Library's volume names
 /// and badges).
-pub const VOLUMES: &str = "library.volumes";
+pub const VOLUMES: &str = "helios.library.volumes";
 /// The Library read again, off the interface's thread (its cursor's
 /// delta), and its thumbnails.
-pub const FILL: &str = "library.fill";
+pub const FILL: &str = "helios.library.fill";
 /// The albums and the quick collection read again.
-pub const ALBUMS: &str = "library.albums";
+pub const ALBUMS: &str = "helios.library.albums";
 /// The stacks read again; after an import, the stacks it suggests to
 /// review (when the workspace asks for them).
-pub const STACKS: &str = "library.stacks";
+pub const STACKS: &str = "helios.library.stacks";
 /// The Library's import sessions read again (its Imports section).
-pub const IMPORTS: &str = "library.imports";
+pub const IMPORTS: &str = "helios.library.imports";
 /// The photos an import brought selected, once the Library holds them
 /// (the same listener as `import.ended`'s, which names them).
 pub const SELECT: &str = crate::import_end::SELECT;
@@ -403,13 +403,14 @@ mod tests {
         assert_eq!(
             *done.borrow(),
             [
-                "library.volumes [\"locations\"]",
-                "library.fill [\"locations\"]"
+                "helios.library.volumes [\"locations\"]",
+                "helios.library.fill [\"locations\"]"
             ]
         );
         assert!(
-            order(&bus)
-                .contains("library.fill (owner helios.library): local; after library.volumes"),
+            order(&bus).contains(
+                "helios.library.fill (owner helios.library): local; after helios.library.volumes"
+            ),
             "{}",
             order(&bus)
         );

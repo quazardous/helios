@@ -134,25 +134,27 @@ pub const OTHERS: &str = "healthOthers";
 /// The owner of the health check's listeners on the bus.
 pub const BUS_OWNER: &str = "helios.health";
 /// The listener setting the status bar's badge from the findings.
-pub const STATUS_LISTENER: &str = "status.health";
+pub const STATUS_LISTENER: &str = "helios.status.health";
 /// The listener setting the page's groups' context keys.
-pub const KEYS_LISTENER: &str = "health.context-keys";
+pub const KEYS_LISTENER: &str = "helios.health.context-keys";
 /// The listener running the checks again once a fix is done.
-pub const RECHECK_LISTENER: &str = "health.recheck";
+pub const RECHECK_LISTENER: &str = "helios.health.recheck";
 /// Said on the journal when a run ends.
 pub const CHECKED: &str = "health.checked";
+/// The hook point a run's findings pass through ([`HealthChecked`]).
+pub const CHECKED_POINT: &str = "helios.health.checked";
 /// Said on the journal when a run starts.
 pub const CHECKING: &str = "health.checking";
 /// Said on the journal when a finding is ignored or shown again.
 pub const IGNORED: &str = "health.ignored";
 
 /// The hook point a run's findings pass through once read
-/// (`health.checked`): each listener fills its part of what the desktop
+/// (`helios.health.checked`): each listener fills its part of what the desktop
 /// then shows, in their declared order.
 pub struct HealthChecked;
 
 impl Point for HealthChecked {
-    const ID: &'static str = CHECKED;
+    const ID: &'static str = CHECKED_POINT;
     type Input = Checked;
     type Value = Shown;
 }

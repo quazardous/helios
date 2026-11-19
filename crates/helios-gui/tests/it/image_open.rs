@@ -278,10 +278,17 @@ fn a_switch_is_said_on_the_journal_with_the_listeners_that_ran() {
         .map(|e| (e.name.clone(), e.data.clone()))
         .collect();
     let kinds: Vec<&str> = said.iter().map(|(k, _)| k.as_str()).collect();
-    assert_eq!(kinds, ["image.opened", "image.closed", "image.opened"]);
+    assert_eq!(
+        kinds,
+        [
+            "helios.image.opened",
+            "helios.image.closed",
+            "helios.image.opened"
+        ]
+    );
     assert_eq!(
         said[1].1["ran"],
-        serde_json::json!(["edit.save", "history.scope"])
+        serde_json::json!(["helios.edit.save", "helios.history.scope"])
     );
     assert_eq!(said[1].1["from"], serde_json::json!(id(1).hex()));
     assert_eq!(said[1].1["to"], serde_json::json!(id(2).hex()));
@@ -328,13 +335,17 @@ fn a_switch_runs_each_follower_once_in_order() {
     assert_eq!(
         kinds,
         [
-            "image.opened",
-            "image.closed",
-            "image.opened",
-            "image.closed"
+            "helios.image.opened",
+            "helios.image.closed",
+            "helios.image.opened",
+            "helios.image.closed"
         ]
     );
-    let followers = serde_json::json!(["snapshots.book", "mask.marks", "workshop.photo"]);
+    let followers = serde_json::json!([
+        "helios.snapshots.book",
+        "helios.mask.marks",
+        "helios.workshop.photo"
+    ]);
     assert_eq!(said[0].1["followed"], followers);
     assert_eq!(said[1].1["followed"], serde_json::Value::Null);
     assert_eq!(said[2].1["followed"], followers);

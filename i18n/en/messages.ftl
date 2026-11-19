@@ -1763,21 +1763,13 @@ gui-library-versions-strip = Versions
 
 gui-library-view = View as
 
-gui-library-view-custom = Thumbnails, { $size } points
-
 gui-library-view-details = Details
-
-gui-library-view-huge = Extra large thumbnails
-
-gui-library-view-large = Large thumbnails
 
 gui-library-view-list = List
 
-gui-library-view-medium = Medium thumbnails
+gui-library-view-per-row = Thumbnails, { $count } per row
 
-gui-library-view-small = Small thumbnails
-
-gui-library-view-tip = Show the results as thumbnails of a size, as a list, or as details in columns
+gui-library-view-tip = Show the results as thumbnails so many per row, as a list, or as details in columns
 
 gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
 

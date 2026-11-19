@@ -263,10 +263,13 @@ What the workspace sets for the library (optional):
   the Results bar's toggle and `vault.autoAdvance` write the view the
   user works in, one undo step).
 - `results` (2026-11-17) is how the main window's Library view shows
-  its photos: `{"mode": "list"}` or thumbnails of a `size` in points
-  (48 to 512), `{"size": 192}`; thumbnails at the default size when
-  absent. The other views' is `views.<id>.results`. The Results bar's
-  "View as" menu and a zoom write it.
+  its photos: `{"mode": "list"}` or thumbnails so many per row,
+  `{"per_row": 3}` (2026-11-19: one per row fills the view, and the
+  count is kept through a resize); five per row when absent. A `size` in
+  points (48 to 512) written before is read once and turned into the
+  count it gave at the view's width. The other views' is
+  `views.<id>.results`. The Results bar's "View as" menu and a zoom
+  write it.
 - `compare` (2026-11-11) makes the workspace a Compare focus: it opens
   in the Compare place (`helios.comparison`), two to four photos side by
   side, the selection's until photos are chosen (`library.compare`, `C`).

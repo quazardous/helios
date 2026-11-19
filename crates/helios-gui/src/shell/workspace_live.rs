@@ -436,7 +436,7 @@ impl Shell {
         let due = self.focus.layout_copy_due.clone();
         let bus = self.core.app.handle().bus();
         if let Err(e) = crate::workspace_applied::listen_layout_copy(&*bus, move || due.set(true)) {
-            self.notes.push(format!("layout.changed: {e}"));
+            self.notes.push(format!("pop.layout.changed: {e}"));
         }
     }
 

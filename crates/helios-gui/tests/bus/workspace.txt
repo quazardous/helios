@@ -1,7 +1,7 @@
-workspace.applied
-  1. workspace.keys (owner helios.workspace): local
-  2. contexts.subworkspaces (owner helios.contexts): local; after workspace.keys
-  3. contexts.scope (owner helios.contexts): local; after contexts.subworkspaces
-  4. graph.template (owner helios.graph): local; after contexts.scope
-  5. workshops.composites (owner helios.workshops): local; after graph.template
-  6. library.heads (owner helios.library): local; after workshops.composites
+helios.workspace.applied
+  1. helios.workspace.keys (owner helios.workspace): local
+  2. helios.contexts.subworkspaces (owner helios.contexts): local; after helios.workspace.keys
+  3. helios.contexts.scope (owner helios.contexts): local; after helios.contexts.subworkspaces
+  4. helios.graph.template (owner helios.graph): local; after helios.contexts.scope
+  5. helios.workshops.composites (owner helios.workshops): local; after helios.graph.template
+  6. helios.library.heads (owner helios.library): local; after helios.workshops.composites

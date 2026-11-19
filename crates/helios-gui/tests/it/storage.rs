@@ -869,21 +869,25 @@ fn a_backup_ended_says_a_card_safe_everywhere_from_one_list() {
     let events = h.state().app().handle().events_since(since);
     let ended = events
         .iter()
-        .position(|e| e.name == "backup.ended")
-        .expect("backup.ended on the journal");
+        .position(|e| e.name == "helios.backup.ended")
+        .expect("helios.backup.ended on the journal");
     let safe = events
         .iter()
-        .position(|e| e.name == "card.safe")
-        .expect("card.safe on the journal");
+        .position(|e| e.name == "helios.card.safe")
+        .expect("helios.card.safe on the journal");
     assert!(ended < safe);
     assert_eq!(
         events[ended].data["ran"],
-        json!(["storage.backups", "cards.safety"])
+        json!(["helios.storage.backups", "helios.cards.safety"])
     );
     assert_eq!(events[safe].data["cards"], json!(["EOS_DIGITAL"]));
     assert_eq!(
         events[safe].data["ran"],
-        json!(["cards.toast", "storage.cards", "health.cards"])
+        json!([
+            "helios.cards.toast",
+            "helios.storage.cards",
+            "helios.health.cards"
+        ])
     );
 
     // The import window's card rows, at their paint: the same.

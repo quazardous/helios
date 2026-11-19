@@ -1,2 +1,2 @@
-command.run
+pop.command.run
   1. helios.policy (owner helios.policy): nothing

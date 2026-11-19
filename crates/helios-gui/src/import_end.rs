@@ -40,33 +40,33 @@ use serde_json::{Value, json};
 
 /// The hook point an import's end passes through, and the journal's
 /// event once it did.
-pub const ENDED: &str = "import.ended";
+pub const ENDED: &str = "helios.import.ended";
 /// The hook point a failed import passes through, and the journal's
 /// event once it did.
-pub const FAILED: &str = "import.failed";
+pub const FAILED: &str = "helios.import.failed";
 /// The owner of the shell's listeners of [`ImportEnded`].
 pub const BUS_OWNER: &str = "helios.import";
 
 /// The import's undo step recorded.
-pub const HISTORY: &str = "library.history";
+pub const HISTORY: &str = "helios.library.history";
 /// The storage strategy's "after each import" asked of the node.
-pub const BACKUPS: &str = "backups.on-import";
+pub const BACKUPS: &str = "helios.backups.on-import";
 /// The Library filled again.
-pub const REFILL: &str = "library.refill";
+pub const REFILL: &str = "helios.library.refill";
 /// The cards the import read, short of their backups, wait for one.
-pub const CARDS: &str = "storage.cards-waiting";
+pub const CARDS: &str = "helios.storage.cards-waiting";
 /// The Duplicates panel holds every duplicate the import found.
-pub const DUPLICATES: &str = "duplicates.collect";
+pub const DUPLICATES: &str = "helios.duplicates.collect";
 /// The import's outcome in the Log panel.
-pub const LOG: &str = "log.import";
+pub const LOG: &str = "helios.log.import";
 /// The import's outcome in a toast.
-pub const TOAST: &str = "import.toast";
+pub const TOAST: &str = "helios.import.toast";
 /// The Library's import sessions read again; one the user started shown.
-pub const SESSION: &str = "library.import-session";
+pub const SESSION: &str = "helios.library.import-session";
 /// The import window's History read again.
-pub const WINDOW_HISTORY: &str = "import-window.history";
+pub const WINDOW_HISTORY: &str = "helios.import-window.history";
 /// The photos the import brought selected once the Library shows them.
-pub const SELECT: &str = "library.select-imported";
+pub const SELECT: &str = "helios.library.select-imported";
 
 /// The listeners of [`ImportEnded`], each with the one it runs after:
 /// the order they run in. The host registers [`BACKUPS`] and [`REFILL`]

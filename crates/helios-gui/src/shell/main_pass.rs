@@ -21,7 +21,7 @@ use egui_pop::api::bus::bus_contract::{
 };
 
 /// The request a window asks the main window's pass on.
-pub const PASS: &str = "window.main_pass";
+pub const PASS: &str = "helios.window.main_pass";
 /// The owner of the shell's listener.
 pub const BUS_OWNER: &str = "helios.shell";
 /// The shell's listener's id.
