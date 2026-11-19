@@ -27,14 +27,18 @@
 //!   than the workspace or Helios has offers "Update to 2"
 //!   (`macro.upgrade`).
 
-use egui_pop::core::ui::UiPop as _;
 use std::cell::RefCell;
 use std::sync::{Mutex, PoisonError};
 
 use egui::Ui;
 use egui_pop::core::areas::{self, AreaKind, AreaSpec};
+use egui_pop::core::fold::{self, TreeRow};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _, role_text};
+use egui_pop::core::widgets::{self, ToggleChip};
 use helios_core::{Graph, Message, Value};
 use helios_shell::commands::Origin;
+use helios_ui::{Action, Scroll};
 use helios_values::{Change, Set, Store, bypass_path};
 
 use crate::dialogs::{Level, Request, request};
@@ -205,6 +209,28 @@ fn macros(store: &Store) -> std::collections::BTreeMap<String, MacroRow> {
         .collect()
 }
 
+/// What a click in one of the panel's rows asks for.
+#[derive(Default)]
+struct Asked {
+    /// The row's module selected.
+    select: bool,
+    /// Its bypass toggled.
+    toggle: bool,
+    /// A command run on it, with its arguments.
+    run: Option<(&'static str, serde_json::Value)>,
+}
+
+/// The macro of `node` opened or folded as `open`, kept as the
+/// workspace has it: its tree row's state follows the workspace's, and a
+/// click on its toggle runs `macro.open` or `macro.fold`.
+fn macro_toggle(ui: &Ui, node: &str, open: bool) -> egui::Id {
+    let id = ui.make_persistent_id(("helios.modules.macro", node));
+    if fold::is_open(ui.ctx(), id) != Some(open) {
+        fold::set_open(ui.ctx(), id, open);
+    }
+    id
+}
+
 /// Draws the panel: one row per module of the viewport's network; with
 /// `workshops` on (the experimental switch), a macro without a workshop
 /// block offers "Save as workshop…" (`workshop.save`).
@@ -235,7 +261,7 @@ pub fn ui(
         )
     };
     if rows.is_empty() {
-        ui.weak(tr(match scope {
+        ui.muted(tr(match scope {
             Some(name) => Message::new(
                 "gui-modules-none-in-scope",
                 "No module of the sub-workspace { $name } in the image's network",
@@ -254,204 +280,119 @@ pub fn ui(
     let mut heading: Option<String> = None;
     let names: Vec<String> = rows.iter().map(|r| r.node.clone()).collect();
     let many_before = many.clone();
-    ui.scroll_area(
-        egui::ScrollArea::vertical()
-            .id_salt(PANEL)
-            .auto_shrink([false, true]),
-        |ui| {
-            for row in &rows {
-                // An opened macro's modules, under a heading row.
-                let inside = row
-                    .node
-                    .split_once('.')
-                    .filter(|(m, _)| macros.get(*m).is_some_and(|r| r.open))
-                    .map(|(m, _)| m.to_string());
-                if inside != heading {
-                    if let Some(m) = &inside {
-                        let version = macros.get(m).map_or(0, |r| r.version);
-                        ui.horizontal_wrapped(|ui| {
-                            if ui
-                                .small_button("⏷")
-                                .on_hover_text(tr(Message::new(
-                                    "gui-modules-fold-hint",
-                                    "Fold { $node } back into one node",
-                                )
-                                .with("node", m)))
-                                .clicked()
-                            {
-                                run = Some(("macro.fold", serde_json::json!({ "node": m })));
-                            }
-                            ui.strong_text(m);
-                            ui.weak(tr(Message::new("gui-modules-macro", "macro { $version }")
-                                .with("version", version)));
-                        });
+    // A network with macros: every row takes a toggle's room, so that the
+    // macros' rows and the others line up.
+    let tree = !macros.is_empty();
+    helios_ui::scroll(ui, PANEL, Scroll::Region, |ui| {
+        for row in &rows {
+            // An opened macro's modules, under a heading row.
+            let inside = row
+                .node
+                .split_once('.')
+                .filter(|(m, _)| macros.get(*m).is_some_and(|r| r.open))
+                .map(|(m, _)| m.to_string());
+            if inside != heading {
+                if let Some(m) = &inside {
+                    let version = macros.get(m).map_or(0, |r| r.version);
+                    let id = macro_toggle(ui, m, true);
+                    let shown = TreeRow::new(id, m.as_str()).show(ui, |ui| {
+                        ui.strong_text(m);
+                        ui.muted(tr(Message::new("gui-modules-macro", "macro { $version }")
+                            .with("version", version)));
+                    });
+                    if let Some(t) = &shown.toggle {
+                        let _ = t.clone().tip(tr(Message::new(
+                            "gui-modules-fold-hint",
+                            "Fold { $node } back into one node",
+                        )
+                        .with("node", m)));
                     }
-                    heading.clone_from(&inside);
+                    if shown.toggled {
+                        run = Some(("macro.fold", serde_json::json!({ "node": m })));
+                    }
+                    shown.keep(ui.ctx());
                 }
-                // Wrapped: a macro's buttons go under its name in a narrow
-                // panel rather than past its edge.
+                heading.clone_from(&inside);
+            }
+            let folded = macros.get(&row.node).filter(|m| !m.open);
+            let draw = |ui: &mut Ui| {
+                // Wrapped: a macro's buttons go under its name in a
+                // narrow panel rather than past its edge.
                 ui.horizontal_wrapped(|ui| {
-                    if inside.is_some() {
-                        ui.add_space(16.0);
-                    }
-                    if macros.get(&row.node).is_some_and(|r| !r.open)
-                        && ui
-                            .small_button("⏵")
-                            .on_hover_text(tr(Message::new(
-                                "gui-modules-open-hint",
-                                "Open { $node }: its modules shown",
-                            )
-                            .with("node", &row.node)))
-                            .clicked()
-                    {
-                        run = Some(("macro.open", serde_json::json!({ "node": row.node })));
-                    }
-                    let bypassed = row.bypassed == Some(true);
-                    if let Some(b) = row.bypassed {
-                        let hint = if b {
-                            Message::new(
-                                "gui-modules-restore-hint",
-                                "Bring { $node } back: the image renders it again ({ $key })",
-                            )
-                        } else {
-                            Message::new(
-                                "gui-modules-bypass-hint",
-                                "Bypass { $node }: the image renders as if it were absent, its parameters kept ({ $key })",
-                            )
-                        };
-                        let hint = tr(hint.with("node", &row.node).with("key", KEY));
-                        let r = ui
-                            .selectable_label(b, tr(Message::new("gui-modules-bypass", "Bypass")))
-                            .on_hover_text(hint);
-                        // An edit area: it bypasses the module in the
-                        // render (its hover text says so, no card).
-                        areas::register(
-                            ui,
-                            &r,
-                            AreaSpec::new(format!("module.bypass.{}", row.node), AreaKind::Edit)
-                                .path(bypass_path(&row.node)),
-                        );
-                        if r.clicked() {
-                            toggle = Some(row.node.clone());
-                        }
-                    }
-                    let mut name = egui::RichText::new(&row.node);
-                    if bypassed {
-                        name = name.strikethrough().weak();
-                    }
-                    let shown = selection.as_deref() == Some(row.node.as_str())
-                        || many.len() > 1 && many.contains(&row.node);
-                    let clicked = ui.selectable_label(shown, name);
-                    // Selecting a module moves what the other panels show.
-                    areas::register(
+                    module_row(
                         ui,
-                        &clicked,
-                        AreaSpec::navigate(format!("module.select.{}", row.node)),
-                    );
-                    if marks.changed(&row.node) {
-                        changed_mark(ui, &row.node);
-                    }
-                    if clicked.clicked() {
-                        let modifiers = ui.input(|i| i.modifiers);
-                        many = pick(&names, &many, selection.as_deref(), &row.node, modifiers);
-                        select = Some(row.node.clone());
-                    }
-                    match macros.get(&row.node) {
-                        Some(m) if !m.open => {
-                            ui.weak(tr(Message::new("gui-modules-macro", "macro { $version }")
-                                .with("version", m.version)));
-                            if let Some(newer) = m.newer
-                                && ui
-                                    .small_button(tr(Message::new(
-                                        "gui-modules-macro-update",
-                                        "Update to { $version }",
-                                    )
-                                    .with("version", newer)))
-                                    .on_hover_text(tr(Message::new(
-                                        "gui-modules-macro-update-hint",
-                                        "Move { $node } to version { $version } of its macro, its values carried by name",
-                                    )
-                                    .with("node", &row.node)
-                                    .with("version", newer)))
-                                    .clicked()
-                            {
-                                run = Some((
-                                    "macro.upgrade",
-                                    serde_json::json!({ "node": row.node, "version": newer }),
-                                ));
-                            }
-                            if ui
-                                .small_button(tr(Message::new(
-                                    "gui-modules-macro-interface",
-                                    "Interface…",
-                                )))
-                                .on_hover_text(tr(Message::new(
-                                    "gui-modules-macro-interface-hint",
-                                    "Choose the parameters { $node } shows, saved as a new version",
-                                )
-                                .with("node", &row.node)))
-                                .clicked()
-                            {
-                                run = Some((
-                                    "macro.interface",
-                                    serde_json::json!({ "node": row.node }),
-                                ));
-                            }
-                            if workshops
-                                && !m.workshop
-                                && ui
-                                    .small_button(tr(Message::new(
-                                        "gui-modules-save-workshop",
-                                        "Save as workshop…",
-                                    )))
-                                    .on_hover_text(tr(Message::new(
-                                        "gui-modules-save-workshop-hint",
-                                        "Give { $node } an intent and targets aimed per image, saved as a new version (experimental)",
-                                    )
-                                    .with("node", &row.node)))
-                                    .clicked()
-                            {
-                                run = Some((
-                                    "workshop.save",
-                                    serde_json::json!({ "node": row.node }),
-                                ));
-                            }
-                            if ui
-                                .small_button(tr(Message::new(
-                                    "gui-modules-macro-publish",
-                                    "Publish…",
-                                )))
-                                .on_hover_text(tr(Message::new(
-                                    "gui-modules-macro-publish-hint",
-                                    "Copy this version of { $node } into your library, for every workspace's Add menu; asked first, and not undone",
-                                )
-                                .with("node", &row.node)))
-                                .clicked()
-                            {
-                                run = Some((
-                                    "macro.publish",
-                                    serde_json::json!({ "node": row.node }),
-                                ));
-                            }
-                        }
-                        _ => {
-                            ui.weak(&row.module);
-                        }
-                    }
-                });
+                        row,
+                        &RowState {
+                            selected: selection.as_deref() == Some(row.node.as_str())
+                                || many.len() > 1 && many.contains(&row.node),
+                            changed: marks.changed(&row.node),
+                            folded,
+                            workshops,
+                        },
+                    )
+                })
+                .inner
+            };
+            let line = |ui: &mut Ui| -> Asked {
+                if !tree {
+                    return draw(ui);
+                }
+                // A folded macro's toggle opens it; another row only takes
+                // the toggle's room.
+                let id = if folded.is_some() {
+                    macro_toggle(ui, &row.node, false)
+                } else {
+                    ui.make_persistent_id(("helios.modules.row", &row.node))
+                };
+                let mut shown = TreeRow::new(id, row.node.as_str())
+                    .leaf(folded.is_none())
+                    .show(ui, draw);
+                let mut asked = std::mem::take(&mut shown.row.inner);
+                if let Some(t) = &shown.toggle {
+                    let _ = t.clone().tip(tr(Message::new(
+                        "gui-modules-open-hint",
+                        "Open { $node }: its modules shown",
+                    )
+                    .with("node", &row.node)));
+                }
+                if shown.toggled {
+                    asked.run = Some(("macro.open", serde_json::json!({ "node": row.node })));
+                }
+                shown.keep(ui.ctx());
+                asked
+            };
+            let asked = if inside.is_some() {
+                ui.indent(("helios.modules.inside", &row.node), line).inner
+            } else {
+                line(ui)
+            };
+            if asked.select {
+                let modifiers = ui.input(|i| i.modifiers);
+                many = pick(&names, &many, selection.as_deref(), &row.node, modifiers);
+                select = Some(row.node.clone());
             }
-            if !many.is_empty()
-                && ui
-                    .button(tr(Message::new("gui-modules-make-macro", "Make macro…")))
-                    .on_hover_text(tr(Message::new(
-                        "gui-modules-make-macro-hint",
-                        "Package the modules selected as one node (Ctrl+G in the graph)",
-                    )))
-                    .clicked()
-            {
-                run = Some(("macro.make", serde_json::json!({ "nodes": many })));
+            if asked.toggle {
+                toggle = Some(row.node.clone());
             }
-        });
+            if asked.run.is_some() {
+                run = asked.run;
+            }
+        }
+        if !many.is_empty()
+            && helios_ui::action(
+                ui,
+                Action::Secondary,
+                &tr(Message::new("gui-modules-make-macro", "Make macro…")),
+            )
+            .tip(tr(Message::new(
+                "gui-modules-make-macro-hint",
+                "Package the modules selected as one node (Ctrl+G in the graph)",
+            )))
+            .clicked()
+        {
+            run = Some(("macro.make", serde_json::json!({ "nodes": many })));
+        }
+    });
     if let Some((id, args)) = run {
         request(ui.ctx(), Request::Run(id.into(), args, Origin::User));
     }
@@ -476,6 +417,147 @@ pub fn ui(
     {
         request(ui.ctx(), Request::Notify(Level::Warning, e.into()));
     }
+}
+
+/// How a module's row is shown.
+struct RowState<'a> {
+    /// It is selected (alone, or one of several).
+    selected: bool,
+    /// Its parameters differ from their defaults.
+    changed: bool,
+    /// It is a folded macro.
+    folded: Option<&'a MacroRow>,
+    /// The experimental switch: "Save as workshop…" offered.
+    workshops: bool,
+}
+
+/// A module's row: its Bypass toggle, its name (struck through when
+/// bypassed), its changed mark, then its module, or a folded macro's
+/// version and actions.
+fn module_row(ui: &mut Ui, row: &Row, state: &RowState<'_>) -> Asked {
+    let ctx = ui.ctx().clone();
+    let tr = |m: Message| crate::i18n::text(&ctx, m);
+    let node = row.node.as_str();
+    let mut asked = Asked::default();
+    if let Some(b) = row.bypassed {
+        let hint = if b {
+            Message::new(
+                "gui-modules-restore-hint",
+                "Bring { $node } back: the image renders it again ({ $key })",
+            )
+        } else {
+            Message::new(
+                "gui-modules-bypass-hint",
+                "Bypass { $node }: the image renders as if it were absent, its parameters kept ({ $key })",
+            )
+        };
+        let hint = tr(hint.with("node", node).with("key", KEY));
+        let mut on = b;
+        let r = ui
+            .add(ToggleChip::new(
+                &mut on,
+                tr(Message::new("gui-modules-bypass", "Bypass")),
+            ))
+            .tip(hint);
+        // An edit area: it bypasses the module in the render (its hover
+        // text says so, no card).
+        areas::register(
+            ui,
+            &r,
+            AreaSpec::new(format!("module.bypass.{node}"), AreaKind::Edit).path(bypass_path(node)),
+        );
+        asked.toggle = r.clicked();
+    }
+    let clicked = if row.bypassed == Some(true) {
+        let name = role_text(ui, TextRole::Muted, node).strikethrough();
+        widgets::selectable_label(ui, state.selected, name)
+    } else {
+        widgets::selectable_label(ui, state.selected, node)
+    };
+    // Selecting a module moves what the other panels show.
+    areas::register(
+        ui,
+        &clicked,
+        AreaSpec::navigate(format!("module.select.{node}")),
+    );
+    if state.changed {
+        changed_mark(ui, node);
+    }
+    asked.select = clicked.clicked();
+    let Some(m) = state.folded else {
+        ui.muted(&row.module);
+        return asked;
+    };
+    ui.muted(tr(
+        Message::new("gui-modules-macro", "macro { $version }").with("version", m.version)
+    ));
+    if let Some(newer) = m.newer
+        && helios_ui::row_action(
+            ui,
+            Action::Secondary,
+            &tr(
+                Message::new("gui-modules-macro-update", "Update to { $version }")
+                    .with("version", newer),
+            ),
+        )
+        .tip(tr(Message::new(
+            "gui-modules-macro-update-hint",
+            "Move { $node } to version { $version } of its macro, its values carried by name",
+        )
+        .with("node", node)
+        .with("version", newer)))
+        .clicked()
+    {
+        asked.run = Some((
+            "macro.upgrade",
+            serde_json::json!({ "node": node, "version": newer }),
+        ));
+    }
+    if helios_ui::row_action(
+        ui,
+        Action::Secondary,
+        &tr(Message::new("gui-modules-macro-interface", "Interface…")),
+    )
+    .tip(tr(Message::new(
+        "gui-modules-macro-interface-hint",
+        "Choose the parameters { $node } shows, saved as a new version",
+    )
+    .with("node", node)))
+    .clicked()
+    {
+        asked.run = Some(("macro.interface", serde_json::json!({ "node": node })));
+    }
+    if state.workshops
+        && !m.workshop
+        && helios_ui::row_action(
+            ui,
+            Action::Secondary,
+            &tr(Message::new("gui-modules-save-workshop", "Save as workshop…")),
+        )
+        .tip(tr(Message::new(
+            "gui-modules-save-workshop-hint",
+            "Give { $node } an intent and targets aimed per image, saved as a new version (experimental)",
+        )
+        .with("node", node)))
+        .clicked()
+    {
+        asked.run = Some(("workshop.save", serde_json::json!({ "node": node })));
+    }
+    if helios_ui::row_action(
+        ui,
+        Action::Secondary,
+        &tr(Message::new("gui-modules-macro-publish", "Publish…")),
+    )
+    .tip(tr(Message::new(
+        "gui-modules-macro-publish-hint",
+        "Copy this version of { $node } into your library, for every workspace's Add menu; asked first, and not undone",
+    )
+    .with("node", node)))
+    .clicked()
+    {
+        asked.run = Some(("macro.publish", serde_json::json!({ "node": node })));
+    }
+    asked
 }
 
 /// The mark of a module whose parameters differ from their defaults,
