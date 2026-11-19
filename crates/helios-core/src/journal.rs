@@ -210,9 +210,10 @@ struct Shared {
     /// input is a [`Fact`], made from the fact itself.
     facts: Mutex<HashSet<&'static str>>,
     /// The typed inputs published through [`Journal::publish_any`] for a
-    /// point that is not a fact point, until the pump delivers them. Held
-    /// across the publish, so the pump never reads a fact before its
-    /// input is kept.
+    /// point that is not a fact point, while the fact bus keeps their
+    /// entry: the pump hands them on, and [`Journal::since`] reads them
+    /// back typed. Held across the publish, so the pump never reads a
+    /// fact before its input is kept.
     inputs: Mutex<BTreeMap<u64, AnyInput>>,
     /// The facts taken in from another process: never served again.
     ingested: Mutex<BTreeSet<u64>>,
@@ -409,10 +410,6 @@ impl Shared {
             return;
         }
         let input = self.input_of(e);
-        self.inputs
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&e.seq);
         let Some(input) = input else {
             log::warn!(target: "helios", "journal: fact {} `{}` has no input its point reads", e.seq, e.kind);
             return;
@@ -542,10 +539,20 @@ impl Journal for BusJournal {
             (SOURCE, payload)
         };
         let mut inputs = shared.inputs.lock().unwrap_or_else(PoisonError::into_inner);
-        let seq = shared.bus.publish_value(source, cause, point.id, payload);
+        let seq = shared
+            .bus
+            .publish_journaled(source, cause, point.id, payload);
         if fact.is_none() {
             inputs.insert(seq, input);
         }
+        // Forget what the bus no longer keeps (`missed(0)`: every
+        // number before its oldest) and the pump has handed on.
+        let delivered = *shared
+            .delivered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let first_kept = (shared.bus.missed(0) + 1).min(delivered + 1);
+        inputs.retain(|n, _| *n >= first_kept);
         Ok(seq)
     }
 

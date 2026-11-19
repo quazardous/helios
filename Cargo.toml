@@ -80,6 +80,9 @@ bus-contract = "0.3.2"
 # MIT: egui-pop's hook kernel, the bus contract's default implementation:
 # the one bus Helios's binaries build (and tests, a bus each).
 egui-pop-hooks = "0.2.1"
+# MIT OR Apache-2.0: bus-kernel's conformance suite (dev only), run on
+# the buses Helios builds to check they keep the bus contract.
+bus-kernel = { version = "0.1", features = ["conformance"] }
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
 egui-pop-model = "0.11"
