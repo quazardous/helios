@@ -1256,9 +1256,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-core"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4548bbac4ea7c0870f143d04520ad14f0a40250bc803aa9b9bcd953cbdda9f05"
+checksum = "80b9ed757c95ecf716a1508e14fd2042ca944ca5321541374a194a948d03719b"
 dependencies = [
  "egui",
  "egui-pop-model",
