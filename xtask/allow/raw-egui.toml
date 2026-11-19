@@ -14,7 +14,6 @@
 "library/versions.rs" = 3
 "log_panel.rs" = 5
 "mask_tree.rs" = 18
-"modules.rs" = 24
 "params.rs" = 26
 "plugins.rs" = 2
 "pointer_choice.rs" = 5
