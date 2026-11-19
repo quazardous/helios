@@ -4995,13 +4995,26 @@ impl Library {
             // the zoom by the count per row its size shows there.
             let width = ui.available_width() - ui.spacing().scroll.allocated_width();
             let gap = egui_pop::core::theme::Tokens::of(ui.ctx()).space.s;
-            let out = grid.show(ui, &mut self.view.state, &items, &thumbs);
+            let before = self.view.state.zoom();
+            let mut out = grid.show(ui, &mut self.view.state, &items, &thumbs);
             self.view.shown_per_row = match self.view.state.zoom() {
                 grid::Zoom::Points(p) => grid::Zoom::from_points(p, width, gap)
                     .per_row()
                     .map(|n| n.min(grid::Zoom::most_per_row(width, gap))),
                 grid::Zoom::PerRow(n) => Some(n),
             };
+            // A count per row the grid turned into the size that shows it
+            // (the default zoom, an older workspace's) is no zoom of the
+            // user's: the same thumbnails show, so it is not kept as a
+            // workspace edit, which would be an undo step nobody made.
+            if let grid::Zoom::PerRow(n) = before
+                && matches!(self.view.state.zoom(), grid::Zoom::Points(_))
+                && self.view.shown_per_row
+                    == Some(n.max(1).min(grid::Zoom::most_per_row(width, gap)))
+            {
+                out.signals
+                    .retain(|s| !matches!(s, grid::Signal::ZoomSize { .. }));
+            }
             (out.response, out.signals)
         };
         let out = Drawn {

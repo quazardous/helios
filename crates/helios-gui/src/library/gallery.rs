@@ -399,8 +399,8 @@ impl Gallery {
     /// points (the default count's size at the view's width when it says
     /// nothing). An older workspace's count per row is handed to the
     /// grid, whose next pass turns it into the size it gave at the view's
-    /// width and signals it, so the workspace keeps the size from then
-    /// on.
+    /// width; the same thumbnails show, so the workspace is not edited
+    /// (an undo step nobody made) until the user zooms.
     pub fn set_results(&mut self, results: &ResultsDesc) {
         self.mode = results.mode;
         if self.columns != results.columns {
