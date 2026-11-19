@@ -184,6 +184,9 @@ pub const BACKUPS: &str = "helios.backups.on-connect";
 pub const HEALTH: &str = "helios.health.recheck";
 /// The image map's job reads the volume plugged in.
 pub const MAP: &str = "helios.map.plugged";
+/// The desktop's read kernel: the values the volumes make out of date
+/// (the Storage page's) are read again, after the scan set the locations.
+pub const READS: &str = "helios.reads";
 
 /// The listeners of [`VolumeMounted`], each with where it runs: the order
 /// they run in.
@@ -193,6 +196,7 @@ pub const MOUNTED_ORDER: &[(&str, Place)] = &[
     (BACKUPS, Place::After(SCAN)),
     (HEALTH, Place::After(SCAN)),
     (MAP, Place::After(SCAN)),
+    (READS, Place::After(SCAN)),
 ];
 
 /// The listeners of [`VolumeUnmounted`], in order.
@@ -200,6 +204,7 @@ pub const UNMOUNTED_ORDER: &[(&str, Place)] = &[
     (CARDS, Place::Before(SCAN)),
     (SCAN, Place::Free),
     (HEALTH, Place::After(SCAN)),
+    (READS, Place::After(SCAN)),
 ];
 
 /// Where a listener runs among its point's.

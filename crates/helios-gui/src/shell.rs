@@ -8068,13 +8068,6 @@ impl Shell {
         &self.core.node_events
     }
 
-    /// Follows the desktop's own node, in process, on its bus: the
-    /// events listeners ask for reach them as a remote node's do, from
-    /// node `local`.
-    pub fn follow_local_node(&self, bus: &Arc<Bus>) {
-        self.core.node_events.follow_local(bus);
-    }
-
     /// Drops the link to a followed node, as a network failure would: it
     /// is followed again at the relay's next attempt. Whether the node is
     /// followed.

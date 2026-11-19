@@ -4,9 +4,9 @@
 //! Every node runs one bus for its whole process. The desktop follows
 //! each node it is connected to through **one relay**: a remote node's
 //! [`crate::relay::Relay`] (one `events.subscribe` on its inspect
-//! endpoint, all kinds, resumed from the last sequence number), the
-//! desktop's own in-process node through a [`LocalRelay`]. A node's facts
-//! reach the listeners of [`NodeEvents`] by one of two paths, never both:
+//! endpoint, all kinds, resumed from the last sequence number). A remote
+//! node's facts reach the listeners of [`NodeEvents`] by one of two
+//! paths, never both:
 //!
 //! - **Relayable kinds** (`FactDecl::relayable`: the decisions, the
 //!   library's imports, a settings layer changed, an export written),
@@ -21,6 +21,12 @@
 //!   with source `node:<name>` and the node's own envelope in the payload
 //!   (`{"node", "event"}`), as the shell's record, and hands them to the
 //!   listeners.
+//!
+//! The desktop's own node runs in process on the desktop's fact bus,
+//! which is the application bus's journal: its facts are the journaled
+//! points' facts, heard by named listeners of the application bus like
+//! any other ([`NodeEvents::listen_local`], or the volume points' own
+//! listeners), with no second copy.
 //!
 //! Windows, panels and services never subscribe to a node themselves:
 //! they ask [`NodeEvents::listen`], under an id of their own, for the
@@ -41,12 +47,9 @@
 //!   promise or job id where the node puts one, so a window tells the
 //!   change it asked for from another client's.
 //! - **What is not relayed.** A node's `job.*` events go through the jobs
-//!   relay only (ids `node:<name>/<id>`, the jobs centre). The desktop's
-//!   own vault and viewport events stay on their buses (process-local,
-//!   high rate): a [`LocalRelay`] never forwards [`INTERNAL`] kinds.
+//!   relay only (ids `node:<name>/<id>`, the jobs centre).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -60,9 +63,6 @@ pub const SOURCE: &str = "node:";
 /// Said to every listener when a node's events cannot be followed on
 /// without a hole: read the state again (`reason` in the payload).
 pub const RESYNC: &str = "node.resync";
-/// The kinds an in-process node keeps to its own bus: its vault's
-/// (read by `Persist`) and its engine's.
-pub const INTERNAL: [&str; 3] = ["vault.", "edit.", "engine."];
 /// The kinds the jobs relay carries, never relayed here.
 const JOBS: &str = "job.";
 /// The id of [`NodeEvents`]' listener on each relayable fact point.
@@ -97,8 +97,9 @@ pub struct NodeEvents {
     relayed: Arc<Mutex<BTreeSet<&'static str>>>,
     /// Wakes the window once a listener has something to read.
     wake: Arc<Mutex<Option<Wake>>>,
-    /// The desktop's own node, followed in process (one relay per bus).
-    local: Arc<Mutex<Vec<LocalRelay>>>,
+    /// The fact bus's number of the desktop's own node's last fact
+    /// recorded on the shell bus ([`NodeEvents::record_local`]).
+    recorded: Arc<Mutex<u64>>,
 }
 
 impl NodeEvents {
@@ -109,7 +110,7 @@ impl NodeEvents {
             listening: Arc::default(),
             relayed: Arc::default(),
             wake: Arc::default(),
-            local: Arc::default(),
+            recorded: Arc::default(),
         }
     }
 
@@ -274,19 +275,7 @@ impl NodeEvents {
         let Some(node) = fact.source.strip_prefix(crate::relay::RELAYED) else {
             return;
         };
-        let event = NodeEvent {
-            node: node.to_string(),
-            event: Envelope {
-                seq: fact.seq,
-                mono_us: 0,
-                wall_ms: now_ms(),
-                source: fact.source.clone(),
-                cause: fact.cause,
-                kind: intern(&fact.kind),
-                payload: fact.payload.clone(),
-            },
-        };
-        self.deliver(&event);
+        self.deliver(&NodeEvent::of_fact(node, fact));
     }
 
     /// Hands `event` to each listener that wants it (a [`RESYNC`] to
@@ -317,14 +306,86 @@ impl NodeEvents {
         }
     }
 
-    /// Follows the desktop's own node, in process, on its bus `bus`
-    /// (`local`). A bus followed already is followed once.
-    pub fn follow_local(&self, bus: &Arc<Bus>) {
-        let mut local = self.local.lock().unwrap_or_else(PoisonError::into_inner);
-        if local.iter().any(|l| Arc::ptr_eq(&l.bus, bus)) {
-            return;
+    /// Wakes the window, as a listener with something to read does.
+    pub fn wake_window(&self) {
+        let wake = self
+            .wake
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(wake) = wake {
+            wake();
         }
-        local.extend(LocalRelay::start(LOCAL, bus.clone(), self.clone()));
+    }
+
+    /// Records a fact of the desktop's own node on the shell bus, once
+    /// however many listeners hear it, as a remote node's event stream
+    /// records its: agents `wait` on the shell bus's journal, and see the
+    /// node's facts there until it is the application bus's journal.
+    fn record_local(&self, fact: &Fact) {
+        {
+            let mut last = self.recorded.lock().unwrap_or_else(PoisonError::into_inner);
+            if fact.seq <= *last {
+                return;
+            }
+            *last = fact.seq;
+        }
+        let event = NodeEvent::of_fact(LOCAL, fact);
+        let Ok(envelope) = serde_json::to_value(&event.event) else {
+            return;
+        };
+        self.bus.republish_value(
+            &format!("{SOURCE}{LOCAL}"),
+            None,
+            event.event.kind,
+            json!({ "node": LOCAL, "event": envelope }),
+        );
+    }
+
+    /// Hears the facts the desktop's own node publishes in process, as
+    /// listener `id` (owned by `owner`) of `app`'s journaled fact points
+    /// (those of `tables`) whose kind matches one of `patterns`: each is
+    /// handed to `heard` as node [`LOCAL`]'s event, on the thread that
+    /// runs the point's pass, then the window is woken; it is recorded
+    /// on the shell bus once ([`NodeEvents::record_local`]). A fact a node's
+    /// relay took in (source `relayed:<name>`) is left to
+    /// [`NodeEvents::attach`]'s listener, so each fact comes once. What
+    /// the bus refused, as text.
+    pub fn listen_local<'a>(
+        &self,
+        app: &dyn bus_contract::Bus,
+        id: &str,
+        owner: &str,
+        patterns: &[&str],
+        tables: impl IntoIterator<Item = &'a [FactDecl]>,
+        heard: impl Fn(NodeEvent) + Send + Sync + 'static,
+    ) -> Vec<String> {
+        let heard = Arc::new(heard);
+        let mut refused = Vec::new();
+        for point in tables
+            .into_iter()
+            .flatten()
+            .filter_map(|d| d.point)
+            .filter(|p| patterns.iter().any(|pattern| matches(pattern, p.id)))
+        {
+            let (me, heard) = (self.clone(), heard.clone());
+            let run: bus_contract::AnyListener = Arc::new(move |input, _| {
+                if let Some(fact) = input.downcast_ref::<Fact>()
+                    && !fact.source.starts_with(crate::relay::RELAYED)
+                {
+                    me.record_local(fact);
+                    heard(NodeEvent::of_fact(LOCAL, fact));
+                    me.wake_window();
+                }
+                Ok(())
+            });
+            app.unlisten(point.id, id);
+            let opts = ListenOpts::new().owner(owner);
+            if let Err(e) = app.listen_any(point.key(), id.to_string(), opts, run) {
+                refused.push(format!("{}: {e}", point.id));
+            }
+        }
+        refused
     }
 }
 
@@ -381,6 +442,22 @@ pub struct NodeEvent {
 }
 
 impl NodeEvent {
+    /// Node `node`'s fact, as a point's listener hears it.
+    pub fn of_fact(node: &str, fact: &Fact) -> NodeEvent {
+        NodeEvent {
+            node: node.to_string(),
+            event: Envelope {
+                seq: fact.seq,
+                mono_us: 0,
+                wall_ms: now_ms(),
+                source: fact.source.clone(),
+                cause: fact.cause,
+                kind: intern(&fact.kind),
+                payload: fact.payload.clone(),
+            },
+        }
+    }
+
     /// Node `node`'s event of kind `kind`, from its envelope as JSON.
     fn of_value(node: &str, kind: &'static str, e: &Value) -> NodeEvent {
         NodeEvent {
@@ -422,6 +499,24 @@ impl Drop for Listener {
 }
 
 impl Listener {
+    /// Hands an event to this listener, as the table does: what a
+    /// listener of the application bus's points ([`NodeEvents::listen_local`])
+    /// gives it. Nothing once the listener is dropped.
+    pub fn hand(&self) -> impl Fn(NodeEvent) + Send + Sync + 'static {
+        let tx = self
+            .listening
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .by_number
+            .get(&self.number)
+            .map(|e| e.tx.clone());
+        move |event| {
+            if let Some(tx) = &tx {
+                let _ = tx.send(event);
+            }
+        }
+    }
+
     /// The events heard so far, without waiting.
     pub fn try_iter(&self) -> impl Iterator<Item = NodeEvent> + '_ {
         self.rx.try_iter()
@@ -435,58 +530,6 @@ impl Listener {
     /// The next event, waiting at most `timeout`.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<NodeEvent, RecvTimeoutError> {
         self.rx.recv_timeout(timeout)
-    }
-}
-
-/// How often a [`LocalRelay`]'s thread looks whether it should stop.
-const STOP_POLL: Duration = Duration::from_millis(200);
-
-/// Follows a node running in the desktop's process, on its bus: the
-/// events listeners want, [`INTERNAL`] ones left out. In process nothing
-/// is missed (the bus's channel keeps every event), so it never resyncs.
-/// Dropped, it stops.
-pub struct LocalRelay {
-    bus: Arc<Bus>,
-    stop: Arc<AtomicBool>,
-}
-
-impl LocalRelay {
-    fn start(name: &str, bus: Arc<Bus>, events: NodeEvents) -> Option<LocalRelay> {
-        // Subscribed here, before it returns: nothing published after is
-        // missed.
-        let rx = bus.subscribe();
-        let stop = Arc::new(AtomicBool::new(false));
-        let stopped = stop.clone();
-        let node = name.to_string();
-        let spawned = std::thread::Builder::new()
-            .name(format!("helios-node-events-{name}"))
-            .spawn(move || {
-                while !stopped.load(Ordering::Relaxed) {
-                    match rx.recv_timeout(STOP_POLL) {
-                        Ok(e) if INTERNAL.iter().any(|p| e.kind.starts_with(p)) => {}
-                        Ok(e) if events.wants(e.kind) => {
-                            if let Ok(event) = serde_json::to_value(&e) {
-                                events.publish(&node, &event);
-                            }
-                        }
-                        Ok(_) | Err(RecvTimeoutError::Timeout) => {}
-                        Err(RecvTimeoutError::Disconnected) => return,
-                    }
-                }
-            });
-        match spawned {
-            Ok(_) => Some(LocalRelay { bus, stop }),
-            Err(e) => {
-                log::warn!(target: "helios", "node `{name}`: its events are not followed: {e}");
-                None
-            }
-        }
-    }
-}
-
-impl Drop for LocalRelay {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
     }
 }
 
@@ -546,20 +589,5 @@ mod tests {
         assert!(!matches("volume.*", "volumes.x"));
         assert!(matches("settings.layerChanged", "settings.layerChanged"));
         assert!(!matches("settings.layer", "settings.layerChanged"));
-    }
-
-    #[test]
-    fn a_local_node_s_internal_events_stay_home() {
-        let shell = Arc::new(Bus::new());
-        let node = Arc::new(Bus::new());
-        let events = NodeEvents::new(shell);
-        let heard = events.listen("test", &["vault.*", "volume.*"]);
-        events.follow_local(&node);
-        node.publish_value("vault", None, "vault.field_changed", json!({}));
-        let seq = node.publish_value("watch", None, "volume.mounted", json!({ "id": "a" }));
-        let e = heard.recv_timeout(Duration::from_secs(10)).unwrap();
-        assert_eq!(e.node, LOCAL);
-        assert_eq!(e.event.kind, "volume.mounted");
-        assert_eq!(e.event.seq, seq);
     }
 }

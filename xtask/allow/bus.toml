@@ -11,9 +11,5 @@ path = "crates/helios-gui/src/host.rs"
 reason = "the window's waker: any fact on the shell bus that the interface did not publish asks for a frame; it reads no fact, it wakes"
 
 [[allow]]
-path = "crates/helios-gui/src/node_events.rs"
-reason = "LocalRelay: the desktop's in-process node, followed on its own bus for the node listener table, whose listeners ask for kinds by prefix (storage.*, library.*, volume.*, cache.*): most of them JSON with no type, volume.* with typed points of their own crate, none a fact point to listen on"
-
-[[allow]]
 path = "crates/helios-gui/src/persist.rs"
 reason = "the vault's events, process-local and high rate: the read cache hears them on its own thread so no read shows a value older than a change announced, and the frame applies them in order"

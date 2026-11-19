@@ -147,13 +147,21 @@ fn a_card_plugged_in_with_the_import_window_closed_is_seen_by_the_node() {
             .iter()
             .any(|c| matches!(c, Change::Unmounted(u) if u.id == volume.id && u.mount == root))
     );
-    // Heard on Helios's bus by the cards and the health check.
+    // Heard on Helios's bus by the Storage reads, the cards and the
+    // health check.
     let heard = watch.heard();
     let gone = heard
         .iter()
         .find(|h| h.point == "volume.unmounted" && h.id == volume.id)
         .expect("volume.unmounted passed");
-    assert_eq!(gone.ran, [node_volumes::CARDS, node_volumes::HEALTH]);
+    assert_eq!(
+        gone.ran,
+        [
+            node_volumes::READS,
+            node_volumes::CARDS,
+            node_volumes::HEALTH
+        ]
+    );
     drop(h);
     node.stop();
     let _ = std::fs::remove_dir_all(&dir);

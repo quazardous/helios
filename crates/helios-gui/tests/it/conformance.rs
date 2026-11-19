@@ -23,16 +23,24 @@ thread_local! {
 }
 
 /// A fresh application bus as the desktop builds it (`journaled_bus` in
-/// `main`), with a shell built on it.
-fn desktop_bus() -> Arc<dyn bus_contract::Bus> {
+/// `main`), and the fact bus that is its journal: the one the desktop's
+/// own node publishes on.
+pub fn journaled() -> (Arc<dyn bus_contract::Bus>, Arc<helios_core::Bus>) {
     let facts = helios_gui::bus();
     let (kernel, journal) = BusJournal::attach(
-        facts,
+        facts.clone(),
         |j| Kernel::new().with_journal(j.clone()).with_relay(j),
         Kernel::declaration,
     );
     let refused = journal.declare(&*kernel, helios_gui::FACTS.iter().copied());
     assert!(refused.is_empty(), "{refused:?}");
+    (kernel, facts)
+}
+
+/// A fresh application bus as the desktop builds it, with a shell built
+/// on it.
+fn desktop_bus() -> Arc<dyn bus_contract::Bus> {
+    let (kernel, _) = journaled();
     let shell = Shell::builder(helios_panels(), None)
         .bus(kernel.clone())
         .build();

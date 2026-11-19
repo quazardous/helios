@@ -30,6 +30,7 @@ use helios_shell::commands::{Origin, Registry};
 use serde_json::Value;
 
 use super::Shell;
+use crate::node_events::NodeEvent;
 
 /// The reads the kernel serves: each command, how long its value stays
 /// fresh (`None`: until an event), and the events that make it out of
@@ -108,6 +109,38 @@ pub fn kernel(registry: Arc<Mutex<Registry>>) -> Arc<ReadKernel> {
 /// The node facts the reads listen to.
 pub const LISTENS: &[&str] = &["storage.*", "library.*", "volume.*", "cache.*"];
 
+/// The reads' listener on the application bus's points, for the
+/// desktop's own node's facts.
+pub const READS: &str = crate::node_volumes::READS;
+
+/// A volume come or gone, as node `local`'s event.
+fn volume_event(change: &crate::node_volumes::Change) -> NodeEvent {
+    use crate::node_volumes::{Change, SOURCE};
+    use helios_core::Event;
+    let (kind, payload) = match change {
+        Change::Mounted(m) => (
+            crate::node_volumes::Mounted::KIND,
+            serde_json::to_value(m).unwrap_or_default(),
+        ),
+        Change::Unmounted(u) => (
+            crate::node_volumes::Unmounted::KIND,
+            serde_json::to_value(u).unwrap_or_default(),
+        ),
+    };
+    NodeEvent {
+        node: crate::node_events::LOCAL.to_string(),
+        event: helios_core::Envelope {
+            seq: 0,
+            mono_us: 0,
+            wall_ms: 0,
+            source: SOURCE.to_string(),
+            cause: None,
+            kind,
+            payload,
+        },
+    }
+}
+
 /// The fact the shell gives the kernel when the storage link read
 /// something new (a disk came or went, a scan, an edit saved).
 pub const VOLUMES_CHANGED: &str = "storage.volumes.changed";
@@ -122,7 +155,32 @@ impl Shell {
             admin.attach_reads(kernel(self.core.registry.clone()));
         }
         if self.core.storage.reads.is_none() {
-            self.core.storage.reads = Some(self.core.node_events.listen("reads", LISTENS));
+            // A remote node's facts come through the node listener table;
+            // the desktop's own node's are the application bus's, heard
+            // by the same listener as `helios.reads`.
+            let listener = self.core.node_events.listen("reads", LISTENS);
+            let bus = self.core.app.handle().bus();
+            let refused = self.core.node_events.listen_local(
+                &*bus,
+                READS,
+                "helios.reads",
+                LISTENS,
+                crate::FACTS.iter().copied(),
+                listener.hand(),
+            );
+            for e in refused {
+                log::error!(target: "helios", "{READS}: {e}");
+            }
+            let (hand, events) = (listener.hand(), self.core.node_events.clone());
+            let listened =
+                crate::node_volumes::listen_both(&*bus, READS, "helios.reads", move |change| {
+                    hand(volume_event(change));
+                    events.wake_window();
+                });
+            if let Err(e) = listened {
+                log::error!(target: "helios", "{READS}: {e}");
+            }
+            self.core.storage.reads = Some(listener);
         }
     }
 

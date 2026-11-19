@@ -16,6 +16,9 @@ use egui_kittest::kittest::Queryable;
 use helios_gui::node_volumes::VolumeWatch;
 use helios_gui::shell::{IMPORT_SOURCES, ImportTrigger};
 use helios_gui::{Shell, headless, helios_panels};
+
+/// The desktop's application bus.
+type AppBus = Arc<dyn egui_pop::api::bus::bus_contract::Bus>;
 use helios_shell::commands::Origin;
 use helios_storage::{Card, Volume, Volumes};
 use helios_vault::{MemoryStore, Vault};
@@ -56,11 +59,14 @@ impl Volumes for Slot {
     }
 }
 
-/// A node over a vault in `dir`, its bus and its settings.
-fn node_in(dir: &Path) -> (Node, Arc<helios_core::Bus>, Kept) {
+/// A node over a vault in `dir`, the application bus whose journal it
+/// publishes on, and its settings.
+fn node_in(dir: &Path) -> (Node, AppBus, Kept) {
     let store = helios_vault_sqlite::SqliteStore::open(&dir.join("vault.db")).unwrap();
-    let bus = Arc::new(helios_core::Bus::new());
-    let node = Node::open(store, bus.clone(), Duration::from_hours(1));
+    // The desktop's own node: on the fact bus that is the application
+    // bus's journal, as `main` opens it.
+    let (bus, facts) = super::conformance::journaled();
+    let node = Node::open(store, facts, Duration::from_hours(1));
     let kept = node.settings();
     (node, bus, kept)
 }
@@ -68,19 +74,17 @@ fn node_in(dir: &Path) -> (Node, Arc<helios_core::Bus>, Kept) {
 /// A shell keeping its import sources through the node, following its
 /// changes, set up by `setup` first; folders rescanned every 50 ms and
 /// a file settled after 300 ms.
-fn shell_on(
-    kept: &Kept,
-    bus: &Arc<helios_core::Bus>,
-    setup: impl FnOnce(&mut Shell),
-) -> Harness<'static, Shell> {
+fn shell_on(kept: &Kept, bus: &AppBus, setup: impl FnOnce(&mut Shell)) -> Harness<'static, Shell> {
     let (read, write, again) = (kept.clone(), kept.clone(), kept.clone());
-    let mut shell = Shell::new(helios_panels(), None);
+    let mut shell = Shell::builder(helios_panels(), None)
+        .bus(bus.clone())
+        .build();
     shell.set_automatic_import_timing(Duration::from_millis(50), Duration::from_millis(300));
     shell.keep_import_sources_with(
         Box::new(move || read.read(IMPORT_SOURCES)),
         Box::new(move |text| write.write(IMPORT_SOURCES, text)),
     );
-    shell.follow_import_sources(bus, move || again.read(IMPORT_SOURCES));
+    shell.follow_import_sources(move || again.read(IMPORT_SOURCES));
     setup(&mut shell);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     h.run();

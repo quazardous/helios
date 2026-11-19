@@ -283,9 +283,10 @@ pub(crate) struct ImportWindow {
     /// The node's volume watch the cards come from
     /// ([`Shell::follow_volumes`]).
     volumes: Option<VolumeWatch>,
-    /// Its events (`volume.*` from the desktop's node, through the shell
-    /// bus), read at each frame of the main window.
-    volume_events: Option<crate::node_events::Listener>,
+    /// Its events (`volume.*` from the desktop's node), as the
+    /// application bus's listener [`node_volumes::CARDS`] heard them,
+    /// read at each frame of the main window.
+    volume_events: Option<std::sync::mpsc::Receiver<Change>>,
     /// Cards plugged in since the watch's first look, not toasted yet.
     inserted: Vec<Card>,
     /// The context the automatic imports' folder watch asks a frame of.
@@ -636,11 +637,7 @@ impl ImportWindow {
             return;
         };
         let mut mounted = self.sources.mounted.clone();
-        for change in events
-            .try_iter()
-            .filter(|e| e.node == crate::node_events::LOCAL)
-            .filter_map(|e| Change::of(&e.event))
-        {
+        for change in events.try_iter() {
             let Some(card) = change.card() else { continue };
             self.cards.retain(|c| c.root != card.root);
             mounted.retain(|m| m.root != card.root);
@@ -926,15 +923,27 @@ impl Shell {
     /// reads the watch's events off the bus at each frame; the watch asks
     /// a frame of the windows when a volume comes or goes.
     pub fn follow_volumes(&mut self, watch: VolumeWatch) {
-        // Its events reach the window as every node's do: relayed on the
-        // shell bus, listened to by kind.
-        self.follow_local_node(watch.bus());
-        let listener = self.node_events().listen("import-window", &["volume.*"]);
+        // A volume came or went: the main window's toasts and the import
+        // window's list hear it as the application bus's listener
+        // `import.cards`, woken at once (before the scan) by the window's
+        // news, said from the watch's thread. Listened to before the list
+        // is read: a card in both is listed once (by its root).
+        let (tx, rx) = std::sync::mpsc::channel();
         let mut w = self.import.get_mut();
         let wake = w.waker();
-        // Subscribed before the list is read: a card in both is listed
-        // once (by its root).
-        w.volume_events = Some(listener);
+        let listened = node_volumes::listen_both(
+            &**watch.hooks(),
+            node_volumes::CARDS,
+            "helios.import",
+            move |change| {
+                let _ = tx.send(change.clone());
+                wake();
+            },
+        );
+        if let Err(e) = listened {
+            log::error!(target: "helios", "{}: {e}", node_volumes::CARDS);
+        }
+        w.volume_events = Some(rx);
         w.cards = watch.cards();
         let mounted = watch
             .mounted()
@@ -952,18 +961,6 @@ impl Shell {
             w.save();
         }
         w.sources.see_cards(mounted);
-        // A volume came or went: the main window's toasts and the import
-        // window's list, woken at once (before the scan) by the window's
-        // news, said from the watch's thread.
-        let listened = node_volumes::listen_both(
-            &**watch.hooks(),
-            node_volumes::CARDS,
-            "helios.import",
-            move |_| wake(),
-        );
-        if let Err(e) = listened {
-            log::error!(target: "helios", "{}: {e}", node_volumes::CARDS);
-        }
         w.volumes = Some(watch);
     }
 

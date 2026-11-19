@@ -12,6 +12,9 @@ use egui::vec2;
 use egui_kittest::Harness;
 use helios_gui::shell::{IMPORT_SOURCES, ImportTrigger};
 use helios_gui::{Shell, headless, helios_panels};
+
+/// The desktop's application bus.
+type AppBus = Arc<dyn egui_pop::api::bus::bus_contract::Bus>;
 use helios_library::import_profile::{Apply, Filter, Kind};
 use helios_shell::commands::Origin;
 use helios_vault::{MemoryStore, Vault};
@@ -35,10 +38,12 @@ fn jpeg(name: &str) -> PathBuf {
         .join(format!("{name}.jpg"))
 }
 
-fn node_in(dir: &Path) -> (Node, Arc<helios_core::Bus>, Kept) {
+fn node_in(dir: &Path) -> (Node, AppBus, Kept) {
     let store = helios_vault_sqlite::SqliteStore::open(&dir.join("vault.db")).unwrap();
-    let bus = Arc::new(helios_core::Bus::new());
-    let node = Node::open(store, bus.clone(), Duration::from_hours(1));
+    // The desktop's own node: on the fact bus that is the application
+    // bus's journal, as `main` opens it.
+    let (bus, facts) = super::conformance::journaled();
+    let node = Node::open(store, facts, Duration::from_hours(1));
     let kept = node.settings();
     (node, bus, kept)
 }
@@ -109,13 +114,15 @@ fn a_named_filter_and_tags_on_a_saved_source_shape_its_automatic_import_and_its_
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     let ended = Arc::new(Mutex::new(Vec::new()));
     let (read, write, again) = (kept.clone(), kept.clone(), kept.clone());
-    let mut shell = Shell::new(helios_panels(), None);
+    let mut shell = Shell::builder(helios_panels(), None)
+        .bus(bus.clone())
+        .build();
     shell.set_automatic_import_timing(Duration::from_millis(50), Duration::from_millis(300));
     shell.keep_import_sources_with(
         Box::new(move || read.read(IMPORT_SOURCES)),
         Box::new(move |text| write.write(IMPORT_SOURCES, text)),
     );
-    shell.follow_import_sources(&bus, move || again.read(IMPORT_SOURCES));
+    shell.follow_import_sources(move || again.read(IMPORT_SOURCES));
     shell.remember_import_choices_in(dir.join("library/import-choices.json"));
     host_import(&mut shell, &vault, &ended);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
