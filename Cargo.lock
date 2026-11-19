@@ -2521,6 +2521,7 @@ version = "0.92.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "bus-kernel",
  "chrono",
  "eframe",
  "egui",

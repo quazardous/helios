@@ -139,6 +139,8 @@ winresource = "0.1"
 
 [dev-dependencies]
 egui-pop-test.workspace = true
+# bus-kernel's conformance suite, run on the desktop's application bus.
+bus-kernel.workspace = true
 # The import window's snapshots (tests/snapshots, thresholds in the
 # workspace's kittest.toml).
 egui_kittest = { version = "0.37", features = ["snapshot"] }
