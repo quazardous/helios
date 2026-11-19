@@ -8,6 +8,13 @@ name: windows-tests
 #
 # Nothing waits on this workflow: promote.yml follows `ci` only, and no
 # release step reads it.
+#
+# A scheduled run tests a `next` it has not tested yet, or nothing: the
+# `gate` job (seconds, no checkout, no toolchain) looks for a cache entry
+# `windows-tests-tested-<sha>` for next's head, which the `mark` job saves
+# once `test` has run on that commit. Found: `test` is skipped and the run is
+# not red. A manual run always tests. Any doubt (API error, cache
+# service down, entry evicted after 7 unused days) runs the tests.
 on:
   # Scheduled runs use the default branch's copy of this file; the job
   # checks out `next` itself.
@@ -28,8 +35,52 @@ permissions:
   contents: read
 
 jobs:
+  gate:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      sha: ${{ steps.next.outputs.sha }}
+    steps:
+      - name: next's head
+        id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/next" --jq .sha) || sha=
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: was it tested?
+        id: tested
+        if: steps.next.outputs.sha != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: tested-sha
+          key: windows-tests-tested-${{ steps.next.outputs.sha }}
+          lookup-only: true
+      - name: decide
+        id: decide
+        env:
+          SHA: ${{ steps.next.outputs.sha }}
+          HIT: ${{ steps.tested.outputs.cache-hit }}
+        run: |
+          if [ -n "$SHA" ] && [ "$HIT" = true ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "skipped: next unchanged since $SHA" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -z "$SHA" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "run: next's head unknown (API error), testing anyway" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "run: next at $SHA not tested yet" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # No GPU on the runner: the GPU tests run on WARP (DX12 in software).
   test:
+    needs: gate
+    # Runs unless the gate said no: a manual run skips the gate, and a
+    # failed gate has no output, so it fails open.
+    if: ${{ !cancelled() && needs.gate.outputs.run != 'false' }}
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
@@ -38,7 +89,8 @@ jobs:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || 'next' }}
+          # The commit the gate looked at, so the one marked as tested.
+          ref: ${{ inputs.ref || needs.gate.outputs.sha || 'next' }}
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
         with:
@@ -52,3 +104,22 @@ jobs:
       # docs/windows-port.md, "Where it stands"); `--no-fail-fast` runs them
       # all, so one run shows everything that fails.
       - run: cargo test --locked --workspace --no-fail-fast
+
+  # A scheduled run marks the commit it tested, pass or fail: the next night
+  # skips it unless `next` moved. A cache entry is the cheapest record the
+  # gate can read (a scheduled run's own `headSha` is main's, not the
+  # tested next's). Saved from Linux, as the gate reads it: a cache entry
+  # is tied to the OS that saved it.
+  mark:
+    needs: [gate, test]
+    if: ${{ !cancelled() && needs.gate.outputs.sha != '' && (needs.test.result == 'success' || needs.test.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "$SHA" > tested-sha
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+      - uses: actions/cache/save@v4
+        with:
+          path: tested-sha
+          key: windows-tests-tested-${{ needs.gate.outputs.sha }}

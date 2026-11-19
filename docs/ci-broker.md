@@ -217,6 +217,15 @@ Helios map lives in `xtask/src/ci_select.rs`.
 `.github/workflows/ci-history.yml` runs at 03:45 UTC, and also on manual
 dispatch.
 
+0. A scheduled run first asks its `gate` job, which takes seconds (no
+   checkout, no toolchain), whether there is anything to ingest. It reads
+   `last_run` in the branch's `summary.json` (GitHub's contents API), then
+   looks among the completed ci.yml push runs on `next` of the last two
+   days for one newer than it that uploaded `junit`. None: the `ingest`
+   job is skipped, the run stays green and its summary says
+   `skipped: no run on next to ingest since run <id>`. No branch yet, no
+   `last_run`, or any API error: it ingests (the gate fails open). A manual
+   run always ingests.
 1. It lists the completed ci.yml push runs on `next` from the last two days,
    oldest first.
 2. For each run, it downloads the `junit` artifact that ci.yml's `test` job

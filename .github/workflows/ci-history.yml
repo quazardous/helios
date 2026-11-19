@@ -16,6 +16,12 @@ name: ci-history
 # - Scheduled runs use the default branch's copy of this file: the nightly
 #   run starts only once this file reaches `main` through promotion. The
 #   job checks out `next` itself, for the newest xtask.
+# - A scheduled run ingests only when there is something to ingest: the
+#   `gate` job (seconds, no checkout, no toolchain) reads `last_run` in the
+#   branch's summary.json and looks for a completed ci.yml push run on
+#   `next` newer than it that uploaded `junit`. None: `ingest` is skipped
+#   and the run is not red. No branch yet, or any API error: it ingests.
+#   A manual run always ingests.
 on:
   schedule:
     - cron: "45 3 * * *"
@@ -35,7 +41,48 @@ permissions:
   actions: read
 
 jobs:
+  gate:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: decide
+        id: decide
+        run: |
+          go() { echo "run=true" >> "$GITHUB_OUTPUT"; echo "run: $1" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          # 404 (no branch, no summary yet) and any other error alike: ingest.
+          last=$(gh api "repos/$GITHUB_REPOSITORY/contents/summary.json?ref=ci-history" \
+            -H 'Accept: application/vnd.github.raw' --jq '.last_run.run // ""') \
+            || go "no summary.json on ci-history yet, or the API failed"
+          [ -n "$last" ] || go "summary.json has no last_run"
+          # The completed push runs on next newer than the last ingested
+          # one, in the window `ingest` reads (two days), newest first.
+          since=$(date -u -d '2 days ago' +%F)
+          newer=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch next \
+            --event push --status completed --created ">=$since" --limit 50 --json databaseId \
+            --jq ".[].databaseId | select(. > $last)") \
+            || go "the run list failed"
+          for id in $newer; do
+            # A run without `junit` (stopped before its tests) has nothing
+            # to ingest.
+            names=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" \
+              --jq '.artifacts[].name') || go "the artifacts of run $id could not be read"
+            if printf '%s\n' "$names" | grep -qx junit; then
+              go "run $id is newer than the last ingested run, $last"
+            fi
+          done
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          echo "skipped: no run on next to ingest since run $last" >> "$GITHUB_STEP_SUMMARY"
+
   ingest:
+    needs: gate
+    # Runs unless the gate said no: a manual run skips the gate, and a
+    # failed gate has no output, so it fails open.
+    if: ${{ !cancelled() && needs.gate.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
