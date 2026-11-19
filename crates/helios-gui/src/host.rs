@@ -15,7 +15,8 @@
 //!   dispatched, done or failed, a dialog answered, a toast shown) go on
 //!   the bus beside the engine's, under `helios.gui.*` kinds, with their sequence
 //!   number, source and cause, and egui-pop reads the bus back (`since`,
-//!   `last_seq`): the host keeps no journal of egui-pop's own;
+//!   `last_seq`): the host keeps no journal of egui-pop's own. A private
+//!   command's arguments are left out of it ([`crate::privacy`]);
 //! - **the store** holds the interface's own settings (focus mode, window
 //!   place, the user's keys); Helios's values (node parameters, the
 //!   viewport) stay in `helios_values`;
@@ -339,6 +340,9 @@ impl Host for HeliosHost {
     }
 
     fn publish(&mut self, source: &str, cause: Option<Seq>, name: &str, data: Json) -> Option<Seq> {
+        // A private command's arguments stay out of the journal, which
+        // agents, the log's trace and bug reports read.
+        let data = crate::privacy::redact(name, data);
         Some(match KINDS.iter().find(|(n, _)| *n == name) {
             Some((_, kind)) => self.bus.publish_value(source, cause, kind, data),
             None => {
@@ -620,6 +624,86 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(30))
             .expect("woken by the engine's event");
         assert!(woken.try_recv().is_err(), "woken once");
+    }
+
+    /// Declares Helios's commands as the shell does
+    /// (`plugins::declared`): `library.folder` private, `vault.rate` not.
+    struct DeclaresHelios(Vec<HeliosSpec>);
+
+    impl Plugin for DeclaresHelios {
+        fn id(&self) -> PluginId {
+            PluginId::from_static("test.helios")
+        }
+
+        fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
+            let d = crate::plugins::Declarations::default();
+            for spec in &self.0 {
+                ctx.declare(crate::plugins::declared(spec, &d)?)?;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_private_command_s_arguments_stay_out_of_the_journal_and_the_agents_view() {
+        let registry = Arc::new(Mutex::new(Registry::new()));
+        let bus = Arc::new(Bus::new());
+        let specs = [
+            HeliosSpec::new("library.folder", "Folder", "Library"),
+            HeliosSpec::new("vault.rate", "Rate", "Library"),
+        ];
+        for spec in &specs {
+            registry
+                .lock()
+                .unwrap()
+                .register(spec.clone(), |_, _| Ok(json!({ "ok": true })))
+                .unwrap();
+        }
+        let mut app = App::builder()
+            .host(HeliosHost::new(registry, bus.clone(), Arc::default()))
+            .debug_bridge(egui_pop::core::debug::BridgeMode::ReadOnly)
+            .plugin(DeclaresHelios(specs.to_vec()))
+            .build(&egui::Context::default())
+            .unwrap();
+        let folder = CommandId::from_static("library.folder");
+        let rate = CommandId::from_static("vault.rate");
+        assert!(app.handle().command(&folder).unwrap().private);
+        assert!(!app.handle().command(&rate).unwrap().private);
+
+        let secret = "/home/someone/Pictures/Family";
+        let agent = PopOrigin::Agent("a1".into());
+        let reply = app.run(&folder, json!({ "path": secret }), agent.clone());
+        assert_eq!(
+            reply.now(),
+            Some(Ok(json!({ "ok": true }))),
+            "it still runs"
+        );
+        app.run(&rate, json!({ "stars": 3 }), agent);
+
+        // The bus's journal: the private dispatch without its arguments,
+        // the other one as it was.
+        let dispatched: Vec<_> = bus
+            .since(0)
+            .into_iter()
+            .filter(|e| e.kind == "helios.gui.command.dispatched")
+            .collect();
+        assert_eq!(dispatched.len(), 2);
+        assert_eq!(
+            dispatched[0].payload,
+            json!({ "command": "library.folder", "args": crate::privacy::REDACTED, "private": true })
+        );
+        assert_eq!(
+            dispatched[1].payload,
+            json!({ "command": "vault.rate", "args": { "stars": 3 } })
+        );
+        // What an agent reads of the journal (the bridge's `journal`).
+        let seen = app
+            .handle()
+            .debug_call("journal", "since", &json!({ "seq": 0 }));
+        assert!(seen.ok, "{}", seen.message);
+        let seen = seen.data.to_string();
+        assert!(!seen.contains(secret), "the path reached the agent: {seen}");
+        assert!(seen.contains("\"stars\":3"), "{seen}");
     }
 
     #[test]

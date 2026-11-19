@@ -1380,6 +1380,19 @@ Its tools are Helios's capabilities, generated from `describe` (a
 command `about.read` is the tool `about_read`), plus `snapshot` and
 `wait`.
 
+**Private data (2026-11-19).** The commands whose arguments or results
+carry places, people, accounts or absolute paths (folders, imports,
+exports, workspaces, accounts, metadata, keywords, album names: the list
+is `privacy::PRIVATE` in helios-gui) are declared private to egui-pop.
+Settings › Developer › Agents (egui-pop's Agents page, shown with the
+agent socket) has a "Private data" switch per paired agent and for the
+defaults: switched off, the agent is refused those commands. Whoever
+reads it, the journal keeps a private command's name but not its
+arguments (`"args": "<private>"`). Its result still reaches the journal,
+since egui-pop's MCP bridge reads it back from there; a unit test fails
+when a command whose title names a `path`, `folder`, `source`,
+`account` or `item` argument is not in the list.
+
 **Writing agents and scenarios (2026-11-08).** `HELIOS_AGENT_WRITE=1`
 makes the bridge writable, and lets the unpaired clients scenarios use
 write through it (egui-pop-agent 0.10 holds them read-only otherwise): the
