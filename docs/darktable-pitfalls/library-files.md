@@ -98,7 +98,7 @@ thread or in the code is marked *(guess)*.
   says migrations are explicit operations, which is the right base.
   *Addressed since*: a verified snapshot (backup API, then `quick_check` on
   the copy) before any migration, named in the error when a step fails;
-  progress reported as a `vault.migration_progress` event (snapshot pages,
+  progress reported as a `helios.vault.migration_progress` event (snapshot pages,
   then steps); a database newer than the binary is refused with a clear
   message, never downgraded. Not done: progress inside one long step, and
   the 200k-image budget test.

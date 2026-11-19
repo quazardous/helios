@@ -3,11 +3,11 @@
 //! export, a batch, the trash, a backup, a catalogue snapshot, a
 //! calibration, a workshop run, the capture and cull passes) is mirrored,
 //! one promise per job, so every client of the node (the Activity focus,
-//! an agent's `promises.list`) sees it. The `job.*` events stay as they are.
+//! an agent's `promises.list`) sees it. The `helios.job.*` events stay as they are.
 //!
 //! - **One promise per top-level job**: a job inside another (an export of
 //!   a batch) is its parent's progress, a job naming the promise it is the
-//!   work of (`promise` in `job.started`: an import by rule) is that
+//!   work of (`promise` in `helios.job.started`: an import by rule) is that
 //!   promise already; the background upkeep of
 //!   [`QUIET`] is left out (the image map's passes stand as one promise of
 //!   their own, [`Standing`]).

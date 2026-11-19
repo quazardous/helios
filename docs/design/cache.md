@@ -29,7 +29,7 @@ limit and its default. "None" means nothing bounds it.
 
 | # | Cache | Tier | Key | Budget (default) | Eviction | Setting | Filled by / read by | Invalidation | Metrics | Tests |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | Render cache (`helios_core::engine::Cache`) | RAM (host `Content`), plus VRAM for device entries | content key of a step: hash of lineage (module, parameters, context, scale, inputs' lineages) and region; a wider region of the same lineage is cropped | one per engine: `Engine::with_budget`, 25 % of physical memory (`DEFAULT_CACHE_SHARE`, 2 GiB when unknown) | LRU over ready, unpinned entries after each render; a render pins its steps until their readers ran; device entries evicted first on a VRAM allocation failure (`evict_device`) | `system.cache.budget`, `system.cache.share` (helios-config, Caches page): **read by `helios-node` only**; the desktop's viewport hard-codes the default share; `compute.budget cache_mb` per device (helios-compute settings file) for the compute manager's engines | every render: viewport tiles, preview (scopes, navigator), head renders (Compare), mask display, graph panel statuses; export has **its own engine** | none needed (content keys); dropped on device loss | `Counters` (requests, computed, evictions, crops, uploads, readbacks...), `engine.cache_settled` on the bus (bytes, budget, entries, evicted) | `helios-core/tests/cache.rs`, `engine.rs`, `helios-gui/tests/it/zero_copy.rs` |
+| 1 | Render cache (`helios_core::engine::Cache`) | RAM (host `Content`), plus VRAM for device entries | content key of a step: hash of lineage (module, parameters, context, scale, inputs' lineages) and region; a wider region of the same lineage is cropped | one per engine: `Engine::with_budget`, 25 % of physical memory (`DEFAULT_CACHE_SHARE`, 2 GiB when unknown) | LRU over ready, unpinned entries after each render; a render pins its steps until their readers ran; device entries evicted first on a VRAM allocation failure (`evict_device`) | `system.cache.budget`, `system.cache.share` (helios-config, Caches page): **read by `helios-node` only**; the desktop's viewport hard-codes the default share; `compute.budget cache_mb` per device (helios-compute settings file) for the compute manager's engines | every render: viewport tiles, preview (scopes, navigator), head renders (Compare), mask display, graph panel statuses; export has **its own engine** | none needed (content keys); dropped on device loss | `Counters` (requests, computed, evictions, crops, uploads, readbacks...), `helios.engine.cache_settled` on the bus (bytes, budget, entries, evicted) | `helios-core/tests/cache.rs`, `engine.rs`, `helios-gui/tests/it/zero_copy.rs` |
 | 2 | Exporter's engine (`helios_gui::export::Exporter`) | RAM | same as 1 | **none** (`Engine::new`) | none: grows until the exporter is dropped | none | export jobs | none | its own bus, not shown | `helios-gui/tests/it/export.rs` |
 | 3 | GPU device ledger (`helios_gpu::Ledger`) and engine device entries | VRAM | the render cache's key (entries), plus transfers | `helios_gpu::default_budget`: 4 × the largest binding, at most a quarter of RAM; `vram_mb` per device in helios-compute settings (applied by the compute manager only) | the engine evicts LRU device content no render pins, retries, else runs the step on the CPU | `compute.budget vram_mb` | engine (accelerated steps), viewport device tiles (`DeviceTile::keep` holds a union's buffer while shown) | device loss drops all | `Gpu::memory()` (used, budget), `Counters::fallbacks` | `helios-gpu` tests, `zero_copy.rs` |
 | 4 | Compiled GPU pipelines (`helios_gpu::Gpu::pipelines`) | VRAM / driver | (kernel, entry point) | none (small, bounded by the kernel count) | never | none | kernels | device rebuild | none | indirect |
@@ -387,7 +387,7 @@ version, a new key; the old entry ages out. What remains:
   written and read on disk, time spent producing misses. Counted
   atomically (the engine's `Counters` stay and read from it, so its
   tests keep asserting "rendering twice computes nothing").
-- On the bus: `cache.settled` (replacing `engine.cache_settled`, with
+- On the bus: `cache.settled` (replacing `helios.engine.cache_settled`, with
   per-kind figures) after a burst of work, never per entry.
 - An agent collector, `helios.cache`, with the same figures and the
   pinned entries, so agents and scenario tests can assert budgets
@@ -479,7 +479,7 @@ measured where speed is at stake (`thumb-bench`, the engine's
    must stay atomic.
 2. **The render cache in the RAM tier; one engine budget.** The engine
    takes its entries, pins and single flight from the service
-   (`render.step`), keeping its `Counters` and `engine.cache_settled`
+   (`render.step`), keeping its `Counters` and `helios.engine.cache_settled`
    (then `cache.settled`). The desktop applies `system.cache.budget` /
    `share` (today ignored). Risks: the engine's hot path (lock
    contention: shard the index by key); `helios-core/tests/cache.rs` and

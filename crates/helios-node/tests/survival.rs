@@ -133,7 +133,7 @@ impl Sandbox {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|e| e["kind"] == "edit.saved")
+            .filter(|e| e["kind"] == "helios.edit.saved")
             .map(|e| e["payload"].clone())
             .collect()
     }

@@ -81,7 +81,7 @@ fn a_source_fault_reaches_what_depends_on_it() {
         .bus()
         .since(0)
         .into_iter()
-        .filter(|ev| ev.kind == "engine.step_computed" && ev.payload["ok"] == false)
+        .filter(|ev| ev.kind == "helios.engine.step_computed" && ev.payload["ok"] == false)
         .map(|ev| ev.payload["name"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(failed, ["src", "double"], "every failed step is an event");
@@ -101,7 +101,7 @@ fn a_paused_scheduler_starts_nothing_until_resumed() {
     let paused: Vec<_> = bus
         .since(0)
         .into_iter()
-        .filter(|e| e.kind == "scheduler.paused")
+        .filter(|e| e.kind == "helios.scheduler.paused")
         .map(|e| e.payload["paused"].as_bool().unwrap())
         .collect();
     assert_eq!(paused, [true, false]);

@@ -20,11 +20,11 @@ Scenario(
         Expect(Tree(has: (role: "Button", label: "Import $photos"))),
         Ui(Click(role: "Button", label: "Import $photos")),
         // The window's import runs as the node's promise: its end is the
-        // Library's `library.imported` (a `job.finished` may be another
+        // Library's `helios.library.imported` (a `helios.job.finished` may be another
         // job's, such as the health check's).
-        Wait(Event("library.imported")),
+        Wait(Event("helios.library.imported")),
         Wait(Settled),
-        Expect(Journal(has: "library.imported")),
+        Expect(Journal(has: "helios.library.imported")),
         // The window, still open, lists the import just made in its
         // History at once.
         Expect(Tree(lacks: (label: "No import yet"))),

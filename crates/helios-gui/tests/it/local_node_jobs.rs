@@ -208,7 +208,7 @@ fn until(what: &str, done: impl Fn() -> bool) {
     }
 }
 
-/// The ids of the jobs `kind` events (`job.finished`...) on `bus` name.
+/// The ids of the jobs `kind` events (`helios.job.finished`...) on `bus` name.
 fn said(bus: &Bus, kind: &str) -> Vec<String> {
     bus.since(0)
         .into_iter()

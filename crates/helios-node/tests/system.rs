@@ -81,7 +81,7 @@ fn a_node_is_driven_and_observed_through_the_cli() {
     // Renders are scheduler jobs: wait for the scheduler, not for a delay.
     let (code, idle) = sandbox.inspect(&["wait-idle", "--timeout", "10000"]);
     assert_eq!(code, 0, "{idle}");
-    let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "10000"]);
+    let (code, idle) = sandbox.inspect(&["wait-event", "helios.node.idle", "--timeout", "10000"]);
     assert_eq!(code, 0, "{idle}");
     assert_eq!(idle["event"]["payload"]["failed"], 0);
     let (_, scheduler) = sandbox.inspect(&["describe", "scheduler"]);
@@ -118,15 +118,15 @@ fn a_node_is_driven_and_observed_through_the_cli() {
         .iter()
         .map(|e| e["kind"].as_str().unwrap())
         .collect();
-    assert_eq!(kinds.first(), Some(&"node.ready"));
-    assert_eq!(kinds.last(), Some(&"node.idle"));
-    assert!(kinds.contains(&"engine.step_computed"));
+    assert_eq!(kinds.first(), Some(&"helios.node.ready"));
+    assert_eq!(kinds.last(), Some(&"helios.node.idle"));
+    assert!(kinds.contains(&"helios.engine.step_computed"));
 }
 
 #[test]
 fn failures_say_what_happened_instead() {
     let sandbox = Sandbox::start("failures", NETWORK);
-    sandbox.inspect(&["wait-event", "node.idle"]);
+    sandbox.inspect(&["wait-event", "helios.node.idle"]);
 
     let (code, missed) = sandbox.inspect(&["wait-event", "node.never", "--timeout", "50"]);
     assert_eq!(code, 1);
@@ -135,7 +135,7 @@ fn failures_say_what_happened_instead() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|e| e["kind"] == "node.idle")
+            .any(|e| e["kind"] == "helios.node.idle")
     );
 
     let (code, unknown) = sandbox.inspect(&["describe", "nope"]);
@@ -293,7 +293,7 @@ fn exports_are_written_next_to_the_network_and_reported() {
       ]
     }"#;
     let sandbox = Sandbox::start("exports", network);
-    let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "10000"]);
+    let (code, idle) = sandbox.inspect(&["wait-event", "helios.node.idle", "--timeout", "10000"]);
     assert_eq!(code, 0, "{idle}");
     assert_eq!(idle["event"]["payload"]["exports"], 3);
     assert_eq!(
@@ -317,7 +317,7 @@ fn exports_are_written_next_to_the_network_and_reported() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|e| e["kind"] == "export.written")
+        .filter(|e| e["kind"] == "helios.export.written")
         .collect();
     assert_eq!(written.len(), 2);
     assert!(
@@ -368,7 +368,7 @@ fn files_are_sources_read_next_to_the_network() {
       "exports": [{ "node": "src", "port": "image", "region": { "x": 0, "y": 0, "width": 16, "height": 8 }, "path": "pic.png" }]
     }"#;
     let maker = Sandbox::start("make-picture", make);
-    maker.inspect(&["wait-event", "node.idle", "--timeout", "10000"]);
+    maker.inspect(&["wait-event", "helios.node.idle", "--timeout", "10000"]);
     let picture = maker.dir.join("pic.png");
     assert!(picture.is_file());
 
@@ -387,7 +387,7 @@ fn files_are_sources_read_next_to_the_network() {
     }}"#
     );
     let sandbox = Sandbox::start("files", &network);
-    let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "30000"]);
+    let (code, idle) = sandbox.inspect(&["wait-event", "helios.node.idle", "--timeout", "30000"]);
     assert_eq!(code, 0, "{idle}");
     assert_eq!(idle["event"]["payload"]["failed"], 0, "{idle}");
     let (_, graph) = sandbox.inspect(&["describe", "graph"]);
@@ -446,7 +446,7 @@ fn a_node_whose_stdout_is_closed_keeps_serving() {
         let state = Command::new(env!("CARGO_BIN_EXE_helios"))
             .args(["inspect", "--socket"])
             .arg(dir.join("node.sock"))
-            .args(["wait-event", "node.idle", "--timeout", "10000"])
+            .args(["wait-event", "helios.node.idle", "--timeout", "10000"])
             .output()
             .unwrap();
         if state.status.code() == Some(0) {
@@ -510,7 +510,7 @@ fn a_raw_goes_through_the_pipe_to_a_file() {
     }}"#
     );
     let sandbox = Sandbox::start("raw-pipe", &network);
-    let (code, idle) = sandbox.inspect(&["wait-event", "node.idle", "--timeout", "60000"]);
+    let (code, idle) = sandbox.inspect(&["wait-event", "helios.node.idle", "--timeout", "60000"]);
     assert_eq!(code, 0, "{idle}");
     assert_eq!(idle["event"]["payload"]["failed"], 0, "{idle}");
     let png = image::open(sandbox.dir.join("out.png")).unwrap().to_rgb8();

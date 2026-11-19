@@ -23,10 +23,10 @@
 //! fail, so its rows wait for an answer instead (`asking`), holding the
 //! export, until decision workers and their signals come.
 //!
-//! Every write is announced on the bus as `workflow.rows` (the rows it
-//! changed), and a run's life as `workflow.run` (created, extended,
+//! Every write is announced on the bus as `helios.workflow.rows` (the rows it
+//! changed), and a run's life as `helios.workflow.run` (created, extended,
 //! finished, resumed, opened, lost, forgotten, paused, reordered). A run
-//! is also a job (`job.*`), its exports its children; cancelled there, its
+//! is also a job (`helios.job.*`), its exports its children; cancelled there, its
 //! rows not concluded are cancelled and its exports stopped.
 //!
 //! The control verbs act on a run's rows through the journal: `cancel` and
@@ -650,7 +650,9 @@ impl Workflows {
                 let mut last = std::time::Instant::now();
                 loop {
                     match events.recv_timeout(TICK) {
-                        Ok(e) if e.kind == "scheduler.job_ended" => this.job_ended(&e.payload),
+                        Ok(e) if e.kind == "helios.scheduler.job_ended" => {
+                            this.job_ended(&e.payload);
+                        }
                         Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
                     }
@@ -691,7 +693,7 @@ impl Workflows {
     }
 
     /// Reads the rows of `items` at `node` again, keeps them in memory,
-    /// and announces them (`workflow.rows`).
+    /// and announces them (`helios.workflow.rows`).
     fn refresh(&self, run: &mut Run, node: &str, items: &[String]) {
         if items.is_empty() {
             return;
@@ -710,7 +712,7 @@ impl Workflows {
         self.ctx.bus.publish_value(
             SOURCE,
             None,
-            "workflow.rows",
+            "helios.workflow.rows",
             json!({ "run": run.id, "node": node, "items": rows }),
         );
     }
@@ -749,7 +751,7 @@ impl Workflows {
         }
         self.ctx
             .bus
-            .publish_value(SOURCE, None, "workflow.run", payload);
+            .publish_value(SOURCE, None, "helios.workflow.run", payload);
     }
 
     fn start_job(&self, run: &mut Run) {
@@ -1487,7 +1489,7 @@ impl Workflows {
     }
 
     /// Removes run `id` whole, in the vault when it is kept there; `why`
-    /// goes in the `workflow.run` event (`forget`, `retention`).
+    /// goes in the `helios.workflow.run` event (`forget`, `retention`).
     fn remove(&self, state: &mut State, id: &str, now: u64, why: &str) -> Result<(), Message> {
         if let Some(run) = state.runs.get(id) {
             if run.state == RunState::Active || state.leases.values().any(|h| h.run == id) {
@@ -1522,7 +1524,7 @@ impl Workflows {
             self.ctx.bus.publish_value(
                 SOURCE,
                 None,
-                "workflow.run",
+                "helios.workflow.run",
                 json!({ "run": id, "state": "forgotten", "why": why }),
             );
         }
@@ -2028,7 +2030,7 @@ impl Workflows {
         (job, permanent, message)
     }
 
-    /// Concludes the lease of a job that ended (`scheduler.job_ended`).
+    /// Concludes the lease of a job that ended (`helios.scheduler.job_ended`).
     fn job_ended(&self, payload: &Value) {
         let Some(job) = payload["job"].as_u64() else {
             return;

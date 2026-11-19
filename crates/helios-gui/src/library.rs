@@ -14,7 +14,7 @@
 //!
 //! Every mark goes through egui-pop's library steps (`library.rate`,
 //! `library.flag`, `library.label`, `library.tag`), whether it comes from
-//! the grid's culling keys, the marks bar, a Helios command (`vault.*`, the
+//! the grid's culling keys, the marks bar, a Helios command (`helios.vault.*`, the
 //! keys a profile or a template binds) or an agent's `library.*` command:
 //! a plugin may veto or redirect it, and what ran is what is written.
 //!

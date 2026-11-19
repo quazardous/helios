@@ -137,7 +137,7 @@ fn a_greyed_command_is_refused_with_its_reason_and_an_enabled_one_runs_as_the_ag
     // keeps it as the agent's.
     let events: Vec<_> = std::iter::from_fn(|| heard.try_recv().ok()).collect();
     assert!(
-        events.iter().any(|e| e.kind == "control.command"
+        events.iter().any(|e| e.kind == "helios.control.command"
             && e.payload["id"] == "theme.select"
             && e.payload["origin"] == "agent:test"),
         "{events:?}"

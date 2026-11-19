@@ -109,9 +109,9 @@ fn full_ai_answers_and_the_render_goes_on() {
     assert_eq!(
         kinds(&bus)
             .into_iter()
-            .filter(|k| k.starts_with("decision."))
+            .filter(|k| k.starts_with("helios.decision."))
             .collect::<Vec<_>>(),
-        ["decision.pending", "decision.answered"]
+        ["helios.decision.pending", "helios.decision.answered"]
     );
 
     // The human reviews and overrides: a new version, by a human.

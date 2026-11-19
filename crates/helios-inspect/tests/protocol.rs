@@ -154,7 +154,7 @@ struct Started {
 }
 
 impl Event for Started {
-    const KIND: &'static str = "job.started";
+    const KIND: &'static str = "helios.job.started";
 }
 
 #[derive(Serialize)]
@@ -163,7 +163,7 @@ struct Finished {
 }
 
 impl Event for Finished {
-    const KIND: &'static str = "job.finished";
+    const KIND: &'static str = "helios.job.finished";
 }
 
 /// The next event of a subscription, heartbeats skipped.
@@ -182,7 +182,7 @@ fn a_subscriber_gets_the_events_in_order_and_resumes_after_a_reconnect() {
     let address = helios_inspect::Address::Unix(path);
     bus.publish("jobs", None, &Started { id: "a" });
     bus.publish("test", None, &Tick { n: 1 });
-    let (ack, mut client) = helios_inspect::subscribe(&address, "job.", Some(0)).unwrap();
+    let (ack, mut client) = helios_inspect::subscribe(&address, "helios.job.", Some(0)).unwrap();
     assert_eq!(ack["ok"], true, "{ack}");
     assert_eq!(ack["gap"], false, "{ack}");
     let instance = ack["instance"].as_str().unwrap().to_string();
@@ -193,7 +193,7 @@ fn a_subscriber_gets_the_events_in_order_and_resumes_after_a_reconnect() {
     let first = next_event(&mut client);
     assert_eq!(
         (first["kind"].as_str(), first["payload"]["id"].as_str()),
-        (Some("job.started"), Some("a"))
+        (Some("helios.job.started"), Some("a"))
     );
     let second = next_event(&mut client);
     assert_eq!(second["payload"]["id"], "b");
@@ -203,7 +203,8 @@ fn a_subscriber_gets_the_events_in_order_and_resumes_after_a_reconnect() {
     // Events published while away come first after a reconnect, the
     // other kinds left out.
     bus.publish("jobs", None, &Finished { id: "b" });
-    let (ack, mut client) = helios_inspect::subscribe(&address, "job.", Some(resume)).unwrap();
+    let (ack, mut client) =
+        helios_inspect::subscribe(&address, "helios.job.", Some(resume)).unwrap();
     assert_eq!(ack["instance"], instance.as_str(), "the same process");
     assert_eq!(ack["gap"], false);
     let kinds: Vec<(String, String)> = (0..2)
@@ -218,10 +219,57 @@ fn a_subscriber_gets_the_events_in_order_and_resumes_after_a_reconnect() {
     assert_eq!(
         kinds,
         [
-            ("job.finished".to_string(), "a".to_string()),
-            ("job.finished".to_string(), "b".to_string())
+            ("helios.job.finished".to_string(), "a".to_string()),
+            ("helios.job.finished".to_string(), "b".to_string())
         ]
     );
+}
+
+/// A desktop of 0.92 or before subscribes without `prefixed`: the node
+/// names each kind as that release did, and reads its prefix in those
+/// names; a `wait_event` on an old name finds the kind under its new one.
+#[test]
+fn an_older_client_reads_the_kinds_by_their_old_names() {
+    let (bus, path) = start("legacy");
+    let address = helios_inspect::Address::Unix(path.clone());
+    bus.publish("jobs", None, &Started { id: "a" });
+    bus.publish("test", None, &Tick { n: 1 });
+    bus.publish("jobs", None, &Finished { id: "a" });
+    let mut client = helios_inspect::Client::connect(&address).unwrap();
+    let ack = client
+        .request(&Request::Subscribe {
+            prefix: "job.".into(),
+            since: Some(0),
+            relay: None,
+            prefixed: false,
+        })
+        .unwrap();
+    assert_eq!(ack["ok"], true, "{ack}");
+    let kinds: Vec<String> = (0..2)
+        .map(|_| {
+            next_event(&mut client)["kind"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(kinds, ["job.started", "job.finished"]);
+
+    // A client of this release reads them as they are.
+    let (_, mut now) = helios_inspect::subscribe(&address, "helios.job.", Some(0)).unwrap();
+    assert_eq!(next_event(&mut now)["kind"], "helios.job.started");
+
+    let waited = request(
+        &path,
+        &Request::WaitEvent {
+            kind: "job.finished".into(),
+            since: 0,
+            timeout_ms: 5_000,
+        },
+    )
+    .unwrap();
+    assert_eq!(waited["ok"], true, "{waited}");
+    assert_eq!(waited["event"]["kind"], "helios.job.finished");
 }
 
 #[test]

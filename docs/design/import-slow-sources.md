@@ -280,7 +280,7 @@ token bucket per account.
    `helios_vault::ReadOrder`: the library folder's copy first, a card or
    ingest source last.
 2. **Promises** (done): durable handles to a result to come, a node
-   concept (`promises.*`, `promise.progress` / `promise.done`, resumed
+   concept (`promises.*`, `helios.promise.progress` / `helios.promise.done`, resumed
    or failed `interrupted` after a crash, a promise line in the desktop);
    see [../protocol.md](../protocol.md#promises).
 3. **Import by rule as a node job, answering a promise.** `library.import` takes `{source,

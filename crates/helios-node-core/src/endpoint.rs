@@ -50,7 +50,7 @@ pub struct CommandRan<'a> {
 }
 
 impl Event for CommandRan<'_> {
-    const KIND: &'static str = "control.command";
+    const KIND: &'static str = "helios.control.command";
 }
 
 /// A command run refused, by whom, and why: journaled after the refusal,
@@ -63,7 +63,7 @@ pub struct CommandRefused<'a> {
 }
 
 impl Event for CommandRefused<'_> {
-    const KIND: &'static str = "control.command.refused";
+    const KIND: &'static str = "helios.control.command.refused";
 }
 
 /// An import done through the node ended: its report (the files it
@@ -75,7 +75,7 @@ pub struct Imported<'a> {
 }
 
 impl Event for Imported<'_> {
-    const KIND: &'static str = "library.imported";
+    const KIND: &'static str = "helios.library.imported";
 }
 
 /// A command of a desktop window, as that window lists it: its id, label
@@ -720,7 +720,7 @@ mod tests {
         assert_eq!(listed["stacks"], json!([]));
         assert_eq!(listed["origin"], "cli");
         let ran = heard.try_recv().unwrap();
-        assert_eq!(ran.kind, "control.command");
+        assert_eq!(ran.kind, "helios.control.command");
         assert_eq!(ran.payload["origin"], "cli");
         // An import profile round-trips through the node's commands.
         let profile = json!({ "id": "", "name": "Monthly",
@@ -857,7 +857,7 @@ mod tests {
         assert_eq!(ran["window"], "main");
         let events: Vec<_> = std::iter::from_fn(|| heard.try_recv().ok()).collect();
         assert!(
-            events.iter().any(|e| e.kind == "control.command"
+            events.iter().any(|e| e.kind == "helios.control.command"
                 && e.payload["id"] == "view.zoom"
                 && e.payload["origin"] == "agent:test"),
             "{events:?}"
@@ -1002,11 +1002,11 @@ mod tests {
         };
         let export = of("export");
         assert_eq!(export.len(), 1, "{export:?}");
-        assert_eq!(export[0].0, "control.command.refused", "{export:?}");
+        assert_eq!(export[0].0, "helios.control.command.refused", "{export:?}");
         assert_eq!(export[0].1["reason"], "Only in the Helios window");
         assert_eq!(export[0].1["origin"], "agent:test");
         let zoom = of("view.zoom");
         assert_eq!(zoom.len(), 1, "{zoom:?}");
-        assert_eq!(zoom[0].0, "control.command", "{zoom:?}");
+        assert_eq!(zoom[0].0, "helios.control.command", "{zoom:?}");
     }
 }

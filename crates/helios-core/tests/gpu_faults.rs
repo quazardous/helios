@@ -289,7 +289,7 @@ fn a_kernel_that_fails_runs_its_step_on_the_cpu() {
         let n = e.counters();
         // The first step fell back; the next two ran on the device.
         assert_eq!((n.fallbacks, n.accelerated), (1, 2), "{failure:?}");
-        let fell = events(&e, "engine.gpu_fell_back");
+        let fell = events(&e, "helios.engine.gpu_fell_back");
         assert_eq!(fell.len(), 1);
         assert_eq!(fell[0]["name"], "g0");
         assert_eq!(fell[0]["module"], "gain");
@@ -352,7 +352,7 @@ fn memory_too_small_for_a_step_runs_it_on_the_cpu() {
     same(&render(&e, &g, last), &cpu(&g, last));
     let n = e.counters();
     assert_eq!((n.fallbacks, n.accelerated), (2, 0));
-    let fell = events(&e, "engine.gpu_fell_back");
+    let fell = events(&e, "helios.engine.gpu_fell_back");
     assert_eq!(fell[0]["failure"], "out_of_memory");
 }
 
@@ -369,7 +369,7 @@ fn a_timeout_rebuilds_the_device_and_replays_the_render() {
     assert_eq!(n.device_losses, 1);
     // Computed twice on the device: before and after the rebuild.
     assert_eq!(n.accelerated, 6, "{n:?}");
-    let lost = events(&e, "engine.gpu_lost");
+    let lost = events(&e, "helios.engine.gpu_lost");
     assert_eq!(lost.len(), 1);
     assert_eq!(lost[0]["failure"], "timeout");
     assert_eq!(lost[0]["recovered"], true);
@@ -389,7 +389,7 @@ fn a_lost_device_that_cannot_be_rebuilt_leaves_the_cpu_for_the_session() {
         off.contains("the rest of this session renders on the CPU"),
         "{off}"
     );
-    let lost = events(&e, "engine.gpu_lost");
+    let lost = events(&e, "helios.engine.gpu_lost");
     assert_eq!(lost[0]["recovered"], false);
     assert_eq!(lost[0]["message"]["english"], off.as_str());
     assert_eq!(lost[0]["message"]["key"], "engine-gpu-lost");
@@ -417,7 +417,7 @@ fn a_device_lost_again_after_its_rebuild_leaves_the_cpu() {
     // Rebuilt once; lost again, the engine stops asking.
     assert_eq!(fake.recoveries.load(Ordering::SeqCst), 1);
     assert!(e.gpu_off().is_some());
-    let lost = events(&e, "engine.gpu_lost");
+    let lost = events(&e, "helios.engine.gpu_lost");
     assert_eq!(lost.len(), 2);
     assert_eq!(lost[0]["recovered"], true);
     assert_eq!(lost[1]["recovered"], false);

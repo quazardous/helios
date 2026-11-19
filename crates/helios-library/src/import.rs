@@ -38,9 +38,9 @@
 //!   added. A duplicate left out gets none. They are applied before the
 //!   file's darktable sidecars, so the importer's values come first.
 //! - **A job.** It reports through [`helios_core::jobs`] (kind `import`):
-//!   `job.started`, a `job.progress` per file (done, total, the file as
+//!   `helios.job.started`, a `helios.job.progress` per file (done, total, the file as
 //!   its item), a log line per file that was not skipped, then
-//!   `job.finished` (or `job.failed` when the source cannot be listed);
+//!   `helios.job.finished` (or `helios.job.failed` when the source cannot be listed);
 //!   one JSON line per file goes to `emit`.
 //! - **Safe to format.** After a copy, each card read is checked by
 //!   content hash: every photo on it in the library with a copy in the
@@ -67,7 +67,7 @@
 //! - **Cancel.** [`Jobs::cancel`] with the job's id, or the caller's
 //!   [`Options::cancel`] flag, stops the import before its next file; a
 //!   copy under way stops too and its hidden part is removed. The files
-//!   done stay imported; the job says `job.cancelled`.
+//!   done stay imported; the job says `helios.job.cancelled`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};

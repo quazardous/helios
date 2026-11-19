@@ -142,7 +142,7 @@ fn a_module_reuses_another_modules_mask_without_computing_it_again() {
     e.render(&n.g, n.b_blend, "output", r).unwrap();
     let mut computed: Vec<String> = events
         .try_iter()
-        .filter(|ev| ev.kind == "engine.step_computed")
+        .filter(|ev| ev.kind == "helios.engine.step_computed")
         .map(|ev| ev.payload["name"].as_str().unwrap().to_string())
         .collect();
     computed.sort();

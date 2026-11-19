@@ -123,7 +123,7 @@ pub struct JobQueued {
 }
 
 impl Event for JobQueued {
-    const KIND: &'static str = "scheduler.job_queued";
+    const KIND: &'static str = "helios.scheduler.job_queued";
 }
 
 #[derive(Serialize)]
@@ -133,7 +133,7 @@ pub struct JobStarted {
 }
 
 impl Event for JobStarted {
-    const KIND: &'static str = "scheduler.job_started";
+    const KIND: &'static str = "helios.scheduler.job_started";
 }
 
 #[derive(Serialize)]
@@ -149,7 +149,7 @@ pub struct JobEnded {
 }
 
 impl Event for JobEnded {
-    const KIND: &'static str = "scheduler.job_ended";
+    const KIND: &'static str = "helios.scheduler.job_ended";
 }
 
 /// Nothing is queued or running any more.
@@ -167,11 +167,11 @@ pub struct Paused {
 }
 
 impl Event for Paused {
-    const KIND: &'static str = "scheduler.paused";
+    const KIND: &'static str = "helios.scheduler.paused";
 }
 
 impl Event for Idle {
-    const KIND: &'static str = "scheduler.idle";
+    const KIND: &'static str = "helios.scheduler.idle";
 }
 
 #[derive(Clone, Debug, Serialize)]

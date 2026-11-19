@@ -175,7 +175,7 @@ fn an_import_through_the_node_is_backed_up_then_the_health_check_runs_and_the_no
     assert!(
         bus.since(0)
             .iter()
-            .any(|e| e.kind == "library.imported" && e.payload["added"] == u64::from(PHOTOS)),
+            .any(|e| e.kind == "helios.library.imported" && e.payload["added"] == u64::from(PHOTOS)),
         "the import is announced on the node's bus"
     );
 
@@ -325,7 +325,7 @@ fn the_node_runs_the_saved_sources_automatic_imports_with_their_own_origin() {
     );
     assert!(
         until(Duration::from_secs(30), || bus.since(0).iter().any(|e| {
-            e.kind == "import.automatic.held"
+            e.kind == "helios.import.automatic.held"
                 && e.payload["source"] == "Fresh"
                 && e.payload["verdict"] == "confirm"
         })),
@@ -513,7 +513,7 @@ fn the_control_endpoint_imports_into_the_nodes_vault() {
 /// The binary: the settings layers the node keeps are read and written
 /// through its control endpoint (`helios control settings-get` and
 /// `settings-set`, on the batch endpoint), each change heard by the
-/// node's other clients (`settings.layerChanged` on its inspect
+/// node's other clients (`helios.settings.layerChanged` on its inspect
 /// endpoint); a layer the node does not keep, or a node with no vault,
 /// refuses.
 #[cfg(unix)]
@@ -587,7 +587,7 @@ fn the_control_endpoint_reads_and_writes_the_nodes_settings_layers() {
     // Another client of the node follows its settings events.
     let (ack, mut heard) = helios_inspect::subscribe(
         &helios_inspect::Address::Unix(p.0.join("owner.sock")),
-        "settings.",
+        "helios.settings.",
         None,
     )
     .unwrap();
@@ -621,7 +621,7 @@ fn the_control_endpoint_reads_and_writes_the_nodes_settings_layers() {
     assert_eq!(empty["ok"], true, "{empty}");
     assert!(empty["text"].is_null(), "{empty}");
     assert_eq!(set["ok"], true, "{set}");
-    assert_eq!(event["kind"], "settings.layerChanged", "{event}");
+    assert_eq!(event["kind"], "helios.settings.layerChanged", "{event}");
     assert_eq!(event["payload"]["layer"], "user", "{event}");
     assert_eq!(read["ok"], true, "{read}");
     assert_eq!(read["text"], text, "{read}");
@@ -779,11 +779,11 @@ fn the_cli_imports_through_the_node_holding_the_vault() {
     assert!(
         events
             .iter()
-            .any(|e| e["kind"] == "library.imported" && e["payload"]["added"] == 1),
+            .any(|e| e["kind"] == "helios.library.imported" && e["payload"]["added"] == 1),
         "the node's bus heard the import: {events:?}"
     );
     assert!(
-        events.iter().any(|e| e["kind"] == "control.command"
+        events.iter().any(|e| e["kind"] == "helios.control.command"
             && e["payload"]["id"] == "library.import"
             && e["payload"]["origin"] == "cli"),
         "run by the CLI: {events:?}"
@@ -852,7 +852,7 @@ fn with_no_node_the_cli_starts_one_shared_and_it_exits_when_idle() {
     let events = node_events(&rendezvous.inspect);
     let imported = events
         .iter()
-        .filter(|e| e["kind"] == "library.imported")
+        .filter(|e| e["kind"] == "helios.library.imported")
         .count();
     assert_eq!(imported, 2, "one node ran both imports: {events:?}");
 
@@ -934,7 +934,7 @@ fn the_cli_reaches_the_desktops_node_through_its_rendezvous() {
     // The desktop's node ran both, for the CLI, and imported the file.
     let ran: Vec<(String, String)> = heard
         .try_iter()
-        .filter(|e| e.kind == "control.command")
+        .filter(|e| e.kind == "helios.control.command")
         .map(|e| {
             (
                 e.payload["id"].as_str().unwrap().to_string(),

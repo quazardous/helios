@@ -36,10 +36,10 @@ pub const PROMISES: &str = "node/promises";
 const SEQUENCE: &str = "node/promise-sequence";
 
 /// The bus event of a promise created, progressing or retried.
-pub const PROGRESS: &str = "promise.progress";
+pub const PROGRESS: &str = "helios.promise.progress";
 
 /// The bus event of a promise settled: done, failed or cancelled.
-pub const DONE: &str = "promise.done";
+pub const DONE: &str = "helios.promise.done";
 
 /// The reason a promise cut by a stop or a crash fails with.
 pub const INTERRUPTED: &str = "interrupted";

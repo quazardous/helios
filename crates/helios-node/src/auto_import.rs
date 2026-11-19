@@ -20,7 +20,7 @@
 //!   each pass. With no window to ask in, a batch held (paused, a first
 //!   run not confirmed yet, above the limits) is left alone: said on the
 //!   node's error output and on its bus ([`Held`],
-//!   `import.automatic.held`). A first run is confirmed in a desktop's
+//!   `helios.import.automatic.held`). A first run is confirmed in a desktop's
 //!   import window on the same vault.
 //! - **The import** is the node's own ([`Importer`]): a job on its jobs,
 //!   followed by the strategy's after-import backup, duplicates always
@@ -65,7 +65,7 @@ pub struct Held<'a> {
 }
 
 impl Event for Held<'_> {
-    const KIND: &'static str = "import.automatic.held";
+    const KIND: &'static str = "helios.import.automatic.held";
 }
 
 /// A saved source, as much of it as an automatic import reads.

@@ -1,12 +1,12 @@
 //! The library changed, one signal.
 //!
-//! The vault says its library changed four ways (`vault.library_changed`,
-//! `vault.locations_changed`, `vault.changed_outside`,
-//! `vault.captures_set`), its stacks two (`vault.stack_changed`,
-//! `library.decision`), and the desktop says it once an import ended
+//! The vault says its library changed four ways (`helios.vault.library_changed`,
+//! `helios.vault.locations_changed`, `helios.vault.changed_outside`,
+//! `helios.vault.captures_set`), its stacks two (`helios.vault.stack_changed`,
+//! `helios.library.decision`), and the desktop says it once an import ended
 //! (`import.ended`'s `library.refill`) or a library step was undone or
 //! redone ([`Publisher::changed`]); the node says an import through it
-//! ended (`library.imported`, its record in the import history).
+//! ended (`helios.library.imported`, its record in the import history).
 //! [`crate::persist::Persist`] gathers
 //! what one pass heard into one [`Change`] (its [`Kind`]s, and who said
 //! it) and passes it once through the hook point [`LibraryChanged`], its
@@ -107,8 +107,8 @@ impl Kind {
                 Some(Kind::Locations)
             }
             helios_vault::capture::CAPTURES_SET => Some(Kind::Captures),
-            "vault.stack_changed" | "library.decision" => Some(Kind::Stacks),
-            "library.imported" => Some(Kind::Imports),
+            "helios.vault.stack_changed" | "helios.library.decision" => Some(Kind::Stacks),
+            "helios.library.imported" => Some(Kind::Imports),
             _ => None,
         }
     }
@@ -437,8 +437,14 @@ mod tests {
             Kind::of_event(helios_vault::capture::CAPTURES_SET),
             Some(Kind::Captures)
         );
-        assert_eq!(Kind::of_event("vault.stack_changed"), Some(Kind::Stacks));
-        assert_eq!(Kind::of_event("library.imported"), Some(Kind::Imports));
-        assert_eq!(Kind::of_event("vault.field_changed"), None);
+        assert_eq!(
+            Kind::of_event("helios.vault.stack_changed"),
+            Some(Kind::Stacks)
+        );
+        assert_eq!(
+            Kind::of_event("helios.library.imported"),
+            Some(Kind::Imports)
+        );
+        assert_eq!(Kind::of_event("helios.vault.field_changed"), None);
     }
 }

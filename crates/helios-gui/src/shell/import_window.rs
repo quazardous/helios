@@ -283,7 +283,7 @@ pub(crate) struct ImportWindow {
     /// The node's volume watch the cards come from
     /// ([`Shell::follow_volumes`]).
     volumes: Option<VolumeWatch>,
-    /// Its events (`volume.*` from the desktop's node), as the
+    /// Its events (`helios.volume.*` from the desktop's node), as the
     /// application bus's listener [`node_volumes::CARDS`] heard them,
     /// read at each frame of the main window.
     volume_events: Option<std::sync::mpsc::Receiver<Change>>,

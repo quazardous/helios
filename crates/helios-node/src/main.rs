@@ -32,7 +32,7 @@
 //! strategy's after-import backup. The settings layers it keeps (`user`,
 //! `project/<folder>`) are read and written through them too
 //! (`settings.layer.get`, `settings.layer.set`), each change announced on
-//! the bus (`settings.layerChanged`). Unless it was started for a client
+//! the bus (`helios.settings.layerChanged`). Unless it was started for a client
 //! (`--idle-exit`), it runs the saved sources' automatic imports too (a
 //! card plugged in, new files in a watched folder), with the desktop's
 //! safeguards (`helios_node::auto_import`). A signal cancels the running
@@ -48,7 +48,7 @@
 //! the image's newest version (parameters, then the decision book
 //! replayed), and each change made through control (a parameter set, a
 //! decision answered) is saved at once as a version, announced as
-//! `edit.saved`. A restart, even after `kill -9`, resumes from the last
+//! `helios.edit.saved`. A restart, even after `kill -9`, resumes from the last
 //! change answered.
 //!
 //! `--batch-control` serves the batch endpoint in every build: only
@@ -61,7 +61,7 @@
 //! private directory made for that run.
 //!
 //! Its exports and batches are jobs people follow (`helios_core::jobs`,
-//! `job.*` on its bus): `job.cancel` with a job's id cancels it, a batch
+//! `helios.job.*` on its bus): `job.cancel` with a job's id cancels it, a batch
 //! with its exports.
 //!
 //! A batch submitted with `workflow.submit` is a run of the workflow level
@@ -110,7 +110,7 @@ struct Ready {
 }
 
 impl Event for Ready {
-    const KIND: &'static str = "node.ready";
+    const KIND: &'static str = "helios.node.ready";
 }
 
 /// A render is finished.
@@ -124,7 +124,7 @@ struct RenderDone {
 }
 
 impl Event for RenderDone {
-    const KIND: &'static str = "node.render_done";
+    const KIND: &'static str = "helios.node.render_done";
 }
 
 /// Every render and export asked for by the description is finished.
@@ -136,7 +136,7 @@ struct Idle {
 }
 
 impl Event for Idle {
-    const KIND: &'static str = "node.idle";
+    const KIND: &'static str = "helios.node.idle";
 }
 
 /// The fact kinds this binary publishes.
@@ -294,7 +294,7 @@ struct Node {
     contexts: Mutex<BTreeMap<NodeId, Context>>,
     /// The vault keeping the edit, when the node has one.
     edit: Option<NodeEdit>,
-    /// Where its exports and batches report (`job.*` on its bus), and
+    /// Where its exports and batches report (`helios.job.*` on its bus), and
     /// what `job.cancel` cancels.
     jobs: Jobs,
     /// The batch jobs running, by id.
@@ -800,10 +800,10 @@ mod control {
     }
 
     impl Event for Action<'_> {
-        const KIND: &'static str = "control.action";
+        const KIND: &'static str = "helios.control.action";
     }
 
-    /// A command is run, by whom: the `control.action` of its request
+    /// A command is run, by whom: the `helios.control.action` of its request
     /// follows.
     use helios_node_core::endpoint::CommandRan;
 

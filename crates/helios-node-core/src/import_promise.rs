@@ -274,7 +274,7 @@ fn name_of(path: &Path) -> String {
 }
 
 /// `promises` running imports too, each announced on `bus` once done
-/// (`library.imported`, as an import by `paths`).
+/// (`helios.library.imported`, as an import by `paths`).
 #[must_use]
 pub fn register<S: Store + Send + 'static>(promises: Promises<S>, bus: Arc<Bus>) -> Promises<S> {
     register_watched(promises, bus, Watch::default())

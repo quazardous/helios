@@ -1,7 +1,7 @@
 //! The jobs a process runs now, folded from its bus: what a client that
 //! lost the event stream reads to catch up (see `docs/jobs.md`).
 //!
-//! [`JobsView::follow`] folds every `job.*` event of a bus as it is
+//! [`JobsView::follow`] folds every `helios.job.*` event of a bus as it is
 //! published: the running jobs with what they started with and their
 //! progress so far, and the last jobs that ended with how. Its
 //! [`Describe`] snapshot says up to which sequence number it is folded,
@@ -51,7 +51,7 @@ struct Running {
 impl Fold {
     fn apply(&mut self, e: &Envelope) {
         self.seq = self.seq.max(e.seq);
-        if !e.kind.starts_with("job.") {
+        if !e.kind.starts_with("helios.job.") {
             return;
         }
         let Some(id) = e.payload["id"].as_str() else {
@@ -155,7 +155,7 @@ impl JobsView {
 impl Describe for JobsView {
     /// `{"instance", "seq", "running": [{"started", "progress",
     /// "cancelling"}], "ended": [{"kind", "data"}]}`: `started` is the job's
-    /// `job.started` data, `progress` its `job.progress` fields merged,
+    /// `helios.job.started` data, `progress` its `helios.job.progress` fields merged,
     /// `ended` its end event, the oldest first.
     /// It first waits (briefly) for the view to fold every event the bus
     /// has published, so a client that has seen an event on the stream
@@ -215,7 +215,7 @@ mod tests {
             .collect();
         assert_eq!(ids, ["batch-1", "export-2"], "a parent before its children");
         assert_eq!(snapshot["running"][1]["started"]["parent"], "batch-1");
-        assert_eq!(snapshot["ended"][0]["kind"], "job.finished");
+        assert_eq!(snapshot["ended"][0]["kind"], "helios.job.finished");
         assert_eq!(snapshot["ended"][0]["data"]["id"], "export-1");
         drop((second, batch));
     }

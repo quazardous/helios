@@ -278,7 +278,7 @@ documentation, not from darktable.
   https://github.com/darktable-org/darktable/issues/22081
 - Helios exposure: handled (2026-10-12). A step whose kernel fails (does
   not compile, does not run, out of memory once eviction freed nothing) is
-  computed on the CPU; the engine publishes `engine.gpu_fell_back`
+  computed on the CPU; the engine publishes `helios.engine.gpu_fell_back`
   (node, module, failure kind, reason) and counts it
   (`Counters::fallbacks`). Not yet surfaced in the GUI.
 - Recommendation: on a GPU error for a step, retry that step on the CPU,

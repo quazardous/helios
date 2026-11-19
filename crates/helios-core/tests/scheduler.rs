@@ -44,11 +44,11 @@ fn jobs_run_and_the_scheduler_becomes_idle() {
     let d = s.describe();
     assert_eq!(d["totals"]["done"], 1);
     assert_eq!(d["totals"]["failed"], 1);
-    assert_eq!(kinds(&bus).last(), Some(&"scheduler.idle"));
+    assert_eq!(kinds(&bus).last(), Some(&"helios.scheduler.idle"));
     let failed = bus
         .since(0)
         .into_iter()
-        .find(|e| e.kind == "scheduler.job_ended" && e.payload["state"] == "failed")
+        .find(|e| e.kind == "helios.scheduler.job_ended" && e.payload["state"] == "failed")
         .unwrap();
     assert_eq!(failed.payload["error"], "disk full");
 }
@@ -82,7 +82,7 @@ fn a_queued_job_cancelled_never_starts() {
     assert!(
         !bus.since(0)
             .iter()
-            .any(|e| e.kind == "scheduler.job_started" && e.payload["name"] == "never")
+            .any(|e| e.kind == "helios.scheduler.job_started" && e.payload["name"] == "never")
     );
 }
 
@@ -111,7 +111,7 @@ fn a_running_job_sees_its_cancellation() {
 fn started_names(bus: &Bus) -> Vec<String> {
     bus.since(0)
         .iter()
-        .filter(|e| e.kind == "scheduler.job_started")
+        .filter(|e| e.kind == "helios.scheduler.job_started")
         .map(|e| e.payload["name"].as_str().unwrap().to_string())
         .collect()
 }
@@ -157,7 +157,7 @@ fn a_limited_resource_holds_jobs_back_until_it_is_released() {
     // The free worker runs what needs no GPU, and leaves `second` queued.
     events
         .iter()
-        .find(|e| e.kind == "scheduler.job_ended" && e.payload["name"] == "no gpu")
+        .find(|e| e.kind == "helios.scheduler.job_ended" && e.payload["name"] == "no gpu")
         .unwrap();
     assert_eq!(s.job(free), Some(JobState::Done));
     assert_eq!(s.job(second), Some(JobState::Queued));
@@ -211,10 +211,10 @@ fn events_of_a_job_follow_its_queuing() {
     assert_eq!(
         kinds(&bus),
         [
-            "scheduler.job_queued",
-            "scheduler.job_started",
-            "scheduler.job_ended",
-            "scheduler.idle"
+            "helios.scheduler.job_queued",
+            "helios.scheduler.job_started",
+            "helios.scheduler.job_ended",
+            "helios.scheduler.idle"
         ]
     );
     assert_eq!(events[1].cause, Some(events[0].seq));

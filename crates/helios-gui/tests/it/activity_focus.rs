@@ -630,7 +630,7 @@ fn a_job_naming_its_photos_shows_exactly_them_in_the_library() {
     assert_eq!(h.state().library().shown_set(), Some(1));
 }
 
-/// What a job of the desktop's writes as it goes (`job.log`) shows in
+/// What a job of the desktop's writes as it goes (`helios.job.log`) shows in
 /// its detail as its console.
 #[test]
 fn a_jobs_console_shows_in_its_detail() {

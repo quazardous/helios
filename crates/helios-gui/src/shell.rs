@@ -2149,7 +2149,7 @@ impl Shell {
     /// Answers a decision of the open image through its book, as
     /// `origin` (recorded as who decided): the graph shown takes the
     /// answer and renders again, its card goes. The panel's buttons and
-    /// the `decision.*` commands come here.
+    /// the `helios.decision.*` commands come here.
     pub fn answer_decision(
         &mut self,
         request: crate::decisions::Request,
@@ -4821,7 +4821,7 @@ impl Shell {
         for e in notices {
             let message = || serde_json::from_value::<Message>(e.payload["message"].clone()).ok();
             match e.kind.as_str() {
-                "engine.gpu_fell_back" => {
+                "helios.engine.gpu_fell_back" => {
                     let module = e.payload["module"].as_str().unwrap_or_default().to_string();
                     if self.core.fell_back.insert(module)
                         && let Some(m) = message()
@@ -4829,7 +4829,7 @@ impl Shell {
                         self.notify(Level::Warning, m);
                     }
                 }
-                "engine.gpu_lost" => {
+                "helios.engine.gpu_lost" => {
                     if let Some(m) = message() {
                         let level = if e.payload["recovered"] == true {
                             Level::Warning
@@ -7956,7 +7956,7 @@ impl Shell {
         line.hint.clone().or_else(|| line.note.clone())
     }
 
-    /// Where background work in this process reports: `job.*` events on
+    /// Where background work in this process reports: `helios.job.*` events on
     /// the shell's bus, shown in the jobs centre, cancelled from it
     /// (see `crate::jobs`). An import, an export started from the
     /// desktop, a calibration: each starts its job here.
@@ -8019,7 +8019,7 @@ impl Shell {
     /// The Queue panel follows the selected node: its queue read again,
     /// the panel closed or opened again as its setting says when empty.
     /// Done when its listeners noted it due: the selection changed
-    /// (`values.changed`), a job event was said (`job.*`).
+    /// (`values.changed`), a job event was said (`helios.job.*`).
     fn follow_queue(&mut self) {
         if !self
             .core

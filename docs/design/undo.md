@@ -426,7 +426,7 @@ egui-pop's `HistoryPlugin` is on in Helios, over `HeliosHistory`:
   one step on the desktop), not Ctrl+Z.
 - The desktop does not see another process's events today (the catalog
   version counter is per process); following versions written by a node
-  needs the relay to carry `edit.saved`, or a poll of the image's
+  needs the relay to carry `helios.edit.saved`, or a poll of the image's
   heads: part of building this, not a new decision.
 
 ## Flows

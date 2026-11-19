@@ -3,8 +3,8 @@
 //!
 //! A [`VolumeWatch`] polls a [`Volumes`] about once a second on a thread
 //! of its own, with or without a window, and publishes what changed on
-//! the node's bus: [`Mounted`] (`volume.mounted`) and [`Unmounted`]
-//! (`volume.unmounted`), with the volume's identity and, for a card, the
+//! the node's bus: [`Mounted`] (`helios.volume.mounted`) and [`Unmounted`]
+//! (`helios.volume.unmounted`), with the volume's identity and, for a card, the
 //! card. The volumes there at the first look are published too, marked
 //! [`Mounted::at_start`]. Its clients subscribe: the import window lists
 //! the cards and a card inserted while it is closed raises a toast (the
@@ -12,8 +12,8 @@
 //!
 //! Each event then passes through its hook point on the application's
 //! bus (`bus-contract`, handed to the watch at its start; egui-pop's
-//! ADR 0029 and 0030): [`VolumeMounted`] (`volume.mounted`) and
-//! [`VolumeUnmounted`] (`volume.unmounted`), on the watch's thread. Who
+//! ADR 0029 and 0030): [`VolumeMounted`] (`helios.volume.mounted`) and
+//! [`VolumeUnmounted`] (`helios.volume.unmounted`), on the watch's thread. Who
 //! acts on a volume coming or going is a named listener in a declared
 //! place ([`MOUNTED_ORDER`], [`UNMOUNTED_ORDER`]), never a callback in
 //! the order of the desktop's start:
@@ -65,7 +65,7 @@ pub struct Mounted {
 }
 
 impl Event for Mounted {
-    const KIND: &'static str = "volume.mounted";
+    const KIND: &'static str = "helios.volume.mounted";
 }
 
 /// A volume gone: unplugged, or unmounted.
@@ -80,7 +80,7 @@ pub struct Unmounted {
 }
 
 impl Event for Unmounted {
-    const KIND: &'static str = "volume.unmounted";
+    const KIND: &'static str = "helios.volume.unmounted";
 }
 
 /// A volume event, as heard from the watch or read off the bus.
@@ -170,7 +170,7 @@ pub const POINTS: &[PointDecl] = &[
 ];
 
 /// The import window's cards and the card toast, woken at once (they read
-/// the journal's `volume.*` events).
+/// the journal's `helios.volume.*` events).
 pub const CARDS: &str = "helios.import.cards";
 /// The scan of the volumes and where each photo is (present, offline,
 /// missing), done inside the pass: whoever runs after it reads the
@@ -337,7 +337,7 @@ pub fn order(bus: &dyn HookBus) -> String {
 /// One volume event as the watch passed it through its point.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heard {
-    /// The point (`volume.mounted`, `volume.unmounted`).
+    /// The point (`helios.volume.mounted`, `helios.volume.unmounted`).
     pub point: &'static str,
     pub id: VolumeId,
     /// Its listeners that ran, in order.

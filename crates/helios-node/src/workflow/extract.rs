@@ -18,8 +18,8 @@
 //!   the prompt's inputs; the caller's [`ImageSource`] chooses the image
 //!   sent (the embedded preview, or the head version rendered small, as
 //!   `image_version`);
-//! - what happens is said on the bus as facts: `extract.run` (submitted,
-//!   refused, progress, finished, stopped) and `extract.item` (one per
+//! - what happens is said on the bus as facts: `helios.extract.run` (submitted,
+//!   refused, progress, finished, stopped) and `helios.extract.item` (one per
 //!   concluded row). Nothing here draws.
 //!
 //! Removing the run's vault documents (`remove_run`) drops its run-only
@@ -274,7 +274,7 @@ impl<S: Store> ExtractRun<S> {
             bus.publish_value(
                 SOURCE,
                 None,
-                "extract.run",
+                "helios.extract.run",
                 json!({ "run": id, "state": "refused", "reason": why }),
             );
             return Err(why);
@@ -284,7 +284,7 @@ impl<S: Store> ExtractRun<S> {
         bus.publish_value(
             SOURCE,
             None,
-            "extract.run",
+            "helios.extract.run",
             json!({
                 "run": id,
                 "state": "submitted",
@@ -357,7 +357,7 @@ impl<S: Store> ExtractRun<S> {
         bus.publish_value(
             SOURCE,
             None,
-            "extract.run",
+            "helios.extract.run",
             json!({ "run": self.id, "state": state, "tally": self.tally() }),
         );
     }
@@ -438,7 +438,7 @@ impl<S: Store> ExtractRun<S> {
             if let (Some(p), Some(e)) = (payload.as_object_mut(), extra.as_object()) {
                 p.extend(e.clone());
             }
-            bus.publish_value(SOURCE, None, "extract.item", payload);
+            bus.publish_value(SOURCE, None, "helios.extract.item", payload);
         };
         let Some(image) = image_of(item) else {
             let why = format!("`{item}` is not a library image");
@@ -655,8 +655,8 @@ mod tests {
             (6, 6, 0, 6, 0)
         );
         assert_eq!(chats(&runtime), 6);
-        assert_eq!(kinds(&bus, "extract.item").len(), 6);
-        let states: Vec<_> = kinds(&bus, "extract.run")
+        assert_eq!(kinds(&bus, "helios.extract.item").len(), 6);
+        let states: Vec<_> = kinds(&bus, "helios.extract.run")
             .iter()
             .map(|p| p["state"].as_str().unwrap().to_string())
             .collect();
@@ -765,7 +765,7 @@ mod tests {
         .unwrap();
         assert!(err.contains("animals"), "{err}");
         assert_eq!(chats(&runtime), 0);
-        let refused = kinds(&bus, "extract.run");
+        let refused = kinds(&bus, "helios.extract.run");
         assert_eq!(refused.len(), 1);
         assert_eq!(refused[0]["state"], "refused");
     }
@@ -799,7 +799,7 @@ mod tests {
         assert_eq!((t.done, t.failed), (2, 2));
         // Two tries per bad row (the corrective retry), none after.
         assert_eq!(chats(&runtime), 2 * 2 + 2);
-        let failed = kinds(&bus, "extract.item")
+        let failed = kinds(&bus, "helios.extract.item")
             .into_iter()
             .filter(|p| p["outcome"] == "failed")
             .count();

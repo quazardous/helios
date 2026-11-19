@@ -28,7 +28,7 @@ from the last step saved:
   add or remove a label), applied by the vault to the stored value in one
   transaction; a reject is its own field, so taking it back keeps the
   stars. The desktop shows what the vault holds after each write and on
-  every `vault.field_changed` event, and says why when a write fails.
+  every `helios.vault.field_changed` event, and says why when a write fails.
 - **XMP import** (`helios batch --sidecar --vault FILE`,
   `helios import-darktable --vault FILE`): a version with origin
   `import:xmp` per sidecar (base and darktable duplicates), its import
@@ -37,21 +37,21 @@ from the last step saved:
   whether it was applied), and the sidecar's rating only when the vault
   has none.
 
-Every save is announced on the bus: `edit.saved` (with the session's step
-number) for a version, `vault.field_changed` for a field. Tests wait on
+Every save is announced on the bus: `helios.edit.saved` (with the session's step
+number) for a version, `helios.vault.field_changed` for a field. Tests wait on
 those, never on time.
 
 | Edit step | Held in memory | Persisted | Granularity | Bus event | `kill -9` loses |
 |---|---|---|---|---|---|
-| Parameter, GUI | value store, viewport graph | a version per committed step | the edit, as a version continuing the head | `edit.saved` | the gesture going on since its last save (at most a second of a drag) |
-| Parameter, control / MCP | node graph | a version per change, before the answer | the edit | `edit.saved` | nothing answered |
-| Undo / redo (history move) | value store stacks | a version per move | the edit | `edit.saved` | nothing (the stacks themselves are not rebuilt on restart) |
+| Parameter, GUI | value store, viewport graph | a version per committed step | the edit, as a version continuing the head | `helios.edit.saved` | the gesture going on since its last save (at most a second of a drag) |
+| Parameter, control / MCP | node graph | a version per change, before the answer | the edit | `helios.edit.saved` | nothing answered |
+| Undo / redo (history move) | value store stacks | a version per move | the edit | `helios.edit.saved` | nothing (the stacks themselves are not rebuilt on restart) |
 | Module add / remove / reorder | (no runtime verb exists) | n/a | n/a | n/a | n/a |
-| Decision answer (AI or human) | decision `Book` | inside the version, per answer | the book | `edit.saved`, `decision.*` | nothing answered |
-| Rating / reject / colour label, GUI | library, pending commands | vault `fields`, next frame | field command | `vault.field_changed` | at most the current frame |
-| Title / description | — | only through `Vault::apply`, no caller | field | `vault.field_changed` if a bus is set | n/a |
+| Decision answer (AI or human) | decision `Book` | inside the version, per answer | the book | `helios.edit.saved`, `helios.decision.*` | nothing answered |
+| Rating / reject / colour label, GUI | library, pending commands | vault `fields`, next frame | field command | `helios.vault.field_changed` | at most the current frame |
+| Title / description | — | only through `Vault::apply`, no caller | field | `helios.vault.field_changed` if a bus is set | n/a |
 | Tags | not modelled | n/a | n/a | n/a | n/a |
-| XMP import | transient value in `helios batch` | with `--vault`: a version `import:xmp`, rating if absent | version, field | `vault.version_added` | nothing kept |
+| XMP import | transient value in `helios batch` | with `--vault`: a version `import:xmp`, rating if absent | version, field | `helios.vault.version_added` | nothing kept |
 | Configuration layer (node `--vault`) | — | vault `documents`, once at start | whole document | none | nothing |
 | Workflow journal rows | — | vault `documents` (`VaultJournal`) | whole row | — | per statement |
 
@@ -116,7 +116,7 @@ equal the last saved step.
 - Persisted: never. The graph comes from `show_image` (`helios-gui/src/main.rs`)
   with default parameters, unrelated to any vault image or version; the
   library selection does not load an edit either.
-- Event: `param.changed` (path, old, new, origin, seq) on the in-process bus.
+- Event: `helios.values.param_changed` (path, old, new, origin, seq) on the in-process bus.
   No event says "saved", because nothing saves.
 - `kill -9`: every parameter change and the whole undo history are lost.
   A clean exit loses them too (`on_exit` saves only the layout, the
@@ -136,8 +136,8 @@ equal the last saved step.
   used for configuration layers only, `main.rs` ~l.674-735).
 - Granularity: field-level in memory (one parameter per request), but each
   write re-resolves the module's whole `Params` from the manifest.
-- Event: `control.action` is published *before* the change is applied, so it
-  announces an intent, not a result; there is no `param.changed` on the node.
+- Event: `helios.control.action` is published *before* the change is applied, so it
+  announces an intent, not a result; there is no `helios.values.param_changed` on the node.
 - `kill -9`: every change since the node started. The control endpoint is
   debug-only, so today this mostly affects agents and tests.
 
@@ -155,7 +155,7 @@ equal the last saved step.
   - darktable's `history_end`, read by `Sidecar` (`helios-xmp/src/sidecar.rs`)
     and applied by `Sidecar::effective()`: a read, never stored.
 - Version graph (`helios-vault/src/versions.rs`): `Vault::add_version` writes
-  one immutable row (`INSERT OR IGNORE`) and publishes `vault.version_added`
+  one immutable row (`INSERT OR IGNORE`) and publishes `helios.vault.version_added`
   after the insert. It is the right home for an edit step but has **no
   caller** outside tests.
 
@@ -192,7 +192,7 @@ equal the last saved step.
   IMMEDIATE` in the SQLite driver), and publishes its events after the
   commit. The SQLite driver runs in WAL mode, `synchronous=NORMAL`, with an
   explicit 5 s busy timeout.
-- Event: `vault.field_changed` is published after each write, but only when
+- Event: `helios.vault.field_changed` is published after each write, but only when
   the vault has a bus; the GUI builds it with `Vault::new` (no bus), so
   nothing is announced. The catalog version used by cursors is a per-process
   counter: another process writing the same file is invisible to it.
@@ -287,11 +287,11 @@ equal the last saved step.
 1. **Make `Vault::apply` one transaction** (done). Add a transaction (or a
    `Store::apply_batch`) to the store contract: old-value read, field
    write and audit row commit together; the whole batch commits or none
-   does. Publish `vault.field_changed` after commit only. Set WAL and an
+   does. Publish `helios.vault.field_changed` after commit only. Set WAL and an
    explicit busy timeout in the SQLite driver.
 2. **Give the GUI's vault a bus, and refresh the library from it** (done,
    except moving the write off the UI thread). Apply
-   `vault.field_changed` from any writer to `Library.entries`; on a failed
+   `helios.vault.field_changed` from any writer to `Library.entries`; on a failed
    `apply`, put the shown value back and keep the change for a retry.
    Move the write off the UI thread through the scheduler.
 3. **Replace whole-set label writes by commands** (done) (`label.add`,
@@ -357,7 +357,7 @@ driver):
   survives in every store (the darktable#22569 scenario).
 - An equal write produces no row, no audit, no event; a failed batch
   produces no event.
-- `vault.field_changed` is published only after commit, and a second
+- `helios.vault.field_changed` is published only after commit, and a second
   handle's cursor sees the change (catalog version shared through storage,
   not a per-process counter).
 - Writing the same version twice is one row and one event; two edits on

@@ -506,17 +506,17 @@ fn a_benchmark_reports_as_a_job() {
     m.benchmark(Some(CPU)).unwrap();
     let events = bus.since(0);
     let kinds: Vec<&str> = events.iter().map(|e| e.kind).collect();
-    assert_eq!(kinds.first(), Some(&"job.started"));
-    assert_eq!(kinds.last(), Some(&"job.finished"));
+    assert_eq!(kinds.first(), Some(&"helios.job.started"));
+    assert_eq!(kinds.last(), Some(&"helios.job.finished"));
     assert_eq!(events[0].payload["kind"], "calibration");
     assert_eq!(events[0].payload["total"], 2, "two families on one device");
     assert!(
         events
             .iter()
-            .any(|e| e.kind == "job.progress" && e.payload["item"].as_str().is_some()),
+            .any(|e| e.kind == "helios.job.progress" && e.payload["item"].as_str().is_some()),
         "{kinds:?}"
     );
-    let log = events.iter().find(|e| e.kind == "job.log").unwrap();
+    let log = events.iter().find(|e| e.kind == "helios.job.log").unwrap();
     assert!(
         log.payload["text"].as_str().unwrap().contains("MP/s"),
         "{log:?}"

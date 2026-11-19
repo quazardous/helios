@@ -285,28 +285,28 @@ fn a_card_is_copied_renamed_with_its_sidecars_as_a_job() {
     let kinds: Vec<&str> = events
         .iter()
         .map(|e| e.kind)
-        .filter(|k| k.starts_with("job.") && *k != "job.log")
+        .filter(|k| k.starts_with("helios.job.") && *k != "helios.job.log")
         .collect();
     assert_eq!(
         kinds,
         [
-            "job.started",
-            "job.progress",
-            "job.progress",
-            "job.progress",
-            "job.finished"
+            "helios.job.started",
+            "helios.job.progress",
+            "helios.job.progress",
+            "helios.job.progress",
+            "helios.job.finished"
         ]
     );
     let started = &events
         .iter()
-        .find(|e| e.kind == "job.started")
+        .find(|e| e.kind == "helios.job.started")
         .unwrap()
         .payload;
     assert_eq!(started["kind"], "import");
     assert_eq!(started["total"], 2);
     let progress: Vec<&Value> = events
         .iter()
-        .filter(|e| e.kind == "job.progress")
+        .filter(|e| e.kind == "helios.job.progress")
         .map(|e| &e.payload)
         .collect();
     assert_eq!(progress[0]["done"], 0);
@@ -314,7 +314,7 @@ fn a_card_is_copied_renamed_with_its_sidecars_as_a_job() {
     assert_eq!(progress[2]["done"], 2);
     let log: Vec<&str> = events
         .iter()
-        .filter(|e| e.kind == "job.log")
+        .filter(|e| e.kind == "helios.job.log")
         .filter_map(|e| e.payload["text"].as_str())
         .collect();
     assert!(
@@ -335,7 +335,7 @@ fn a_card_is_copied_renamed_with_its_sidecars_as_a_job() {
         &mut |_: &Value| {},
     );
     assert!(refused.is_err());
-    assert!(bus.since(0).iter().any(|e| e.kind == "job.failed"));
+    assert!(bus.since(0).iter().any(|e| e.kind == "helios.job.failed"));
 }
 
 #[test]
@@ -459,7 +459,7 @@ fn a_burst_and_a_bracket_are_suggested_accepted_and_dissolved() {
     assert!(
         bus.since(0)
             .iter()
-            .filter(|e| e.kind == "library.decision")
+            .filter(|e| e.kind == "helios.library.decision")
             .count()
             >= 2
     );
@@ -515,7 +515,7 @@ fn an_import_shows_in_the_jobs_model_and_is_cancelled_midway() {
                 let started = bus
                     .since(0)
                     .into_iter()
-                    .find(|e| e.kind == "job.started")
+                    .find(|e| e.kind == "helios.job.started")
                     .expect("the import started");
                 jobs.cancel(started.payload["id"].as_str().unwrap())
                     .unwrap();
@@ -868,11 +868,11 @@ fn a_card_taken_out_pauses_the_import_until_it_is_back() {
                 },
             )
         });
-        let paused = event(&bus, "job.paused", 30);
+        let paused = event(&bus, "helios.job.paused", 30);
         if paused.is_some() {
             std::fs::rename(&away, &card).unwrap();
         }
-        if paused.is_none() || event(&bus, "job.finished", 30).is_none() {
+        if paused.is_none() || event(&bus, "helios.job.finished", 30).is_none() {
             // Never hang: a job that did not pause or end is stopped.
             cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         }
@@ -887,9 +887,23 @@ fn a_card_taken_out_pauses_the_import_until_it_is_back() {
         .since(0)
         .iter()
         .map(|e| e.kind)
-        .filter(|k| ["job.paused", "job.resumed", "job.finished"].contains(k))
+        .filter(|k| {
+            [
+                "helios.job.paused",
+                "helios.job.resumed",
+                "helios.job.finished",
+            ]
+            .contains(k)
+        })
         .collect();
-    assert_eq!(kinds, ["job.paused", "job.resumed", "job.finished"]);
+    assert_eq!(
+        kinds,
+        [
+            "helios.job.paused",
+            "helios.job.resumed",
+            "helios.job.finished"
+        ]
+    );
 }
 
 /// A paused import can still be cancelled.
@@ -917,10 +931,10 @@ fn a_paused_import_can_be_cancelled() {
                 },
             )
         });
-        let started = event(&bus, "job.started", 30).expect("started");
+        let started = event(&bus, "helios.job.started", 30).expect("started");
         let id = started["id"].as_str().unwrap().to_string();
         // Cancelled whether it paused or not: never left waiting.
-        let paused = event(&bus, "job.paused", 30);
+        let paused = event(&bus, "helios.job.paused", 30);
         jobs.cancel(&id).unwrap();
         (importing.join().unwrap(), paused)
     });
@@ -929,7 +943,7 @@ fn a_paused_import_can_be_cancelled() {
     let report = report.unwrap();
     assert!(report.cancelled, "{report:?}");
     assert_eq!(report.added, 1);
-    assert!(event(&bus, "job.cancelled", 1).is_some());
+    assert!(event(&bus, "helios.job.cancelled", 1).is_some());
 }
 
 /// After a copy, a card is safe to format only when every photo on it has
@@ -972,7 +986,7 @@ fn a_card_is_safe_to_format_once_every_photo_is_copied() {
     );
     assert!(!first.safe_to_format);
     assert!(
-        bus.since(0).iter().any(|e| e.kind == "job.log"
+        bus.since(0).iter().any(|e| e.kind == "helios.job.log"
             && e.payload["text"] == "EOS_DIGITAL: 1 photo not in the Library"),
         "the job says it"
     );

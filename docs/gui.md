@@ -415,7 +415,7 @@ Built (interim, until the workflow level runs): the Queue panel
 (`helios.queue`, `helios_gui::queue`) follows the selected node
 (`view/graph/selection`, the value the graph editor, the Masks panel and
 the Parameters panel share) and lists the jobs that name it: a job may
-name the graph node it works for (`node` in `job.started`, see
+name the graph node it works for (`node` in `helios.job.started`, see
 [jobs.md](jobs.md)), and an export names the node it renders, a connected
 node's exports included. Per item: its state (waiting until its first
 progress, running, paused, cancelling, done, failed, cancelled), since
@@ -849,7 +849,7 @@ runs on the registry, the control surface agents and scripts reach too.
 A command whose work waits for the next frame shows as running until its
 result arrives, and its failure is shown; egui-pop's events (a command
 dispatched, done or failed, a dialog answered, a toast shown) go on
-Helios's bus under `gui.*` kinds, with their sequence number, source and
+Helios's bus under `helios.gui.*` kinds, with their sequence number, source and
 cause, beside the engine's; events from elsewhere wake the window.
 
 **Normalized (decided 2026-10-11).** Panels, widgets, modules and plugins
@@ -1106,7 +1106,7 @@ opens its log console (a terminal over the job's log lines,
 `JobConsolesPlugin`). The status bar's item shows a ring with the
 overall estimate and how many jobs go on or failed.
 
-Helios's work reports through `helios_core::jobs` as `job.*` events on
+Helios's work reports through `helios_core::jobs` as `helios.job.*` events on
 the shell's bus, which egui-pop reads as its journal (see
 [jobs.md](jobs.md)): an export (its render, encode and write steps, the
 file written in its log), the library import (`library.import`: each

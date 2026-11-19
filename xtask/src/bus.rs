@@ -31,10 +31,17 @@
 //! README, "Naming points"): every point a Helios crate declares
 //! (`impl Point for T` with its `const ID`) is under `helios.`, so
 //! egui-pop's `pop.*` and `egui_stack`'s `stack.*` share the bus with it.
-//! A point named after a node fact kind (`const ID = E::KIND`) keeps the
-//! kind's name until the relay maps an older node's. The listeners are
+//! A point named after a node fact kind (`const ID = E::KIND`) is held to
+//! it through the kind, below. The listeners are
 //! held to it by helios-gui's `every_point_and_listener_of_helios_has_its_prefix`,
 //! on the bus the desktop builds.
+//!
+//! So are the fact kinds (`helios_core::FactDecl`): each kind a crate
+//! declares, the `const KIND` of an `impl Event for T` or the first
+//! argument of `FactDecl::json(` / `FactDecl::typed::<T>(` (a literal, or
+//! a `const` of the crate, by name), is under `helios.`. A node of an
+//! older release names them without it; the relay maps those names
+//! (`helios_core::legacy_kinds`), the bus never holds one.
 //!
 //! `bus --timings <file>` reads the bus debug collector saved by a run
 //! (the journey's `bus-timings-*.json`) and prints, per point, its passes
@@ -88,6 +95,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     found.extend(judge_subscriptions(root, &subscriptions));
     let named = point_names(root);
     found.extend(named.problems.iter().cloned());
+    let kinds = fact_kinds(root);
+    found.extend(kinds.problems.iter().cloned());
     let facts = facts(root);
     found.extend(
         facts
@@ -101,6 +110,11 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
             "points declared under `{PREFIX}`: {} of {}",
             named.points.len(),
             named.points.len()
+        );
+        println!(
+            "fact kinds named under `{PREFIX}`: {} of {}",
+            kinds.kinds.len(),
+            kinds.kinds.len()
         );
         println!(
             "typed fact kinds declared in a contract table: {} of {}",
@@ -123,8 +137,8 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     }
     eprintln!(
         "bus: {} problem(s): a bus built in a library crate (take it from the application), \
-         a fact no table declares (add its `FactDecl::of`), a point without its \
-         `{PREFIX}` prefix, or a desktop subscription \
+         a fact no table declares (add its `FactDecl::of`), a point or a fact kind \
+         without its `{PREFIX}` prefix, or a desktop subscription \
          to a bus outside {ALLOW_LIST} (listen on the point or the node table instead)",
         found.len()
     );
@@ -562,6 +576,245 @@ pub fn point_names_in(rel: &str, text: &str) -> Vec<(String, String)> {
     found
 }
 
+/// Helios's fact kinds and those without their prefix.
+#[derive(Debug, Default)]
+pub struct FactKinds {
+    /// Every fact kind declared, as `path:line: kind`.
+    pub kinds: Vec<String>,
+    /// Those not under [`PREFIX`], or whose name cannot be read.
+    pub problems: Vec<String>,
+}
+
+/// Reads every crate's `src/` (tests left out) for the fact kinds it
+/// declares, each name read from its literal or from a `const` of the
+/// crate.
+pub fn fact_kinds(root: &Path) -> FactKinds {
+    let mut files = Vec::new();
+    for folder in FOLDERS {
+        let dir = root.join(folder);
+        if dir.is_dir() {
+            let _ = sources(&dir, &mut files);
+        }
+    }
+    // Each crate's sources, by the crate's folder (the part before `/src/`).
+    let mut crates: std::collections::BTreeMap<String, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
+    for path in files {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let Some((krate, _)) = rel.split_once("/src/") else {
+            continue;
+        };
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        crates
+            .entry(krate.to_string())
+            .or_default()
+            .push((rel, text));
+    }
+    let mut found = FactKinds::default();
+    for sources in crates.values() {
+        let consts: Vec<Const<'_>> = sources
+            .iter()
+            .flat_map(|(rel, text)| {
+                str_consts(text)
+                    .into_iter()
+                    .map(move |(module, name, value)| Const {
+                        file: rel.as_str(),
+                        module,
+                        name,
+                        value,
+                    })
+            })
+            .collect();
+        for (rel, text) in sources {
+            for (at, name) in fact_kinds_in(rel, text) {
+                let kind = match name {
+                    KindName::Literal(kind) => Some(kind),
+                    KindName::Path(path) => resolve(&path, rel, &consts),
+                };
+                match kind {
+                    Some(kind) if kind.starts_with(PREFIX) => {
+                        found.kinds.push(format!("{at}: {kind}"));
+                    }
+                    Some(kind) => {
+                        found.kinds.push(format!("{at}: {kind}"));
+                        found
+                            .problems
+                            .push(format!("{at}: fact kind `{kind}` is not under `{PREFIX}`"));
+                    }
+                    None => found.problems.push(format!(
+                        "{at}: a fact kind whose name is not a literal nor a `const` of its crate"
+                    )),
+                }
+            }
+        }
+    }
+    found
+}
+
+/// How a fact kind's name is written where it is declared.
+#[derive(Debug, PartialEq)]
+pub enum KindName {
+    /// A string literal.
+    Literal(String),
+    /// A constant, by its path (`facts::READY`, `STARTED`).
+    Path(String),
+}
+
+/// One file's fact kinds, up to its inline test module: the `const KIND`
+/// of each `impl … Event for T`, and the first argument of each
+/// `FactDecl::json(` and `FactDecl::typed::<T>(`, as `(path:line, name)`.
+pub fn fact_kinds_in(rel: &str, text: &str) -> Vec<(String, KindName)> {
+    let lines: Vec<&str> = text
+        .lines()
+        .take_while(|line| !line.starts_with("#[cfg(test)]"))
+        .collect();
+    let mut found = Vec::new();
+    let mut in_event = false;
+    for (n, line) in lines.iter().enumerate() {
+        let code = line.split("//").next().unwrap_or("").trim();
+        let at = format!("{rel}:{}", n + 1);
+        if code.starts_with("impl")
+            && let Some((head, _)) = code.split_once("Event for ")
+            && (head.ends_with(' ') || head.ends_with("::"))
+        {
+            in_event = true;
+            continue;
+        }
+        if code.starts_with('}') {
+            in_event = false;
+        }
+        if in_event
+            && let Some(value) = code
+                .strip_prefix("const KIND: &'static str = ")
+                .and_then(|v| v.strip_suffix(';'))
+        {
+            let name = match value.strip_prefix('"') {
+                Some(literal) => KindName::Literal(literal.trim_end_matches('"').into()),
+                None => KindName::Path(value.to_string()),
+            };
+            found.push((at.clone(), name));
+        }
+        for opener in ["FactDecl::json(", "FactDecl::typed::<"] {
+            for (i, _) in code.match_indices(opener) {
+                let mut rest = &code[i + opener.len()..];
+                if opener.ends_with('<') {
+                    // Past the type's generics and the call's parenthesis.
+                    let Some(open) = rest.find(">(") else {
+                        continue;
+                    };
+                    rest = &rest[open + 2..];
+                }
+                // The argument on the next line when the call breaks there.
+                let arg = if rest.trim().is_empty() {
+                    lines.get(n + 1).map_or("", |l| l.trim())
+                } else {
+                    rest.trim()
+                };
+                let arg = arg.split(',').next().unwrap_or("").trim();
+                let name = match arg.strip_prefix('"') {
+                    Some(literal) => KindName::Literal(literal.trim_end_matches('"').into()),
+                    None => KindName::Path(arg.to_string()),
+                };
+                found.push((at.clone(), name));
+            }
+        }
+    }
+    found
+}
+
+/// A `const NAME: &str = "…";` of a file: its inline module (`pub mod
+/// facts { … }`) if any, its name and its value.
+type StrConst = (Option<String>, String, String);
+
+/// The `const NAME: &str = "…";` of one file, any visibility, up to its
+/// inline test module.
+fn str_consts(text: &str) -> Vec<StrConst> {
+    let mut found = Vec::new();
+    // The inline module the line is in, and how deep its braces go.
+    let mut module: Option<(String, usize)> = None;
+    for line in text
+        .lines()
+        .take_while(|line| !line.starts_with("#[cfg(test)]"))
+    {
+        let code = line.split("//").next().unwrap_or("").trim();
+        let opens = code
+            .strip_prefix("pub ")
+            .unwrap_or(code)
+            .strip_prefix("mod ")
+            .and_then(|rest| rest.strip_suffix(" {"));
+        if module.is_none()
+            && let Some(name) = opens
+        {
+            module = Some((name.to_string(), 0));
+        }
+        if let Some(c) = code.split_once("const ").map(|(_, c)| c)
+            && let Some((name, value)) = c.split_once(": &str = \"")
+            && let Some(value) = value.split('"').next()
+        {
+            let inside = module.as_ref().map(|(m, _)| m.clone());
+            found.push((inside, name.trim().to_string(), value.to_string()));
+        }
+        if let Some((_, depth)) = module.as_mut() {
+            *depth = (*depth + code.matches('{').count()).saturating_sub(code.matches('}').count());
+            if *depth == 0 {
+                module = None;
+            }
+        }
+    }
+    found
+}
+
+/// A `const NAME: &str` of a crate, where it is.
+#[derive(Debug)]
+pub struct Const<'a> {
+    /// Its file, from the workspace root.
+    pub file: &'a str,
+    /// The inline module it is in, if any.
+    pub module: Option<String>,
+    pub name: String,
+    pub value: String,
+}
+
+/// The value of the constant `path` names, from the crate's `consts`:
+/// the one of the module the path names (`promises::DONE` in
+/// `promises.rs`, `facts::READY` in a `mod facts`), else of `rel` itself,
+/// else the crate's only one of that name.
+fn resolve(path: &str, rel: &str, consts: &[Const<'_>]) -> Option<String> {
+    let mut segments = path.rsplit("::");
+    let name = segments.next()?;
+    let module = segments.next();
+    let named: Vec<&Const<'_>> = consts.iter().filter(|c| c.name == name).collect();
+    let stem = |file: &str| {
+        file.rsplit('/')
+            .next()
+            .and_then(|f| f.strip_suffix(".rs"))
+            .map(str::to_string)
+    };
+    let by_module = module.and_then(|m| {
+        named
+            .iter()
+            .find(|c| c.module.as_deref() == Some(m) || stem(c.file).as_deref() == Some(m))
+            .map(|c| c.value.clone())
+    });
+    by_module
+        .or_else(|| {
+            named
+                .iter()
+                .find(|c| c.file == rel && c.module.is_none())
+                .map(|c| c.value.clone())
+        })
+        .or_else(|| match named.as_slice() {
+            [only] => Some(only.value.clone()),
+            _ => None,
+        })
+}
+
 /// The last segment of the type path `ty` starts with, its generics and
 /// what follows left out: `endpoint::CommandRan<'static>>(` is `CommandRan`.
 fn type_name(ty: &str) -> &str {
@@ -699,6 +952,118 @@ mod tests {
         let named = point_names(root);
         assert_eq!(named.problems, Vec::<String>::new());
         assert!(named.points.len() >= 20, "{named:?}");
+    }
+
+    #[test]
+    fn a_fact_kind_is_read_from_its_literal_its_constant_or_the_next_line() {
+        let text = "pub const STARTED: &str = \"helios.job.started\";\n\
+                    impl Event for Ready {\n\
+                    const KIND: &'static str = \"node.ready\";\n\
+                    }\n\
+                    const FACTS: &[FactDecl] = &[\n\
+                    FactDecl::json(STARTED, \"{ id }\", \"x\"),\n\
+                    FactDecl::json(\n\
+                    \"gui.event\",\n\
+                    FactDecl::typed::<promises::Promise>(promises::DONE, \"x\"),\n\
+                    ];\n\
+                    #[cfg(test)]\n\
+                    impl Event for Ping { const KIND: &'static str = \"test.ping\"; }\n";
+        assert_eq!(
+            fact_kinds_in("crates/x/src/lib.rs", text),
+            [
+                (
+                    "crates/x/src/lib.rs:3".to_string(),
+                    KindName::Literal("node.ready".into())
+                ),
+                (
+                    "crates/x/src/lib.rs:6".to_string(),
+                    KindName::Path("STARTED".into())
+                ),
+                (
+                    "crates/x/src/lib.rs:7".to_string(),
+                    KindName::Literal("gui.event".into())
+                ),
+                (
+                    "crates/x/src/lib.rs:9".to_string(),
+                    KindName::Path("promises::DONE".into())
+                ),
+            ]
+        );
+        let at = |file, module: Option<&str>, name: &str, value: &str| Const {
+            file,
+            module: module.map(str::to_string),
+            name: name.into(),
+            value: value.into(),
+        };
+        let consts = [
+            at("crates/x/src/lib.rs", None, "STARTED", "helios.job.started"),
+            at("crates/x/src/promises.rs", None, "DONE", "promise.done"),
+            at("crates/x/src/other.rs", None, "DONE", "helios.other"),
+            at(
+                "crates/x/src/states.rs",
+                Some("facts"),
+                "READY",
+                "helios.ready",
+            ),
+            at("crates/x/src/jobs.rs", None, "READY", "job.ready"),
+        ];
+        assert_eq!(
+            resolve("facts::READY", "crates/x/src/lib.rs", &consts).as_deref(),
+            Some("helios.ready")
+        );
+        assert_eq!(
+            str_consts(
+                "pub mod facts {\n    pub const READY: &str = \"r\";\n}\nconst B: &str = \"b\";\n"
+            ),
+            [
+                (
+                    Some("facts".to_string()),
+                    "READY".to_string(),
+                    "r".to_string()
+                ),
+                (None, "B".to_string(), "b".to_string()),
+            ]
+        );
+        assert_eq!(
+            resolve("STARTED", "crates/x/src/lib.rs", &consts).as_deref(),
+            Some("helios.job.started")
+        );
+        assert_eq!(
+            resolve("promises::DONE", "crates/x/src/lib.rs", &consts).as_deref(),
+            Some("promise.done")
+        );
+        assert_eq!(resolve("DONE", "crates/x/src/lib.rs", &consts), None);
+    }
+
+    #[test]
+    fn an_unprefixed_fact_kind_is_refused() {
+        let dir = std::env::temp_dir().join(format!("xtask-bus-kinds-{}", std::process::id()));
+        let src = dir.join("crates/x/src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("lib.rs"),
+            "impl Event for Ready {\n\
+             const KIND: &'static str = \"node.ready\";\n\
+             }\n\
+             const DONE: &str = \"helios.x.done\";\n\
+             const FACTS: &[FactDecl] = &[FactDecl::json(DONE, \"{}\", \"x\")];\n",
+        )
+        .unwrap();
+        let found = fact_kinds(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found.kinds.len(), 2, "{found:?}");
+        assert_eq!(
+            found.problems,
+            ["crates/x/src/lib.rs:2: fact kind `node.ready` is not under `helios.`"]
+        );
+    }
+
+    #[test]
+    fn every_fact_kind_of_the_workspace_is_under_helios() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let kinds = fact_kinds(root);
+        assert_eq!(kinds.problems, Vec::<String>::new());
+        assert!(kinds.kinds.len() >= 70, "{kinds:?}");
     }
 
     #[test]

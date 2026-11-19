@@ -22,7 +22,9 @@
 //!   published (see [`Inspector::stream`]); with `relay` (a cursor
 //!   `{run, seq}`), a stream of the relayable facts of the process's
 //!   application bus after that cursor, for another process to take in
-//!   (see [`Inspector::stream_relay`]).
+//!   (see [`Inspector::stream_relay`]). Without `prefixed`, as a client
+//!   of 0.92 or before asks, both name each fact kind as that release did
+//!   ([`helios_core::legacy_kinds`]).
 //!
 //! Responses: `{"ok": true, ...}` or `{"ok": false, "error": "...", ...}`.
 //!
@@ -91,7 +93,56 @@ pub enum Request {
         /// ([`Inspector::stream_relay`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         relay: Option<RelayCursor>,
+        /// The client reads the fact kinds under their `helios.` prefix.
+        /// A desktop of Helios 0.92 or before does not say it: the
+        /// stream names each kind as that release did, and `prefix` is
+        /// read in those names ([`helios_core::legacy_kinds`]).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        prefixed: bool,
     },
+}
+
+/// How a stream names the fact kinds to its client: as they are now, or
+/// as a client of an older release knows them.
+#[derive(Clone, Copy)]
+struct Names {
+    legacy: bool,
+}
+
+impl Names {
+    /// The prefix asked for, in the names the bus uses.
+    fn prefix(self, asked: &str) -> String {
+        if !self.legacy || asked.is_empty() {
+            return asked.to_string();
+        }
+        let renamed = helios_core::legacy_kinds::ALIASES
+            .iter()
+            .any(|(old, _)| old.starts_with(asked));
+        if renamed {
+            format!("{}{asked}", helios_core::legacy_kinds::PREFIX)
+        } else {
+            asked.to_string()
+        }
+    }
+
+    /// A line of the stream, its kind named for the client.
+    fn line(self, line: &Value) -> std::borrow::Cow<'_, Value> {
+        if !self.legacy {
+            return std::borrow::Cow::Borrowed(line);
+        }
+        let mut line = line.clone();
+        for at in ["event", "relayed"] {
+            let old = line
+                .get(at)
+                .and_then(|e| e.get("kind"))
+                .and_then(Value::as_str)
+                .map(|k| helios_core::legacy_kinds::legacy(k).to_string());
+            if let Some(old) = old {
+                line[at]["kind"] = Value::String(old);
+            }
+        }
+        std::borrow::Cow::Owned(line)
+    }
 }
 
 /// Where a reader of a relay stands ([`bus_contract::Cursor`]), on the
@@ -286,17 +337,28 @@ impl Inspector {
         match request {
             Request::Subscribe {
                 relay: Some(cursor),
+                prefixed,
                 ..
             } => {
+                let names = Names { legacy: !prefixed };
                 self.stream_relay(*cursor, HEARTBEAT, &never, &mut |line: &Value| {
-                    connection.send(line)
+                    connection.send(&names.line(line))
                 });
                 None
             }
-            Request::Subscribe { prefix, since, .. } => {
-                self.stream(prefix, *since, HEARTBEAT, &mut |line: &Value| {
-                    connection.send(line)
-                });
+            Request::Subscribe {
+                prefix,
+                since,
+                prefixed,
+                ..
+            } => {
+                let names = Names { legacy: !prefixed };
+                self.stream(
+                    &names.prefix(prefix),
+                    *since,
+                    HEARTBEAT,
+                    &mut |line: &Value| connection.send(&names.line(line)),
+                );
                 None
             }
             other => Some(self.answer(other)),
@@ -501,6 +563,8 @@ impl Inspector {
         // Subscribe before reading the journal, so an event published in
         // between is seen by one or the other.
         let rx = self.bus.subscribe();
+        // A client of an older release names the kind without its prefix.
+        let kind = helios_core::legacy_kinds::current(kind);
         let found = |e: &Envelope| e.seq > since && e.kind == kind;
         if let Some(e) = self.bus.since(since).into_iter().find(found) {
             return Some(json!({ "ok": true, "event": e }));
@@ -724,6 +788,7 @@ pub fn subscribe(
         prefix: prefix.to_string(),
         since,
         relay: None,
+        prefixed: true,
     })?;
     if ack["ok"] != true {
         return Err(io::Error::other(
@@ -745,6 +810,7 @@ pub fn subscribe_relay(address: &Address, cursor: RelayCursor) -> io::Result<(Va
         prefix: String::new(),
         since: None,
         relay: Some(cursor),
+        prefixed: true,
     })?;
     if ack["ok"] != true {
         return Err(io::Error::other(
@@ -858,7 +924,7 @@ pub mod control {
         },
         /// Cancels a job people follow by its id (`export-3`, `batch-1`),
         /// as egui-pop's jobs centre asks: the job stops the way it gave
-        /// when it started and says `job.cancelled`.
+        /// when it started and says `helios.job.cancelled`.
         #[serde(rename = "job.cancel")]
         JobCancel {
             id: String,
@@ -1044,7 +1110,7 @@ pub mod control {
         /// `flat`); exact duplicates `skip`ped, kept or listed to `ask`
         /// (`duplicates`); near-duplicate signals measured unless
         /// `signals` is false. The import is announced on the bus
-        /// (`library.imported`), which starts the backup strategy's
+        /// (`helios.library.imported`), which starts the backup strategy's
         /// after-import run; `$/cancel` stops it before its next file.
         /// `paths` are absolute. An import by `source` and `rule` is
         /// answered by the node with a promise before it becomes this
@@ -1076,7 +1142,7 @@ pub mod control {
         },
         /// Keeps `text` (TOML) as a settings layer the node keeps (as
         /// [`ControlRequest::SettingsLayerGet`] names them). A change is
-        /// announced on the bus as `settings.layerChanged` (`{layer}`),
+        /// announced on the bus as `helios.settings.layerChanged` (`{layer}`),
         /// for the node's other clients to read it again; the same text
         /// again announces nothing.
         #[serde(rename = "settings.layer.set")]

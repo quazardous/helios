@@ -106,7 +106,7 @@ fn a_kernel_that_fails_runs_its_step_on_the_cpu() {
         let n = engine.counters();
         // One step fell back (the first: exposure), the others ran on the GPU.
         assert_eq!((n.fallbacks, n.accelerated), (1, 2), "{fault:?}: {n:?}");
-        let fell = events(&engine, "engine.gpu_fell_back");
+        let fell = events(&engine, "helios.engine.gpu_fell_back");
         assert_eq!(fell.len(), 1, "{fault:?}");
         assert_eq!(fell[0]["failure"], failure);
         assert_eq!(fell[0]["module"], "exposure");
@@ -125,7 +125,7 @@ fn a_spent_memory_budget_runs_steps_on_the_cpu() {
     close(&out.unwrap(), &cpu);
     let n = engine.counters();
     assert_eq!((n.fallbacks, n.accelerated), (3, 0), "{n:?}");
-    let fell = events(&engine, "engine.gpu_fell_back");
+    let fell = events(&engine, "helios.engine.gpu_fell_back");
     assert!(
         fell[0]["reason"]
             .as_str()
@@ -163,7 +163,7 @@ fn a_hung_device_is_rebuilt_and_the_render_replayed() {
     close(&out, &cpu);
     assert_eq!(gpu.rebuilds(), rebuilds + 1);
     assert!(gpu.lost().is_none(), "{:?}", gpu.lost());
-    let lost = events(&engine, "engine.gpu_lost");
+    let lost = events(&engine, "helios.engine.gpu_lost");
     assert_eq!(lost.len(), 1);
     assert_eq!(lost[0]["failure"], "timeout");
     assert_eq!(lost[0]["recovered"], true);
@@ -188,7 +188,7 @@ fn a_lost_device_is_rebuilt_and_the_render_replayed() {
     close(&out, &cpu_h);
     assert_eq!(gpu.rebuilds(), rebuilds + 1);
     assert!(gpu.lost().is_none(), "{:?}", gpu.lost());
-    let lost = events(&engine, "engine.gpu_lost");
+    let lost = events(&engine, "helios.engine.gpu_lost");
     assert_eq!(lost[0]["failure"], "device_lost");
     assert_eq!(lost[0]["recovered"], true);
     // What the engine cached on the lost device was dropped: the first

@@ -163,7 +163,7 @@ pub(super) struct Core {
     /// The catalogues' generation About's description was last
     /// translated for (`follow_language`).
     pub(super) about_generation: Option<u64>,
-    /// Where background work reports (`job.*` on the shell's bus).
+    /// Where background work reports (`helios.job.*` on the shell's bus).
     pub(super) jobs: helios_core::jobs::Jobs,
     /// The library's undo steps (imports), shared with the history owner.
     pub(super) library_history: crate::library_history::LibraryHistory,

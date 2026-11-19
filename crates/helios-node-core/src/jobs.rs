@@ -158,7 +158,7 @@ where
     }
 
     /// The strategy's "when a backup disk is plugged in", as the
-    /// listener [`crate::volumes::BACKUPS`] of `volume.mounted` on `bus`
+    /// listener [`crate::volumes::BACKUPS`] of `helios.volume.mounted` on `bus`
     /// (after the scan, so the run reads the locations it just set): each
     /// volume mounted after the watch's first look starts a run on
     /// [`Trigger::OnConnect`] (what is short goes to it; a strategy that

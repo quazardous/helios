@@ -1,4 +1,4 @@
-//! Background work as people follow it: `job.*` events on the [`Bus`].
+//! Background work as people follow it: `helios.job.*` events on the [`Bus`].
 //!
 //! The [`scheduler`](crate::scheduler) runs work; this module says how it
 //! goes, in the events egui-pop's jobs model folds (its jobs centre, the
@@ -10,14 +10,14 @@
 //!
 //! | Event | Data |
 //! |---|---|
-//! | `job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node`, `promise`, `images` |
-//! | `job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
-//! | `job.item_failed` | `id`, `item`, `error` |
-//! | `job.log` | `id`, `text` |
-//! | `job.cancelling` | `id` |
-//! | `job.paused` | `id`, `reason` |
-//! | `job.resumed` | `id` |
-//! | `job.finished`, `job.failed`, `job.cancelled` | `id`, `kind`, `seconds`; `error` when failed; `actions` or `result` when finished with them |
+//! | `helios.job.started` | `id`, `title`, `kind`, `total`, `steps` (`[{id, title, weight}]`), `parent`, `weight`, `cancellable`, `node`, `promise`, `images` |
+//! | `helios.job.progress` | `id`, `done`, `total`, `failed`, `skipped`, `item`, `item_progress`, `step`, `step_done`, `step_total`, `estimate` |
+//! | `helios.job.item_failed` | `id`, `item`, `error` |
+//! | `helios.job.log` | `id`, `text` |
+//! | `helios.job.cancelling` | `id` |
+//! | `helios.job.paused` | `id`, `reason` |
+//! | `helios.job.resumed` | `id` |
+//! | `helios.job.finished`, `helios.job.failed`, `helios.job.cancelled` | `id`, `kind`, `seconds`; `error` when failed; `actions` or `result` when finished with them |
 //!
 //! A job may name the graph node it works for (`node`, [`Start::node`]):
 //! an export names the node it renders. The desktop's Queue panel lists a
@@ -39,7 +39,7 @@
 //! job.log("a.raw: imported");
 //! job.finished();
 //! let kinds: Vec<&str> = bus.since(0).iter().map(|e| e.kind).collect();
-//! assert_eq!(kinds, ["job.started", "job.progress", "job.log", "job.finished"]);
+//! assert_eq!(kinds, ["helios.job.started", "helios.job.progress", "helios.job.log", "helios.job.finished"]);
 //! ```
 
 use std::collections::BTreeMap;
@@ -55,18 +55,18 @@ use crate::bus::{Bus, FactDecl};
 /// The bus source of the job events.
 pub const SOURCE: &str = "jobs";
 
-pub const STARTED: &str = "job.started";
-pub const PROGRESS: &str = "job.progress";
-pub const ITEM_FAILED: &str = "job.item_failed";
-pub const LOG: &str = "job.log";
-pub const CANCELLING: &str = "job.cancelling";
+pub const STARTED: &str = "helios.job.started";
+pub const PROGRESS: &str = "helios.job.progress";
+pub const ITEM_FAILED: &str = "helios.job.item_failed";
+pub const LOG: &str = "helios.job.log";
+pub const CANCELLING: &str = "helios.job.cancelling";
 /// Waiting on something outside it (a card taken out): egui-pop shows the
 /// job paused.
-pub const PAUSED: &str = "job.paused";
-pub const RESUMED: &str = "job.resumed";
-pub const FINISHED: &str = "job.finished";
-pub const FAILED: &str = "job.failed";
-pub const CANCELLED: &str = "job.cancelled";
+pub const PAUSED: &str = "helios.job.paused";
+pub const RESUMED: &str = "helios.job.resumed";
+pub const FINISHED: &str = "helios.job.finished";
+pub const FAILED: &str = "helios.job.failed";
+pub const CANCELLED: &str = "helios.job.cancelled";
 
 /// The job facts, each published with the job's `id`.
 pub const FACTS: &[FactDecl] = &[
@@ -145,7 +145,7 @@ impl Jobs {
         self.cancels.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Starts a job: publishes `job.started`. The job reports through
+    /// Starts a job: publishes `helios.job.started`. The job reports through
     /// what this returns until it ends; dropped without an end, it fails.
     pub fn start(&self, start: Start) -> Report {
         let kind = start.kind.clone();
@@ -159,8 +159,8 @@ impl Jobs {
         }
     }
 
-    /// Cancels a running job: publishes `job.cancelling`, then runs the
-    /// job's cancel; the job says `job.cancelled` once it stopped. Refused
+    /// Cancels a running job: publishes `helios.job.cancelling`, then runs the
+    /// job's cancel; the job says `helios.job.cancelled` once it stopped. Refused
     /// for a job that is not running or cannot be cancelled.
     pub fn cancel(&self, id: &str) -> Result<(), String> {
         let cancel = self
@@ -179,7 +179,7 @@ impl Jobs {
     }
 
     /// Pauses (`paused` true) or resumes a running job that offered it
-    /// ([`Report::on_pause`]); the job says `job.paused` or `job.resumed`
+    /// ([`Report::on_pause`]); the job says `helios.job.paused` or `helios.job.resumed`
     /// itself. Refused for a job that is not running or cannot pause.
     pub fn pause(&self, id: &str, paused: bool) -> Result<(), String> {
         let pause = self
@@ -546,10 +546,10 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                "job.started",
-                "job.progress",
-                "job.item_failed",
-                "job.failed"
+                "helios.job.started",
+                "helios.job.progress",
+                "helios.job.item_failed",
+                "helios.job.failed"
             ]
         );
         assert_eq!(events[0].payload["total"], 2);
@@ -575,13 +575,20 @@ mod tests {
         job.cancelled();
         assert!(jobs.cancel("b1").is_err(), "ended: nothing to cancel");
         let kinds: Vec<&str> = bus.since(0).iter().map(|e| e.kind).collect();
-        assert_eq!(kinds, ["job.started", "job.cancelling", "job.cancelled"]);
+        assert_eq!(
+            kinds,
+            [
+                "helios.job.started",
+                "helios.job.cancelling",
+                "helios.job.cancelled"
+            ]
+        );
     }
 
     #[test]
     fn a_job_dropped_without_an_end_failed() {
         let bus = Arc::new(Bus::new());
         drop(Jobs::new(bus.clone()).start(Start::new("x", "X", "test")));
-        assert_eq!(bus.since(0).last().unwrap().kind, "job.failed");
+        assert_eq!(bus.since(0).last().unwrap().kind, "helios.job.failed");
     }
 }

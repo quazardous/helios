@@ -62,7 +62,7 @@ process per library), [sync.md](sync.md) (replicas), [workflow-level.md](../work
   backups and the health check as its jobs, and a clean close on SIGTERM.
 - **The link between them carries jobs only.** `--node NAME=INSPECT[,CONTROL]`
   starts a relay (`crates/helios-gui/src/relay.rs`) that mirrors a node's
-  `job.*` events into the jobs centre and sends Cancel back. No catalogue
+  `helios.job.*` events into the jobs centre and sends Cancel back. No catalogue
   query, thumbnail or render crosses it.
 - **Transport is local only.** `helios-inspect` serves JSON lines on a Unix
   socket or on loopback TCP with a session token
@@ -102,7 +102,7 @@ as an optimisation), **split** (a part on each side, with a protocol).
 
 | # | Subsystem | Today: where, code | Touches | Deciding criteria | Bucket | Reason, protocol |
 |---|---|---|---|---|---|---|
-| 1 | Vault and catalogue | desktop process (`helios-gui/src/persist.rs`, `main.rs` opens and closes it); node with `--vault`; SQLite WAL, several processes may open it (`windows.md`) | the catalogue file, the vault bus | multi-client, survival | **node** | one owner per vault; clients query through cursors and subscribe to `vault.*` events (architecture.md, "Cursors"). Today two processes on one vault drift apart in memory. |
+| 1 | Vault and catalogue | desktop process (`helios-gui/src/persist.rs`, `main.rs` opens and closes it); node with `--vault`; SQLite WAL, several processes may open it (`windows.md`) | the catalogue file, the vault bus | multi-client, survival | **node** | one owner per vault; clients query through cursors and subscribe to `helios.vault.*` events (architecture.md, "Cursors"). Today two processes on one vault drift apart in memory. |
 | 2 | Image map, volume registry, storage scan | desktop (`helios-library/src/map.rs`, `helios-storage/src/scan.rs`, `registry.rs`), poked on volume changes (`main.rs` `on_volumes_changed`) | the vault, mounted volumes | data locality, survival | **node**, with sightings from clients | the registry is catalogue data. Each machine's volumes are seen by that machine: a client reports its mounts (split with #16). |
 | 3 | Engine, interactive render (viewport tiles, mask display, scopes' preview) | desktop (`engine_source.rs`, `preview.rs`, `mask_display.rs`), zero-copy GPU display (architecture.md, "The viewport on the GPU") | the raw's pixels, GPU memory | latency, hardware, bandwidth | **either** | the node by default when it is local (same process: zero copy); a client with the raw (local or fetched) and a GPU renders itself; a remote node streams tiles otherwise (choice F). |
 | 4 | Engine, batch render (export, head renders, thumbnails of versions) | desktop (`export.rs` on the viewport's engine, `head_render.rs`); node (`ExportDesc`, workflow runs) | raws, output folders | survival, bandwidth | **node** | ROADMAP 2.2: render where the raw is, ship the result. |
@@ -128,7 +128,7 @@ as an optimisation), **split** (a part on each side, with a protocol).
 | 24 | Input (keys, pointer, tablets, MIDI) | desktop: egui-pop keymaps (`keys.rs`, `keymaps.rs`), `pointer_choice.rs` | input devices | hardware, latency | **client** | always. Commands go to the node; key maps are user taste (a `user` setting). |
 | 25 | Colour management, display profile | desktop: `display.rs`, `helios-display` (Wayland colour management), display transform in the viewport's shader | the screen, the compositor | hardware | **client** | the display transform runs where the pixels are shown; the node renders in a working or output space. Export colour (`helios-colour`) is node. |
 | 26 | File dialogs | egui-pop's in-window dialogs and file browser (`egui_pop::api::files::browser`) over the client's file system | the client's file system | data locality | **split** | a dialog lists the file system of whoever will read the path: the client's for a client source, the node's (through a `files.list` query) for a node path. |
-| 27 | Notifications, single instance, session end, logs | desktop `platform.rs` (egui-pop platform), `ending.rs` | the OS desktop | hardware | **client** | the node emits `job.*` events; the client decides to notify. |
+| 27 | Notifications, single instance, session end, logs | desktop `platform.rs` (egui-pop platform), `ending.rs` | the OS desktop | hardware | **client** | the node emits `helios.job.*` events; the client decides to notify. |
 | 28 | Clipboard | desktop (egui-pop clipboard, `clipboard.rs`); agent slots in the window | the OS clipboard | multi-client | **split**: the OS clipboard on the client; agents' slots on the node (mcp.rs says these are not built) | |
 | 29 | Compute units and GPU calibration | `helios-compute` (local devices, settings never synced, remote units probed) | GPUs | hardware | **either**: each machine calibrates its own devices | already per machine. |
 
@@ -349,10 +349,10 @@ the node is the workstation".
 | 10 | Remote compute units are not used | `helios-compute/src/remote.rs` | a node renders on request and reports its devices | M |
 | 11 | Secrets are per machine with no rule for a remote node | `helios-ai/src/secrets.rs`, `helios-connect` (`Oauth`, `Form`) | a node secret store; consent relayed from the client's browser or device code | M |
 | 12 | The plugin broker is started by the desktop | `main.rs` (`Broker::new`) | brokers on both sides, placed by the manifest's side | M |
-| 13 | Settings: the node keeps `user`/`project` in its vault; the desktop reads and writes them through its node (`helios-node-core` `settings`, `settings.layerChanged` on its bus) and reads a layer again when the node says it changed; `helios-node --vault` serves them on its control endpoints (`settings.layer.get`/`set`), but the desktop does not yet take its settings from a remote node | `helios-gui/src/config.rs`, `helios-node-core/src/settings.rs`, `helios-node` `--vault` | clients read `user` and `project` from the node, over the control endpoint for a remote one; `global` stays per machine | S |
+| 13 | Settings: the node keeps `user`/`project` in its vault; the desktop reads and writes them through its node (`helios-node-core` `settings`, `helios.settings.layerChanged` on its bus) and reads a layer again when the node says it changed; `helios-node --vault` serves them on its control endpoints (`settings.layer.get`/`set`), but the desktop does not yet take its settings from a remote node | `helios-gui/src/config.rs`, `helios-node-core/src/settings.rs`, `helios-node` `--vault` | clients read `user` and `project` from the node, over the control endpoint for a remote one; `global` stays per machine | S |
 | 14 | Volume watching lives in the import window | `shell/import_window.rs` (`Watch`) | one watcher per machine, reporting volumes to the node | S |
 | 15 | Two processes on one vault drift in memory | `windows.md`, "Helios today" | solved by one owner (gap 1) | (in 1) |
-| 16 | Notifications only for the desktop's own jobs and relayed ones | `platform.rs` | the client notifies on any node `job.*` end | S |
+| 16 | Notifications only for the desktop's own jobs and relayed ones | `platform.rs` | the client notifies on any node `helios.job.*` end | S |
 | 17 | File dialogs list the client's file system only | egui-pop dialogs | a node `files.list` source for node paths | S |
 | 18 | No resource agent | none | the `Connector` trait served by a client process (read-only, per session) | M |
 | 19 | No path remapping between machines | none | volume report from the client; node answers paths on shared volumes remapped | S |

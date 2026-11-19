@@ -11,10 +11,10 @@
 //!   Once the link is back, the relay resumes after the last event it
 //!   read, so none is relayed twice; when the node restarted or its
 //!   journal no longer holds what was missed, it starts over from the
-//!   node's present and says `node.resync` to the listeners (the second
+//!   node's present and says `helios.node.resync` to the listeners (the second
 //!   link says it instead, when there is one: one resync per hole);
 //! - it reads the node's jobs whole (`describe jobs`), then follows its
-//!   `job.*` events after that point (`subscribe`, pushed by the node,
+//!   `helios.job.*` events after that point (`subscribe`, pushed by the node,
 //!   see `helios_inspect`), and republishes each on the shell's bus with
 //!   the job's id (and its parent's) as `node:<name>/<id>`: the jobs
 //!   centre shows a node's batch as a parent with its exports as children,
@@ -28,11 +28,11 @@
 //!   resume where they are, the ones that ended meanwhile end as they did
 //!   (or as failed, when the node no longer remembers how), the new ones
 //!   start. Still lost after [`Timing::forget_after`], they fail and are
-//!   forgotten (`node.jobs_forgotten`, which the shell reads to take them
+//!   forgotten (`helios.node.jobs_forgotten`, which the shell reads to take them
 //!   out of the jobs centre). A node that restarted (another instance)
 //!   leaves its old jobs failed.
 //!
-//! Each change of the link is said on the bus too: `node.link` with the
+//! Each change of the link is said on the bus too: `helios.node.link` with the
 //! node's name, `up`, and why it dropped.
 //!
 //! When the desktop's application bus has a relay (`bus-contract`'s
@@ -44,7 +44,7 @@
 //! here (`NodeEvents` among them, for its own listeners: those kinds
 //! come by this link only). It resumes from its cursor; a node restarted
 //! (`restarted`) or a cursor the node's journal no longer holds (`gap`)
-//! says `node.resync` to the listeners, then goes on from the node's
+//! says `helios.node.resync` to the listeners, then goes on from the node's
 //! facts.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,10 +53,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use egui_pop::api::bus::bus_contract::{self, RelayedEntry};
-use helios_core::Bus;
 use helios_core::jobs::{
     CANCELLED, CANCELLING, FAILED, FINISHED, ITEM_FAILED, LOG, PAUSED, PROGRESS, RESUMED, STARTED,
 };
+use helios_core::{Bus, legacy_kinds};
 use helios_inspect::control::ControlRequest;
 use helios_inspect::{Address, Client, Closer, Request};
 
@@ -66,9 +66,9 @@ use serde_json::{Value, json};
 /// What a node's job id starts with on the desktop.
 pub const PREFIX: &str = "node:";
 /// The bus event listing a lost node's jobs to forget (`node`, `ids`).
-pub const FORGOTTEN: &str = "node.jobs_forgotten";
+pub const FORGOTTEN: &str = "helios.node.jobs_forgotten";
 /// The bus event saying a link went up or down (`node`, `up`, `error`).
-pub const LINK: &str = "node.link";
+pub const LINK: &str = "helios.node.link";
 /// The source of the events a relay publishes.
 const SOURCE: &str = "relay";
 
@@ -100,8 +100,10 @@ pub fn split_node_job(id: &str) -> Option<(&str, &str)> {
 }
 
 /// The kind of a job event, as the bus names it (`&'static`); `None`
-/// for an event a relay does not carry.
+/// for an event a relay does not carry. A node of an older release says
+/// it without its prefix (`job.started`).
 fn job_kind(kind: &str) -> Option<&'static str> {
+    let kind = legacy_kinds::current(kind);
     [
         STARTED,
         PROGRESS,
@@ -116,6 +118,25 @@ fn job_kind(kind: &str) -> Option<&'static str> {
     ]
     .into_iter()
     .find(|k| *k == kind)
+}
+
+/// A line read from a node, the kind it carries (an event's, a relayed
+/// fact's) under its name now: a node of an older release says it
+/// without its prefix (`vault.field_changed`), and the desktop takes it
+/// in under its new one, once (`helios_core::legacy_kinds`).
+fn current_kinds(mut line: Value) -> Value {
+    for at in ["event", "relayed"] {
+        let renamed = line
+            .get(at)
+            .and_then(|e| e.get("kind"))
+            .and_then(Value::as_str)
+            .filter(|k| legacy_kinds::current(k) != *k)
+            .map(|k| legacy_kinds::current(k).to_string());
+        if let Some(kind) = renamed {
+            line[at]["kind"] = Value::String(kind);
+        }
+    }
+    line
 }
 
 /// A node the desktop follows: its name on the desktop, its inspect
@@ -448,7 +469,7 @@ impl Follow {
             if self.stopped() {
                 return Ok(());
             }
-            let line = client.read().map_err(unreachable)?;
+            let line = current_kinds(client.read().map_err(unreachable)?);
             if let Some(event) = line.get("event") {
                 if let (Some(n), Some((_, last))) = (event["seq"].as_u64(), self.resume.as_mut()) {
                     *last = n;
@@ -457,7 +478,7 @@ impl Follow {
                 // events up to `seq`.
                 if event["kind"]
                     .as_str()
-                    .is_some_and(|k| k.starts_with("job."))
+                    .is_some_and(|k| k.starts_with("helios.job."))
                 {
                     if event["seq"].as_u64().is_none_or(|n| n > seq) {
                         self.relay(event);
@@ -730,7 +751,7 @@ impl TakeIn {
             if self.stopped() {
                 return Ok(());
             }
-            let line = client.read().map_err(unreachable)?;
+            let line = current_kinds(client.read().map_err(unreachable)?);
             if let Some(e) = line.get("relayed") {
                 let seq = e["seq"].as_u64().unwrap_or(0);
                 if skip_to.is_some_and(|s| seq <= s) {

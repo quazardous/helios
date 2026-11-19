@@ -60,7 +60,7 @@ pub struct CallMeta {
     pub attempt: Option<u32>,
 }
 
-/// One model call, as logged and published (`ai.call`). Never the images,
+/// One model call, as logged and published (`helios.ai.call`). Never the images,
 /// the text or the key.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CallRecord {
@@ -460,7 +460,7 @@ impl Core {
     fn record(&self, record: &CallRecord) {
         let line = serde_json::to_value(record).expect("records serialize");
         self.bus
-            .publish_value(SOURCE, None, "ai.call", line.clone());
+            .publish_value(SOURCE, None, "helios.ai.call", line.clone());
         let _guard = self.log.lock().expect("log lock");
         if let Some(dir) = self.paths.log.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -827,7 +827,7 @@ impl Core {
             p.extend(d.clone());
         }
         self.bus
-            .publish_value(SOURCE, None, "job.progress", payload);
+            .publish_value(SOURCE, None, "helios.job.progress", payload);
     }
 
     fn finish(&self, job: u64, result: Value) {
@@ -1792,7 +1792,7 @@ impl Ai {
             result
         });
         Ok(json!({ "job": id.0, "name": name, "disk": disk,
-            "follow": "helios_ai_jobs_events (job.progress), helios_ai_jobs_wait, helios_ai_jobs_cancel" }))
+            "follow": "helios_ai_jobs_events (helios.job.progress), helios_ai_jobs_wait, helios_ai_jobs_cancel" }))
     }
 
     /// Measures prompts on local models, as a job; with `apply`, routes
@@ -1908,7 +1908,7 @@ impl Ai {
             Ok(())
         });
         Ok(json!({ "job": id.0, "name": "ai bench",
-            "follow": "helios_ai_jobs_events (job.progress), helios_ai_jobs_wait" }))
+            "follow": "helios_ai_jobs_events (helios.job.progress), helios_ai_jobs_wait" }))
     }
 
     // Jobs.

@@ -10,8 +10,10 @@ its crate's prefix, so several share one bus: egui-pop's are `pop.*`
 Helios's own `helios.*` (`helios.image.open`, `helios.library.changed`,
 the listener `helios.library.scan`; a health check's listener is
 `helios.check.<check id>`). This document was written before: it names
-them without their prefix. The node's fact kinds (`vault.*`,
-`volume.*`…) keep their names until the relay can map an older node's.
+them without their prefix. Since 2026-11-19 the node's fact kinds take
+it too (`helios.vault.*`, `helios.volume.*`, `helios.job.*`…); a node or
+a desktop of 0.92 and before still pairs for one release, the relay
+translating the old names at the edge (`helios_core::legacy_kinds`).
 
 The owner's ask: re-read how Helios's modules depend on each other, in the
 light of the event bus, so that modules stop holding strong dependencies on
@@ -61,7 +63,7 @@ on `next` as of 2026-11-15. "Coupling" says what a change costs today.
 | # | Where | Kind | What it couples | Coupling today |
 |---|---|---|---|---|
 | 1 | `helios-health` (`lib.rs`: `Registry::builtin`, `Context`; `checks.rs`, `backup.rs`, `gpu.rs`, `plugins.rs`, `snapshots.rs`) and `helios-node-core/src/health.rs` (`HealthInputs::with_*`) | registry filled at start, in the registry's crate | the health crate knows storage, the library, backups, the GPU, plugins and snapshots; `Context` has one field per module; the node's `HealthInputs` has one `with_*` per module | **strong**: a module adding a check edits `helios-health` (its check, a `Context` field, `builtin`) and `helios-node-core` (a `with_*`). `helios-health` depends on `helios-storage` and `helios-vault` for that |
-| 2 | `helios-gui/src/main.rs` (three calls to `backups.start(Trigger::OnImport, …)`) and `helios-node/src/vault_node.rs` (the `helios-after-import` thread on `library.imported`) | direct call across crates | the desktop's import paths know the storage strategy's trigger | **strong**: the node does it from a fact, the desktop by hand; a new "after import" reaction (the image map, a health re-run) means a fourth call |
+| 2 | `helios-gui/src/main.rs` (three calls to `backups.start(Trigger::OnImport, …)`) and `helios-node/src/vault_node.rs` (the `helios-after-import` thread on `helios.library.imported`) | direct call across crates | the desktop's import paths know the storage strategy's trigger | **strong**: the node does it from a fact, the desktop by hand; a new "after import" reaction (the image map, a health re-run) means a fourth call |
 | 3 | `helios-node/src/lib.rs` (`registry()`), `helios-gui/src/templates.rs` (`builtin`), `helios-template`, `helios-calibrate`; the `Cargo.toml` of `helios-gui` and `helios-node` (fourteen `helios-module-*` each) | hand-written lists | each processing module named in four crates | **strong**: a new module edits four lists that must agree |
 | 4 | `helios-config/src/lib.rs` (`SETTINGS`, one array) | registry filled at start, in the registry's crate | every module's settings declared in the config crate | **medium**: `Schema::new(&[sets])` already takes several sets; only the habit of one array remains |
 | 5 | `helios-init/src/lib.rs` (`Registry::builtin`, `library()`) | registry filled at start, in the registry's crate | the library's first-run steps live in the init crate | **medium**: same shape as health, smaller |
@@ -97,7 +99,7 @@ Three channels, each with its test:
 | # | Becomes | Why |
 |---|---|---|
 | 1 Health checks | **hook point** `health.report` | Many owners contribute findings to one report, in a stable order, and one failing check must not hide the others: the runner's job today, done by hand. Each check moves to its owner; `Context`'s per-module fields become what each listener reads for itself |
-| 2 After an import | **fact event** `library.imported` | Nobody answers; backups, the map and a health re-run are reactions. The desktop's in-process imports publish the same fact the node does, and the storage strategy listens |
+| 2 After an import | **fact event** `helios.library.imported` | Nobody answers; backups, the map and a health re-run are reactions. The desktop's in-process imports publish the same fact the node does, and the storage strategy listens |
 | 3 Module lists | **typed contract**, one catalogue | The engine's hot path: `Module` (`helios-core/src/module.rs`) stays a trait. The lists become one catalogue crate the node, the desktop, templates and calibration read; no hook point (no order, no partial failure) |
 | 4 Settings | **typed contract** (declarations by owner), collected through `settings.declare` | Each module declares its `Setting`s next to its code; the collect is a hook point only because plugins and modules come and go and the form's sections are altered (egui-pop's `Hook::settings` already does that part) |
 | 5 Init steps | **hook point** `init.steps` | Contributions in order (`after` matters: the library folder before the first import), with requirements per module |
@@ -377,7 +379,7 @@ shared), the desktop adds the GPU and the plugin host
 
 ### Slice 2: after an import
 
-The desktop's in-process imports publish `library.imported` on the bus
+The desktop's in-process imports publish `helios.library.imported` on the bus
 they report to, as the node does; the storage strategy's
 `OnImport` trigger listens to it on both sides (the node's
 `helios-after-import` thread is the model). `main.rs`'s three
@@ -406,9 +408,9 @@ is not done on the interface's thread. The node's own
 
 ### Slice 2b: the library changed
 
-The vault says its library changed four ways (`vault.library_changed`,
-`vault.locations_changed`, `vault.changed_outside`, `vault.captures_set`)
-and its stacks two (`vault.stack_changed`, `library.decision`); the
+The vault says its library changed four ways (`helios.vault.library_changed`,
+`helios.vault.locations_changed`, `helios.vault.changed_outside`, `helios.vault.captures_set`)
+and its stacks two (`helios.vault.stack_changed`, `helios.library.decision`); the
 desktop used to turn the first four into a `locations_changed` flag,
 while imports and undo set a separate `refill` flag, so an import or an
 undo read the Library twice, and the albums compared the library
@@ -431,7 +433,7 @@ the reads through the node): they mark their place, and `Persist` (for
 `library.changed`) or the shell (for `library.filled`) does their part
 right after, in the order they ran.
 
-Since 2026-11-17 the node's `library.imported` (an import through it
+Since 2026-11-17 the node's `helios.library.imported` (an import through it
 ended, its record in the import history; any client's) is a fifth kind,
 `imports`, and `library.imports` (the shell's) reads the Library's
 import sessions again on it. They were read every 10 seconds, a blocking
@@ -439,7 +441,7 @@ node request on the interface's thread; now an idle pass reads nothing.
 
 ### Slice 2c: volumes coming and going
 
-The node's volume watch published `volume.mounted` / `volume.unmounted`
+The node's volume watch published `helios.volume.mounted` / `helios.volume.unmounted`
 on the journal and also called callbacks in the order the desktop's
 start registered them: the scan of where each photo is (which only
 woke the scan's own thread), the image map's feed, the backups on
@@ -657,7 +659,7 @@ too, after the darkroom's: the Decisions panel's cards
 (`helios.decisions.follow`, made again from the book and the graph the
 darkroom just brought up to the values) and the Queue panel
 (`helios.queue.selection` on the selected node, `helios.queue.jobs` on
-egui-pop's `job.*` events after its jobs model; both note it due, the
+egui-pop's `pop.job.*` events after its jobs model; both note it due, the
 shell reads the queue once the drain returns). The journal's
 `helios.param.journal` says `helios.param.changed` once per undo step
 or gesture: the store marks a change written inside an open gesture
@@ -724,7 +726,7 @@ debug bridge and `hooks.list` show every point in one place.
   cache, refreshed in the background, a spinner per value) is a
   **listener of facts**, not a hook point: it invalidates its keys on
   node events through `NodeEvents::listen("reads", ["storage.*",
-  "volume.*", …])`, and each read's freshness and invalidating events are
+  "helios.volume.*", …])`, and each read's freshness and invalidating events are
   declared with its command (a typed contract, next to the command's
   schema). It uses the kernel in one place: a page whose rows come from
   several modules (the "In use" rows, one per cache kind and plugin)

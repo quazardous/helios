@@ -458,7 +458,7 @@ fn catalogue_commands(
 }
 
 /// The library operations as commands (see `helios_library`): an import
-/// runs as a job on the shell's jobs (`job.*`, in the jobs centre, where
+/// runs as a job on the shell's jobs (`helios.job.*`, in the jobs centre, where
 /// it is cancelled), the library filled again when it ends, its
 /// duplicates listed in the Duplicates panel, its photos' darktable edits
 /// kept as versions (unless `darktable` is false), the darktable edits

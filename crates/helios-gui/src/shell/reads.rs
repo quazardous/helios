@@ -14,8 +14,8 @@
 //! - Each read's policy ([`POLICIES`]): how long it stays fresh, and
 //!   which node events make it out of date.
 //! - Invalidation: the node-event relay's listener `reads` (on
-//!   `storage.*`, `library.*`, `volume.*` and `cache.*`) hands each node
-//!   fact to the kernel at every frame; `node.resync` (a hole in a node's
+//!   `storage.*`, `library.*`, `helios.volume.*` and `cache.*`) hands each node
+//!   fact to the kernel at every frame; `helios.node.resync` (a hole in a node's
 //!   events) makes every value out of date. The storage link's own
 //!   changes (an edit saved, a read after a scan) reach it as
 //!   `storage.volumes.changed` ([`Shell::read_fact`]); the health check's
@@ -47,12 +47,12 @@ pub const POLICIES: &[(&str, Option<Duration>, &[&str])] = &[
     (
         super::storage_admin::VOLUMES,
         Some(Duration::from_secs(30)),
-        &["storage.*", "library.*"],
+        &["storage.*", "helios.library.*"],
     ),
     (
         super::storage_admin::STRATEGY,
         Some(Duration::from_secs(30)),
-        &["storage.*", "library.*"],
+        &["storage.*", "helios.library.*"],
     ),
     // The health check's findings change only when a run starts or ends
     // or a finding is ignored, each said as `health.*`.
@@ -107,7 +107,12 @@ pub fn kernel(registry: Arc<Mutex<Registry>>) -> Arc<ReadKernel> {
 }
 
 /// The node facts the reads listen to.
-pub const LISTENS: &[&str] = &["storage.*", "library.*", "volume.*", "cache.*"];
+pub const LISTENS: &[&str] = &[
+    "storage.*",
+    "helios.library.*",
+    "helios.volume.*",
+    "cache.*",
+];
 
 /// The reads' listener on the application bus's points, for the
 /// desktop's own node's facts.
