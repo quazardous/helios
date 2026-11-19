@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A nextest JUnit report (`--profile ci`, one retry): a pass, a failure
+     on both attempts, and a test under its old name. -->
+<testsuites name="nextest-run" tests="3" failures="1" errors="0" uuid="u1" timestamp="2026-11-18T10:00:00Z" time="12.5">
+    <testsuite name="helios-core" tests="2" disabled="0" errors="0" failures="1">
+        <testcase name="graph::tests::a_cycle_is_refused" classname="helios-core" timestamp="2026-11-18T10:00:01Z" time="0.250">
+        </testcase>
+        <testcase name="graph::tests::an_edge_is_kept" classname="helios-core" timestamp="2026-11-18T10:00:01Z" time="0.100">
+            <failure type="test failure">thread 'graph::tests::an_edge_is_kept' panicked</failure>
+            <rerunFailure timestamp="2026-11-18T10:00:02Z" time="0.110" type="test failure">panicked again</rerunFailure>
+        </testcase>
+    </testsuite>
+    <testsuite name="helios-gui::it" tests="1" disabled="0" errors="0" failures="0">
+        <testcase name="import::the_old_name" classname="helios-gui::it" timestamp="2026-11-18T10:00:03Z" time="4.000">
+        </testcase>
+    </testsuite>
+</testsuites>
