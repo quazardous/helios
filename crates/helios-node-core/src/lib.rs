@@ -31,6 +31,7 @@ pub mod quit;
 pub mod reads;
 pub mod settings;
 pub mod volumes;
+pub mod warm;
 pub mod workshops;
 
 /// The fact kinds this crate publishes.
@@ -71,5 +72,16 @@ pub const FACTS: &[helios_core::FactDecl] = {
             "Every asker of an image state cancelled",
         ),
         FactDecl::json(facts::EVICTED, STATE, "A ready image state was let go"),
+        FactDecl::json(warm::facts::SHOWN, "{ photo }", "A surface shows the photo"),
+        FactDecl::json(
+            warm::facts::NEAR,
+            "{ photo }",
+            "The photo is likely shown next: worth warming",
+        ),
+        FactDecl::json(
+            warm::facts::HIDDEN,
+            "{ photo }",
+            "The photo is neither shown nor near any more",
+        ),
     ]
 };
