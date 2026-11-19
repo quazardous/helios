@@ -399,15 +399,12 @@ fn an_edit_from_an_undeclared_area_fails_the_audit() {
         h.hover_at(at + vec2(60.0, 0.0));
         h.step();
         let checked = a.check(&h.ctx, &store.lock().unwrap(), Some(at));
-        match declared {
-            Some(AreaKind::Edit) => {
-                let area = checked.expect("an edit area passes");
-                assert_eq!(area.map(|a| a.id).as_deref(), Some("test.slider"));
-            }
-            _ => {
-                let e = checked.expect_err("refused");
-                assert!(e.contains(EV), "{e}");
-            }
+        if declared == Some(AreaKind::Edit) {
+            let area = checked.expect("an edit area passes");
+            assert_eq!(area.map(|a| a.id).as_deref(), Some("test.slider"));
+        } else {
+            let e = checked.expect_err("refused");
+            assert!(e.contains(EV), "{e}");
         }
     }
 }
