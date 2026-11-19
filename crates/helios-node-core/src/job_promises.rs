@@ -355,7 +355,9 @@ impl<S: Store> Mirror<S> {
 /// stops (adopted by it, [`crate::node::Link::adopt`]) or it is dropped.
 pub struct JobPromises {
     stop: Arc<AtomicBool>,
-    thread: Mutex<Option<JoinHandle<()>>>,
+    /// The mirror's thread, and what tells its end: the sender its
+    /// thread holds, dropped as it ends.
+    thread: Mutex<Option<(JoinHandle<()>, Receiver<()>)>>,
 }
 
 impl JobPromises {
@@ -367,9 +369,12 @@ impl JobPromises {
     {
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
+        let (ending, ended) = std::sync::mpsc::channel::<()>();
         let thread = std::thread::Builder::new()
             .name("helios-job-promises".into())
             .spawn(move || {
+                // Dropped as the thread ends, a panic included.
+                let _ending = ending;
                 let mut mirror = Mirror {
                     vault,
                     jobs: BTreeMap::new(),
@@ -392,7 +397,8 @@ impl JobPromises {
                 mirror.interrupt();
             })
             .map_err(|e| warn(&format!("jobs are not mirrored as promises: {e}")))
-            .ok();
+            .ok()
+            .map(|t| (t, ended));
         Self {
             stop,
             thread: Mutex::new(thread),
@@ -413,22 +419,19 @@ impl JobPromises {
     pub fn stop_within(&self, deadline: Duration) -> bool {
         self.stop.store(true, Ordering::SeqCst);
         let mut thread = self.thread.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(t) = thread.take() else {
+        let Some((t, ended)) = thread.take() else {
             return true;
         };
-        let until = Instant::now() + deadline;
-        while !t.is_finished() {
-            if Instant::now() >= until {
-                log::warn!(
-                    target: "helios::node",
-                    "the jobs' mirror did not stop within {} ms: left, its last jobs settle at the next start",
-                    deadline.as_millis()
-                );
-                // Kept, so that a later stop waits for it again.
-                *thread = Some(t);
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(5));
+        // Woken as the thread ends (its sender dropped), not polled.
+        if let Err(RecvTimeoutError::Timeout) = ended.recv_timeout(deadline) {
+            log::warn!(
+                target: "helios::node",
+                "the jobs' mirror did not stop within {} ms: left, its last jobs settle at the next start",
+                deadline.as_millis()
+            );
+            // Kept, so that a later stop waits for it again.
+            *thread = Some((t, ended));
+            return false;
         }
         let _ = t.join();
         true

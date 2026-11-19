@@ -11,6 +11,7 @@ pub const INTERFACE_PASS_BUDGET: std::time::Duration = std::time::Duration::from
 pub mod account_gone;
 pub mod activity;
 pub mod agent_state;
+pub mod app_quit;
 pub mod backup_end;
 pub mod caches;
 pub mod calibrate;
