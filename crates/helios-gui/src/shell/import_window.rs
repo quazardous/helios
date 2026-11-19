@@ -2585,6 +2585,9 @@ fn contents_ui(
             .max_rect(grid_rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    // Clipped to its own rect: the grid's rubber band senses its whole clip
+    // rect, which would otherwise cover the folder tree and take its clicks.
+    grid_ui.set_clip_rect(grid_rect.intersect(ui.clip_rect()));
     ui.advance_cursor_after_rect(room);
     let ui = &mut grid_ui;
     let browser = w.browser.as_mut()?;
