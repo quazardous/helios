@@ -24,6 +24,7 @@ mod clipboard;
 mod command_policy;
 mod compare_focus;
 mod compare_heads;
+mod conformance;
 mod contexts;
 mod control_names;
 mod culling;
