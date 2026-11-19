@@ -29,6 +29,10 @@ struct Audit {
     seq: u64,
     /// Where the pointer's button went down, while it is held.
     press: Option<Pos2>,
+    /// The topmost area under the press, as the press's frame listed it:
+    /// a gesture's writes come from where it began, even once its handle
+    /// moved away or its panel turned stale under its own change.
+    origin: Option<AreaRecord>,
 }
 
 impl Audit {
@@ -36,7 +40,16 @@ impl Audit {
         Audit {
             seq: store.seq(),
             press: None,
+            origin: None,
         }
+    }
+
+    /// The topmost area registered under `at` in the last pass.
+    fn area_at(ctx: &egui::Context, at: Pos2) -> Option<AreaRecord> {
+        areas::list(ctx)
+            .into_iter()
+            .rev()
+            .find(|a| a.rect.contains(at))
     }
 
     /// The paths of the edit the user wrote since the last check.
@@ -55,8 +68,9 @@ impl Audit {
     }
 
     /// After a frame: the edit's writes since the last check came from an
-    /// edit area under `at` (the press), as the registry lists the
-    /// frame's areas. Returns the area they came from, if any wrote.
+    /// edit area under `at` (the press): the one its frame listed there,
+    /// else the topmost one listed now. Returns the area they came from,
+    /// if any wrote.
     fn check(
         &mut self,
         ctx: &egui::Context,
@@ -69,11 +83,10 @@ impl Audit {
             return Ok(None);
         }
         let at = at.ok_or_else(|| format!("{writes:?} written with no pointer press"))?;
-        let listed = areas::list(ctx);
-        let area = listed
-            .iter()
-            .rev()
-            .find(|a| a.rect.contains(at))
+        let area = self
+            .origin
+            .clone()
+            .or_else(|| Audit::area_at(ctx, at))
             .ok_or_else(|| format!("{writes:?} written from {at:?}, under no declared area"))?;
         if area.kind != AreaKind::Edit || area.inert {
             return Err(format!(
@@ -91,7 +104,7 @@ impl Audit {
                 area.id
             ));
         }
-        Ok(Some(area.clone()))
+        Ok(Some(area))
     }
 
     /// One frame of `h`, checked; `pressed` says a button went down
@@ -116,13 +129,19 @@ impl Audit {
             h.hover_at(at);
         }
         h.step();
+        if pressed == Some(true) {
+            self.origin = Audit::area_at(&h.ctx, at);
+        }
         let from = self.press;
+        let checked = {
+            let store = h.state().values().lock().unwrap();
+            self.check(&h.ctx, &store, from)
+        };
         if pressed == Some(false) {
             self.press = None;
+            self.origin = None;
         }
-        let store = h.state().values().lock().unwrap();
-        self.check(&h.ctx, &store, from)
-            .unwrap_or_else(|e| panic!("an edit from an undeclared area: {e}"))
+        checked.unwrap_or_else(|e| panic!("an edit from an undeclared area: {e}"))
     }
 
     /// A whole drag from `from` to `to`, every frame checked; the edit
