@@ -16,6 +16,10 @@
 //! #5265: a Details mode (columns sorted as the gallery, kept per view);
 //! the list and the details open a photo on Enter or a double click and
 //! carry photos out on a drag; a narrow bar keeps Compare on one line.
+//!
+//! #5345: the grid's thumbnails keep their size as the view widens, which
+//! shows more columns, as catalogue apps do; the workspace keeps the size,
+//! an older count per row turned into one once.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -200,6 +204,93 @@ fn the_view_menu_changes_the_results_and_asks_to_keep_them() {
         [(MAIN_GALLERY.to_string(), lib.results())],
         "the host keeps it with the view"
     );
+}
+
+/// A Library of `n` photos, `p000.jpg` on.
+fn library_of(n: usize) -> Rc<RefCell<Library>> {
+    let mut lib = Library::default();
+    lib.set_entries(
+        (0..n)
+            .map(|i| Entry {
+                id: format!("p{i:03}"),
+                name: format!("p{i:03}.jpg"),
+                ..Entry::default()
+            })
+            .collect(),
+    );
+    Rc::new(RefCell::new(lib))
+}
+
+/// The grid's first row: how many cells it holds, and the first one's
+/// width.
+fn first_row(h: &Harness, n: usize) -> (usize, f32) {
+    let cell = |i: usize| {
+        h.query_all_by_label(&format!("p{i:03}.jpg"))
+            .map(|c| c.rect())
+            .next()
+    };
+    let first = cell(0).expect("the first cell");
+    let row = (0..n)
+        .filter_map(cell)
+        .filter(|r| (r.top() - first.top()).abs() < 1.0)
+        .count();
+    (row, first.width())
+}
+
+#[test]
+fn the_grid_keeps_its_thumbnails_size_and_adds_columns_as_the_view_widens() {
+    const N: usize = 60;
+    let lib = library_of(N);
+    let mut h = harness(&lib, GalleryOptions::RESULTS_PANEL);
+    h.run();
+    let (narrow, small) = first_row(&h, N);
+    let kept = lib.borrow().results();
+    h.set_size(egui::vec2(960.0, 640.0));
+    h.run();
+    let (wide, big) = first_row(&h, N);
+    assert!(narrow > 1, "a single column: {narrow}");
+    assert!(
+        wide > narrow,
+        "the wider view shows more columns: {narrow} then {wide}"
+    );
+    // A cell takes at most one column's share of what is left of a row
+    // on top of the size.
+    assert!(
+        (big - small).abs() <= small / narrow as f32 + 8.0,
+        "the thumbnails keep their size: {small} then {big}"
+    );
+    // The zoom kept is the size, the same before and after.
+    assert!(kept.size.is_some() && kept.per_row.is_none(), "{kept:?}");
+    assert_eq!(lib.borrow().results(), kept, "a resize keeps the zoom");
+}
+
+#[test]
+fn an_older_count_per_row_becomes_the_size_it_gave_once() {
+    const N: usize = 60;
+    let lib = library_of(N);
+    lib.borrow_mut().set_results(&ResultsDesc {
+        per_row: Some(3),
+        ..ResultsDesc::default()
+    });
+    assert!(lib.borrow_mut().take_results_changes().is_empty());
+    let mut h = harness(&lib, GalleryOptions::RESULTS_PANEL);
+    h.run();
+    let (shown, _) = first_row(&h, N);
+    assert_eq!(shown, 3, "the count kept, at the width it is read at");
+    let results = lib.borrow().results();
+    assert!(
+        results.size.is_some() && results.per_row.is_none(),
+        "turned into a size: {results:?}"
+    );
+    assert_eq!(
+        lib.borrow_mut().take_results_changes(),
+        [(MAIN_GALLERY.to_string(), results)],
+        "and the host asked to keep it"
+    );
+    // From then on, a wider view shows more of them.
+    h.set_size(egui::vec2(960.0, 640.0));
+    h.run();
+    assert!(first_row(&h, N).0 > 3, "more columns once wider");
 }
 
 #[test]

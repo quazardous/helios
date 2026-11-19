@@ -342,6 +342,9 @@ pub struct Gallery {
     /// How the results show changed since the workspace last kept it
     /// ([`super::Library::take_results_changes`]).
     pub(super) results_changed: bool,
+    /// How many thumbnails the grid's last pass showed per row: what the
+    /// view menu names as the current zoom, the zoom itself being a size.
+    pub(super) shown_per_row: Option<u32>,
 }
 
 impl Gallery {
@@ -367,12 +370,15 @@ impl Gallery {
             table: TableState::new(),
             table_store: None,
             results_changed: false,
+            shown_per_row: None,
         }
     }
 
     /// How the Results show the photos, as the workspace keeps it: the
-    /// zoom as a count per row, or the size in points of an older
-    /// workspace while the grid has not turned it into a count yet.
+    /// zoom as the thumbnails' size in points (the grid keeps the size on
+    /// a resize, `GridResize::FixedSize`: a wider view shows more
+    /// columns), or the count per row of an older workspace while the
+    /// grid has not turned it into a size yet.
     pub fn results(&self) -> ResultsDesc {
         let (per_row, size) = match self.state.zoom() {
             Zoom::PerRow(n) => (
@@ -389,20 +395,21 @@ impl Gallery {
         }
     }
 
-    /// Shows the photos as `results` says: so many thumbnails per row
-    /// (the default count when it says nothing). An older workspace's
-    /// size in points is handed to the grid, whose next pass turns it
-    /// into the count it gave at the view's width and signals it, so the
-    /// workspace keeps the count from then on.
+    /// Shows the photos as `results` says: thumbnails of its size in
+    /// points (the default count's size at the view's width when it says
+    /// nothing). An older workspace's count per row is handed to the
+    /// grid, whose next pass turns it into the size it gave at the view's
+    /// width and signals it, so the workspace keeps the size from then
+    /// on.
     pub fn set_results(&mut self, results: &ResultsDesc) {
         self.mode = results.mode;
         if self.columns != results.columns {
             self.columns.clone_from(&results.columns);
             self.table_store = None;
         }
-        self.state.set_zoom(match (results.per_row, results.size) {
-            (Some(n), _) => Zoom::PerRow(u32::from(n)),
-            (None, Some(points)) => Zoom::Points(f32::from(points)),
+        self.state.set_zoom(match (results.size, results.per_row) {
+            (Some(points), _) => Zoom::Points(f32::from(points)),
+            (None, Some(n)) => Zoom::PerRow(u32::from(n)),
             (None, None) => Zoom::default(),
         });
     }

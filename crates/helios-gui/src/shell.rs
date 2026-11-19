@@ -1000,6 +1000,14 @@ impl Shell {
             .themes(themes.clone())
             .theme(crate::theme::ThemeSpec::new(crate::theme::DEFAULT))
             .plugins(DefaultPlugins)
+            // The in-app file picker's thumbnails keep their size, as the
+            // Library's and the import window's do: a wider dialog shows
+            // more columns. In `DefaultPlugins` too: named here, it takes
+            // the group's place.
+            .plugin(
+                egui_pop::api::files::FilesPlugin::default()
+                    .grid_resize(egui_pop::api::files::browser::GridResize::FixedSize),
+            )
             // Photoshop's habits by default: the wheel over a slider scrolls the panel
             // and a slider takes it once clicked or focused (darktable's
             // pitfall of values changed by a scroll). A saved choice is
