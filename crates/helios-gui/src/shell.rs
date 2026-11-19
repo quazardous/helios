@@ -1563,6 +1563,25 @@ impl Shell {
                 WORKSPACE_STATE,
                 &shell.focus.values_due,
             );
+            crate::values_changed::listen_decisions(
+                &bus,
+                crate::values_changed::MAIN_SURFACE,
+                shell.focus.viewport.clone(),
+                shell.focus.decisions.clone(),
+            );
+            crate::values_changed::listen_queue(
+                &bus,
+                crate::values_changed::MAIN_SURFACE,
+                crate::params::SELECTION,
+                &shell.focus.values_due,
+            );
+            // Read once at the first pass: closed while empty, as its
+            // setting says.
+            shell.focus.values_due.queue.set(true);
+            crate::values_changed::listen_journal(
+                shell.core.app.handle(),
+                crate::values_changed::MAIN_SURFACE,
+            );
         }
         // A window drawn apart asks the main window's pass on the bus.
         main_pass::listen(&*shell.core.app.handle().bus());
@@ -2156,13 +2175,6 @@ impl Shell {
         }
     }
 
-    /// Makes the Decisions panel's cards again from the book before it
-    /// is drawn (an agent's answer removes its card here).
-    fn follow_decisions(&mut self) {
-        let viewport = self.focus.viewport.borrow();
-        self.focus.decisions.borrow_mut().refresh(viewport.graph());
-    }
-
     /// Answers what was asked while the panels and windows were drawn, in
     /// the same pass, once they are: the dialogs channel's asks (a
     /// dialog, a menu, a notice, a command), and a toast for each
@@ -2390,6 +2402,9 @@ impl Shell {
             if self.session_waits() {
                 due.session.set(true);
             }
+        }
+        if due.queue.take() {
+            self.follow_queue();
         }
     }
 
@@ -7606,11 +7621,11 @@ impl Shell {
         });
         self.focus.rects.insert("window".into(), ctx.content_rect());
 
-        // The graph shown and the edit's marks follow the values on
-        // `values.changed` (their listeners); written while drawing, they
-        // are heard after the drawing.
+        // The graph shown, the edit's marks, the Decisions panel's cards
+        // and the Queue panel follow the values on `values.changed`
+        // (their listeners); written while drawing, they are heard after
+        // the drawing.
         self.follow_opening(&ctx);
-        self.follow_decisions();
         self.status_bar(&ctx);
         self.status_items(&ctx);
         self.health_tick(&ctx);
@@ -7664,7 +7679,6 @@ impl Shell {
                 .node_events
                 .set_wake(Arc::new(move || ctx.request_repaint()));
         }
-        self.follow_queue(&ctx);
         self.menus_ui(&ctx);
         self.rule_editor_ui(&ctx);
         self.pointer_choice_ui(&ctx);
@@ -7982,7 +7996,9 @@ impl Shell {
 
     /// The Queue panel follows the selected node: its queue read again,
     /// the panel closed or opened again as its setting says when empty.
-    fn follow_queue(&mut self, ctx: &Egui) {
+    /// Done when its listeners noted it due: the selection changed
+    /// (`values.changed`), a job event was said (`job.*`).
+    fn follow_queue(&mut self) {
         if !self
             .core
             .panels
@@ -7997,14 +8013,14 @@ impl Shell {
                 helios_core::Value::Text(t) if !t.is_empty() => Some(t.clone()),
                 _ => None,
             });
-        // The panels are drawn already: a change shows at the next frame.
+        // Heard after the drawing, a change shows at the next frame.
         if self
             .focus
             .queue_panel
             .borrow_mut()
             .update(self.core.app.handle(), node.as_deref())
         {
-            ctx.request_repaint();
+            self.core.app.handle().egui().request_repaint();
         }
     }
 
@@ -8017,6 +8033,7 @@ impl Shell {
     /// (`interface.panels.queue_when_empty`, on by default).
     pub fn set_queue_when_empty(&mut self, on: bool) {
         self.focus.queue_panel.borrow_mut().set_when_empty(on);
+        self.focus.values_due.queue.set(true);
     }
 
     /// Follows a node's jobs in the jobs centre (see `crate::relay`):

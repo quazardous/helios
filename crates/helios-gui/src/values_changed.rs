@@ -27,7 +27,17 @@
 //! - the workspace's state ([`WORKSPACE`]) and the workshop session's
 //!   record ([`SESSION`]), which only the shell can put in place: their
 //!   listeners note them due ([`Due`]), and the shell does them once the
-//!   drain returns, in the same pass.
+//!   drain returns, in the same pass;
+//! - the Decisions panel's cards ([`listen_decisions`], [`DECISIONS`]),
+//!   made again from the book and the graph the darkroom just brought up
+//!   to the values;
+//! - the Queue panel ([`listen_queue`], [`QUEUE`]), noted due when the
+//!   selected node changed, as it is when a job event is said
+//!   ([`QUEUE_JOBS`], after egui-pop's jobs model);
+//! - the journal ([`listen_journal`], [`JOURNAL`]), which says
+//!   [`PARAM_CHANGED`] once per step or gesture: a slider's drag asks a
+//!   change per frame, written inside its gesture, gathered until the
+//!   gesture's step (or its cancel, or its end) closes it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -55,6 +65,19 @@ pub const EDIT_MARKS: &str = "helios.edit.marks";
 pub const WORKSPACE: &str = "helios.workspace.sync";
 /// The workshop session's record follows the value steps.
 pub const SESSION: &str = "helios.workshop.session";
+/// The Decisions panel's cards follow the graph shown, after the
+/// darkroom brought it up to the values.
+pub const DECISIONS: &str = "helios.decisions.follow";
+/// The Queue panel follows the selected node.
+pub const QUEUE: &str = "helios.queue.selection";
+/// The Queue panel follows the jobs (after egui-pop's jobs model).
+pub const QUEUE_JOBS: &str = "helios.queue.jobs";
+/// The journal's listener: says [`PARAM_CHANGED`], once per gesture.
+pub const JOURNAL: &str = "helios.param.journal";
+/// The journal's event: values changed, once per step or gesture (a
+/// drag's frames gathered), with the paths, the sequence numbers and who
+/// wrote.
+pub const PARAM_CHANGED: &str = "helios.param.changed";
 /// The main window's surface: its store, its darkroom.
 pub const MAIN_SURFACE: u64 = 0;
 
@@ -76,6 +99,9 @@ pub struct Change {
     /// redone, a gesture ended, the history cleared or left for another
     /// image.
     pub history: bool,
+    /// Whether it was written inside an open gesture or group (a drag's
+    /// frame): its step, its cancel or its end is heard after it.
+    pub gesture: bool,
 }
 
 /// A change to the values, asked after it is made: heard after the
@@ -124,6 +150,7 @@ pub fn hook(store: &mut helios_values::Store, bus: Arc<dyn Bus>, surface: u64) {
             seq: c.seq,
             origin: c.origin.clone(),
             history: c.history,
+            gesture: c.gesture,
         };
         if std::thread::current().id() != interface {
             // The local listeners are queued for the interface's thread.
@@ -246,6 +273,9 @@ pub struct Due {
     /// The history moved: the workshop session's record follows it
     /// ([`SESSION`]).
     pub session: Cell<bool>,
+    /// The selected node changed, or a job event was said: the Queue
+    /// panel reads its node's queue again ([`QUEUE`], [`QUEUE_JOBS`]).
+    pub queue: Cell<bool>,
 }
 
 /// The listeners that note the shell's parts due on `surface`'s changes,
@@ -284,6 +314,193 @@ fn note_due(
             if change.surface == surface {
                 note(change, &due);
             }
+            Ok(())
+        },
+    );
+    if let Err(e) = listened {
+        log::error!(target: "helios", "{CHANGED}: {e}");
+    }
+}
+
+/// The Decisions panel's listener ([`DECISIONS`], after the darkroom's)
+/// on `surface`'s changes: its cards made again from the book and the
+/// graph shown, which the darkroom just brought up to the values (a
+/// question changed there makes its decision pending again). Busy (a
+/// drain made while the viewport or the panel is borrowed), the change is
+/// asked again for the next drain.
+pub fn listen_decisions(
+    bus: &Arc<dyn Bus>,
+    surface: u64,
+    viewport: Rc<RefCell<Viewport>>,
+    decisions: Rc<RefCell<crate::decisions::Decisions>>,
+) {
+    declare(&**bus);
+    bus.unlisten(CHANGED, DECISIONS);
+    let again = bus.clone();
+    let listened = bus.listen_local::<ValuesChanged>(
+        DECISIONS,
+        ListenOpts::new().owner(BUS_OWNER).after(DARKROOM),
+        move |change: &Change, (): &mut ()| {
+            if change.surface != surface {
+                return Ok(());
+            }
+            let (Ok(viewport), Ok(mut decisions)) =
+                (viewport.try_borrow(), decisions.try_borrow_mut())
+            else {
+                if let Some(defer) = again.defer() {
+                    defer.ask::<ValuesChanged>(change.clone(), ());
+                }
+                return Ok(());
+            };
+            decisions.refresh(viewport.graph());
+            Ok(())
+        },
+    );
+    if let Err(e) = listened {
+        log::error!(target: "helios", "{CHANGED}: {e}");
+    }
+}
+
+/// The Queue panel's listeners: noted due ([`Due::queue`]) when
+/// `surface`'s `selection` changed ([`QUEUE`], after the darkroom's), and
+/// on each job event, once egui-pop's jobs model took it in
+/// ([`QUEUE_JOBS`]). The shell reads the queue once the drain returns.
+pub fn listen_queue(bus: &Arc<dyn Bus>, surface: u64, selection: &'static str, due: &Rc<Due>) {
+    use egui_pop::api::bus::JobEvents;
+    declare(&**bus);
+    bus.unlisten(CHANGED, QUEUE);
+    let noted = due.clone();
+    let listened = bus.listen_local::<ValuesChanged>(
+        QUEUE,
+        ListenOpts::new().owner(BUS_OWNER).after(DARKROOM),
+        move |change: &Change, (): &mut ()| {
+            if change.surface == surface && change.paths.iter().any(|p| p == selection) {
+                noted.queue.set(true);
+            }
+            Ok(())
+        },
+    );
+    if let Err(e) = listened {
+        log::error!(target: "helios", "{CHANGED}: {e}");
+    }
+    bus.unlisten(JobEvents::ID, QUEUE_JOBS);
+    let noted = due.clone();
+    let listened = bus.listen_local::<JobEvents>(
+        QUEUE_JOBS,
+        ListenOpts::new()
+            .owner(BUS_OWNER)
+            .after(egui_pop::api::jobs::MODEL),
+        move |_, (): &mut ()| {
+            noted.queue.set(true);
+            Ok(())
+        },
+    );
+    if let Err(e) = listened {
+        log::error!(target: "helios", "{}: {e}", JobEvents::ID);
+    }
+}
+
+/// Values changed, as the journal says them ([`PARAM_CHANGED`]): a step
+/// or a gesture whole.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Said {
+    /// The paths written, each once, in the order first written.
+    pub paths: Vec<String>,
+    /// The sequence numbers the writes took, first and last.
+    pub seq: (u64, u64),
+    /// Who wrote.
+    pub origin: Option<Origin>,
+    /// Whether it made an undo step (a write, a gesture ended into one,
+    /// an undo, a redo); not for a gesture cancelled, nor for transient
+    /// values (the view).
+    pub step: bool,
+}
+
+/// Gathers a surface's changes into what the journal says: one per change
+/// outside a gesture, one per gesture whole (its frames, then its step,
+/// its cancel or its end). A preview shown or left, and the history
+/// moving with nothing written, say nothing; a change heard again (asked
+/// again by a busy listener) is not counted twice.
+#[derive(Debug, Default)]
+pub struct Gather {
+    pending: Option<Said>,
+    /// The sequence numbers of the last changes taken in, to know one
+    /// heard again (a thread's change may be heard after a later one).
+    heard: std::collections::VecDeque<(u64, u64)>,
+}
+
+/// How many changes [`Gather`] remembers to know one heard again.
+const HEARD: usize = 64;
+
+impl Gather {
+    /// Takes `change` in: what to say once it closes what was gathered.
+    pub fn take(&mut self, change: &Change) -> Option<Said> {
+        if let Some((first, last)) = change.seq {
+            if self.heard.contains(&(first, last)) {
+                return None;
+            }
+            if self.heard.len() == HEARD {
+                self.heard.pop_front();
+            }
+            self.heard.push_back((first, last));
+            let said = self.pending.get_or_insert_with(|| Said {
+                seq: (first, last),
+                ..Said::default()
+            });
+            for p in &change.paths {
+                if !said.paths.contains(p) {
+                    said.paths.push(p.clone());
+                }
+            }
+            said.seq = (said.seq.0.min(first), said.seq.1.max(last));
+            if change.origin.is_some() {
+                said.origin.clone_from(&change.origin);
+            }
+        }
+        if change.gesture {
+            return None;
+        }
+        let mut said = self.pending.take()?;
+        said.step = change.history;
+        if said.origin.is_none() {
+            said.origin.clone_from(&change.origin);
+        }
+        Some(said)
+    }
+}
+
+/// The journal's listener ([`JOURNAL`], after the darkroom's) on
+/// `surface`'s changes: [`PARAM_CHANGED`] said once per step or gesture
+/// ([`Gather`]), with the surface, the paths, the sequence numbers, who
+/// wrote and whether it made a step.
+pub fn listen_journal(app: &AppHandle, surface: u64) {
+    let bus = app.bus();
+    declare(&*bus);
+    bus.unlisten(CHANGED, JOURNAL);
+    let app = app.clone();
+    let gather = RefCell::new(Gather::default());
+    let listened = bus.listen_local::<ValuesChanged>(
+        JOURNAL,
+        ListenOpts::new().owner(BUS_OWNER).after(DARKROOM),
+        move |change: &Change, (): &mut ()| {
+            if change.surface != surface {
+                return Ok(());
+            }
+            let Some(said) = gather.borrow_mut().take(change) else {
+                return Ok(());
+            };
+            app.publish(
+                "helios",
+                None,
+                PARAM_CHANGED,
+                json!({
+                    "surface": surface,
+                    "paths": said.paths,
+                    "seq": [said.seq.0, said.seq.1],
+                    "origin": said.origin,
+                    "step": said.step,
+                }),
+            );
             Ok(())
         },
     );

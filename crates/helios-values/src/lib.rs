@@ -542,6 +542,12 @@ pub struct Changed {
     /// a step made, undone or redone, a gesture ended into a step, the
     /// history cleared or left for another image.
     pub history: bool,
+    /// Whether it was written inside an open gesture or group (a drag's
+    /// frame): not a step yet. What closes it is heard after it, as a
+    /// change of its own: the step it ends into, its cancel, or its end
+    /// with no step (only transient values written). A host that says
+    /// changes per gesture gathers these until then.
+    pub gesture: bool,
 }
 
 impl Changed {
@@ -738,8 +744,10 @@ impl Store {
 
     /// Calls `hook` after each change, in one go ([`Changed`]): one call
     /// per write, per undo or redo step, per gesture cancelled or ended
-    /// into a step, per preview shown or left, per history cleared or
-    /// left for another image; none for a write that changed nothing. It
+    /// (into a step, or with no step when it wrote only transient
+    /// values), per preview shown or left, per history cleared or left
+    /// for another image; none for a write that changed nothing. A write
+    /// inside a gesture says so ([`Changed::gesture`]). It
     /// replaces the hook set before. Called under the store's lock: the
     /// hook must not take the store again.
     pub fn on_change(&mut self, hook: impl Fn(&Changed) + Send + 'static) {
@@ -756,6 +764,7 @@ impl Store {
                     seq: None,
                     origin: origin.cloned(),
                     history: false,
+                    gesture: false,
                 })
                 .history = true;
         }
@@ -971,6 +980,7 @@ impl Store {
                 seq: None,
                 origin: Some(origin.clone()),
                 history: false,
+                gesture: false,
             });
             if !changing.paths.iter().any(|p| p == path) {
                 changing.paths.push(path.into());
@@ -1047,6 +1057,9 @@ impl Store {
         let change = (set.path.clone(), old, value.clone());
         match set.gesture.and_then(|g| self.gestures.get_mut(&g)) {
             Some(g) => {
+                if let Some(changing) = &mut self.changing {
+                    changing.gesture = true;
+                }
                 g.paths.insert(set.path.clone());
                 if !transient {
                     g.changes.push(change);
@@ -1296,9 +1309,10 @@ impl Store {
 
     /// Ends a gesture or a group; what it changed becomes one undo step.
     pub fn end(&mut self, id: GestureId) {
-        if let Some(g) = self.gestures.remove(&id)
-            && !g.changes.is_empty()
-        {
+        let Some(g) = self.gestures.remove(&id) else {
+            return;
+        };
+        if !g.changes.is_empty() {
             self.push_step(Step {
                 id: 0,
                 label: g.label,
@@ -1310,6 +1324,17 @@ impl Store {
             });
             // Its writes were heard one by one; the step it became is
             // heard now.
+            self.announce();
+        } else if !g.paths.is_empty() && self.hook.is_some() {
+            // Only transient values written (the view moved): no step, its
+            // end heard all the same, so its writes are closed.
+            self.changing = Some(Changed {
+                paths: Vec::new(),
+                seq: None,
+                origin: Some(g.origin),
+                history: false,
+                gesture: false,
+            });
             self.announce();
         }
     }

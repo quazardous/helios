@@ -642,6 +642,19 @@ wrote). The workshop session (`helios.workshop.session`, on the
 history moving) and the edit's marks (`helios.edit.marks`) follow the
 values the same way, after the darkroom's `helios.darkroom.sync`.
 
+Since 2026-11-19 the last two per-pass value followers are listeners
+too, after the darkroom's: the Decisions panel's cards
+(`helios.decisions.follow`, made again from the book and the graph the
+darkroom just brought up to the values) and the Queue panel
+(`helios.queue.selection` on the selected node, `helios.queue.jobs` on
+egui-pop's `job.*` events after its jobs model; both note it due, the
+shell reads the queue once the drain returns). The journal's
+`helios.param.journal` says `helios.param.changed` once per undo step
+or gesture: the store marks a change written inside an open gesture
+(`Changed::gesture`), and the listener gathers a drag's frames until its
+step, its cancel or its end closes them (paths, sequence numbers, who
+wrote, whether it made a step).
+
 ### Slice 2h: the layout changed
 
 Two savers followed one document, each pass: egui-pop's autosave

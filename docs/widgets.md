@@ -61,8 +61,10 @@ translation key, choices.
 **Widgets are controlled views.** A widget reads the value from the store
 every frame and, on input, sends a command (`param.set` with the path,
 the value, its origin and the gesture), never writing the value itself.
-The store announces `param.changed` (path, old, new, origin, sequence) on
-the bus; the GUI repaints, coalescing changes per frame. Dependent widgets
+The store hears each change in one go (its change hook); the desktop
+asks it on `values.changed`, heard after the drawing, and says
+`helios.param.changed` on the journal once per undo step or gesture (a
+drag's frames gathered until it ends). Dependent widgets
 (a choice that hides a slider) are a function of the values, evaluated
 every frame.
 
