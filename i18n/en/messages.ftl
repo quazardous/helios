@@ -595,7 +595,15 @@ gui-editor-title = Edit source
 
 gui-end-changes = Saving your changes
 
+gui-end-client = Disconnecting from the library's node
+
+gui-end-host-step = { $step } (window)
+
 gui-end-interface = Saving the interface settings
+
+gui-end-jobs = Checking the running jobs
+
+gui-end-node = Asking the library's node to stop
 
 gui-export-bits = PNG bits per channel
 
@@ -1364,6 +1372,8 @@ gui-jobs-unchanged = Already there
 gui-jobs-window = Activity
 
 gui-keys-from-template = template
+
+gui-last-quit-cut = The last quit cut short: { $what }
 
 gui-layout-not-saved = The layout was not saved: { $error }
 

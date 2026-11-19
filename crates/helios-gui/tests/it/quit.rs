@@ -296,6 +296,262 @@ fn a_listener_past_its_deadline_is_reported_and_does_not_hang_the_quit() {
     release.send(()).unwrap();
 }
 
+/// The end splash's steps on a shell `shell`: the test listeners
+/// `first` (between the jobs and the node) and `second` (after the node),
+/// each noting the frame its turn ran at.
+fn end_listeners(
+    shell: &Shell,
+    frame: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) -> std::sync::Arc<std::sync::Mutex<Vec<(String, usize)>>> {
+    use egui_pop::api::bus::bus_contract::ListenOpts;
+    use helios_gui::app_quit::{AppQuit, CLIENT, JOBS, NODE};
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+
+    let bus = shell.app().handle().bus();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    for (id, opts) in [
+        (
+            "helios.test.first",
+            ListenOpts::new().after(JOBS).before(NODE),
+        ),
+        (
+            "helios.test.second",
+            ListenOpts::new().after(NODE).before(CLIENT),
+        ),
+    ] {
+        let (frame, heard) = (frame.clone(), heard.clone());
+        bus.listen::<AppQuit>(id, opts.owner("helios.test"), move |ask, said| {
+            if ask.stage.turn_of(id) {
+                heard
+                    .lock()
+                    .unwrap()
+                    .push((id.to_owned(), frame.load(Ordering::SeqCst)));
+                said.push(id.to_owned());
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+    heard
+}
+
+/// The end splash asks the quit's request again, one listener's turn per
+/// frame (through `Defer`), in the declared order; the host's steps are
+/// listed with them, before the GUI client detaches, marked as the
+/// host's; the splash's rows are those steps, in that order, and the
+/// end's report has every step finished.
+#[test]
+fn the_end_runs_one_listener_per_frame_in_order_with_matching_rows() {
+    use helios_core::Message;
+    use helios_gui::app_quit::{self, CLIENT, JOBS, NODE};
+    use helios_gui::splash::{End, Ending};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let shell = Shell::new(helios_panels(), None);
+    let frame = Arc::new(AtomicUsize::new(0));
+    let heard = end_listeners(&shell, &frame);
+    let host = "helios.test.host";
+    let steps = shell.end_steps(&[host]);
+    let ids: Vec<String> = steps.iter().map(|s| s.id.clone()).collect();
+    assert_eq!(
+        ids,
+        [
+            JOBS,
+            "helios.test.first",
+            NODE,
+            "helios.test.second",
+            host,
+            CLIENT
+        ]
+    );
+    assert_eq!(
+        steps
+            .iter()
+            .filter(|s| s.host)
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>(),
+        [host],
+        "the host's step marked"
+    );
+    let mut end = End::new(helios_node_core::phases::Phase::new());
+    for (turn, step) in steps.iter().enumerate() {
+        let id = step.id.clone();
+        end = if step.host {
+            end.then(
+                Message::plain(format!("{id} (window)")),
+                move |s: &mut Shell| {
+                    s.quit_host_step_done(&id);
+                },
+            )
+        } else {
+            end.then(app_quit::label(&id), move |s: &mut Shell| {
+                s.quit_turn(turn, &id);
+            })
+        };
+    }
+    let counted = frame.clone();
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(vec2(640.0, 600.0))
+        .build_ui_state(
+            move |ui, (end, shell, outcome): &mut (End<Shell>, Shell, Option<Ending>)| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                *outcome = Some(end.pass(ui, shell));
+            },
+            (end, shell, None),
+        );
+    h.run_steps(1);
+    // Every step a row, in order.
+    let rows = [
+        "Checking the running jobs".to_owned(),
+        "helios.test.first".to_owned(),
+        "Asking the library's node to stop".to_owned(),
+        "helios.test.second".to_owned(),
+        format!("{host} (window)"),
+        "Disconnecting from the library's node".to_owned(),
+    ];
+    let mut tops = Vec::new();
+    for row in &rows {
+        tops.push(h.get_by_label(row).rect().min.y);
+    }
+    assert!(tops.is_sorted(), "the rows in the steps' order: {tops:?}");
+    for _ in 0..steps.len() {
+        h.run_steps(1);
+    }
+    h.run_steps(1);
+    assert_eq!(h.state().2, Some(Ending::Done));
+    let heard = heard.lock().unwrap().clone();
+    assert_eq!(heard.len(), 2, "each test listener's turn once: {heard:?}");
+    assert_eq!(heard[0].0, "helios.test.first");
+    assert_eq!(heard[1].0, "helios.test.second");
+    // Turns 1 and 3, the node's between them: one frame each.
+    assert_eq!(
+        heard[1].1 - heard[0].1,
+        2,
+        "one listener per frame: {heard:?}"
+    );
+    let names: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let report = h.state().1.end_report(&names);
+    assert_eq!(report.finished, ids, "every step, in order");
+    assert!(report.clean() && !report.may_have_lost_work, "{report:?}");
+}
+
+/// A listener past its deadline at its end turn (threaded, 100 ms, never
+/// answering) is cut and reported, the work it may have lost flagged,
+/// and the end goes on to the next turn.
+#[test]
+fn an_end_listener_past_its_deadline_is_cut_reported_and_the_quit_goes_on() {
+    use egui_pop::api::bus::bus_contract::ListenOpts;
+    use helios_gui::app_quit::{AppQuit, CLIENT, TurnOutcome};
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::time::{Duration, Instant};
+
+    let mut h = harness();
+    let bus = h.state().app().handle().bus();
+    let (release, held) = mpsc::channel::<()>();
+    let held = Arc::new(Mutex::new(held));
+    let stuck = "helios.test.stuck";
+    bus.listen::<AppQuit>(
+        stuck,
+        ListenOpts::new()
+            .threaded()
+            .deadline(Duration::from_millis(100))
+            .before(CLIENT)
+            .owner("helios.test"),
+        move |ask, _| {
+            if ask.stage.turn_of(stuck) {
+                let _ = held.lock().unwrap().recv();
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    quit(&mut h);
+    assert!(h.state().quitting());
+    let ids: Vec<String> = h.state().end_steps(&[]).into_iter().map(|s| s.id).collect();
+    let at = ids.iter().position(|id| id == stuck).unwrap();
+    let started = Instant::now();
+    let outcome = h.state().quit_turn(at, stuck);
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(
+        matches!(outcome, TurnOutcome::Late { cut: true, .. }),
+        "{outcome:?}"
+    );
+    h.run_steps(1);
+    let next = ids.iter().position(|id| id == CLIENT).unwrap();
+    assert_eq!(h.state().quit_turn(next, CLIENT), TurnOutcome::Finished);
+    let names: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let report = h.state().end_report(&names);
+    assert_eq!(report.late.len(), 1, "{report:?}");
+    assert_eq!(report.late[0].listener, stuck);
+    assert_eq!(report.late[0].deadline_ms, 100);
+    assert!(report.may_have_lost_work);
+    assert!(
+        report.finished.contains(&CLIENT.to_owned()),
+        "the quit went on"
+    );
+    assert!(
+        report
+            .lines()
+            .iter()
+            .any(|l| l.contains("stopped `helios.test.stuck` after its 0.1 s deadline")),
+        "{:?}",
+        report.lines()
+    );
+    release.send(()).unwrap();
+}
+
+/// The end's report is said on the journal, written for the next start
+/// and read back there once: the steps the end left are abandoned.
+#[test]
+fn the_quit_report_is_journaled_and_read_back_at_the_next_start() {
+    use helios_gui::app_quit::{REPORT_EVENT, REPORT_FILE, ShutdownReport};
+
+    let mut h = harness();
+    quit(&mut h);
+    let ids: Vec<String> = h.state().end_steps(&[]).into_iter().map(|s| s.id).collect();
+    // The end left before its last turn ("Quit now").
+    for (turn, id) in ids.iter().enumerate().take(ids.len() - 1) {
+        h.state().quit_turn(turn, id);
+        h.run_steps(1);
+    }
+    let names: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let report = h.state().end_report(&names);
+    assert_eq!(report.abandoned, [ids.last().unwrap().clone()]);
+    assert!(report.may_have_lost_work);
+    let said: Vec<_> = h
+        .state()
+        .app()
+        .handle()
+        .events_since(0)
+        .into_iter()
+        .filter(|e| e.name == REPORT_EVENT)
+        .collect();
+    assert_eq!(said.len(), 1, "said once on the journal");
+    assert_eq!(said[0].data["abandoned"][0], ids.last().unwrap().as_str());
+
+    let dir = std::env::temp_dir().join(format!("helios-quit-report-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    report.write(&dir).unwrap();
+    let read = ShutdownReport::take(&dir).expect("read back at the next start");
+    assert_eq!(read, report);
+    assert!(
+        read.lines()
+            .iter()
+            .any(|l| l.contains("left `helios.quit.client` before it ran")),
+        "{:?}",
+        read.lines()
+    );
+    assert!(!dir.join(REPORT_FILE).exists(), "taken once");
+    assert!(ShutdownReport::take(&dir).is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// No sleep is left on the quit and close path: each wait there is woken
 /// by what it waits for, with a deadline (a channel, a condition), never
 /// a clock polled.

@@ -1045,8 +1045,6 @@ struct App {
         std::sync::mpsc::Sender<String>,
         std::sync::mpsc::Receiver<String>,
     ),
-    /// The GUI's connection to the local node, dropped as the GUI ends.
-    node: Option<helios_gui::node::Client>,
     /// macOS's global menu bar.
     #[cfg(target_os = "macos")]
     menu_bar: helios_gui::macos::MenuBar,
@@ -1054,6 +1052,9 @@ struct App {
     boot: splash::Boot,
     /// The end splash and its steps, from the frame that saw the quit.
     end: Option<splash::End<App>>,
+    /// The end's steps, in order: the quit request's listeners and the
+    /// host's own (`helios.app.quit`, `Shell::end_steps`).
+    end_steps: Vec<String>,
     /// The interface's settings were saved by the end's step.
     shell_exited: bool,
     _rest_dropped: quit::MarkOnDrop,
@@ -1390,6 +1391,34 @@ impl App {
     }
 }
 
+/// The end's host step saving what the user changed.
+const END_CHANGES: &str = "helios.end.changes";
+
+/// The end's host step saving the interface's settings.
+const END_INTERFACE: &str = "helios.end.interface";
+
+/// The last quit's report, taken at the start: what it cut, logged and
+/// told (`helios_gui::app_quit::ShutdownReport`).
+fn last_quit(shell: &mut Shell) {
+    let Some(report) = helios_gui::app_quit::ShutdownReport::take(&helios_gui::shell::config_dir())
+    else {
+        return;
+    };
+    if report.clean() {
+        log::debug!(target: "helios::quit", "the last quit ended cleanly");
+        return;
+    }
+    let lines = report.lines();
+    for line in &lines {
+        log::warn!(target: "helios::quit", "{line}");
+    }
+    shell.notify(
+        helios_gui::dialogs::Level::Warning,
+        Message::new("gui-last-quit-cut", "The last quit cut short: { $what }")
+            .with("what", lines.join("; ")),
+    );
+}
+
 /// How long the end may last before Helios quits anyway, as if "Quit
 /// now" was chosen: a step that never ends does not hold the window.
 const END_LIMIT: std::time::Duration = std::time::Duration::from_mins(1);
@@ -1407,17 +1436,44 @@ impl App {
     fn closing(&mut self, ctx: &egui::Context) {
         quit::requested();
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        let node = self.node.as_ref().map(|c| c.link().clone());
-        let mut end = splash::End::new(phases::end().clone())
-            .give_up_after(END_LIMIT)
-            .then(
-                Message::new("gui-end-changes", "Saving your changes"),
-                App::save_changes,
-            )
-            .then(
-                Message::new("gui-end-interface", "Saving the interface settings"),
-                App::exit_shell,
-            );
+        let node = self.shell.node_link();
+        let mut end = splash::End::new(phases::end().clone()).give_up_after(END_LIMIT);
+        // Every step in order, one per frame: the quit request's
+        // listeners, each its own turn (`helios.app.quit`), and the two
+        // host steps, which need the window's state, marked as such.
+        let host = |step: Message| {
+            Message::new("gui-end-host-step", "{ $step } (window)")
+                .with("step", helios_gui::i18n::text(ctx, step))
+        };
+        let steps = self.shell.end_steps(&[END_CHANGES, END_INTERFACE]);
+        self.end_steps = steps.iter().map(|s| s.id.clone()).collect();
+        for (turn, step) in steps.into_iter().enumerate() {
+            end = match (step.host, step.id.as_str()) {
+                (true, END_CHANGES) => end.then(
+                    host(Message::new("gui-end-changes", "Saving your changes")),
+                    |app: &mut App| {
+                        app.save_changes();
+                        app.shell.quit_host_step_done(END_CHANGES);
+                    },
+                ),
+                (true, _) => end.then(
+                    host(Message::new(
+                        "gui-end-interface",
+                        "Saving the interface settings",
+                    )),
+                    |app: &mut App| {
+                        app.exit_shell();
+                        app.shell.quit_host_step_done(END_INTERFACE);
+                    },
+                ),
+                (false, id) => {
+                    let id = id.to_owned();
+                    end.then(helios_gui::app_quit::label(&id), move |app: &mut App| {
+                        app.shell.quit_turn(turn, &id);
+                    })
+                }
+            };
+        }
         // The node closes the library once the GUI is gone (its own
         // steps: the background jobs stopped, the library closed).
         if let Some(link) = node {
@@ -1439,18 +1495,15 @@ impl App {
     }
 
     /// egui-pop's exit (the workspace saved, `save_workspace`, then the
-    /// `app.exit` step saves the interface's settings and keys); then the
-    /// GUI client disconnects: the node, asked to quit, closes the vault
-    /// once its last client is gone.
+    /// `app.exit` step saves the interface's settings and keys). The GUI
+    /// client disconnects at the next turn (`helios.quit.client`): the
+    /// node, asked to quit, closes the vault once its last client is gone.
     fn exit_shell(&mut self) {
         if !std::mem::replace(&mut self.shell_exited, true) {
             if let Err(e) = self.shell.exit() {
                 warn(&format!("cannot save the interface's settings: {e}"));
             }
             quit::mark("interface settings, keys and layout saved");
-        }
-        if self.node.take().is_some() {
-            quit::mark("GUI client disconnected from the node");
         }
     }
 
@@ -1473,6 +1526,12 @@ impl App {
                 quit::mark("end splash: quit now");
             } else {
                 quit::mark("end splash done");
+            }
+            // What the end did, on the journal and for the next start.
+            let steps: Vec<&str> = self.end_steps.iter().map(String::as_str).collect();
+            let report = self.shell.end_report(&steps);
+            if let Err(e) = report.write(&helios_gui::shell::config_dir()) {
+                warn(&format!("the quit's report cannot be written: {e}"));
             }
             ENDED.store(true, Ordering::SeqCst);
             // The main window's `window.close` already ran on the bus (it
@@ -2544,11 +2603,16 @@ fn main() -> Result<(), String> {
                 shell.image_states().clone(),
                 warm_book.recipe(),
             );
+            // The GUI's client of the node: detached by the quit's end
+            // turn (`helios.quit.client`), after the host's steps.
+            if let Some(client) = node_client {
+                shell.attach_client(client);
+            }
+            last_quit(&mut shell);
             let mut app = App {
                 photos: helios_node_core::warm::Lifecycle::default(),
                 warm_book,
                 _warmer: warmer,
-                node: node_client,
                 _exporter: exporter,
                 network_changed,
                 export_refused,
@@ -2564,6 +2628,7 @@ fn main() -> Result<(), String> {
                 menu_bar: helios_gui::macos::MenuBar::new(),
                 boot,
                 end: None,
+            end_steps: Vec::new(),
                 shell_exited: false,
                 _rest_dropped: quit::MarkOnDrop(
                     "images, library readers and exporter dropped",

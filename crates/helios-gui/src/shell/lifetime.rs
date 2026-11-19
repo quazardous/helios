@@ -32,9 +32,14 @@
 //! [`crate::app_quit::AppQuit`] (`helios.app.quit`), asked by the main
 //! window's `window.close` before-hook: its listeners, the running jobs'
 //! question among them, refuse in order, and a refusal vetoes the close.
+//! Once the close goes, the end splash asks the same request again, one
+//! listener's turn per frame ([`Shell::quit_turn`]): telling the node to
+//! quit and detaching the GUI client are its listeners
+//! ([`crate::app_quit::NODE`], [`crate::app_quit::CLIENT`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use egui::{Context, ViewportCommand};
 use egui_pop::api::bus::{Reason, STEP_WINDOW_CLOSE, WindowKind, WindowRequest};
@@ -107,6 +112,18 @@ pub(super) struct Lifetime {
     quit: Rc<Quit>,
 }
 
+impl Drop for Lifetime {
+    /// The shell goes while Helios quits and the end's turns did not tell
+    /// the node ("Quit now", the end's limit, a host without the end
+    /// splash): told now, so it still closes the vault once its last
+    /// client is gone.
+    fn drop(&mut self) {
+        if self.quit.quitting.get() {
+            self.quit.slots.tell(self.quit.cancel_jobs.get());
+        }
+    }
+}
+
 impl Lifetime {
     pub(super) fn new(quit: Rc<Quit>) -> Self {
         Self {
@@ -134,8 +151,11 @@ pub(crate) struct Quit {
     report: RefCell<Option<crate::app_quit::QuitReport>>,
     /// Confirmations are answered yes by policy: nothing is asked.
     assume_yes: Cell<bool>,
-    /// The local node, asked to quit when Helios quits.
-    node: RefCell<Option<crate::node::Link>>,
+    /// The local node and the GUI client, told to quit and detached by
+    /// the end's listeners.
+    slots: Arc<crate::app_quit::EndSlots>,
+    /// What the end's steps did so far.
+    ended: RefCell<crate::app_quit::ShutdownReport>,
     /// The jobs running in this process.
     jobs: helios_core::jobs::Jobs,
     /// The question's language.
@@ -160,28 +180,26 @@ impl Quit {
             jobs_confirmed: Cell::new(false),
             report: RefCell::new(None),
             assume_yes: Cell::new(false),
-            node: RefCell::new(None),
+            slots: Arc::default(),
+            ended: RefCell::default(),
             jobs,
             i18n,
         }
     }
 
-    /// Helios quits: the node is asked to quit too, cancelling its jobs
-    /// when `cancel_jobs` (the question answered), waiting for them if
-    /// not.
+    /// Helios quits, cancelling its jobs when `cancel_jobs` (the
+    /// question answered): the end splash's turns tell the node
+    /// ([`crate::app_quit::NODE`]); dropped before, the shell tells it.
     fn quitting(&self, cancel_jobs: bool) {
         self.quitting.set(true);
         self.cancel_jobs.set(self.cancel_jobs.get() | cancel_jobs);
-        if let Some(node) = &*self.node.borrow() {
-            tell(node, self.cancel_jobs.get());
-        }
     }
 
     /// The jobs a quit would cancel: the node's (the exports, which
     /// outlive their window) and the others running in this process.
     fn running_jobs(&self) -> usize {
         let mut running = self.jobs.cancellable();
-        if let Some(node) = &*self.node.borrow() {
+        if let Some(node) = self.slots.node() {
             running.extend(node.running_jobs());
         }
         running.sort_unstable();
@@ -218,6 +236,7 @@ impl Quit {
             } else {
                 QuitWhy::LastWindow
             },
+            stage: crate::app_quit::QuitStage::Ask,
             running_jobs: running,
             jobs_confirmed: self.jobs_confirmed.get() || self.assume_yes.get(),
         };
@@ -284,14 +303,6 @@ impl Quit {
     }
 }
 
-fn tell(node: &crate::node::Link, cancel_jobs: bool) {
-    if cancel_jobs {
-        node.quit_cancelling_jobs();
-    } else {
-        node.quit();
-    }
-}
-
 /// The hooks of egui-pop's `window.close` step for the main window: the
 /// question before quitting while jobs run (a before-hook vetoing the
 /// close), and Helios quitting once the close went (an after-hook).
@@ -312,7 +323,7 @@ impl Plugin for QuitHooks {
         let before = self.0.clone();
         let after = self.0.clone();
         // Helios's own listeners on the quit's request.
-        if let Err(e) = crate::app_quit::listen(&*ctx.app().bus()) {
+        if let Err(e) = crate::app_quit::listen(&*ctx.app().bus(), &self.0.slots) {
             log::error!(target: "helios", "{}: {e}", crate::app_quit::QUIT);
         }
         ctx.before(STEP_WINDOW_CLOSE, move |app, args| {
@@ -345,10 +356,98 @@ impl Shell {
     /// Attaches the local node: Helios quitting asks it to quit.
     pub fn attach_node(&mut self, node: crate::node::Link) {
         let quit = &self.lifetime.quit;
+        quit.slots.set_node(node);
+        // Attached late (the start handing the library over after the
+        // close): told at once.
         if quit.quitting.get() {
-            tell(&node, quit.cancel_jobs.get());
+            quit.slots.tell(quit.cancel_jobs.get());
         }
-        *quit.node.borrow_mut() = Some(node);
+    }
+
+    /// Tells the node to quit when Helios quits and the end's turn of
+    /// [`crate::app_quit::NODE`] did not yet (once either way).
+    pub(super) fn tell_node_if_quitting(&self) {
+        let quit = &self.lifetime.quit;
+        if quit.quitting.get() {
+            quit.slots.tell(quit.cancel_jobs.get());
+        }
+    }
+
+    /// The GUI's client of the local node: detached at the end's turn of
+    /// [`crate::app_quit::CLIENT`], after the host's steps.
+    pub fn attach_client(&mut self, client: crate::node::Client) {
+        self.lifetime.quit.slots.set_client(client);
+    }
+
+    /// The local node, when attached.
+    pub fn node_link(&self) -> Option<crate::node::Link> {
+        self.lifetime.quit.slots.node()
+    }
+
+    /// The end splash's steps, in order: the quit request's listeners,
+    /// and the host's steps `host` placed before the GUI client detaches
+    /// ([`crate::app_quit::end_steps`]).
+    pub fn end_steps(&self, host: &[&str]) -> Vec<crate::app_quit::EndStep> {
+        crate::app_quit::end_steps(&*self.core.app.handle().bus(), host)
+    }
+
+    /// The end's `turn`-th step, the listener `listener`'s: the quit
+    /// request asked through `Defer` and heard at this drain. Kept in the
+    /// end's report; the quit goes on whatever it did.
+    pub fn quit_turn(&self, turn: usize, listener: &str) -> crate::app_quit::TurnOutcome {
+        use crate::app_quit::{QuitAsk, QuitStage, QuitWhy, turn as ask_turn};
+        let quit = &self.lifetime.quit;
+        let handle = self.core.app.handle().clone();
+        let ask = QuitAsk {
+            why: QuitWhy::Quit,
+            stage: QuitStage::End {
+                turn,
+                listener: listener.to_owned(),
+            },
+            running_jobs: 0,
+            jobs_confirmed: quit.cancel_jobs.get(),
+        };
+        let outcome = ask_turn(&*handle.bus(), || handle.drain_asks(), ask);
+        quit.ended.borrow_mut().record(listener, &outcome);
+        outcome
+    }
+
+    /// The host's end step `id` did its part.
+    pub fn quit_host_step_done(&self, id: &str) {
+        let done = crate::app_quit::TurnOutcome::Finished;
+        self.lifetime.quit.ended.borrow_mut().record(id, &done);
+    }
+
+    /// The end is over: the steps of `steps` that did not run are
+    /// abandoned. The end's report, said on the journal
+    /// ([`crate::app_quit::REPORT_EVENT`]).
+    pub fn end_report(&self, steps: &[&str]) -> crate::app_quit::ShutdownReport {
+        let mut report = self.lifetime.quit.ended.borrow().clone();
+        let ran: Vec<String> = report
+            .finished
+            .iter()
+            .chain(report.late.iter().map(|l| &l.listener))
+            .chain(report.failed.iter().map(|(id, _)| id))
+            .cloned()
+            .collect();
+        let left: Vec<&str> = steps
+            .iter()
+            .copied()
+            .filter(|id| !ran.iter().any(|r| r == id))
+            .collect();
+        report.abandon(left);
+        if !report.clean() {
+            for line in report.lines() {
+                log::warn!(target: "helios::quit", "{line}");
+            }
+        }
+        self.core.app.handle().publish(
+            "helios",
+            None,
+            crate::app_quit::REPORT_EVENT,
+            serde_json::to_value(&report).unwrap_or_default(),
+        );
+        report
     }
 
     /// The system ends the session: Helios quits at once, asking nothing.

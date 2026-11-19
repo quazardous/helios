@@ -593,7 +593,11 @@ gui-editor-params-refused 17e99425fe05031e
 gui-editor-save bf722ac13bbc1962
 gui-editor-title bbab0761ce200edc
 gui-end-changes f9f7579c9692b35f
+gui-end-client 470af8ed22220e67
+gui-end-host-step e058c7f3d16a68b4
 gui-end-interface 977fdf5514d528ca
+gui-end-jobs e97654bb26fd93bb
+gui-end-node 0a25ca6a4532dd3f
 gui-export-bits 445ead6584b2ae46
 gui-export-cancelled 1b689c82cb971e12
 gui-export-clash 49f01efc23c89024
@@ -967,6 +971,7 @@ gui-jobs-title 61eef857facc40ad
 gui-jobs-unchanged 329f69872f93d8dd
 gui-jobs-window 2fd04c5910d8237a
 gui-keys-from-template e70109422c5ad48b
+gui-last-quit-cut 34c88b069c1edae1
 gui-layout-not-saved 942738e1ab7b193d
 gui-library-album-add 4431f7a66bf4fea9
 gui-library-album-delete 7b2511e3687c6a5c
