@@ -283,7 +283,7 @@ mod tests {
                 {
                     let answer = if accept {
                         Answer::Accept {
-                            values: Default::default(),
+                            values: serde_json::Map::default(),
                         }
                     } else {
                         Answer::Cancel

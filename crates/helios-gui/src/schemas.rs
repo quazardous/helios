@@ -69,7 +69,9 @@ fn paths() -> Json {
 pub fn schema(command: &str) -> Option<Json> {
     Some(match command {
         // The scenarios' and quick open's.
-        "param.get" | "param.reset" => object(&["path"], &[("path", string())]),
+        "param.get" | "param.reset" | "library.openFolder" | "library.scanFolder" => {
+            object(&["path"], &[("path", string())])
+        }
         "param.set" => object(
             &["path"],
             &[
@@ -99,7 +101,6 @@ pub fn schema(command: &str) -> Option<Json> {
                 ("camera_look", any()),
             ],
         ),
-        "library.importWindow" => object(&[], &[("source", string_or_null())]),
         "library.importSource" => object(
             &[],
             &[
@@ -120,11 +121,9 @@ pub fn schema(command: &str) -> Option<Json> {
             ],
         ),
         // Folders and files (private).
-        "library.folder" | "library.chooseFolder" | "init.libraryFolder" => {
+        "library.folder" | "library.chooseFolder" | "init.libraryFolder" | "workspace.open" => {
             object(&[], &[("path", string_or_null())])
         }
-        "library.openFolder" | "library.scanFolder" => object(&["path"], &[("path", string())]),
-        "workspace.open" => object(&[], &[("path", string_or_null())]),
         "init.apply" => object(&[], &[("library.folder", string())]),
         "calibrate.open" => object(
             &[],
@@ -135,7 +134,7 @@ pub fn schema(command: &str) -> Option<Json> {
             ],
         ),
         "workspace.new" => object(&[], &[("template", any()), ("path", string_or_null())]),
-        "workspace.parts" => object(&[], &[("source", string_or_null())]),
+        "workspace.parts" | "library.importWindow" => object(&[], &[("source", string_or_null())]),
         "profile.export" => object(
             &[],
             &[
@@ -233,7 +232,6 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.trash" | "library.deleteRejected" => {
             object(&[], &[("images", images()), ("confirmed", boolean())])
         }
-        "library.remove" | "library.resetRotation" => object(&[], &[("images", images())]),
         "library.removeVersion" => object(
             &[],
             &[
@@ -264,7 +262,9 @@ pub fn schema(command: &str) -> Option<Json> {
         | "library.duplicate"
         | "library.duplicateOriginal"
         | "library.rotateLeft"
-        | "library.rotateRight" => object(&[], &[("images", images())]),
+        | "library.rotateRight"
+        | "library.remove"
+        | "library.resetRotation" => object(&[], &[("images", images())]),
         "library.fitCameraLook" => object(&[], &[("images", images()), ("default", any())]),
         "library.show" => object(&[], &[("ids", images())]),
         "library.sort" => object(&[], &[("by", string_or_null()), ("descending", boolean())]),
