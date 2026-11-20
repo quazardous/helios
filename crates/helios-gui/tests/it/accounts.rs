@@ -2758,4 +2758,26 @@ fn an_account_clicked_then_focused_is_drawn_selected() {
         Some(egui::accesskit::Toggled::True),
         "focused, still selected"
     );
+    // Painted so: the row's inside (at its end, mid-height, clear of its
+    // border, its text and its pin) is the selected fill, not the
+    // column's background just left of the row.
+    let rect = row.rect();
+    let image = h.render().expect("a painted frame");
+    let ppp = h.ctx.pixels_per_point();
+    let px = |x: f32, y: f32| image.get_pixel((x * ppp) as u32, (y * ppp) as u32).0;
+    let (inside, outside) = (
+        px(rect.right() - 2.5, rect.center().y),
+        px(rect.left() - 3.0, rect.center().y),
+    );
+    let apart = inside
+        .iter()
+        .zip(outside.iter())
+        .take(3)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        apart > 24,
+        "the selected fill under the focus outline: inside {inside:?}, outside {outside:?}"
+    );
 }

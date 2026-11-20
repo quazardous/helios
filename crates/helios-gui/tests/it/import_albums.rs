@@ -182,3 +182,41 @@ fn a_connector_without_albums_lists_none() {
     }
     assert!(h.state().import_cells().is_empty());
 }
+
+/// Whether the node labelled `label` is drawn selected (accesskit's
+/// toggled state, set from the flag the selected fill is painted from).
+fn drawn_selected(h: &Harness<'_, Shell>, label: &str) -> bool {
+    h.query_all_by_label(label)
+        .any(|n| n.toggled() == Some(egui::accesskit::Toggled::True))
+}
+
+/// The Sources item labelled `label` (the first node of that label).
+fn row<'a>(h: &'a Harness<'_, Shell>, label: &str) -> egui_kittest::Node<'a> {
+    h.query_all_by_label(label)
+        .next()
+        .unwrap_or_else(|| panic!("no {label}"))
+}
+
+/// As list views do: the album selected is the row drawn selected, its
+/// account is not (egui-pop's places panel has no "holds the selection"
+/// state); the account clicked again is drawn selected, focused or not.
+#[test]
+fn the_album_selected_is_drawn_selected_not_its_account() {
+    let provider = AlbumsProvider::new(&[("Trip", 3), ("Family", 1)], 5);
+    let (mut h, _) = world(Arc::new(provider));
+    until(&mut h, "the albums", |h| shown(h, "Family"));
+    assert!(drawn_selected(&h, "ann@example.org"), "the account clicked");
+    click(&mut h, "Trip");
+    until(&mut h, "Trip's photos", |h| {
+        h.state().import_cells().len() == 3
+    });
+    assert!(drawn_selected(&h, "Trip"));
+    assert!(!drawn_selected(&h, "Family"));
+    assert!(!drawn_selected(&h, "ann@example.org"), "its album is");
+    click(&mut h, "ann@example.org");
+    row(&h, "ann@example.org").focus();
+    h.run_steps(3);
+    assert!(row(&h, "ann@example.org").is_focused());
+    assert!(drawn_selected(&h, "ann@example.org"), "the account again");
+    assert!(!drawn_selected(&h, "Trip"));
+}
