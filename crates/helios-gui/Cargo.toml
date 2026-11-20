@@ -120,6 +120,9 @@ open = "5"
 # Apache-2.0, the node's choice for its own signals).
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.4"
+# A followed node's relayable facts, taken in over bus-bridge's Unix
+# socket link (`relay`); also measured by tests/it/node_link_baseline.rs.
+bus-bridge = { workspace = true, features = ["unix"] }
 
 # macOS: the global menu bar (muda, Apache-2.0 OR MIT, without its GTK
 # backend) and the Dock's reopen, answered on winit's application delegate
@@ -144,9 +147,6 @@ winresource = "0.1"
 egui-pop-test.workspace = true
 # bus-kernel's conformance suite, run on the desktop's application bus.
 bus-kernel = { workspace = true, features = ["conformance"] }
-# The node link's baseline (tests/it/node_link_baseline.rs): today's link
-# and bus-bridge's Unix socket, measured side by side.
-bus-bridge = { workspace = true, features = ["unix"] }
 # The import window's snapshots (tests/snapshots, thresholds in the
 # workspace's kittest.toml).
 egui_kittest = { version = "0.37", features = ["snapshot"] }

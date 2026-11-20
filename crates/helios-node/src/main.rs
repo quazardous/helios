@@ -2303,6 +2303,16 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // On Unix, the relayable facts go to a desktop over bus-bridge, on a
+    // socket next to the inspect one; a desktop that cannot reach it
+    // takes them from the event stream.
+    #[cfg(unix)]
+    if let Listen::Unix(path) = &args.socket {
+        let bridge = helios_inspect::bridge_socket(path);
+        if let Err(e) = helios_node::bridge::serve(hooks.clone(), &bridge) {
+            log::warn!(target: "helios::node", "cannot serve the facts on {}: {e}", bridge.display());
+        }
+    }
     let control_address = match &args.control {
         None => None,
         Some(listen) => match serve_control(&node, &instance, listen, token.as_deref()) {

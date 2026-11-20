@@ -636,9 +636,9 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "bus-bridge"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79f2c0f34f9182df8fdfe2ef3541e9f5c4c621ef27d52b984c9d663833234e6d"
+checksum = "ad28109d2b411946b53ef3ca6b5d7a59e9e769b1b24e0f47fb197c8a3f5092ba"
 dependencies = [
  "bus-contract",
  "bus-contract-crossing",
@@ -2934,6 +2934,7 @@ name = "helios-node"
 version = "0.92.0"
 dependencies = [
  "blake3",
+ "bus-bridge",
  "bus-contract",
  "bus-contract-crossing",
  "egui-pop-hooks",

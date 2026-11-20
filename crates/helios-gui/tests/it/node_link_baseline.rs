@@ -1,16 +1,19 @@
-//! The node link's baseline (#5318): today's link between the desktop
-//! and a node, and bus-bridge's Unix socket link, measured side by side
-//! on the same pair of Helios buses.
+//! The node link's baseline (#5318): the desktop's link to a node, and
+//! bus-bridge's Unix socket link on its own, measured side by side on
+//! the same pair of Helios buses.
 //!
 //! Each side is a node's fact bus (journaled, with its application bus
 //! as journal and relay, as `helios-node` builds it) and a desktop's,
 //! one process, two threads of links:
 //!
-//! - **today**: the node serves its inspect endpoint (`subscribe` with
-//!   `relay`) and a control endpoint; the desktop follows it with
+//! - **relay**: the node serves its inspect endpoint, a control endpoint
+//!   and its facts over bus-bridge (`helios_node::bridge`, as
+//!   `helios-node` does on Unix); the desktop follows it with
 //!   [`relay::Relay`], which takes the relayable facts in through its
-//!   bus's relay, and asks the control endpoint over a fresh connection
-//!   per request, as Cancel does;
+//!   bus's relay over that link, and asks the control endpoint over a
+//!   fresh connection per request, as Cancel does (the facts came by the
+//!   inspect stream before, `subscribe` with `relay`, which Windows
+//!   keeps);
 //! - **bridge**: a `bus_bridge::Endpoint` on each bus, joined over a Unix
 //!   socket; the desktop's request is answered by the node's listeners
 //!   (`Endpoint::listen_far`).
@@ -163,12 +166,12 @@ trait Link {
     fn ask(&self, n: u64) -> u64;
 }
 
-struct Today {
+struct Desktop {
     relay: Relay,
     control: Address,
 }
 
-impl Link for Today {
+impl Link for Desktop {
     fn drop_link(&self) {
         self.relay.drop_link();
     }
@@ -199,14 +202,19 @@ impl Link for Bridge {
     }
 }
 
-/// Today's link: the node's inspect and control endpoints, followed by a
-/// [`Relay`].
-fn today(node: &Side, desktop: &Side, dir: &std::path::Path) -> Today {
+/// The desktop's link: the node's inspect, control and facts endpoints,
+/// followed by a [`Relay`].
+fn desktop_link(node: &Side, desktop: &Side, dir: &std::path::Path) -> Desktop {
     let jobs = Jobs::new(node.facts.clone());
     let inspector = Inspector::new(node.facts.clone())
         .with_jobs()
         .with_relay(node.kernel.clone());
     helios_inspect::serve(inspector, &dir.join("node.sock")).unwrap();
+    helios_node::bridge::serve(
+        node.bus(),
+        &helios_inspect::bridge_socket(&dir.join("node.sock")),
+    )
+    .unwrap();
     helios_inspect::serve_at(
         &Listen::Unix(dir.join("control.sock")),
         None,
@@ -240,7 +248,7 @@ fn today(node: &Side, desktop: &Side, dir: &std::path::Path) -> Today {
         timing,
     )
     .unwrap();
-    Today {
+    Desktop {
         relay,
         control: Address::Unix(dir.join("control.sock")),
     }
@@ -292,8 +300,8 @@ fn micros(d: &[Duration]) -> Value {
 
 /// Measures `link` between `node` and the desktop's `heard`.
 fn measure(node: &Side, heard: &Receiver<u64>, link: &dyn Link) -> Value {
-    // Up: the first fact said until it is heard (today's link starts from
-    // the node's present).
+    // Up: the first fact said until it is heard (the desktop's link starts
+    // from the node's present).
     let start = Instant::now();
     let deadline = start + LONG;
     let mut n = 0;
@@ -380,13 +388,13 @@ fn report(name: &str, figures: &Value) {
 }
 
 #[test]
-fn today_s_node_link_delivers_each_fact_once_and_answers() {
-    let dir = dir("today");
+fn the_desktop_s_node_link_delivers_each_fact_once_and_answers() {
+    let dir = dir("relay");
     let (node, desktop) = (Side::new(), Side::new());
     let heard = desktop.hear();
-    let link = today(&node, &desktop, &dir);
+    let link = desktop_link(&node, &desktop, &dir);
     let figures = measure(&node, &heard, &link);
-    report("today", &figures);
+    report("relay", &figures);
     drop(link);
     let _ = std::fs::remove_dir_all(&dir);
 }

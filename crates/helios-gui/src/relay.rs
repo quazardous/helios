@@ -37,15 +37,22 @@
 //!
 //! When the desktop's application bus has a relay (`bus-contract`'s
 //! `Relay`, Helios's fact bus behind it), a second link per node takes in
-//! the node's relayable facts (`subscribe` with `relay`, see
-//! `helios_inspect::Inspector::stream_relay`): each one `ingest`ed with
-//! source `relayed:<name>`, decoded by the codec the desktop declares for
-//! its point, and heard by that point's listeners as a fact published
-//! here (`NodeEvents` among them, for its own listeners: those kinds
-//! come by this link only). It resumes from its cursor; a node restarted
-//! (`restarted`) or a cursor the node's journal no longer holds (`gap`)
-//! says `helios.node.resync` to the listeners, then goes on from the node's
-//! facts.
+//! the node's relayable facts: each one `ingest`ed with source
+//! `relayed:<name>`, decoded by the codec the desktop declares for its
+//! point, and heard by that point's listeners as a fact published here
+//! (`NodeEvents` among them, for its own listeners: those kinds come by
+//! this link only). The first link starts from the node's present (what
+//! the node published before is its state, read whole by whoever needs
+//! it); a link back resumes from its cursor; a node restarted or a
+//! cursor the node's journal no longer holds says `helios.node.resync`
+//! to the listeners, then goes on from the node's facts. That link is:
+//!
+//! - on Unix, bus-bridge's link over the Unix socket the node serves next
+//!   to its inspect socket (`helios_inspect::bridge_socket`; a node
+//!   followed over `tcp://` has none, its facts come by the event
+//!   stream), receive-only on the desktop's side;
+//! - elsewhere (Windows), the node's inspect endpoint (`subscribe` with
+//!   `relay`, see `helios_inspect::Inspector::stream_relay`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
@@ -53,7 +60,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use egui_pop::api::bus::bus_contract;
-use egui_pop::api::bus::bus_contract_crossing::{BusCrossing as _, Origin, RelayedEntry};
+use egui_pop::api::bus::bus_contract_crossing::BusCrossing as _;
+#[cfg(not(unix))]
+use egui_pop::api::bus::bus_contract_crossing::{Origin, RelayedEntry};
 use helios_core::jobs::{
     CANCELLED, CANCELLING, FAILED, FINISHED, ITEM_FAILED, LOG, PAUSED, PROGRESS, RESUMED, STARTED,
 };
@@ -209,9 +218,133 @@ pub struct Relay {
     link: NodeLink,
     /// Dropped with the relay: its threads stop.
     _stop: Sender<()>,
-    _stop_in: Option<Sender<()>>,
     closer: Arc<Mutex<Option<Closer>>>,
-    closer_in: Arc<Mutex<Option<Closer>>>,
+    facts_in: FactsIn,
+}
+
+/// The second link, taking in a node's relayable facts; dropped, it
+/// stops.
+enum FactsIn {
+    /// None: the desktop's bus has no relay, or the node is followed
+    /// over `tcp://` on Unix. Its facts come by the event stream.
+    None,
+    /// bus-bridge's link over the node's Unix socket.
+    #[cfg(unix)]
+    Bridge(bus_bridge::Endpoint),
+    /// The node's inspect stream ([`TakeIn`]).
+    #[cfg(not(unix))]
+    Stream {
+        _stop: Sender<()>,
+        closer: Arc<Mutex<Option<Closer>>>,
+    },
+}
+
+impl FactsIn {
+    /// Starts taking in `link`'s relayable facts through the relay of
+    /// `hooks`; `taken_after` is shared with the event stream
+    /// ([`Follow::takes_in`]).
+    #[cfg(unix)]
+    fn start(
+        link: &NodeLink,
+        hooks: Arc<dyn bus_contract::Bus>,
+        events: &NodeEvents,
+        timing: Timing,
+        taken_after: &Arc<AtomicU64>,
+    ) -> Result<FactsIn, String> {
+        use bus_bridge::bus_contract_crossing::{Lost, Origin};
+        use bus_bridge::{Config, Endpoint, LinkEvent, Start, unix::UnixDialer};
+        let Address::Unix(inspect) = &link.inspect else {
+            return Ok(FactsIn::None);
+        };
+        let config = Config::new(
+            "desktop",
+            Origin::process(format!("{RELAYED}{}", link.name)),
+        )
+        .start(Start::Present)
+        .receive_only()
+        .reconnect(timing.retry);
+        let end = Endpoint::new(hooks, config)
+            .map_err(|e| format!("cannot follow node `{}`: {e}", link.name))?;
+        let (name, events, after) = (link.name.clone(), events.clone(), taken_after.clone());
+        // Called on the link's thread before the entries that follow are
+        // taken in: the line with the event stream is drawn first.
+        end.on_event(move |event| match event {
+            // From the node's present on: what came before went by the
+            // event stream.
+            LinkEvent::FromPresent { cursor } => after.store(cursor.seq, Ordering::SeqCst),
+            LinkEvent::Lost(lost) => {
+                let restarted = matches!(lost, Lost::Restarted);
+                if restarted {
+                    // Another run, read from its first fact.
+                    after.store(0, Ordering::SeqCst);
+                }
+                events.resync(
+                    &name,
+                    if restarted {
+                        "the node restarted"
+                    } else {
+                        "the node's facts were missed"
+                    },
+                );
+            }
+            LinkEvent::Refused { reason } => {
+                log::warn!(target: "helios", "node `{name}`: the facts link refused: {reason}");
+            }
+            _ => {}
+        });
+        end.connect(UnixDialer::new(helios_inspect::bridge_socket(inspect)));
+        Ok(FactsIn::Bridge(end))
+    }
+
+    /// [`FactsIn::start`] elsewhere: the node's inspect stream.
+    #[cfg(not(unix))]
+    fn start(
+        link: &NodeLink,
+        hooks: Arc<dyn bus_contract::Bus>,
+        events: &NodeEvents,
+        timing: Timing,
+        taken_after: &Arc<AtomicU64>,
+    ) -> Result<FactsIn, String> {
+        let (stop_tx, stop) = channel();
+        let closer: Arc<Mutex<Option<Closer>>> = Arc::default();
+        let mut take = TakeIn {
+            link: link.clone(),
+            hooks,
+            events: events.clone(),
+            timing,
+            stop,
+            closer: closer.clone(),
+            cursor: None,
+            taken_after: taken_after.clone(),
+        };
+        std::thread::Builder::new()
+            .name(format!("helios-relay-in-{}", link.name))
+            .spawn(move || take.run())
+            .map_err(|e| format!("cannot follow node `{}`: {e}", link.name))?;
+        Ok(FactsIn::Stream {
+            _stop: stop_tx,
+            closer,
+        })
+    }
+
+    /// Drops the link, as a network failure would.
+    fn drop_link(&self) {
+        match self {
+            FactsIn::None => {}
+            #[cfg(unix)]
+            FactsIn::Bridge(end) => end.disconnect(),
+            #[cfg(not(unix))]
+            FactsIn::Stream { closer, .. } => {
+                if let Some(c) = closer
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                {
+                    c.close();
+                }
+            }
+        }
+    }
 }
 
 impl Relay {
@@ -226,28 +359,10 @@ impl Relay {
         timing: Timing,
     ) -> Result<Relay, String> {
         link.check()?;
-        let closer_in: Arc<Mutex<Option<Closer>>> = Arc::default();
         let taken_after = Arc::new(AtomicU64::new(NOT_TAKEN));
-        let stop_in = match hooks.filter(|h| h.relay().is_some()) {
-            None => None,
-            Some(hooks) => {
-                let (stop_tx, stop) = channel();
-                let mut take = TakeIn {
-                    link: link.clone(),
-                    hooks,
-                    events: events.clone(),
-                    timing,
-                    stop,
-                    closer: closer_in.clone(),
-                    cursor: None,
-                    taken_after: taken_after.clone(),
-                };
-                std::thread::Builder::new()
-                    .name(format!("helios-relay-in-{}", link.name))
-                    .spawn(move || take.run())
-                    .map_err(|e| format!("cannot follow node `{}`: {e}", link.name))?;
-                Some(stop_tx)
-            }
+        let facts_in = match hooks.filter(|h| h.relay().is_some()) {
+            None => FactsIn::None,
+            Some(hooks) => FactsIn::start(&link, hooks, &events, timing, &taken_after)?,
         };
         let (stop_tx, stop) = channel();
         let closer: Arc<Mutex<Option<Closer>>> = Arc::default();
@@ -263,7 +378,7 @@ impl Relay {
             jobs: Vec::new(),
             lost_at: None,
             up: false,
-            takes_in: stop_in.as_ref().map(|_| taken_after),
+            takes_in: (!matches!(facts_in, FactsIn::None)).then_some(taken_after),
         };
         std::thread::Builder::new()
             .name(format!("helios-relay-{}", link.name))
@@ -272,9 +387,8 @@ impl Relay {
         Ok(Relay {
             link,
             _stop: stop_tx,
-            _stop_in: stop_in,
             closer,
-            closer_in,
+            facts_in,
         })
     }
 
@@ -310,15 +424,15 @@ impl Relay {
     /// Drops the current link, as a network failure would: the relay
     /// connects again (and catches up) at its next attempt.
     pub fn drop_link(&self) {
-        for closer in [&self.closer, &self.closer_in] {
-            if let Some(c) = closer
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_ref()
-            {
-                c.close();
-            }
+        if let Some(c) = self
+            .closer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            c.close();
         }
+        self.facts_in.drop_link();
     }
 }
 
@@ -355,7 +469,7 @@ struct Follow {
     lost_at: Option<Instant>,
     up: bool,
     /// When a second link takes in the node's relayable facts
-    /// ([`TakeIn`]): the node's `seq` after which their kinds are its
+    /// ([`FactsIn`]): the node's `seq` after which their kinds are its
     /// own ([`NOT_TAKEN`] until it is linked: an older node serves no
     /// relay). Once linked, the resyncs are its own.
     takes_in: Option<Arc<AtomicU64>>,
@@ -491,7 +605,7 @@ impl Follow {
         }
     }
 
-    /// Whether `event`'s kind comes by the second link ([`TakeIn`]),
+    /// Whether `event`'s kind comes by the second link ([`FactsIn`]),
     /// so the listeners hear it once.
     fn taken_in(&self, event: &Value) -> bool {
         let Some(after) = &self.takes_in else {
@@ -663,10 +777,12 @@ impl Follow {
 /// The source of a node's facts taken in: `relayed:<name>`.
 pub const RELAYED: &str = "relayed:";
 
-/// [`TakeIn`] not linked yet: the event stream hands on every kind.
+/// [`FactsIn`] not linked yet: the event stream hands on every kind.
 const NOT_TAKEN: u64 = u64::MAX;
 
-/// The thread taking in a node's relayable facts.
+/// The thread taking in a node's relayable facts from its inspect
+/// stream, where there is no bus-bridge link (Windows).
+#[cfg(not(unix))]
 struct TakeIn {
     link: NodeLink,
     /// The desktop's application bus: its relay takes them in.
@@ -684,6 +800,7 @@ struct TakeIn {
     taken_after: Arc<AtomicU64>,
 }
 
+#[cfg(not(unix))]
 impl TakeIn {
     fn stopped(&self) -> bool {
         !matches!(self.stop.try_recv(), Err(TryRecvError::Empty))
