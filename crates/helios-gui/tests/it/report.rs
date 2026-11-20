@@ -123,7 +123,11 @@ fn the_settings_part_lists_only_the_changed_settings() {
     set_wide_gamut(&mut h, true);
     let changed = bundle(&mut h)["context"]["settings"].clone();
     let changed = changed.as_object().unwrap().clone();
-    assert_eq!(changed.get(key), Some(&json!(true)), "{changed:?}");
+    assert_eq!(
+        changed.get(key),
+        Some(&json!({ "bool": true })),
+        "a value as egui-pop writes it: {changed:?}"
+    );
     let mut rest = changed.clone();
     rest.remove(key);
     assert_eq!(rest, before, "nothing else is said changed");
