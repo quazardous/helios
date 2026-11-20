@@ -101,16 +101,24 @@ impl<F: Feature> Hosted<F> {
     }
 
     /// Runs command `id` as the user does, its answer at once (a queued
-    /// command answers `{"queued": true}`).
+    /// command answers `{"queued": true}`); refused, it is said as a
+    /// warning toast, as the shell says it (`Shell::run`).
     pub(crate) fn run(&mut self, id: &str, args: Value) -> Result<Value, String> {
         let id = CommandId::new(id).map_err(|e| e.to_string())?;
-        match self
+        let result = match self
             .app
             .run(&id, args, egui_pop::model::commands::Origin::User)
         {
             egui_pop::api::host::Reply::Done(r) => r,
             egui_pop::api::host::Reply::Later(_) => Ok(serde_json::json!({ "queued": true })),
+        };
+        if let (Err(e), Some(toasts)) = (
+            &result,
+            self.app.handle().service(&egui_pop::api::toasts::TOASTS),
+        ) {
+            toasts.notify(egui_pop::api::toasts::Toast::warning(e));
         }
+        result
     }
 
     /// The application's handle.
