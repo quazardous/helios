@@ -8144,13 +8144,15 @@ fn menu_rows(
     items: &[MenuItem],
     chosen: &mut Option<(String, Value)>,
 ) {
+    use egui_pop::core::tooltip::TooltipExt as _;
+    use egui_pop::core::ui::UiPop as _;
     for item in items {
         match item {
             MenuItem::Separator => {
-                ui.separator();
+                ui.divider();
             }
             MenuItem::Submenu { label, items } => {
-                ui.menu_button(label, |ui| menu_rows(ui, h, cx, items, chosen));
+                egui_pop::api::menus::submenu(ui, label, |ui| menu_rows(ui, h, cx, items, chosen));
             }
             MenuItem::Command {
                 id,
@@ -8176,7 +8178,7 @@ fn menu_rows(
                 // A row its owner greyed (an offline folder's) says
                 // nothing more; one whose command does not apply, why.
                 if *enabled && !applies {
-                    r.on_disabled_hover_text(format!("Does not apply here ({})", spec.when));
+                    r.disabled_tip(format!("Does not apply here ({})", spec.when));
                 } else if r.clicked() {
                     *chosen = Some((id.clone(), args.clone()));
                     ui.close();
