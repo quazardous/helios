@@ -169,3 +169,149 @@ fn a_value_that_turns_not_finite_is_an_infinite_distance() {
     assert!(s.max_abs.is_infinite());
     assert!((s.over - 1.0 / 16.0).abs() < 1e-12);
 }
+
+/// Inverts its input on the CPU: a module without a GPU kernel.
+struct Invert;
+
+impl helios_core::Module for Invert {
+    type Plan = ();
+
+    fn manifest(&self) -> helios_core::Manifest {
+        use helios_core::{Family, Manifest, ModuleKind, Needs, PortSpec, Role};
+        Manifest {
+            name: "invert".into(),
+            version: 1,
+            description: String::new(),
+            params: vec![],
+            inputs: vec![PortSpec::image("input", 4)],
+            outputs: vec![PortSpec::image("output", 4)],
+            context: vec![],
+            needs: Needs::default(),
+            kind: ModuleKind::Process,
+            family: Family::Other,
+            role: Role::General,
+        }
+    }
+
+    fn prepare(&self, _: &Params, _: &helios_core::Context) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn process(&self, (): &(), inputs: &[&Image], output: Region) -> Result<Vec<Image>, String> {
+        let src = inputs[0].sample(output);
+        Ok(vec![Image::new(
+            output,
+            4,
+            src.data().iter().map(|v| 1.0 - v).collect(),
+        )])
+    }
+}
+
+/// An accelerator whose blur kernel does not compile, as a shader the
+/// driver refuses would not (sigmoid under DX12's FXC did exactly that,
+/// and ran on the CPU unseen); its exposure kernel is the identity, right
+/// for the identity exposure.
+struct BadShader;
+
+impl Accelerator for BadShader {
+    fn id(&self) -> &'static str {
+        "bad-shader"
+    }
+
+    fn upload(&self, image: &Image) -> Result<DeviceImage, AcceleratorError> {
+        Broken.upload(image)
+    }
+
+    fn download(&self, image: &DeviceImage) -> Result<Image, AcceleratorError> {
+        Broken.download(image)
+    }
+
+    fn run(
+        &self,
+        module: &str,
+        _job: &GpuJob,
+        input: &DeviceImage,
+        output: Region,
+        _channels: u32,
+    ) -> Result<DeviceImage, AcceleratorError> {
+        if module != "exposure" {
+            return Err(AcceleratorError::new(
+                Failure::Compile,
+                "error: expected ';', found 'fn'",
+            ));
+        }
+        let out = input.handle::<Image>().ok_or("not ours")?.sample(output);
+        Ok(DeviceImage::new(output, out.channels(), out))
+    }
+}
+
+#[test]
+fn a_kernel_that_falls_back_fails_the_run_and_names_its_module() {
+    let region = Region::sized(96, 64);
+    let mut g = Graph::new();
+    let src = g.add_source("src", helios_testkit::noise(region, 4, 5));
+    let ident = Params::new()
+        .with("exposure", Value::Float(0.0))
+        .with("black", Value::Float(0.0));
+    let e = g
+        .add_module(
+            "first",
+            ModuleRef::new(helios_module_exposure::Exposure),
+            &ident,
+        )
+        .unwrap();
+    let b = g
+        .add_module(
+            "soft",
+            ModuleRef::new(helios_module_blur::Blur),
+            &Params::new().with("radius", Value::Float(1.5)),
+        )
+        .unwrap();
+    let i = g
+        .add_module("inv", ModuleRef::new(Invert), &Params::new())
+        .unwrap();
+    g.connect(src, "image", e, "input").unwrap();
+    g.connect(e, "output", b, "input").unwrap();
+    g.connect(b, "output", i, "input").unwrap();
+
+    let gpu = cpu().with_accelerator(Arc::new(BadShader));
+    let diffs = diffstat::run(&g, region, &cpu(), &gpu, Options::default(), None).unwrap();
+    let by = |n: &str| diffs.iter().find(|d| d.name == n).unwrap();
+
+    // Every distance is zero: the blur's fell back, so the CPU met itself.
+    for d in &diffs {
+        assert!(d.alone.as_ref().unwrap().is_zero(), "{d:?}");
+        assert!(d.chain.as_ref().unwrap().is_zero(), "{d:?}");
+    }
+    let first = by("first");
+    assert!(
+        first.has_kernel && first.accelerated > 0 && first.fallbacks == 0,
+        "{first:?}"
+    );
+    let soft = by("soft");
+    assert!(
+        soft.has_kernel && soft.fallbacks > 0 && soft.accelerated == 0,
+        "{soft:?}"
+    );
+    assert!(
+        soft.fallback_reason
+            .as_deref()
+            .is_some_and(|r| r.contains("expected ';'")),
+        "{soft:?}"
+    );
+    let inv = by("inv");
+    assert!(!inv.has_kernel && inv.fallbacks == 0, "{inv:?}");
+
+    // Only the blur fails the run, named; the CPU-only module does not.
+    let problems = diffstat::problems(&diffs);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(
+        problems[0].starts_with("soft (blur): its GPU kernel fell back"),
+        "{problems:?}"
+    );
+
+    // Two CPU engines: no kernel is tried, nothing falls back, no problem.
+    let sane = diffstat::run(&g, region, &cpu(), &cpu(), Options::default(), None).unwrap();
+    assert!(diffstat::problems(&sane).is_empty());
+    assert!(sane.iter().all(|d| d.fallbacks == 0 && d.accelerated == 0));
+}

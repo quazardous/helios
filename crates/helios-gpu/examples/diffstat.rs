@@ -8,6 +8,12 @@
 //!          [--tile N] [--json FILE] [--cpu]
 //! ```
 //!
+//! Each module's `kernel` column says where it ran: `gpu`, `cpu only` (it
+//! has no GPU kernel, both sides run its CPU code) or `FELL BACK` (its GPU
+//! kernel failed and the engine ran it on the CPU). A fallback fails the
+//! run, the module named: its distance of zero would be the CPU against
+//! itself.
+//!
 //! `--cpu` compares the CPU with itself (the sanity mode: every distance
 //! is zero). `--dump-diff DIR` writes the per-pixel distance of the module
 //! `--module` names, alone and through the chain, as PFM files.
@@ -175,6 +181,17 @@ fn cell(s: &Result<Stats, String>) -> String {
     }
 }
 
+/// Where a module ran on the engine under test.
+fn ran_on(d: &ModuleDiff) -> String {
+    match (d.has_kernel, d.fallbacks) {
+        (false, _) => "cpu only".into(),
+        (true, 0) if d.accelerated > 0 => "gpu".into(),
+        // The sanity mode: no accelerator to try the kernel on.
+        (true, 0) => "cpu".into(),
+        (true, n) => format!("FELL BACK x{n}"),
+    }
+}
+
 fn stats_json(s: &Result<Stats, String>) -> serde_json::Value {
     match s {
         Ok(s) => serde_json::json!({
@@ -220,6 +237,7 @@ fn main() -> ExitCode {
     );
     let mut lines = Vec::new();
     let mut failed = false;
+    let mut problems = Vec::new();
     for name in &args.fixtures {
         let graph = match fixture(name) {
             Ok(g) => g,
@@ -258,13 +276,17 @@ fn main() -> ExitCode {
             "over",
             "worst tile"
         );
+        problems.extend(
+            diffstat::problems(&diffs)
+                .into_iter()
+                .map(|p| format!("{name}: {p}")),
+        );
         for d in &diffs {
-            failed |= d.alone.is_err() || d.chain.is_err();
             println!(
-                "  {:<10} {:<14} {:<6} | {} | {}",
+                "  {:<10} {:<14} {:<14} | {} | {}",
                 d.name,
                 d.module,
-                if d.has_kernel { "gpu" } else { "cpu" },
+                ran_on(d),
                 cell(&d.alone),
                 cell(&d.chain)
             );
@@ -273,6 +295,8 @@ fn main() -> ExitCode {
                 "node": d.name,
                 "module": d.module,
                 "kernel": d.has_kernel,
+                "fallbacks": d.fallbacks,
+                "accelerated": d.accelerated,
                 "adapter": adapter,
                 "alone": stats_json(&d.alone),
                 "chain": stats_json(&d.chain),
@@ -295,6 +319,16 @@ fn main() -> ExitCode {
             eprintln!("diffstat: {}: {e}", path.display());
             return ExitCode::FAILURE;
         }
+    }
+    if let Some(off) = other.gpu_off() {
+        problems.push(format!("the GPU was turned off during the run: {off}"));
+    }
+    if !problems.is_empty() {
+        eprintln!("\ndiffstat: {} problem(s):", problems.len());
+        for p in &problems {
+            eprintln!("  {p}");
+        }
+        failed = true;
     }
     if failed {
         ExitCode::FAILURE

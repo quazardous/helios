@@ -21,6 +21,14 @@
 //! mean one, the share of pixels over a threshold and the worst tile.
 //! [`diff_image`] gives the per-pixel distance as an image, to look at.
 //! Two reference engines report zero everywhere: the sanity mode.
+//!
+//! A distance of zero proves nothing when the kernel never ran: a GPU
+//! kernel that fails (a shader the driver refuses, say) falls back to the
+//! CPU, and the CPU matches itself. So each module also reports how many of
+//! its steps fell back ([`ModuleDiff::fallbacks`], from the engine's
+//! [`helios_core::Counters::fallbacks`]), and [`problems`] counts a module
+//! with a GPU kernel that fell back as a failure. A module without a kernel
+//! runs on the CPU on both sides by design: "CPU only", never a failure.
 
 use helios_core::{Engine, Graph, Image, NodeId, Region, graph::SOURCE_PORT};
 
@@ -161,6 +169,15 @@ pub struct ModuleDiff {
     /// Whether the module has a GPU variant: without one, both paths run
     /// its CPU code and only its inputs can differ.
     pub has_kernel: bool,
+    /// Steps of the module, run alone, that the engine under test computed
+    /// on the CPU because the GPU kernel failed (0 when it has no kernel:
+    /// it never tries one).
+    pub fallbacks: u64,
+    /// Steps of the module, run alone, the engine under test computed on
+    /// the GPU.
+    pub accelerated: u64,
+    /// Why the last of those steps fell back, as the engine said it.
+    pub fallback_reason: Option<String>,
     /// The module run alone on the same inputs, or why it could not be.
     pub alone: Result<Stats, String>,
     /// The node rendered through the whole graph, or why it could not be.
@@ -171,6 +188,11 @@ pub struct ModuleDiff {
 /// bypassed ones left out; `only` keeps the nodes or modules of that
 /// name) over `region`, `other` against `reference`. A node that fails to
 /// render reports why; the others still run.
+///
+/// The fallbacks are counted on `other` while the module runs alone, and
+/// that run comes first: the module is computed there for the first time,
+/// never served from the cache, and nothing else is (its inputs are
+/// sources).
 pub fn run(
     graph: &Graph,
     region: Region,
@@ -195,21 +217,53 @@ pub fn run(
         let Some(port) = manifest.outputs.first().map(|p| p.name.clone()) else {
             continue;
         };
-        let chain = both(reference, other, graph, id, &port, region)
-            .and_then(|(r, o)| measure(&r, &o, options));
+        let before = other.counters();
         let alone = alone(graph, id, region)
             .and_then(|(g, n)| both(reference, other, &g, n, &port, region))
+            .and_then(|(r, o)| measure(&r, &o, options));
+        let ran = other.counters().since(&before);
+        let chain = both(reference, other, graph, id, &port, region)
             .and_then(|(r, o)| measure(&r, &o, options));
         out.push(ModuleDiff {
             node: id,
             name,
             module: manifest.name.clone(),
             has_kernel: module.gpu_kernel().is_some(),
+            fallbacks: ran.fallbacks,
+            accelerated: ran.accelerated,
+            fallback_reason: (ran.fallbacks > 0)
+                .then(|| other.fallback_reason())
+                .flatten(),
             alone,
             chain,
         });
     }
     Ok(out)
+}
+
+/// What fails a run, one line per problem, each naming its node and
+/// module: a measure that could not be made, or a module with a GPU kernel
+/// that fell back to the CPU (its distance then says nothing about the
+/// kernel). Modules without a kernel are not checked for fallbacks.
+pub fn problems(diffs: &[ModuleDiff]) -> Vec<String> {
+    let mut out = Vec::new();
+    for d in diffs {
+        let who = format!("{} ({})", d.name, d.module);
+        if d.has_kernel && d.fallbacks > 0 {
+            out.push(format!(
+                "{who}: its GPU kernel fell back to the CPU ({} step{}): {}",
+                d.fallbacks,
+                if d.fallbacks == 1 { "" } else { "s" },
+                d.fallback_reason.as_deref().unwrap_or("no reason given")
+            ));
+        }
+        for (kind, r) in [("alone", &d.alone), ("chain", &d.chain)] {
+            if let Err(e) = r {
+                out.push(format!("{who}: {kind}: {e}"));
+            }
+        }
+    }
+    out
 }
 
 /// The renders of `node`'s `port` on both engines.
