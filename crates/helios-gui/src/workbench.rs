@@ -13,6 +13,7 @@ use std::rc::Rc;
 use egui::Ui;
 use egui_pop::api::history_view::PANEL_HISTORY;
 use egui_pop::api::{Ctx, Plugin, PluginError};
+use egui_pop::core::ui::UiPop as _;
 use egui_pop::model::ids::{PanelId, PluginId};
 use egui_pop::model::layout::{Anchor, AnchorEdge, Arrangement, FloatingGroup, Layout, Node};
 use egui_pop::model::panels::{Area, PanelSpec};
@@ -131,11 +132,11 @@ pub(crate) fn keep_focus_taken(ctx: &egui::Context) {
 }
 
 /// A panel waiting for its widget: its title, in the interface's
-/// language.
+/// language, as the kit's secondary text.
 fn placeholder(ui: &mut Ui, id: &str, title: &str) {
     let title = egui_pop::core::strings::panel_title(ui.ctx(), id, title);
     ui.centered_and_justified(|ui| {
-        ui.weak(title);
+        ui.muted(title);
     });
 }
 
