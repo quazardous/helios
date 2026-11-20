@@ -793,18 +793,34 @@ impl Rack {
                         self.typing = Some((row.path.clone(), t.clone()));
                     }
                 }
-                // An editor's value (a curve's points, a wheel's colour)
-                // is written as a set one is: at the end of its gesture.
-                Edit::Set { to, done, .. } | Edit::Tool { to, done, .. } => {
+                // A set value (a choice) is written once done.
+                Edit::Set { to, done, .. } => {
                     let to = helios_controls::values::helios_value(to.clone());
                     if *done {
                         let mut s = store.lock().expect("value store lock");
                         write(&mut s, &row.path, Change::To(to), None, false);
                     }
                 }
-                // Nothing of a drag is written before its end: a drag
-                // given up has nothing to put back.
-                Edit::Cancel { .. } => {}
+                // An editor's change (a curve's points, a wheel's colour):
+                // a drag's frames as one gesture that its end closes (one
+                // undo step), so the editor follows the drag.
+                Edit::Tool {
+                    to, cause, done, ..
+                } => {
+                    let to = helios_controls::values::helios_value(to.clone());
+                    let d = row.entry.descriptor.clone();
+                    self.tool_edit(ctx, store, &row.path, &d, to, *cause, *done);
+                }
+                // A drag given up: what it wrote is put back, no trace.
+                Edit::Cancel { .. } => {
+                    if let Some((p, g)) = self.gesture.take() {
+                        if p == row.path {
+                            store.lock().expect("value store lock").cancel(g);
+                        } else {
+                            self.gesture = Some((p, g));
+                        }
+                    }
+                }
             }
         }
         for (key, changes) in numbers {
@@ -844,6 +860,50 @@ impl Rack {
                     c.moments.entry(node.to_owned()).or_default().reveal_all = true;
                 }
             }
+        }
+    }
+
+    /// Writes one change of an editor (a curve, a wheel), as the user: a
+    /// drag's frames as one gesture ended by its release, other origins
+    /// kept off meanwhile; keys in a row as one group; any other finished
+    /// change as a step of its own.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the path, its descriptor, the value, its cause and whether it is done"
+    )]
+    fn tool_edit(
+        &mut self,
+        ctx: &egui::Context,
+        store: &Mutex<Store>,
+        path: &str,
+        d: &Descriptor,
+        v: Value,
+        cause: egui_pop::viewport::change::Cause,
+        done: bool,
+    ) {
+        use egui_pop::viewport::change::Cause as ToolCause;
+        let now = ctx.input(|i| i.time);
+        let mut s = store.lock().expect("value store lock");
+        let held = self
+            .gesture
+            .as_ref()
+            .filter(|(p, _)| p == path)
+            .map(|(_, g)| *g);
+        if !done {
+            let g = held.unwrap_or_else(|| {
+                let g = s.begin_gesture(Origin::User, &format!("drag {}", d.label));
+                self.gesture = Some((path.into(), g));
+                g
+            });
+            write(&mut s, path, Change::To(v), Some(g), false);
+        } else if let Some(g) = held {
+            self.gesture = None;
+            write(&mut s, path, Change::To(v), Some(g), false);
+            s.end(g);
+        } else if matches!(cause, ToolCause::Key | ToolCause::Access) {
+            self.step(&mut s, path, Change::To(v), &d.label, now);
+        } else {
+            write(&mut s, path, Change::To(v), None, false);
         }
     }
 
