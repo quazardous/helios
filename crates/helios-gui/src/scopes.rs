@@ -21,6 +21,8 @@ use std::sync::Mutex;
 use egui::{Color32, ColorImage, TextureHandle, Ui};
 use egui_pop::api::AppHandle;
 use egui_pop::core::areas::{self, AreaSpec};
+use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::widgets::{self, ToggleChip};
 use egui_pop::viewport::histogram::{Channel, Clipping, Histogram, HistogramOutput};
 use helios_core::{Image, Message, Value};
 use helios_scopes::{Counts, Scale, histogram, parade, waveform};
@@ -308,32 +310,48 @@ impl Scopes {
     /// The panel; with the application and the value store, the
     /// histogram drags the exposure of the network shown.
     pub fn ui_with(&mut self, ui: &mut Ui, edit: Option<(&AppHandle, &Mutex<Store>)>) {
+        let ctx = ui.ctx().clone();
+        let tr = |m: Message| crate::i18n::text(&ctx, m);
         ui.horizontal(|ui| {
-            for (mode, label) in [
-                (Mode::Histogram, "Histogram"),
-                (Mode::Waveform, "Waveform"),
-                (Mode::Parade, "Parade"),
+            for (mode, key, label) in [
+                (
+                    Mode::Histogram,
+                    "histogram",
+                    tr(Message::new("gui-scopes-histogram", "Histogram")),
+                ),
+                (
+                    Mode::Waveform,
+                    "waveform",
+                    tr(Message::new("gui-scopes-waveform", "Waveform")),
+                ),
+                (
+                    Mode::Parade,
+                    "parade",
+                    tr(Message::new("gui-scopes-parade", "Parade")),
+                ),
             ] {
-                let r = ui.selectable_label(self.mode == mode, label);
+                let r = widgets::selectable_label(ui, self.mode == mode, label);
                 // A scope's mode moves what is shown, never the edit.
-                areas::register(
-                    ui,
-                    &r,
-                    AreaSpec::navigate(format!("scopes.mode.{}", label.to_lowercase())),
-                );
+                areas::register(ui, &r, AreaSpec::navigate(format!("scopes.mode.{key}")));
                 if r.clicked() {
                     self.set_mode(mode);
                 }
             }
-            ui.separator();
-            let r = ui.selectable_label(self.stops, "Stops");
+            ui.divider();
+            // A toggle chip: pressed while the scale is in stops. The
+            // chip's own flip is dropped, `set_stops` sets the scale.
+            let mut pressed = self.stops;
+            let r = ui.add(ToggleChip::new(
+                &mut pressed,
+                tr(Message::new("gui-scopes-stops", "Stops")),
+            ));
             areas::register(ui, &r, AreaSpec::navigate("scopes.stops"));
             if r.clicked() {
                 self.set_stops(!self.stops);
             }
         });
         if self.image.is_none() {
-            ui.weak("No image yet");
+            ui.muted(tr(Message::new("gui-scopes-no-image", "No image yet")));
             return;
         }
         if self.mode == Mode::Histogram {

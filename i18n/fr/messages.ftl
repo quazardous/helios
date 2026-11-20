@@ -1040,7 +1040,17 @@ gui-scopes-blue = Bleu
 
 gui-scopes-green = Vert
 
+gui-scopes-histogram = Histogramme
+
+gui-scopes-no-image = Pas encore d’image
+
+gui-scopes-parade = Parade
+
 gui-scopes-red = Rouge
+
+gui-scopes-stops = Diaphs
+
+gui-scopes-waveform = Forme d’onde
 
 gui-settings-account-last-used = Dernière utilisation
 

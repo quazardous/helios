@@ -2453,7 +2453,17 @@ gui-scopes-blue = Blue
 
 gui-scopes-green = Green
 
+gui-scopes-histogram = Histogram
+
+gui-scopes-no-image = No image yet
+
+gui-scopes-parade = Parade
+
 gui-scopes-red = Red
+
+gui-scopes-stops = Stops
+
+gui-scopes-waveform = Waveform
 
 gui-settings-account-last-used = Last used
 
