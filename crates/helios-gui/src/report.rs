@@ -272,7 +272,7 @@ pub fn library_shape(lib: &Library, ctx: &egui::Context) -> Json {
         match e.presence {
             helios_vault::Presence::Offline => offline += 1,
             helios_vault::Presence::Missing => missing += 1,
-            _ => {}
+            helios_vault::Presence::Present => {}
         }
     }
     let pairs = stems.values().filter(|(r, j)| *r && *j).count();
