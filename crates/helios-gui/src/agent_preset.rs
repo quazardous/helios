@@ -4,26 +4,30 @@
 //!
 //! Without a preset, egui-pop-agent's defaults hold: the bridge reads
 //! only, an unpaired client reads, a paired agent (approved by the user)
-//! edits, destructive commands asked first.
+//! edits, destructive calls asked first.
 //!
-//! `HELIOS_AGENT_PRESET=scenario` makes the bridge writable and gives
-//! the scenario grant to paired agents and to the unpaired clients
-//! scenario runners are (`examples/scenarios.rs`,
-//! `egui_pop_test::scenario::live`, which do not say `hello` yet): every
-//! command, value writes and `ui` actions, private data withheld.
+//! `HELIOS_AGENT_PRESET=scenario` makes the bridge writable and issues a
+//! pairing at start for the scenario runner, with the scenario grant:
+//! every command, value writes and `ui` actions, private data withheld.
+//! The token comes from `EGUI_POP_AGENT_TOKEN`, else is written to the
+//! file `EGUI_POP_AGENT_TOKEN_FILE` names; the runner says `hello` with
+//! it (`examples/scenarios.rs`, `egui_pop_test::scenario::live`). Agents
+//! the user pairs get the same grant; unpaired clients still only read.
 //! `scenario+private` adds private data (paths, accounts, people,
 //! places), which importing a folder or opening a file by its path needs.
-//! Destructive commands are still held for the user's yes.
+//! Destructive calls are still held for the user's yes.
 //!
-//! `HELIOS_AGENT_WRITE=1` is the preset's deprecated alias, kept for one
-//! release: it means `scenario+private`, what it allowed before.
+//! `HELIOS_AGENT_WRITE=1`, the switch before the preset, is no longer
+//! read: a warning says what replaces it.
 
-use egui_pop_agent::{AgentGrants, Grant};
+use egui_pop_agent::{AgentGrants, Grant, PreIssue, TOKEN_ENV, TOKEN_FILE_ENV};
 
 /// The environment variable naming the preset.
 pub const PRESET: &str = "HELIOS_AGENT_PRESET";
-/// Deprecated: `HELIOS_AGENT_WRITE=1` is `HELIOS_AGENT_PRESET=scenario+private`.
+/// Removed: the switch before [`PRESET`], only warned about now.
 pub const AGENT_WRITE: &str = "HELIOS_AGENT_WRITE";
+/// The agent id the scenario runner is paired as.
+pub const RUNNER_ID: &str = "scenario";
 
 /// A preset of the agents' grants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,7 +49,7 @@ impl Preset {
     }
 
     /// The preset the environment asks for, if any, with a warning to
-    /// log when it is asked the deprecated way or wrongly.
+    /// log when it is asked wrongly or by the removed switch.
     pub fn from_env(env: impl Fn(&str) -> Option<String>) -> (Option<Self>, Option<String>) {
         if let Some(name) = env(PRESET).filter(|n| !n.trim().is_empty()) {
             return match Self::parse(&name) {
@@ -53,12 +57,12 @@ impl Preset {
                 Err(e) => (None, Some(e)),
             };
         }
-        if env(AGENT_WRITE).is_some_and(|v| v == "1") {
+        if env(AGENT_WRITE).is_some() {
             return (
-                Some(Self::Scenario { private: true }),
+                None,
                 Some(format!(
-                    "{AGENT_WRITE}=1 is deprecated: use {PRESET}=scenario+private \
-                     (or scenario, without private data)"
+                    "{AGENT_WRITE} was removed and is ignored: use {PRESET}=scenario+private \
+                     (or scenario) with {TOKEN_ENV} or {TOKEN_FILE_ENV} for the runner"
                 )),
             );
         }
@@ -72,11 +76,29 @@ impl Preset {
         }
     }
 
-    /// The grants: paired agents and unpaired clients alike.
+    /// The grants: paired agents get the preset's; unpaired clients keep
+    /// egui-pop's read-only default.
     pub fn grants(self) -> AgentGrants {
-        AgentGrants::new()
-            .unpaired(self.grant())
-            .paired(self.grant())
+        AgentGrants::new().paired(self.grant())
+    }
+
+    /// The scenario runner's pairing, issued at start with the preset's
+    /// grant: its token from [`TOKEN_ENV`], else a new one written to
+    /// the file [`TOKEN_FILE_ENV`] names. `Err` with a warning to log
+    /// when neither is set: no runner can then write.
+    pub fn pre_issue(self, env: impl Fn(&str) -> Option<String>) -> Result<PreIssue, String> {
+        let set = |v: &str| env(v).filter(|s| !s.is_empty());
+        let issue = if let Some(token) = set(TOKEN_ENV) {
+            PreIssue::token(RUNNER_ID, token)
+        } else if let Some(file) = set(TOKEN_FILE_ENV) {
+            PreIssue::file(RUNNER_ID, file)
+        } else {
+            return Err(format!(
+                "{PRESET} is set but neither {TOKEN_ENV} nor {TOKEN_FILE_ENV}: \
+                 no scenario runner is paired, unpaired clients only read"
+            ));
+        };
+        Ok(issue.grant(self.grant()))
     }
 }
 
@@ -92,8 +114,11 @@ mod tests {
         }
     }
 
+    /// A token as long as egui-pop asks (32 characters at least).
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef-test";
+
     #[test]
-    fn the_preset_is_read_from_its_variable_and_the_old_switch_is_its_alias() {
+    fn the_preset_is_read_from_its_variable_and_the_old_switch_only_warns() {
         assert_eq!(
             Preset::from_env(env(&[(PRESET, "scenario")])),
             (Some(Preset::Scenario { private: false }), None)
@@ -102,15 +127,14 @@ mod tests {
             Preset::from_env(env(&[(PRESET, "scenario+private")])).0,
             Some(Preset::Scenario { private: true })
         );
+        // The removed switch grants nothing, and says what replaces it.
         let (p, warning) = Preset::from_env(env(&[(AGENT_WRITE, "1")]));
-        assert_eq!(p, Some(Preset::Scenario { private: true }));
-        assert!(warning.unwrap().contains("deprecated"));
-        assert_eq!(Preset::from_env(env(&[(AGENT_WRITE, "yes")])), (None, None));
+        assert_eq!(p, None);
+        assert!(warning.unwrap().contains("removed"));
         assert_eq!(Preset::from_env(env(&[])), (None, None));
         let (p, error) = Preset::from_env(env(&[(PRESET, "admin")]));
         assert_eq!(p, None);
         assert!(error.unwrap().contains("unknown preset"));
-        // The preset wins over the alias.
         assert_eq!(
             Preset::from_env(env(&[(PRESET, "scenario"), (AGENT_WRITE, "1")])).0,
             Some(Preset::Scenario { private: false })
@@ -118,15 +142,28 @@ mod tests {
     }
 
     #[test]
-    fn the_scenario_grant_writes_and_withholds_private_data_unless_asked() {
+    fn the_scenario_grant_goes_to_paired_agents_and_unpaired_clients_only_read() {
         let g = Preset::Scenario { private: false }.grants();
-        assert_eq!(g.unpaired, g.paired);
+        assert!(g.unpaired.read_only, "unpaired clients keep the default");
+        assert_eq!(g.unpaired, AgentGrants::new().unpaired);
         assert!(!g.paired.read_only);
         assert!(g.paired.ui);
         assert!(!g.paired.private);
         assert!(Preset::Scenario { private: true }.grant().private);
-        // Without a preset, egui-pop's defaults: unpaired clients read.
-        assert!(AgentGrants::new().unpaired.read_only);
+    }
+
+    #[test]
+    fn the_runner_s_pairing_takes_its_token_from_the_variable_else_the_file() {
+        let p = Preset::Scenario { private: true };
+        assert_eq!(
+            p.pre_issue(env(&[(TOKEN_ENV, TOKEN), (TOKEN_FILE_ENV, "/t")])),
+            Ok(PreIssue::token(RUNNER_ID, TOKEN).grant(p.grant()))
+        );
+        assert_eq!(
+            p.pre_issue(env(&[(TOKEN_ENV, ""), (TOKEN_FILE_ENV, "/run/t")])),
+            Ok(PreIssue::file(RUNNER_ID, "/run/t").grant(p.grant()))
+        );
+        assert!(p.pre_issue(env(&[])).unwrap_err().contains(TOKEN_ENV));
     }
 
     /// Helios's commands on egui-pop's agent socket, under the scenario
@@ -146,7 +183,9 @@ mod tests {
         use egui_pop::api::{App, Ctx, DefaultPlugins, Plugin, PluginError};
         use egui_pop::model::commands::Origin as PopOrigin;
         use egui_pop::model::ids::PluginId;
-        use egui_pop_agent::{AgentGrantsExt as _, AgentSocket, AgentSocketExt as _};
+        use egui_pop_agent::{
+            AgentGrantsExt as _, AgentSocket, AgentSocketExt as _, PreIssueExt as _,
+        };
         use helios_core::Bus;
         use helios_shell::commands::{CommandSpec as HeliosSpec, Registry};
         use serde_json::{Value as Json, json};
@@ -174,11 +213,18 @@ mod tests {
         /// What the handlers saw: each command run, with its arguments.
         type Ran = Arc<Mutex<Vec<(String, Json)>>>;
 
-        /// An application with Helios's host and three of its commands:
+        /// An application with Helios's host and four of its commands:
         /// `library.trash` (destructive, with a schema), `vault.rate` (a
-        /// write) and `library.folder` (private); its agent socket under
-        /// the scenario preset, set in code, no variable.
+        /// write), `library.folder` (private) and `library.export`
+        /// (destructive with `clash: overwrite`); its agent socket under
+        /// the scenario preset, set in code, no variable, the runner's
+        /// token [`TOKEN`] issued at start.
         fn app(name: &str) -> (Harness<'static, App>, PathBuf, Ran) {
+            app_with(name, Preset::Scenario { private: false })
+        }
+
+        /// [`app`] under `preset`.
+        fn app_with(name: &str, preset: Preset) -> (Harness<'static, App>, PathBuf, Ran) {
             let dir = std::env::temp_dir()
                 .join(format!("helios-agent-preset-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
@@ -191,6 +237,7 @@ mod tests {
                 HeliosSpec::new("library.trash", "Move to Trash", "Library"),
                 HeliosSpec::new("vault.rate", "Rate", "Library"),
                 HeliosSpec::new("library.folder", "Folder", "Library"),
+                HeliosSpec::new("library.export", "Export…", "Library"),
             ];
             for spec in &specs {
                 let ran = ran.clone();
@@ -205,7 +252,6 @@ mod tests {
                     .unwrap();
             }
             let host = crate::host::HeliosHost::new(registry, Arc::new(Bus::new()), Arc::default());
-            let preset = Preset::Scenario { private: false };
             let builder = App::builder()
                 .host(host)
                 .plugins(DefaultPlugins)
@@ -213,7 +259,8 @@ mod tests {
                 .debug_bridge(egui_pop::core::debug::BridgeMode::On)
                 .agent_grants(preset.grants())
                 .app_id("org.example.HeliosAgentPreset")
-                .agent_socket(AgentSocket::at(&socket));
+                .agent_socket(AgentSocket::at(&socket))
+                .pre_issued_pairing(preset.pre_issue(env(&[(TOKEN_ENV, TOKEN)])).unwrap());
             let mut h = egui_pop_test::app(builder, egui::vec2(800.0, 600.0));
             h.step();
             (h, socket, ran)
@@ -227,7 +274,8 @@ mod tests {
         }
 
         impl Client {
-            fn connect(path: &Path) -> Self {
+            /// A client that says no `hello`.
+            fn unpaired(path: &Path) -> Self {
                 let write = UnixStream::connect(path).expect("the socket answers");
                 write
                     .set_read_timeout(Some(Duration::from_secs(20)))
@@ -239,21 +287,33 @@ mod tests {
                 }
             }
 
-            /// `commands.run` of `id`: the call's whole response.
-            fn run(&mut self, id: &str, args: Json) -> Json {
+            /// The scenario runner: says `hello` with the pre-issued token.
+            fn connect(path: &Path) -> Self {
+                let mut c = Self::unpaired(path);
+                let hello = c.request("hello", json!({ "name": "runner", "token": TOKEN }));
+                assert_eq!(hello["result"]["agent"], RUNNER_ID, "{hello}");
+                c
+            }
+
+            fn request(&mut self, method: &str, params: Json) -> Json {
                 let n = self.next;
                 self.next += 1;
+                let req = json!({ "jsonrpc": "2.0", "id": n, "method": method, "params": params });
+                writeln!(self.write, "{req}").unwrap();
+                let mut line = String::new();
+                self.read.read_line(&mut line).expect("a response line");
+                serde_json::from_str(&line).expect("JSON")
+            }
+
+            /// `commands.run` of `id`: the call's whole response.
+            fn run(&mut self, id: &str, args: Json) -> Json {
                 let params = json!({
                     "collector": "commands",
                     "action": "run",
                     "args": { "id": id, "args": args },
                     "deadline_ms": 20_000,
                 });
-                let req = json!({ "jsonrpc": "2.0", "id": n, "method": "call", "params": params });
-                writeln!(self.write, "{req}").unwrap();
-                let mut line = String::new();
-                self.read.read_line(&mut line).expect("a response line");
-                serde_json::from_str(&line).expect("JSON")
+                self.request("call", params)
             }
         }
 
@@ -363,6 +423,49 @@ mod tests {
             assert!(declined.get("error").is_some(), "{declined}");
             assert_eq!(names(&ran), ["vault.rate", "library.trash"]);
             assert_eq!(refused_by(&h, "pop.agent.confirm").len(), 1);
+        }
+
+        #[test]
+        fn an_unpaired_client_only_reads_under_the_preset() {
+            let (mut h, socket, ran) = app("unpaired");
+            let s = socket.clone();
+            let client = std::thread::spawn(move || {
+                Client::unpaired(&s).run("vault.rate", json!({ "stars": 3 }))
+            });
+            let rate = finish(&mut h, client);
+            assert!(
+                rate.get("error").is_some() || rate["result"]["ok"] == false,
+                "{rate}"
+            );
+            assert!(
+                names(&ran).is_empty(),
+                "the write ran for an unpaired client"
+            );
+        }
+
+        #[test]
+        fn only_an_overwriting_export_waits_for_the_user() {
+            // An export names file paths: private data.
+            let (mut h, socket, ran) = app_with("export", Preset::Scenario { private: true });
+            // A new file's name numbered: runs at once.
+            let s = socket.clone();
+            let client = std::thread::spawn(move || {
+                Client::connect(&s).run("library.export", json!({ "clash": "number" }))
+            });
+            let numbered = finish(&mut h, client);
+            assert_eq!(numbered["result"]["ok"], true, "{numbered}");
+            assert_eq!(names(&ran), ["library.export"]);
+
+            // Overwriting: held until the user says yes.
+            let s = socket.clone();
+            let client = std::thread::spawn(move || {
+                Client::connect(&s).run("library.export", json!({ "clash": "overwrite" }))
+            });
+            user_confirms(&mut h, true);
+            let overwrite = finish(&mut h, client);
+            assert_eq!(overwrite["result"]["ok"], true, "{overwrite}");
+            assert_eq!(names(&ran), ["library.export", "library.export"]);
+            assert_eq!(ran.lock().unwrap()[1].1["clash"], "overwrite");
         }
 
         #[test]

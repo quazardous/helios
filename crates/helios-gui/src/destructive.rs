@@ -13,6 +13,10 @@
 //! one value at once. One value set back to its default stays an edit:
 //! the undo history has it.
 //!
+//! A command destructive only with some arguments is in
+//! [`DESTRUCTIVE_IF`] instead: only those calls wait for the user's yes
+//! (egui-pop's `CommandSpec::destructive_if`), the others run at once.
+//!
 //! Formatting or ejecting a card has no command yet (the storage page
 //! acts on volumes itself); a command for it goes in this list.
 
@@ -47,10 +51,28 @@ pub const DESTRUCTIVE: &[&str] = &[
     "workspace.reset",
 ];
 
-/// Whether an agent must ask the user before `command` runs
+/// Commands destructive only when an argument has a value: the
+/// command, the argument and the value. An agent's call with it waits for
+/// the user's yes; its other calls run at once.
+pub const DESTRUCTIVE_IF: &[(&str, &str, &str)] = &[
+    // Writes new files, but replaces those of the same name with
+    // `clash: overwrite`.
+    ("library.export", "clash", "overwrite"),
+];
+
+/// Whether an agent must ask the user before any run of `command`
 /// ([`DESTRUCTIVE`]).
 pub fn is_destructive(command: &str) -> bool {
     DESTRUCTIVE.contains(&command)
+}
+
+/// The arguments and values that make a call of `command` destructive
+/// ([`DESTRUCTIVE_IF`]).
+pub fn destructive_if(command: &str) -> impl Iterator<Item = (&'static str, &'static str)> + '_ {
+    DESTRUCTIVE_IF
+        .iter()
+        .filter(move |(c, _, _)| *c == command)
+        .map(|(_, arg, value)| (*arg, *value))
 }
 
 #[cfg(test)]
@@ -129,11 +151,6 @@ mod tests {
             "folds a macro back; a change made while open is asked first",
         ),
         (
-            "library.export",
-            "writes new files; it overwrites only with `clash: overwrite`, which needs \
-             a per-call flag (egui-pop flags a command whole)",
-        ),
-        (
             "mask.point.remove",
             "removes a path point, an undoable edit",
         ),
@@ -180,12 +197,16 @@ mod tests {
                 WORDS.iter().any(|w| text.contains(w))
             })
             .map(|(id, _)| id.as_str())
-            .filter(|id| !is_destructive(id) && !NOT_DESTRUCTIVE.iter().any(|(n, _)| n == id))
+            .filter(|id| {
+                !is_destructive(id)
+                    && destructive_if(id).next().is_none()
+                    && !NOT_DESTRUCTIVE.iter().any(|(n, _)| n == id)
+            })
             .collect();
         assert!(
             unmarked.is_empty(),
-            "these commands may destroy: add them to destructive::DESTRUCTIVE, \
-             or to NOT_DESTRUCTIVE with the reason: {unmarked:?}"
+            "these commands may destroy: add them to destructive::DESTRUCTIVE \
+             (or DESTRUCTIVE_IF), or to NOT_DESTRUCTIVE with the reason: {unmarked:?}"
         );
     }
 
@@ -196,16 +217,24 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), DESTRUCTIVE.len(), "a command listed twice");
         let catalogue = catalogue();
+        let conditional = DESTRUCTIVE_IF.iter().map(|(c, _, _)| c);
         for id in DESTRUCTIVE
             .iter()
+            .chain(conditional.clone())
             .chain(NOT_DESTRUCTIVE.iter().map(|(n, _)| n))
         {
             assert!(catalogue.iter().any(|(c, _)| c == id), "{id} is gone");
         }
-        for id in DESTRUCTIVE {
+        for id in DESTRUCTIVE.iter().chain(conditional.clone()) {
             assert!(
                 !NOT_DESTRUCTIVE.iter().any(|(n, _)| n == id),
                 "{id} is in both lists"
+            );
+        }
+        for id in conditional {
+            assert!(
+                !is_destructive(id),
+                "{id} is destructive whole and per call"
             );
         }
     }

@@ -461,6 +461,7 @@ def main() -> int:
             "XDG_CACHE_HOME": str(args.work / "cache"),
             "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
             "HELIOS_AGENT_PRESET": "scenario+private",
+            ic.TOKEN_ENV: ic.TOKEN,
             "HELIOS_TRACE_FILE": str(args.out / "helios.stderr"),
         }
         if "error" in comp.launch(cmd, env):

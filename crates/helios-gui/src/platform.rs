@@ -610,8 +610,8 @@ pub fn desktop(app: AppBuilder, instance: Instance) -> AppBuilder {
         .debug_bridge_if(agent_preset(|n| std::env::var(n).ok()))
 }
 
-/// The agents' preset the environment asks for (`HELIOS_AGENT_PRESET`,
-/// or the deprecated `HELIOS_AGENT_WRITE=1`), its warning logged.
+/// The agents' preset the environment asks for (`HELIOS_AGENT_PRESET`),
+/// its warning logged (a wrong name, the removed `HELIOS_AGENT_WRITE`).
 fn agent_preset(env: impl Fn(&str) -> Option<String>) -> Option<crate::agent_preset::Preset> {
     let (preset, warning) = crate::agent_preset::Preset::from_env(env);
     if let Some(w) = warning {
@@ -627,15 +627,22 @@ trait DebugBridgeIf {
 
 impl DebugBridgeIf for AppBuilder {
     fn debug_bridge_if(self, preset: Option<crate::agent_preset::Preset>) -> Self {
-        use egui_pop_agent::AgentGrantsExt as _;
-        match preset {
-            // A preset is for runs on a throwaway library: the bridge
-            // writes, and the agents get the preset's grant
-            // (crate::agent_preset).
-            Some(p) => self
-                .debug_bridge(egui_pop::core::debug::BridgeMode::On)
-                .agent_grants(p.grants()),
-            None => self,
+        use egui_pop_agent::{AgentGrantsExt as _, PreIssueExt as _};
+        let Some(p) = preset else {
+            return self;
+        };
+        // A preset is for runs on a throwaway library: the bridge writes,
+        // paired agents get the preset's grant, and the scenario runner
+        // is paired at start by its token (crate::agent_preset).
+        let app = self
+            .debug_bridge(egui_pop::core::debug::BridgeMode::On)
+            .agent_grants(p.grants());
+        match p.pre_issue(|n| std::env::var(n).ok()) {
+            Ok(issue) => app.pre_issued_pairing(issue),
+            Err(w) => {
+                log::warn!("{w}");
+                app
+            }
         }
     }
 }

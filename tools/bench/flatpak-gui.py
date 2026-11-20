@@ -242,12 +242,13 @@ def main() -> int:
                 "sh",
                 "-c",
                 'exec flatpak run --user --env=EGUI_POP_AGENT_SOCKET="$1" --env=HELIOS_AGENT_PRESET=scenario+private '
-                '"$0" --vault "$2" "$3" 2>"$4"',
+                '--env=EGUI_POP_AGENT_TOKEN="$5" "$0" --vault "$2" "$3" 2>"$4"',
                 APP,
                 str(w["socket"]),
                 str(w["vault"]),
                 str(w["workspace"]),
                 str(args.out / "helios.stderr"),
+                ic.TOKEN,
             ]
             if "error" in comp.launch(cmd, {}):
                 results.append({"step": "start", "ok": False, "seen": "launch failed"})
