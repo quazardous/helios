@@ -201,8 +201,10 @@ impl<'de> Deserialize<'de> for ContentHash {
 pub struct Image {
     region: Region,
     channels: u32,
-    /// The pixels, shared by every clone and every view of them.
-    buffer: Arc<[f32]>,
+    /// The pixels, shared by every clone and every view of them. A vector
+    /// rather than a slice: wrapping a module's output is then free, where
+    /// `Arc<[f32]>` from a `Vec` copies it (100 MB on a 25 MP mosaic).
+    buffer: Arc<Vec<f32>>,
     /// Where the first value of the region sits in `buffer`.
     offset: usize,
     /// Values from one row of the region to the next in `buffer`.
@@ -214,17 +216,22 @@ pub struct Image {
 
 impl Image {
     /// Wraps pixel data; `data` holds `region.area() * channels` values, row by row.
-    pub fn new(region: Region, channels: u32, data: Vec<f32>) -> Self {
+    pub fn new(region: Region, channels: u32, mut data: Vec<f32>) -> Self {
         assert!(channels > 0, "an image has at least one channel");
         assert_eq!(
             data.len(),
             region.area() * channels as usize,
             "pixel data does not match {region} x {channels}"
         );
+        // Kept as it comes (no copy), unless it holds much more room than
+        // its pixels: the caches count an image by its pixels.
+        if data.capacity() > data.len() + data.len() / 4 {
+            data.shrink_to_fit();
+        }
         Self {
             region,
             channels,
-            buffer: data.into(),
+            buffer: Arc::new(data),
             offset: 0,
             stride: region.width as usize * channels as usize,
             packed: Arc::default(),
@@ -242,6 +249,39 @@ impl Image {
             }
         }
         Self::new(region, channels, data)
+    }
+
+    /// Builds an image row by row, `fill(y, row)` writing row `y`
+    /// (absolute) of the region, `row` its `width * channels` values: in
+    /// row bands over the machine's threads ([`crate::bands`]), so a
+    /// per-pixel step on a full-resolution mosaic runs at memory speed.
+    /// Each row is computed by the same code whatever thread runs it: the
+    /// image is the one-thread image, bit for bit. The current cancel
+    /// token ([`crate::cancel::current`]) is checked before each band:
+    /// once set, the call gives up with [`crate::cancel::CANCELLED`].
+    pub fn from_rows(
+        region: Region,
+        channels: u32,
+        fill: impl Fn(i64, &mut [f32]) + Sync,
+    ) -> Result<Self, String> {
+        Self::from_rows_until(region, channels, &crate::cancel::current(), fill)
+    }
+
+    /// [`Image::from_rows`] checking `cancel`.
+    pub fn from_rows_until(
+        region: Region,
+        channels: u32,
+        cancel: &crate::cancel::Token,
+        fill: impl Fn(i64, &mut [f32]) + Sync,
+    ) -> Result<Self, String> {
+        let row_len = region.width as usize * channels as usize;
+        let mut data = vec![0.0f32; region.area() * channels as usize];
+        crate::bands::rows(&mut data, row_len, cancel, |first, band| {
+            for (i, row) in band.chunks_mut(row_len).enumerate() {
+                fill(region.y + (first + i) as i64, row);
+            }
+        })?;
+        Ok(Self::new(region, channels, data))
     }
 
     /// What a module gets for an optional input left unconnected: no
@@ -367,30 +407,36 @@ impl Image {
         }
         let r = self.region;
         assert!(!r.is_empty(), "cannot sample an empty image");
-        // Row by row: the columns inside copied at once, those past each
-        // side the edge pixel repeated.
+        // Row by row, in bands over the machine's threads: the columns
+        // inside copied at once, those past each side the edge pixel
+        // repeated. Never cancelled: a copy has no token to answer to.
         let channels = self.channels as usize;
-        let mut data = Vec::with_capacity(region.area() * channels);
         let (left, right) = (region.x, region.right());
         let (inside_from, inside_to) = (left.clamp(r.x, r.right()), right.clamp(r.x, r.right()));
-        for y in region.y..region.bottom() {
+        let before = (inside_from.min(right) - left).max(0) as usize * channels;
+        let inside = (inside_to - inside_from).max(0) as usize * channels;
+        let fill = |y: i64, out: &mut [f32]| {
             let row = self.row(y.clamp(r.y, r.bottom() - 1));
             let at = |x: i64| {
                 let i = (x.clamp(r.x, r.right() - 1) - r.x) as usize * channels;
                 &row[i..i + channels]
             };
-            for x in left..inside_from.min(right) {
-                data.extend_from_slice(at(x));
+            let (head, rest) = out.split_at_mut(before);
+            for (x, px) in (left..).zip(head.chunks_exact_mut(channels)) {
+                px.copy_from_slice(at(x));
             }
-            if inside_from < inside_to {
-                let (a, b) = ((inside_from - r.x) as usize, (inside_to - r.x) as usize);
-                data.extend_from_slice(&row[a * channels..b * channels]);
+            let (middle, tail) = rest.split_at_mut(inside);
+            if inside > 0 {
+                let a = (inside_from - r.x) as usize * channels;
+                middle.copy_from_slice(&row[a..a + inside]);
             }
-            for x in inside_to.max(left)..right {
-                data.extend_from_slice(at(x));
+            let start = inside_to.max(left);
+            for (x, px) in (start..).zip(tail.chunks_exact_mut(channels)) {
+                px.copy_from_slice(at(x));
             }
-        }
-        Image::new(region, self.channels, data)
+        };
+        Image::from_rows_until(region, self.channels, &crate::cancel::Token::new(), fill)
+            .expect("a token nobody holds is never cancelled")
     }
 
     /// [`Image::sample`] at a scale: `region` is in pixels at that scale,
@@ -488,6 +534,43 @@ mod tests {
         assert_eq!(tiles.len(), 3 * 2);
         assert_eq!(tiles.iter().map(Region::area).sum::<usize>(), r.area());
         assert!(tiles.iter().all(|t| r.contains(t)));
+    }
+
+    #[test]
+    fn from_rows_in_bands_is_from_fn() {
+        let region = Region::new(-3, 7, 517, 409);
+        let f = |x: i64, y: i64, c: u32| (x * 31 + y * 17 + i64::from(c)) as f32 * 0.25;
+        let rows = Image::from_rows(region, 2, |y, row| {
+            for (i, px) in row.chunks_exact_mut(2).enumerate() {
+                let x = region.x + i as i64;
+                px[0] = f(x, y, 0);
+                px[1] = f(x, y, 1);
+            }
+        })
+        .unwrap();
+        assert_eq!(rows.data(), Image::from_fn(region, 2, f).data());
+        let cancelled = crate::cancel::Token::new();
+        cancelled.cancel();
+        let err = Image::from_rows_until(region, 2, &cancelled, |_, _| {}).unwrap_err();
+        assert_eq!(err, crate::cancel::CANCELLED);
+    }
+
+    #[test]
+    fn a_large_sample_past_the_edges_replicates_them_in_bands() {
+        let img = Image::from_fn(Region::sized(600, 500), 1, |x, y, _| (x * 1000 + y) as f32);
+        let region = Region::new(-4, -3, 610, 509);
+        let out = img.sample(region);
+        let want = Image::from_fn(region, 1, |x, y, _| {
+            (x.clamp(0, 599) * 1000 + y.clamp(0, 499)) as f32
+        });
+        assert_eq!(out.data(), want.data());
+        // Wholly outside, on either side.
+        for region in [Region::new(-9, 2, 4, 3), Region::new(700, 2, 4, 3)] {
+            let want = Image::from_fn(region, 1, |x, y, _| {
+                (x.clamp(0, 599) * 1000 + y.clamp(0, 499)) as f32
+            });
+            assert_eq!(img.sample(region).data(), want.data(), "{region}");
+        }
     }
 
     #[test]

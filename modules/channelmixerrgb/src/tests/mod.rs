@@ -282,3 +282,32 @@ fn a_neutral_seen_under_a_light_gives_the_light_back() {
     }
     assert_eq!(illuminant_from_neutral([0.0; 3], reference), None);
 }
+
+#[test]
+fn a_large_image_in_bands_is_each_pixel_bit_for_bit() {
+    // Large enough to be shared among threads, offset so the rows are
+    // absolute: every pixel is `pixel` of its input, alpha kept.
+    let plan = plan(Params::new().with("gamut", Value::Float(1.0))).unwrap();
+    let region = Region::new(3, 5, 401, 300);
+    let img = Image::from_fn(region, 4, |x, y, c| {
+        if c == 3 {
+            0.5
+        } else {
+            ((x * 7 + y * 13 + i64::from(c) * 29) % 97) as f32 / 61.0 - 0.1
+        }
+    });
+    let out = ChannelMixerRgb.process(&plan, &[&img], region).unwrap();
+    for (o, p) in out[0]
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(img.data().as_chunks::<4>().0)
+    {
+        let rgb = plan.pixel([p[0], p[1], p[2]]);
+        assert_eq!(
+            o.map(f32::to_bits),
+            [rgb[0], rgb[1], rgb[2], 0.5].map(f32::to_bits)
+        );
+    }
+}

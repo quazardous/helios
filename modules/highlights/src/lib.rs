@@ -82,12 +82,16 @@ impl Module for Highlights {
         inputs: &[&Image],
         output: Region,
     ) -> Result<Vec<Image>, String> {
-        let data = inputs[0]
-            .data()
-            .iter()
-            .map(|v| v.min(plan.threshold))
-            .collect();
-        Ok(vec![Image::new(output, 1, data)])
+        // Row by row, the rows in bands over the machine's threads.
+        let input = inputs[0];
+        let from = (output.x - input.region().x) as usize;
+        let image = Image::from_rows(output, 1, |y, out| {
+            let row = &input.row(y)[from..from + output.width as usize];
+            for (o, v) in out.iter_mut().zip(row) {
+                *o = v.min(plan.threshold);
+            }
+        })?;
+        Ok(vec![image])
     }
 }
 
@@ -114,6 +118,16 @@ mod tests {
             .process(&plan, &[&img], Region::sized(3, 1))
             .unwrap();
         assert_eq!(out[0].data(), &[0.4, 0.987, 0.987]);
+    }
+
+    #[test]
+    fn a_large_mosaic_in_bands_is_each_photosite_bit_for_bit() {
+        let plan = Plan { threshold: 0.6 };
+        let r = Region::new(2, 9, 700, 400);
+        let img = Image::from_fn(r, 1, |x, y, _| ((x * 3 + y * 5) % 89) as f32 / 80.0);
+        let out = Highlights.process(&plan, &[&img], r).unwrap();
+        let want = Image::from_fn(r, 1, |x, y, _| img.pixel(x, y)[0].min(0.6));
+        assert_eq!(out[0].data(), want.data());
     }
 
     #[test]
