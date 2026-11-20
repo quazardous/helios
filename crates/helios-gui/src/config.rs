@@ -649,6 +649,7 @@ pub fn manifest(
     })
     .wizard(helios_storage_ui::settings::backup_wizard(t))
     .wizard(crate::reset::wizard(t))
+    .wizard(crate::forget::wizard(t))
     .wizard(init_wizard(&helios_init::Registry::builtin(), t));
     plugins::sections(m, plugins, t)
 }
@@ -719,7 +720,45 @@ pub fn init_wizard(registry: &helios_init::Registry, t: &dyn Fn(Message) -> Stri
             w = w.optional();
         }
     }
-    w
+    reimport_step(w, t)
+}
+
+/// The setup's last step, shown after an "everything" reset only (the
+/// draft's `init.reimport.offered`, `crate::shell::init_wizard`): the
+/// photo folders the reset kept, and a toggle, on, to add their photos
+/// back where they are. Skipped ("Later"), nothing is added.
+fn reimport_step(w: Wizard, t: &dyn Fn(Message) -> String) -> Wizard {
+    use crate::shell::init_wizard::{
+        REIMPORT_FOLDERS, REIMPORT_KEY, REIMPORT_OFFERED, REIMPORT_STEP, WIZARD,
+    };
+    w.step(
+        REIMPORT_STEP,
+        &t(Message::new("gui-init-reimport", "Your photos")),
+        |s| {
+            s.description(&t(Message::new(
+                "gui-init-reimport-about",
+                "Helios was reset. Its photos are still in these folders: add them back to the library where they are. Nothing is copied or moved.",
+            )));
+            s.list(
+                Records::command("init-reimport-folders", "", REIMPORT_FOLDERS, "/folders", "id")
+                    .titles("path", None),
+            );
+            s.field(
+                Field::draft(
+                    WIZARD,
+                    REIMPORT_KEY,
+                    &t(Message::new(
+                        "gui-init-reimport-toggle",
+                        "Add these photos back, where they are",
+                    )),
+                    FieldKind::Toggle,
+                )
+                .default_value(Json::Bool(false)),
+            );
+        },
+    )
+    .when(&format!("form.{REIMPORT_OFFERED}"))
+    .optional()
 }
 
 /// The `validate` hook of the setup's library folder field: what is wrong
@@ -1319,6 +1358,14 @@ impl Plugin for BridgePlugin {
         admin.hook(
             crate::reset::CHECK_WORD,
             crate::reset::check_word(move |m| match &words {
+                Some(i) => helios_i18n::message(i, &m),
+                None => m.english,
+            }),
+        );
+        let words = self.i18n.clone();
+        admin.hook(
+            crate::forget::CHECK_WORD,
+            crate::forget::check_word(move |m| match &words {
                 Some(i) => helios_i18n::message(i, &m),
                 None => m.english,
             }),

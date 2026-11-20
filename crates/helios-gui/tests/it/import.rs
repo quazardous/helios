@@ -1043,7 +1043,7 @@ fn an_import_is_one_undo_step_and_ctrl_z_on_the_library_takes_it_back() {
 /// The host's `library.import`, as `main.rs` registers it: the import
 /// run as a job into `vault`, its lines to the shell, its changes one
 /// undo step; `done` once it ended.
-fn host_import<S: helios_vault::Store + Send + 'static>(
+pub(crate) fn host_import<S: helios_vault::Store + Send + 'static>(
     shell: &mut Shell,
     vault: &Arc<Vault<S>>,
     done: &Arc<std::sync::atomic::AtomicBool>,

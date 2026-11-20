@@ -272,3 +272,36 @@ fn a_missing_folder_is_skipped() {
     assert_eq!(report.failed, None);
     assert!(report.moved.is_empty() && report.removed.is_empty());
 }
+
+/// An "everything" reset records the photo folders in its backup folder:
+/// the next first run reads them back once; a folder gone is left out,
+/// and a reset of the caches records nothing.
+#[test]
+fn an_everything_reset_records_the_photo_folders_for_one_reimport() {
+    let home = Home::new("reimport");
+    home.helios();
+    let roots = home.photos();
+    let gone = home.0.join("Old card");
+    let mut checked = roots.clone();
+    checked.push(gone.clone());
+    let before = hashes(&roots);
+    let places = home.places(Some(".local/share/helios/library.db"));
+
+    let caches = reset::plan(&places, Scope::Caches, &checked, "1").unwrap();
+    assert_eq!(reset::run(&caches).failed, None);
+    assert_eq!(reset::pending_reimport(&places.data), None, "caches only");
+
+    let plan = reset::plan(&places, Scope::Everything, &checked, "2").unwrap();
+    assert_eq!(plan.photos, checked);
+    assert_eq!(reset::run(&plan).failed, None);
+    let backup = plan.backup.clone().unwrap();
+    assert!(backup.join(reset::REIMPORT_FILE).is_file());
+    let offer = reset::pending_reimport(&places.data).expect("a re-import to offer");
+    assert_eq!(offer.folders, roots, "the folders still there");
+    assert_eq!(offer.record, backup.join(reset::REIMPORT_FILE));
+
+    reset::reimport_offered(&offer.record).unwrap();
+    assert_eq!(reset::pending_reimport(&places.data), None, "offered once");
+    assert!(backup.join(reset::REIMPORT_OFFERED).is_file());
+    assert_eq!(hashes(&roots), before, "a photo changed");
+}

@@ -70,6 +70,7 @@ pub use helios_node_core::node;
 pub mod node_jobs;
 /// The node's volume watch, from the node's crate.
 pub use helios_node_core::volumes as node_volumes;
+pub mod forget;
 pub mod node_events;
 pub mod params;
 pub mod persist;

@@ -25,6 +25,12 @@
 //!
 //! The photo files and their sidecars are never read, moved or removed:
 //! the tests compare their hashes before and after.
+//!
+//! An "everything" reset records the photo folders it was checked against
+//! in its backup folder ([`REIMPORT_FILE`]): the first-run setup that
+//! follows reads them back ([`pending_reimport`]) and offers to add the
+//! photos again where they are, nothing copied or moved; once offered,
+//! the record is set aside ([`reimport_offered`]) so it is offered once.
 
 use std::path::{Path, PathBuf};
 
@@ -35,6 +41,13 @@ pub const FOLDER_NAME: &str = "helios";
 
 /// The prefix of the backup folder a reset moves Helios's data into.
 pub const BACKUP_PREFIX: &str = "helios-reset-";
+
+/// The file, in an "everything" reset's backup folder, that lists the
+/// photo folders to offer for a re-import in place.
+pub const REIMPORT_FILE: &str = "reimport.json";
+
+/// [`REIMPORT_FILE`] once the re-import was offered.
+pub const REIMPORT_OFFERED: &str = "reimport-offered.json";
 
 /// What a reset takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -118,6 +131,9 @@ pub struct Plan {
     pub targets: Vec<Target>,
     /// Where the moved paths go; none when nothing is moved.
     pub backup: Option<PathBuf>,
+    /// The photo folders the plan was checked against: an "everything"
+    /// reset records them for the re-import ([`REIMPORT_FILE`]).
+    pub photos: Vec<PathBuf>,
 }
 
 /// Why a reset is refused.
@@ -374,6 +390,7 @@ pub fn plan(
         scope,
         targets,
         backup,
+        photos: photo_roots.to_vec(),
     })
 }
 
@@ -505,7 +522,74 @@ pub fn run(plan: &Plan) -> Report {
             }
         }
     }
+    if plan.scope == Scope::Everything
+        && report.failed.is_none()
+        && let Some(backup) = &plan.backup
+        && let Err(e) = record_reimport(backup, &plan.photos)
+    {
+        log::warn!(target: "helios::reset", "the photo folders not recorded: {e}");
+    }
     report
+}
+
+/// The re-import an "everything" reset left to offer: the record's file
+/// and the photo folders it lists that are still there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reimport {
+    /// The record ([`REIMPORT_FILE`] in the backup folder).
+    pub record: PathBuf,
+    /// The photo folders, each still a folder on disk.
+    pub folders: Vec<PathBuf>,
+}
+
+/// Writes the photo folders into `backup`'s [`REIMPORT_FILE`].
+fn record_reimport(backup: &Path, folders: &[PathBuf]) -> Result<(), String> {
+    std::fs::create_dir_all(backup).map_err(|e| format!("{}: {e}", backup.display()))?;
+    let file = backup.join(REIMPORT_FILE);
+    let text = serde_json::to_string_pretty(&serde_json::json!({ "photo_folders": folders }))
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))
+}
+
+/// The newest re-import an "everything" reset recorded beside the data
+/// folder `data` and not offered yet, its folders that are gone left
+/// out; `None` when there is none, or none of its folders is left.
+pub fn pending_reimport(data: &Path) -> Option<Reimport> {
+    let parent = data.parent()?;
+    let newest = std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with(BACKUP_PREFIX))
+        .map(|e| e.path().join(REIMPORT_FILE))
+        .filter_map(|record| {
+            let at = std::fs::metadata(&record).and_then(|m| m.modified()).ok()?;
+            Some((at, record))
+        })
+        .max()?
+        .1;
+    let text = std::fs::read_to_string(&newest).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let folders: Vec<PathBuf> = value["photo_folders"]
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .collect();
+    (!folders.is_empty()).then_some(Reimport {
+        record: newest,
+        folders,
+    })
+}
+
+/// Sets `record` aside as offered ([`REIMPORT_OFFERED`]): the re-import
+/// is not offered again.
+///
+/// # Errors
+/// The record cannot be renamed.
+pub fn reimport_offered(record: &Path) -> Result<(), String> {
+    let to = record.with_file_name(REIMPORT_OFFERED);
+    std::fs::rename(record, &to).map_err(|e| format!("{}: {e}", record.display()))
 }
 
 /// A target's name in the backup folder: its kind, the library's files

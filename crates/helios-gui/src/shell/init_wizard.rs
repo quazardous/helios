@@ -29,6 +29,14 @@
 //! - [`CHOOSE`] (`init.chooseFolder`): the folder step's "Choose…", the
 //!   folder chooser parented to the window the wizard is in, its answer
 //!   written into the draft.
+//! - **Re-import after a reset**: an "everything" reset records the photo
+//!   folders it kept (`helios_node_core::reset::pending_reimport`); the
+//!   desktop hands them over ([`Shell::offer_reimport`]) and the first run
+//!   and "Set up Helios…" show one more step, [`REIMPORT_STEP`], listing
+//!   them ([`REIMPORT_FOLDERS`]) with [`REIMPORT_KEY`] ticked: Finish adds
+//!   the photos back where they are, nothing copied or moved, through the
+//!   import ([`REIMPORT`], `helios.app.reimport`, kept from agents). The
+//!   offer is made once: finished either way, its record is set aside.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -41,6 +49,9 @@ use helios_init::{
     IMPORT, LIBRARY_FOLDER, LIBRARY_FOLDER_SETTING, Outcome, Plan, Registry, Reply, Request,
 };
 use serde_json::{Map, Value, json};
+
+use helios_node_core::reset::Reimport;
+use helios_shell::commands::Origin;
 
 use super::Shell;
 
@@ -62,6 +73,23 @@ pub const CHOOSE: &str = "init.chooseFolder";
 
 /// The `validate` hook of the library folder field.
 pub const CHECK_FOLDER: &str = "init.libraryFolder.check";
+
+/// The step that offers to add the photos back after a reset.
+pub const REIMPORT_STEP: &str = "init.reimport";
+
+/// The draft value of [`REIMPORT_STEP`]: add the photos back, where they
+/// are.
+pub const REIMPORT_KEY: &str = "init.reimport";
+
+/// The draft value that shows [`REIMPORT_STEP`]: a re-import is offered.
+pub const REIMPORT_OFFERED: &str = "init.reimport.offered";
+
+/// Adds the photos of the folders a reset recorded back to the library,
+/// where they are (nothing copied or moved). Kept from agents.
+pub const REIMPORT: &str = "helios.app.reimport";
+
+/// The folders [`REIMPORT`] adds (read-only).
+pub const REIMPORT_FOLDERS: &str = "helios.app.reimport.folders";
 
 /// The draft value that hides a step out of a partial run: the step's
 /// `when` is `!form.<this>` ([`crate::config::init_wizard`]).
@@ -98,6 +126,8 @@ pub(crate) struct InitState {
     heard: Arc<Mutex<Vec<(Then, Outcome)>>>,
     /// The folder chooser asked by "Choose…".
     choosing: Option<Pending>,
+    /// The re-import a reset left to offer.
+    reimport: Option<Reimport>,
 }
 
 /// The settings the steps read, as the desktop holds them.
@@ -121,6 +151,8 @@ impl helios_init::Values for DesktopValues {
 struct SettingsHost<'a> {
     app: &'a egui_pop::api::app::AppHandle,
     folder: Option<PathBuf>,
+    /// A re-import to offer in this run.
+    reimport: bool,
     running: Option<Running>,
     refused: Option<String>,
 }
@@ -151,6 +183,10 @@ impl helios_init::Host for SettingsHost<'_> {
         {
             values.insert(skip_key(id), json!(true));
         }
+        if self.reimport {
+            values.insert(REIMPORT_OFFERED.to_owned(), json!(true));
+            values.insert(REIMPORT_KEY.to_owned(), json!(true));
+        }
         let finished_before = admin.last_finished();
         // A focus screen: the main window's whole page, whatever the
         // Settings app's window setting, nothing of the shell under it.
@@ -173,6 +209,65 @@ impl Shell {
     pub fn set_first_run(&mut self, on: bool) {
         self.core.init.first_run = on;
         self.core.init.checked = false;
+    }
+
+    /// Offers to add the photos of `offer`'s folders back, where they
+    /// are, in the next first run or "Set up Helios…": the folders an
+    /// "everything" reset recorded. The desktop's; `None` takes it back.
+    pub fn offer_reimport(&mut self, offer: Option<Reimport>) {
+        self.core.init.reimport = offer;
+    }
+
+    /// The re-import offered, if any.
+    pub fn reimport_offer(&self) -> Option<&Reimport> {
+        self.core.init.reimport.as_ref()
+    }
+
+    /// `helios.app.reimport.folders`: the folders the re-import adds.
+    pub(super) fn reimport_folders(&self) -> Value {
+        let folders: Vec<Value> = self
+            .core
+            .init
+            .reimport
+            .iter()
+            .flat_map(|o| &o.folders)
+            .map(|f| json!({ "id": f.display().to_string(), "path": f.display().to_string() }))
+            .collect();
+        json!({ "folders": folders })
+    }
+
+    /// `helios.app.reimport`: the photos of the folders a reset recorded
+    /// added back to the library where they are (`copy: false`, the
+    /// import's "add in place"; duplicates skipped), then the offer set
+    /// aside. Refused when none is offered.
+    pub(super) fn reimport(&mut self) -> Result<Value, String> {
+        let offer = self
+            .core
+            .init
+            .reimport
+            .clone()
+            .ok_or("no re-import to offer: no reset recorded photo folders")?;
+        let queued = self.import_now(
+            json!({ "paths": offer.folders, "copy": false }),
+            &json!({ "copy": false, "duplicates": "skip" }),
+            &Origin::User,
+        )?;
+        log::info!(
+            target: "helios",
+            "init: the photos of {} folders added back where they are",
+            offer.folders.len()
+        );
+        self.reimport_offered();
+        Ok(json!({ "folders": offer.folders, "queued": queued }))
+    }
+
+    /// The offer made: its record set aside, not offered again.
+    fn reimport_offered(&mut self) {
+        if let Some(offer) = self.core.init.reimport.take()
+            && let Err(e) = helios_node_core::reset::reimport_offered(&offer.record)
+        {
+            log::warn!("init: the re-import's record: {e}");
+        }
     }
 
     /// The settings the steps read, the library folder as the import's
@@ -201,6 +296,7 @@ impl Shell {
         request: &Request,
         then: Then,
         always: bool,
+        reimport: bool,
     ) -> Result<Value, String> {
         if self.core.init.running.is_some() {
             return Err("the setup is already open".into());
@@ -224,6 +320,7 @@ impl Shell {
         let mut host = SettingsHost {
             app: &app,
             folder,
+            reimport: reimport && self.core.init.reimport.is_some(),
             running: None,
             refused: None,
         };
@@ -244,7 +341,7 @@ impl Shell {
 
     /// `helios.setUp`: every step.
     pub(super) fn init_setup(&mut self) -> Result<Value, String> {
-        self.init_ensure(&Request::all(), Then::Nothing, true)
+        self.init_ensure(&Request::all(), Then::Nothing, true, true)
     }
 
     /// `init.libraryFolder`: sets the folder to `path`, or opens the
@@ -254,7 +351,7 @@ impl Shell {
             return self.init_apply(&json!({ LIBRARY_FOLDER_SETTING: args["path"] }));
         }
         let request = Request::steps(&[LIBRARY_FOLDER]).starting_at(LIBRARY_FOLDER);
-        self.init_ensure(&request, Then::Nothing, true)
+        self.init_ensure(&request, Then::Nothing, true, false)
     }
 
     /// Opening the import window: the steps import requires first, in a
@@ -273,7 +370,7 @@ impl Shell {
         };
         let steps: Vec<&str> = missing.iter().map(String::as_str).collect();
         let request = Request::steps(&steps).starting_at(first);
-        match self.init_ensure(&request, Then::Import(args.clone()), false) {
+        match self.init_ensure(&request, Then::Import(args.clone()), false, false) {
             Ok(_) => true,
             Err(e) => {
                 log::warn!("init: {e}");
@@ -305,11 +402,29 @@ impl Shell {
                     self.set_library_folder(&dir)?;
                     written.push(key.clone());
                 }
+                // Read once the settings are written, below.
+                REIMPORT_KEY | REIMPORT_OFFERED => {}
                 _ => log::warn!("init: `{key}` is not a setting a step fills here"),
             }
         }
+        // The re-import offered: the photos added back where they are, or
+        // the offer declined; made once either way.
+        let mut reimported = Value::Null;
+        if values.get(REIMPORT_OFFERED) == Some(&json!(true)) {
+            if values.get(REIMPORT_KEY) == Some(&json!(true)) {
+                match self.reimport() {
+                    Ok(out) => reimported = out,
+                    Err(e) => {
+                        log::warn!("init: the re-import: {e}");
+                        self.notify(crate::dialogs::Level::Error, Message::plain(e));
+                    }
+                }
+            } else {
+                self.reimport_offered();
+            }
+        }
         self.init_end();
-        Ok(json!({ "written": written }))
+        Ok(json!({ "written": written, "reimported": reimported }))
     }
 
     /// Ends the run, if one is open: its caller hears the outcome read
@@ -388,7 +503,8 @@ impl Shell {
                  wizard {} as a focus screen",
                 if missing { "opens" } else { "does not open" }
             );
-            if missing && let Err(e) = self.init_ensure(&Request::all(), Then::Nothing, false) {
+            if missing && let Err(e) = self.init_ensure(&Request::all(), Then::Nothing, false, true)
+            {
                 log::warn!("init: the first run: {e}");
             }
         }

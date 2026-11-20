@@ -315,7 +315,7 @@ impl Shell {
     /// `args` (`copy`, `into`, `layout`, `rename`, `duplicates`,
     /// `darktable`, `camera_look`), remembered first when asked. Without a library open,
     /// nothing is queued: the error says so.
-    fn import_now(
+    pub(super) fn import_now(
         &mut self,
         target: Value,
         args: &Value,

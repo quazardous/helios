@@ -60,6 +60,11 @@ pub const NOT_FOR_AGENTS: &[&str] = &[
     // Puts Helios's own folders aside and restarts it: the word typed by
     // the person is its confirmation (`crate::reset`).
     "helios.app.reset",
+    // Removes Helios's secrets from the system keyring (`crate::forget`).
+    "helios.app.forgetAccounts",
+    // Adds back the photos of the folders a reset kept, in place: run by
+    // the person from the first-run setup (`shell::init_wizard`).
+    "helios.app.reimport",
 ];
 
 /// Whether the agent bridge refuses `command` ([`NOT_FOR_AGENTS`]).
