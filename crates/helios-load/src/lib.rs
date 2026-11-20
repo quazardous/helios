@@ -162,19 +162,20 @@ pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
 }
 
 /// [`preview_oriented`] for a first paint `max` pixels long: the preview
-/// at least `max` pixels on its long side (when it is that large), and
-/// less than twice that, made in 8 bits before it is taken to the working
-/// space, so a first paint never converts a full-size preview in floating
-/// point.
+/// made in 8 bits before it is taken to the working space, so a first
+/// paint never converts a full-size preview in floating point.
 ///
-/// The colour JPEG stream the file embeds that is the smallest at least
-/// `max` long (else the largest) is decoded at the smallest DCT scale
-/// that keeps it so ([`embedded::decode_scaled`]): a Nikon Z6 II's
-/// 6048 px preview asked 2560 px is decoded at 3024 px, never whole.
-/// A raw whose previews are no JPEG stream falls back to rawler, which
-/// decodes its largest preview alone (the smaller ones only when it is
-/// missing or unreadable), then the result is scaled by a whole-factor
-/// block mean.
+/// When the file embeds a colour JPEG stream at least twice `max` long,
+/// the smallest such stream is decoded at the smallest DCT scale that
+/// keeps it at least `max` long ([`embedded::decode_scaled`]): a Nikon
+/// Z6 II's 6048 px preview asked 2560 px is decoded at 3024 px, never
+/// whole. A stream shorter than that gains nothing from the scaling and
+/// would cost a whole decode of a stream larger than the preview a raw
+/// names (a Sony A7S III's ARW holds one larger than its 1616 px
+/// preview, and decoding it took first pixels from 67 to 294 ms): rawler then decodes the raw's own largest preview alone
+/// (the smaller ones only when it is missing or unreadable), as before,
+/// and a whole-factor block mean shrinks it only while it stays at least
+/// `max` long.
 ///
 /// # Errors
 /// The file cannot be read, or its format is unknown.
@@ -189,7 +190,7 @@ pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Imag
         });
         embedded::choose(&embedded::embedded_jpegs(&bytes), m)
             .into_iter()
-            .filter(|e| !e.grey())
+            .filter(|e| !e.grey() && e.long() >= m.saturating_mul(2))
             .find_map(|e| embedded::decode_scaled(&bytes[e.offset..], m).ok())
             .map(DynamicImage::ImageRgb8)
     });
