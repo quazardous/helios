@@ -184,7 +184,7 @@ fn quitting_closes_the_vault_through_the_node() {
 /// flush and the vault closed, each step marked. The bound: none of these
 /// waits on a job or a deadline, so they take milliseconds; 2 s leaves a
 /// debug build on a loaded box ample room, and stays under the node's own
-/// deadline (`quit::NODE_DEADLINE`), past which the black window the
+/// deadline (`Link::stop_deadline`), past which the black window the
 /// owner saw would come back.
 #[test]
 fn a_quit_with_nothing_running_ends_quickly() {

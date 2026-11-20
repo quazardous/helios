@@ -46,13 +46,6 @@ use std::time::{Duration, Instant};
 
 pub use helios_node_core::quit::{MarkOnDrop, TRACE_ENV, mark, requested, started};
 
-/// How long the node's stop (its jobs stopped, its last flush, the
-/// vault's clean-shutdown marker) may take once the window is gone:
-/// the node's own bound ([`helios_node_core::node::STOP_DEADLINE`]).
-/// Done already when the end splash saw the node stop; the whole of it
-/// when the splash gave up or eframe ended on an error.
-pub const NODE_DEADLINE: Duration = helios_node_core::node::STOP_DEADLINE;
-
 /// Work left for after the window: each piece on a thread of its own,
 /// waited for until its deadline.
 #[derive(Default)]

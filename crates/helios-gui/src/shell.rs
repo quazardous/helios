@@ -356,6 +356,8 @@ enum Action {
     Quit,
     /// Quit, the question about running jobs answered.
     QuitConfirmed,
+    /// The question about an edit not saved answered: retry or discard.
+    QuitUnsaved(String),
     /// A notice's details as an error dialog (`notice.details`).
     NoticeDetails(Option<usize>),
     /// Bring the main window forward, or back.
@@ -3039,6 +3041,19 @@ impl Shell {
                 "Window",
             ),
             Box::new(|_, _| Ok(Action::QuitConfirmed)),
+        );
+        add(
+            CommandSpec::new(
+                lifetime::QUIT_UNSAVED,
+                "Before quitting, an edit not saved: retry saving or quit without saving (`value`)",
+                "Window",
+            ),
+            Box::new(|a, _| {
+                a.get("value")
+                    .and_then(Value::as_str)
+                    .map(|v| Action::QuitUnsaved(v.to_owned()))
+                    .ok_or_else(|| "`value` is missing".to_string())
+            }),
         );
         add(
             CommandSpec::new(lifetime::MAIN_WINDOW, "Main window", "Window"),
@@ -6864,6 +6879,7 @@ impl Shell {
             }
             Action::Quit => self.quit(),
             Action::QuitConfirmed => self.quit_confirmed(),
+            Action::QuitUnsaved(answer) => self.quit_unsaved(&answer)?,
             Action::NoticeDetails(i) => self.notice_details(i),
             Action::MainWindow => self.main_window(),
             Action::SystemMenu => {

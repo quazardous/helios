@@ -1,4 +1,5 @@
 helios.app.quit
-  1. helios.quit.jobs (owner helios.quit): nothing
-  2. helios.quit.node (owner helios.quit): after helios.quit.jobs
-  3. helios.quit.client (owner helios.quit): after helios.quit.node
+  1. helios.quit.unsaved (owner helios.quit): before helios.quit.jobs
+  2. helios.quit.jobs (owner helios.quit): nothing
+  3. helios.quit.node (owner helios.quit): after helios.quit.jobs
+  4. helios.quit.client (owner helios.quit): after helios.quit.node

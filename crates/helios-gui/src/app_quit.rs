@@ -7,10 +7,13 @@
 //! the quit's conditions, named, in a declared order (`after` /
 //! `before`), each with its deadline:
 //!
+//! - [`UNSAVED`]: an edit whose save failed and that nobody chose to
+//!   discard: it refuses, and the hook asks "Retry saving", "Quit
+//!   without saving" or Cancel;
 //! - [`JOBS`]: jobs are running and nobody confirmed cancelling them:
 //!   it refuses, and the hook asks "Quit Helios?";
-//! - any module holding something a quit would lose (an edit not saved)
-//!   adds its own listener, and refuses with its reason.
+//! - any other module holding something a quit would lose adds its own
+//!   listener, and refuses with its reason.
 //!
 //! A refusal is the step's veto: the main window stays, the journal says
 //! `window.close.vetoed`, and the refusing listener is named in the
@@ -53,6 +56,10 @@ use egui_pop::api::bus::bus_contract::{
 
 /// The request a quit is asked on.
 pub const QUIT: &str = "helios.app.quit";
+
+/// The unsaved edit's listener: refuses while an edit whose save failed
+/// is not discarded. Before [`JOBS`]: the edit is asked about first.
+pub const UNSAVED: &str = "helios.quit.unsaved";
 
 /// The running jobs' listener: refuses while jobs run unconfirmed.
 pub const JOBS: &str = "helios.quit.jobs";
@@ -110,6 +117,11 @@ pub struct QuitAsk {
     /// Cancelling them is confirmed: asked and answered Quit, or
     /// confirmations answered yes by policy.
     pub jobs_confirmed: bool,
+    /// An edit whose save failed, in words (its reason): a quit would
+    /// lose it.
+    pub unsaved: Option<String>,
+    /// Losing it is chosen: asked and answered "Quit without saving".
+    pub unsaved_discarded: bool,
 }
 
 /// Helios quits (`helios.app.quit`): each listener says, in one line,
@@ -208,17 +220,42 @@ impl EndSlots {
     }
 }
 
-/// Registers Helios's own listeners on [`AppQuit`]: [`JOBS`], then
-/// [`NODE`] and [`CLIENT`] over `slots`. Those there already are
-/// replaced.
+/// Registers Helios's own listeners on [`AppQuit`]: [`UNSAVED`],
+/// [`JOBS`], then [`NODE`] and [`CLIENT`] over `slots`. Those there
+/// already are replaced.
 ///
 /// # Errors
 /// The bus refused one.
 pub fn listen(bus: &dyn Bus, slots: &std::sync::Arc<EndSlots>) -> Result<(), String> {
     declare(bus);
-    for id in [JOBS, NODE, CLIENT] {
+    for id in [UNSAVED, JOBS, NODE, CLIENT] {
         bus.unlisten(QUIT, id);
     }
+    bus.listen::<AppQuit>(
+        UNSAVED,
+        ListenOpts::new().before(JOBS).owner(OWNER),
+        |ask, said| {
+            if ask.stage != QuitStage::Ask {
+                return Ok(());
+            }
+            match &ask.unsaved {
+                None => {
+                    said.push(format!("{UNSAVED}: every edit saved"));
+                    Ok(())
+                }
+                Some(_) if ask.unsaved_discarded => {
+                    said.push(format!(
+                        "{UNSAVED}: an edit not saved, discarding it chosen"
+                    ));
+                    Ok(())
+                }
+                Some(why) => Err(HookError::refuse(format!(
+                    "an edit could not be saved: {why}"
+                ))),
+            }
+        },
+    )
+    .map_err(|e| e.to_string())?;
     bus.listen::<AppQuit>(JOBS, ListenOpts::new().owner(OWNER), |ask, said| {
         if ask.stage != QuitStage::Ask {
             Ok(())
@@ -378,10 +415,35 @@ pub fn end_steps(bus: &dyn Bus, host: &[&str]) -> Vec<EndStep> {
     steps
 }
 
+/// What is added to the end's declared deadlines: the splash's own
+/// frames between two steps.
+pub const END_MARGIN: Duration = Duration::from_secs(2);
+
+/// The hard ceiling of [`end_limit`]: a broken declaration (a listener
+/// declaring an hour) never holds the window longer.
+pub const END_CEILING: Duration = Duration::from_mins(1);
+
+/// How long the end splash may last before it goes on as if "Quit now"
+/// was chosen: its steps one after the other, each listener within its
+/// declared deadline, each host step within `host_step`, then the node's
+/// stop within `node` (its own listeners' deadlines,
+/// `Link::stop_deadline`), plus [`END_MARGIN`]; never past
+/// [`END_CEILING`].
+pub fn end_limit(steps: &[EndStep], host_step: Duration, node: Duration) -> Duration {
+    steps
+        .iter()
+        .map(|s| s.deadline.unwrap_or(host_step))
+        .fold(Duration::ZERO, Duration::saturating_add)
+        .saturating_add(node)
+        .saturating_add(END_MARGIN)
+        .min(END_CEILING)
+}
+
 /// A listener's row on the end splash: Helios's own named, another
 /// module's by its id.
 pub fn label(id: &str) -> Message {
     match id {
+        UNSAVED => Message::new("gui-end-unsaved", "Checking the unsaved edits"),
         JOBS => Message::new("gui-end-jobs", "Checking the running jobs"),
         NODE => Message::new("gui-end-node", "Asking the library's node to stop"),
         CLIENT => Message::new("gui-end-client", "Disconnecting from the library's node"),

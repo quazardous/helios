@@ -193,7 +193,7 @@ fn the_quit_requests_listeners_run_in_a_declared_order() {
 #[test]
 fn quitting_runs_the_listeners_in_order_and_a_veto_stops_it() {
     use egui_pop::api::bus::bus_contract::{HookError, ListenOpts};
-    use helios_gui::app_quit::{AppQuit, JOBS};
+    use helios_gui::app_quit::{AppQuit, JOBS, UNSAVED};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -203,7 +203,10 @@ fn quitting_runs_the_listeners_in_order_and_a_veto_stops_it() {
     let edit = unsaved.clone();
     bus.listen::<AppQuit>(
         "helios.test.edit",
-        ListenOpts::new().before(JOBS).owner("helios.test"),
+        ListenOpts::new()
+            .after(UNSAVED)
+            .before(JOBS)
+            .owner("helios.test"),
         move |_, said| {
             if edit.load(Ordering::SeqCst) {
                 return Err(HookError::refuse("an edit is not saved"));
@@ -232,7 +235,14 @@ fn quitting_runs_the_listeners_in_order_and_a_veto_stops_it() {
         report.refused,
         Some(("helios.test.edit".into(), "an edit is not saved".into()))
     );
-    assert!(report.said.is_empty(), "nothing after the refusal ran");
+    assert!(
+        !report
+            .said
+            .iter()
+            .any(|l| l.starts_with("helios.quit.jobs")),
+        "nothing after the refusal ran: {:?}",
+        report.said
+    );
 
     unsaved.store(false, Ordering::SeqCst);
     quit(&mut h);
@@ -242,6 +252,7 @@ fn quitting_runs_the_listeners_in_order_and_a_veto_stops_it() {
     assert_eq!(
         report.said,
         [
+            "helios.quit.unsaved: every edit saved",
             "helios.test.edit: saved",
             "helios.quit.jobs: no job running",
             "helios.test.after",
@@ -344,7 +355,7 @@ fn end_listeners(
 #[test]
 fn the_end_runs_one_listener_per_frame_in_order_with_matching_rows() {
     use helios_core::Message;
-    use helios_gui::app_quit::{self, CLIENT, JOBS, NODE};
+    use helios_gui::app_quit::{self, CLIENT, JOBS, NODE, UNSAVED};
     use helios_gui::splash::{End, Ending};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -358,6 +369,7 @@ fn the_end_runs_one_listener_per_frame_in_order_with_matching_rows() {
     assert_eq!(
         ids,
         [
+            UNSAVED,
             JOBS,
             "helios.test.first",
             NODE,
@@ -404,6 +416,7 @@ fn the_end_runs_one_listener_per_frame_in_order_with_matching_rows() {
     h.run_steps(1);
     // Every step a row, in order.
     let rows = [
+        "Checking the unsaved edits".to_owned(),
         "Checking the running jobs".to_owned(),
         "helios.test.first".to_owned(),
         "Asking the library's node to stop".to_owned(),
@@ -425,7 +438,7 @@ fn the_end_runs_one_listener_per_frame_in_order_with_matching_rows() {
     assert_eq!(heard.len(), 2, "each test listener's turn once: {heard:?}");
     assert_eq!(heard[0].0, "helios.test.first");
     assert_eq!(heard[1].0, "helios.test.second");
-    // Turns 1 and 3, the node's between them: one frame each.
+    // Turns 2 and 4, the node's between them: one frame each.
     assert_eq!(
         heard[1].1 - heard[0].1,
         2,
@@ -709,4 +722,286 @@ fn a_node_listener_cut_is_named_in_the_quit_report() {
         "{:?}",
         report.lines()
     );
+}
+
+/// A desktop whose edit's save can be made to fail: a harness on the
+/// shell, its persistence on a vault with images 1 and 2, image 1 open
+/// and its exposure changed. A writer holding the vault (`hold`) makes
+/// the next save fail at once (a 20 ms busy wait).
+struct Unsaved {
+    dir: std::path::PathBuf,
+    path: std::path::PathBuf,
+    h: Harness<'static, Shell>,
+    persist: helios_gui::persist::Persist<helios_vault_sqlite::SqliteStore>,
+    now: f64,
+}
+
+const UNSAVED_QUESTION: &str = "An edit could not be saved";
+
+fn image_id(n: u8) -> helios_vault::ImageId {
+    helios_vault::ImageId(helios_core::ContentHash([n; 32]))
+}
+
+/// A source and an exposure node: the network the viewport shows.
+fn network() -> (helios_core::Graph, helios_core::NodeId) {
+    let mut g = helios_core::Graph::new();
+    let src = g.add_source(
+        "source",
+        helios_core::Image::from_fn(helios_core::Region::sized(16, 8), 4, |_, _, _| 0.25),
+    );
+    let exp = g
+        .add_module(
+            "exposure",
+            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+            &helios_core::Params::new(),
+        )
+        .unwrap();
+    g.connect(src, "image", exp, "input").unwrap();
+    (g, exp)
+}
+
+impl Unsaved {
+    fn new(name: &str) -> Self {
+        use helios_vault::Store as _;
+        use helios_vault_sqlite::{Options, SqliteStore};
+        let dir =
+            std::env::temp_dir().join(format!("helios-quit-unsaved-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vault.db");
+        let mut store = SqliteStore::open(&path).unwrap();
+        for n in [1, 2] {
+            store
+                .add_to_library(&helios_vault::Image {
+                    id: image_id(n),
+                    size: 10,
+                    partial: helios_core::ContentHash([n; 32]),
+                })
+                .unwrap();
+        }
+        drop(store);
+        let options = Options {
+            busy_timeout: std::time::Duration::from_millis(20),
+            ..Options::default()
+        };
+        let mut persist = helios_gui::persist::Persist::new(
+            SqliteStore::open_with(&path, &options).unwrap(),
+            std::sync::Arc::new(helios_core::Bus::new()),
+        );
+        let mut h = harness();
+        let (graph, exp) = network();
+        persist
+            .open_image(h.state_mut(), image_id(1), graph, exp, "output")
+            .unwrap();
+        let set = helios_values::Set::new(
+            "node/exposure/exposure",
+            helios_values::Change::To(helios_core::Value::Float(1.5)),
+            Origin::User,
+        );
+        h.state().values().lock().unwrap().set(set).unwrap();
+        Self {
+            dir,
+            path,
+            h,
+            persist,
+            now: 100.0,
+        }
+    }
+
+    /// A writer holding the vault: saves fail until it lets go.
+    fn hold(&self) -> helios_vault_sqlite::SqliteStore {
+        use helios_vault::Store as _;
+        let mut blocker = helios_vault_sqlite::SqliteStore::open(&self.path).unwrap();
+        blocker.begin().unwrap();
+        blocker
+    }
+
+    /// The edit's save fails, the vault held ([`Unsaved::hold`]):
+    /// opening image 2 saves image 1's edit first, refused; the next
+    /// frame says it is unsaved.
+    fn fail_the_save(&mut self) {
+        let (graph, exp) = network();
+        let refused =
+            self.persist
+                .open_image(self.h.state_mut(), image_id(2), graph, exp, "output");
+        assert!(refused.is_err(), "the save failed: {refused:?}");
+        assert!(self.persist.unsaved());
+        self.frame();
+    }
+
+    /// One frame of the host: the persistence's, then the shell's.
+    fn frame(&mut self) {
+        self.now += 1.0;
+        self.persist.frame_settled(self.h.state_mut(), self.now);
+        self.h.run_steps(2);
+    }
+
+    fn asked(&self) -> bool {
+        self.h.query_by_label_contains(UNSAVED_QUESTION).is_some()
+    }
+
+    /// The head versions image 1 has in the vault.
+    fn saved_versions(&self) -> usize {
+        helios_vault::Vault::new(helios_vault_sqlite::SqliteStore::open(&self.path).unwrap())
+            .versions(&image_id(1))
+            .unwrap()
+            .len()
+    }
+}
+
+impl Drop for Unsaved {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn release(mut blocker: helios_vault_sqlite::SqliteStore) {
+    use helios_vault::Store as _;
+    blocker.rollback().unwrap();
+}
+
+/// An edit whose save failed makes the quit ask, its refusal named in
+/// the quit's report; Cancel keeps Helios open; "Quit without saving"
+/// quits, the edit lost.
+#[test]
+fn a_failed_save_asks_before_quitting_cancel_keeps_open_discard_quits() {
+    use helios_gui::app_quit::UNSAVED;
+
+    let mut d = Unsaved::new("discard");
+    // The edit is not saved and the vault stays held while Helios asks.
+    let blocker = d.hold();
+    d.fail_the_save();
+    quit(&mut d.h);
+    assert!(d.asked(), "the question about the unsaved edit");
+    assert!(!d.h.state().quitting(), "asked first");
+    assert_eq!(vetoes(&d.h), ["helios.quit"]);
+    let report = d.h.state().quit_report().expect("the quit was asked");
+    let (by, why) = report.refused.expect("refused");
+    assert_eq!(by, UNSAVED, "the refusal names its listener");
+    assert!(why.contains("could not be saved"), "{why}");
+    assert!(d.h.query_by_label("Retry saving").is_some());
+    assert!(d.h.query_by_label("Quit without saving").is_some());
+
+    d.h.get_by_label("Cancel").click();
+    d.h.run_steps(2);
+    assert!(!d.asked(), "the question answered");
+    assert!(!d.h.state().quitting(), "Cancel keeps Helios open");
+    assert!(d.persist.unsaved(), "the edit still unsaved");
+
+    quit(&mut d.h);
+    assert!(d.asked(), "asked again at the next quit");
+    d.h.get_by_label("Quit without saving").click();
+    d.h.run_steps(2);
+    d.h.run_steps(2);
+    assert!(d.h.state().quitting(), "\"Quit without saving\" quits");
+    let report = d.h.state().quit_report().unwrap();
+    assert!(report.goes());
+    assert!(
+        report
+            .said
+            .iter()
+            .any(|l| l.starts_with(UNSAVED) && l.contains("discarding it chosen")),
+        "{:?}",
+        report.said
+    );
+    release(blocker);
+    assert_eq!(d.saved_versions(), 0, "the edit was not saved");
+}
+
+/// "Retry saving" tries the save again: failing again, the question is
+/// asked again; once the vault lets go, the edit is saved and Helios
+/// quits.
+#[test]
+fn retry_saving_asks_again_while_it_fails_then_saves_and_quits() {
+    let mut d = Unsaved::new("retry");
+    let blocker = d.hold();
+    d.fail_the_save();
+    quit(&mut d.h);
+    assert!(d.asked());
+
+    // The vault still held: the retry fails, asked again.
+    d.h.get_by_label("Retry saving").click();
+    d.h.run_steps(2);
+    d.frame();
+    assert!(!d.h.state().quitting(), "the save failed again");
+    assert!(d.asked(), "asked again");
+    assert_eq!(vetoes(&d.h).len(), 2, "{:?}", vetoes(&d.h));
+
+    // The vault let go: the retry saves, and the quit goes.
+    release(blocker);
+    d.h.get_by_label("Retry saving").click();
+    d.h.run_steps(2);
+    d.frame();
+    assert!(!d.persist.unsaved(), "saved on retry");
+    assert!(d.h.state().quitting(), "saved: Helios quits");
+    assert!(!d.asked());
+    let report = d.h.state().quit_report().unwrap();
+    assert!(
+        report
+            .said
+            .contains(&"helios.quit.unsaved: every edit saved".to_owned()),
+        "{:?}",
+        report.said
+    );
+    assert_eq!(d.saved_versions(), 1, "the edit is in the vault");
+}
+
+/// A normal quit, the edit saved: nothing is asked about it.
+#[test]
+fn a_quit_with_every_edit_saved_does_not_ask() {
+    let mut d = Unsaved::new("saved");
+    d.frame();
+    assert!(!d.persist.unsaved());
+    quit(&mut d.h);
+    assert!(!d.asked());
+    assert!(d.h.state().quitting());
+    assert!(vetoes(&d.h).is_empty());
+}
+
+/// The end splash's limit follows its steps' declared deadlines and the
+/// node's stop, plus a margin; a broken declaration stays under the
+/// ceiling.
+#[test]
+fn the_end_limit_follows_the_declared_deadlines() {
+    use egui_pop::api::bus::bus_contract::ListenOpts;
+    use helios_gui::app_quit::{AppQuit, CLIENT, END_CEILING, END_MARGIN, EndStep, end_limit};
+    use std::time::Duration;
+
+    let h = harness();
+    let host = Duration::from_secs(3);
+    let node = Duration::from_secs(4);
+    let steps = h.state().end_steps(&["helios.test.host"]);
+    let declared: Duration = steps.iter().filter_map(|s| s.deadline).sum();
+    assert_eq!(
+        end_limit(&steps, host, node),
+        declared + host + node + END_MARGIN
+    );
+    // A listener declaring 5 s more lengthens it by as much.
+    h.state()
+        .app()
+        .handle()
+        .bus()
+        .listen::<AppQuit>(
+            "helios.test.slow",
+            ListenOpts::new()
+                .deadline(Duration::from_secs(5))
+                .before(CLIENT)
+                .owner("helios.test"),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+    let slower = h.state().end_steps(&["helios.test.host"]);
+    assert_eq!(
+        end_limit(&slower, host, node),
+        declared + Duration::from_secs(5) + host + node + END_MARGIN
+    );
+    // An hour declared: the ceiling.
+    let broken = [EndStep {
+        id: "helios.test.broken".into(),
+        host: false,
+        deadline: Some(Duration::from_hours(1)),
+    }];
+    assert_eq!(end_limit(&broken, host, node), END_CEILING);
+    // The node's own stop, from its adopters' declared deadlines.
+    assert!(helios_node_core::node_quit::STOP_CEILING < END_CEILING);
 }
