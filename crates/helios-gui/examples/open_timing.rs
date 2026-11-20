@@ -23,6 +23,12 @@
 //! kept after), then the first opened again: its fit should read the kept
 //! step, with no demosaic.
 //!
+//! Then a warmed neighbour (the two largest raws): the largest opened
+//! cold while the next one warms (its `developed` state, as the desktop
+//! warms a neighbour), background work free then held back from the
+//! open's start to its preview; then the neighbour opened: its frame and
+//! histogram times, the KPI of a warmed open.
+//!
 //! Writes `<out>/open-timing.jsonl` (one line per run) and
 //! `<out>/open-timing.md` (the table).
 //!
@@ -199,6 +205,35 @@ fn main() {
             line["back_demosaic_calls"],
         );
     }
+    if files.len() >= 2 {
+        // The largest raw shown, its neighbour (the next largest) warmed.
+        let (shown, near) = (&files[0], &files[1]);
+        for hold in [false, true] {
+            let line = match warmed_neighbour(shown, near, &bundle, gpu.as_ref(), hold, &records) {
+                Ok(line) => line,
+                Err(e) => json!({"scenario": "warmed_neighbour", "error": e}),
+            };
+            eprintln!("{line}");
+            writeln!(lines, "{line}").expect("the results file");
+            let _ = writeln!(
+                table,
+                "\nWarmed neighbour ({} shown cold while {} warms, background {}): shown fit {} ms, histogram {} ms; the neighbour's warm-up {} ms; then the neighbour opened: frame (fit) {} ms, histogram {} ms, {} demosaic call(s).",
+                line["shown"].as_str().unwrap_or("?"),
+                line["near"].as_str().unwrap_or("?"),
+                if hold {
+                    "held back until the shown preview"
+                } else {
+                    "free"
+                },
+                line["shown_fit_ms"],
+                line["shown_histogram_ms"],
+                line["warm_ms"],
+                line["warmed_fit_ms"],
+                line["warmed_histogram_ms"],
+                line["warmed_demosaic_calls"],
+            );
+        }
+    }
     print!("{table}");
     let md = a.out.join("open-timing.md");
     std::fs::write(&md, table).unwrap_or_else(|e| panic!("{}: {e}", md.display()));
@@ -281,6 +316,99 @@ fn back_to_first(
     }))
 }
 
+/// The desktop's warm-up of a neighbour, timed: `shown` opened cold (its
+/// `decoded` state asked on the open's thread) while `near`'s `developed`
+/// state is asked at Prefetch, as the warmer asks it once the neighbour
+/// settles (`hold`: background work held back from the open's start to
+/// its preview, as the desktop holds it); then `near` opened as a warmed
+/// photo: its frame and histogram times, its demosaic calls.
+fn warmed_neighbour(
+    shown: &Path,
+    near: &Path,
+    bundle: &helios_template::Bundle,
+    gpu: Option<&Arc<helios_gpu::Gpu>>,
+    hold: bool,
+    records: &std::sync::Mutex<Vec<Record>>,
+) -> Result<serde_json::Value, String> {
+    use helios_node_core::image_states::ImageStates;
+    let engine = Arc::new(Engine::new(Arc::new(Bus::new())));
+    if let Some(g) = gpu {
+        engine.attach_accelerator(g.clone());
+    }
+    let states = ImageStates::new(
+        engine.bus().clone(),
+        helios_node_core::image_states::THREADS,
+    );
+    let name = |p: &Path| {
+        p.file_name()
+            .map_or_else(String::new, |f| f.to_string_lossy().into_owned())
+    };
+    let wait = std::time::Duration::from_mins(10);
+    let open = |path: &Path, start: Instant| -> Result<(f64, f64, f64), String> {
+        let held = hold.then(|| states.hold_background());
+        let (graph, node) = helios_gui::warm::open(&states, &name(path), path, bundle)?;
+        let decoded = ms(start);
+        let extent = graph
+            .extent(node)
+            .map_err(|e| e.to_string())?
+            .ok_or("no extent")?;
+        let graph = Arc::new(graph);
+        let (_, fit, _, histogram) = concurrent_held(&engine, &graph, node, extent, start, held);
+        Ok((decoded, fit, histogram))
+    };
+    // The neighbour's warm-up, asked as the open starts.
+    let decoded = (
+        helios_gui::warm::key(&name(near), near, bundle),
+        helios_gui::warm::compute(near.to_path_buf(), bundle.clone()),
+    );
+    let key = helios_gui::warm::developed_key(&decoded.0, None);
+    let compute = helios_gui::warm::developed(&states, decoded, engine.clone(), None);
+    let start = Instant::now();
+    let mut warm = states.ask(key, helios_core::Priority::Prefetch, compute);
+    let (_, shown_fit, shown_histogram) = open(shown, start)?;
+    warm.wait(wait).map_err(|e| e.to_string())?;
+    let warm_ms = ms(start);
+    records
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+    let start = Instant::now();
+    let (warmed_decoded, warmed_fit, warmed_histogram) = open(near, start)?;
+    let mut run = Run::default();
+    from_spans(
+        &mut run,
+        &records.lock().unwrap_or_else(PoisonError::into_inner),
+    );
+    Ok(json!({
+        "scenario": "warmed_neighbour", "hold": hold, "shown": name(shown), "near": name(near),
+        "shown_fit_ms": round(shown_fit), "shown_histogram_ms": round(shown_histogram),
+        "warm_ms": round(warm_ms), "warmed_decoded_ms": round(warmed_decoded),
+        "warmed_fit_ms": round(warmed_fit), "warmed_histogram_ms": round(warmed_histogram),
+        "warmed_demosaic_calls": run.demosaics, "states": states.usage(),
+    }))
+}
+
+/// [`concurrent`] with a proxy, dropping `held` (the open's hold on
+/// background work) once the preview and its histogram are done.
+fn concurrent_held(
+    engine: &Arc<Engine>,
+    graph: &Arc<Graph>,
+    node: NodeId,
+    extent: Region,
+    start: Instant,
+    held: Option<helios_node_core::image_states::BackgroundHold>,
+) -> (f64, f64, f64, f64) {
+    let release = std::sync::Mutex::new(held);
+    concurrent_then(engine, graph, node, extent, true, start, &|| {
+        drop(
+            release
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+        );
+    })
+}
+
 /// Opens `path` on `engine` as the desktop does, and times it.
 fn open(
     path: &Path,
@@ -328,6 +456,20 @@ fn concurrent(
     extent: Region,
     with_proxy: bool,
     start: Instant,
+) -> (f64, f64, f64, f64) {
+    concurrent_then(engine, graph, node, extent, with_proxy, start, &|| {})
+}
+
+/// [`concurrent`], calling `histogram_done` once the preview's histogram
+/// is computed.
+fn concurrent_then(
+    engine: &Arc<Engine>,
+    graph: &Arc<Graph>,
+    node: NodeId,
+    extent: Region,
+    with_proxy: bool,
+    start: Instant,
+    histogram_done: &(dyn Fn() + Sync),
 ) -> (f64, f64, f64, f64) {
     // The viewport at 1920×1080: the fit scale, and a proxy at a power of
     // two below a quarter of it.
@@ -390,6 +532,7 @@ fn concurrent(
         })
         .expect("a preview thread");
     let (pv, hist) = preview.join().expect("the preview thread");
+    histogram_done();
     let (px, ft) = view.join().expect("the viewport thread");
     (px, ft, pv, hist)
 }

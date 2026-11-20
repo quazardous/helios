@@ -82,8 +82,22 @@ pub fn stats(service: &Service, t: &dyn Fn(Message) -> String) -> Value {
     snapshot
 }
 
-/// Registers [`STATS_COMMAND`] and [`CLEAR_COMMAND`] on the shell, over
-/// the process's service.
+/// Lists the image-state router's states (read-only): by photo and kind,
+/// each with its status, size, bytes and age, and the router's usage and
+/// counters. Photos are named by their vault id: no path.
+pub const STATES_COMMAND: &str = "image.state.list";
+
+/// The answer of [`STATES_COMMAND`].
+pub fn states(states: &helios_node_core::image_states::ImageStates) -> Value {
+    json!({
+        "states": states.entries(),
+        "usage": states.usage(),
+        "counters": states.counters(),
+    })
+}
+
+/// Registers [`STATS_COMMAND`], [`CLEAR_COMMAND`] and [`STATES_COMMAND`]
+/// on the shell, over the process's service and the shell's router.
 ///
 /// # Errors
 /// A command cannot be registered.
@@ -97,6 +111,16 @@ pub fn register(shell: &mut Shell) -> Result<(), String> {
         )
         .read_only(),
         move |_, _| Ok(stats(Service::global(), &t)),
+    )?;
+    let router = shell.image_states().clone();
+    shell.register(
+        CommandSpec::new(
+            STATES_COMMAND,
+            "The image states the router keeps or computes: by photo and kind, their status, size, bytes and age; its usage and counters",
+            "Help",
+        )
+        .read_only(),
+        move |_, _| Ok(states(&router)),
     )?;
     shell.register(
         CommandSpec::new(

@@ -842,6 +842,9 @@ struct Prepared {
     node: helios_core::NodeId,
 }
 
+/// How long an open holds the router's background work back at most.
+const OPEN_HOLD: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// What a thread making an image ready sends.
 enum Ready {
     /// A raw's embedded preview, alone in its graph: the first paint
@@ -1034,6 +1037,18 @@ struct App {
     warm_book: helios_gui::warm::Book,
     /// Decodes the photos near ahead; ends with the application.
     _warmer: helios_node_core::warm::Warmer,
+    /// The darkroom was open at the last pass: left, its photos are said
+    /// hidden.
+    in_darkroom: bool,
+    /// An open in progress holds the router's background work back from
+    /// its start to its preview (no warm-up slips in between its decode
+    /// and its preview's asks), with when it began and the preview's
+    /// last render number then.
+    opening: Option<(
+        helios_node_core::image_states::BackgroundHold,
+        std::time::Instant,
+        Option<u64>,
+    )>,
     /// Starts the exports the shell asks for (`export.run`, on
     /// `export.start`, holds it weakly); the node runs them. Held here: it
     /// ends with the application.
@@ -1089,6 +1104,12 @@ impl App {
         // A newer opening replaces one still being made ready.
         self.preparing.retain(|p| p.library.is_none());
         let states = self.shell.image_states().clone();
+        let rendered = self.shell.preview().latest().map(|(n, _)| n);
+        self.opening = Some((
+            states.hold_background(),
+            std::time::Instant::now(),
+            rendered,
+        ));
         self.preparing
             .push(prepare_library(id, image, path, bundle, states));
         self.say_around(id);
@@ -1127,6 +1148,29 @@ impl App {
         self.warm_book.set(book);
         self.photos
             .publish(self.shell.image_states().bus(), Some(id), &near);
+    }
+
+    /// Lets the router's background work go once the open is over: its
+    /// image made ready and its preview rendered (or past [`OPEN_HOLD`]).
+    /// The darkroom left, its photos are said hidden: their warm-ups are
+    /// withdrawn.
+    fn follow_photos(&mut self) {
+        if let Some((_, since, rendered)) = &self.opening {
+            let preview = self.shell.preview();
+            let opened = !self.preparing.iter().any(|p| p.library.is_some())
+                && preview.latest().map(|(n, _)| n) != *rendered
+                && preview.status() != helios_gui::preview::Status::Busy;
+            if opened || since.elapsed() > OPEN_HOLD {
+                self.opening = None;
+            }
+        }
+        let in_darkroom = contexts::darkroom(self.shell.app().handle()).is_some();
+        if self.in_darkroom && !in_darkroom {
+            self.warm_book.set([]);
+            self.photos
+                .publish(self.shell.image_states().bus(), None, &[]);
+        }
+        self.in_darkroom = in_darkroom;
     }
 
     /// The darkroom the workspace was left in, its image opened again;
@@ -1689,6 +1733,7 @@ impl eframe::App for App {
             );
         }
         self.render_heads();
+        self.follow_photos();
         let activated = self.shell.library_mut().take_activated();
         if let Some(id) = activated
             && let Err(e) = self.open_from_library(&id)
@@ -2625,6 +2670,13 @@ fn main() -> Result<(), String> {
                 }
             }
             let warm_book = helios_gui::warm::Book::default();
+            if let Some(persist) = &persist {
+                warm_book.set_render(
+                    shell.image_states().clone(),
+                    shell.render_engine(),
+                    persist.reader(),
+                );
+            }
             let warmer = helios_node_core::warm::Warmer::start(
                 shell.image_states().clone(),
                 warm_book.recipe(),
@@ -2639,6 +2691,8 @@ fn main() -> Result<(), String> {
                 photos: helios_node_core::warm::Lifecycle::default(),
                 warm_book,
                 _warmer: warmer,
+                in_darkroom: false,
+                opening: None,
                 _exporter: exporter,
                 network_changed,
                 export_refused,

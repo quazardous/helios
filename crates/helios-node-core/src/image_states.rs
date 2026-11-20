@@ -82,6 +82,12 @@ pub enum StateKind {
     /// The whole image at a small size, its longest side `size` pixels:
     /// what the scopes measure and the navigator draws.
     Preview,
+    /// The photo developed ahead (a warm-up): its file through the
+    /// network with its head edit applied, the full-size steps it reads
+    /// held in the engine's cache and its preview rendered there, so an
+    /// open of the photo reads them instead of demosaicing; its
+    /// `development` the file, network and head version.
+    Developed,
     /// The full-size steps (the demosaic's output) kept in the engine's
     /// cache: a [`helios_core::Hold`], its `development` the steps' keys.
     /// The fit, a zoom and the preview read them instead of demosaicing
@@ -100,6 +106,7 @@ impl StateKind {
             StateKind::Preview => "preview",
             StateKind::FullSize => "full_size",
             StateKind::Decoded => "decoded",
+            StateKind::Developed => "developed",
         }
     }
 }
@@ -242,6 +249,8 @@ struct Job {
     askers: cancel::Token,
     priority: Mutex<Priority>,
     started: AtomicBool,
+    /// When it was asked.
+    asked: Instant,
     compute: Compute,
     /// Ends the flight; taken by the worker that finishes it.
     lead: Mutex<Option<Lead<StateKey, Outcome>>>,
@@ -283,6 +292,31 @@ impl Ord for Queued {
 struct Kept {
     value: Value,
     held: bool,
+    /// When it landed.
+    since: Instant,
+}
+
+/// One state the router knows, as `image.state.list` lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Entry {
+    pub photo: String,
+    pub state: StateKind,
+    /// The development, short.
+    pub development: String,
+    pub size: u32,
+    /// `ready`, `computing` or `waiting` (queued, not started).
+    pub status: &'static str,
+    /// What a ready state weighs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    /// Its bytes live in the engine's cache (a hold).
+    pub held: bool,
+    pub pinned: bool,
+    /// The priority it is computed at; none once ready.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<Priority>,
+    /// Milliseconds since it landed (ready) or was asked.
+    pub age_ms: u64,
 }
 
 #[derive(Default)]
@@ -516,6 +550,58 @@ impl ImageStates {
         }
     }
 
+    /// Holds background work back until the guard drops: an open on its
+    /// own thread, from its decode to its preview's asks, keeps a warm-up
+    /// from starting in the gap between them.
+    #[must_use = "background work starts again when the hold drops"]
+    pub fn hold_background(&self) -> BackgroundHold {
+        self.inner.table().interactive += 1;
+        BackgroundHold {
+            router: self.inner.clone(),
+        }
+    }
+
+    /// Every state it knows, ready or in flight, by photo then kind: what
+    /// `image.state.list` answers.
+    pub fn entries(&self) -> Vec<Entry> {
+        let table = self.inner.table();
+        let ms = |since: Instant| since.elapsed().as_millis() as u64;
+        let mut entries: Vec<Entry> = table
+            .ready
+            .iter()
+            .map(|(key, kept)| Entry {
+                photo: key.photo.clone(),
+                state: key.state,
+                development: key.development.short(),
+                size: key.size,
+                status: "ready",
+                bytes: table.order.size(key),
+                held: kept.held,
+                pinned: table.pins.contains_key(key),
+                priority: None,
+                age_ms: ms(kept.since),
+            })
+            .chain(table.jobs.iter().map(|(key, job)| Entry {
+                photo: key.photo.clone(),
+                state: key.state,
+                development: key.development.short(),
+                size: key.size,
+                status: if job.started.load(Ordering::SeqCst) {
+                    "computing"
+                } else {
+                    "waiting"
+                },
+                bytes: None,
+                held: false,
+                pinned: table.pins.contains_key(key),
+                priority: Some(job.priority()),
+                age_ms: ms(job.asked),
+            }))
+            .collect();
+        entries.sort_by(|a, b| (&a.photo, a.state, a.size).cmp(&(&b.photo, b.state, b.size)));
+        entries
+    }
+
     /// The states ready now, and those asked and not ready yet.
     pub fn list(&self) -> (Vec<StateKey>, Vec<StateKey>) {
         let table = self.inner.table();
@@ -523,6 +609,25 @@ impl ImageStates {
             table.ready.keys().cloned().collect(),
             table.jobs.keys().cloned().collect(),
         )
+    }
+}
+
+/// Background work held back: while it lives, no Prefetch or Batch
+/// computation starts, as while an interactive one runs.
+pub struct BackgroundHold {
+    router: Arc<Inner>,
+}
+
+impl fmt::Debug for BackgroundHold {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BackgroundHold").finish_non_exhaustive()
+    }
+}
+
+impl Drop for BackgroundHold {
+    fn drop(&mut self) {
+        self.router.table().interactive -= 1;
+        self.router.work.notify_all();
     }
 }
 
@@ -734,6 +839,7 @@ impl Inner {
                     askers,
                     priority: Mutex::new(priority),
                     started: AtomicBool::new(inline),
+                    asked: Instant::now(),
                     compute: compute.clone(),
                     lead: Mutex::new(Some(lead)),
                 });
@@ -835,6 +941,7 @@ impl Inner {
                 Kept {
                     value: ready.value.clone(),
                     held: ready.held,
+                    since: Instant::now(),
                 },
             );
             self.publish_with(facts::READY, &job.key, priority, None, Some(ready.bytes));
@@ -1249,5 +1356,67 @@ mod tests {
         );
         assert_eq!(helios_cache::Store::clear(&store, Some("image.state")), 30);
         assert_eq!(ready_keys(&router), ["held"]);
+    }
+
+    #[test]
+    fn the_list_says_each_state_with_its_status_size_and_age() {
+        let states = ImageStates::new(Arc::new(Bus::new()), 1);
+        let ready: Compute = Arc::new(|| Ok(Ready::new(1u32, 40)));
+        states
+            .ask(key("a"), Priority::Interactive, ready)
+            .wait(LONG)
+            .expect("a");
+        let _pin = states.pin(&key("a"));
+        let (calls, started, go) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(Barrier::new(2)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let mut flying = states.ask(key("b"), Priority::Prefetch, held(&calls, &started, &go));
+        started.wait();
+        let list = states.entries();
+        assert_eq!(list.len(), 2, "{list:?}");
+        assert_eq!(
+            (
+                list[0].photo.as_str(),
+                list[0].status,
+                list[0].bytes,
+                list[0].pinned
+            ),
+            ("a", "ready", Some(40), true)
+        );
+        assert_eq!(list[0].priority, None);
+        assert_eq!(
+            (list[1].photo.as_str(), list[1].status, list[1].priority),
+            ("b", "computing", Some(Priority::Prefetch))
+        );
+        let json = serde_json::to_value(&list[1]).expect("serializes");
+        assert_eq!(json["state"], "preview");
+        assert!(json["age_ms"].is_u64());
+        go.store(true, Ordering::SeqCst);
+        flying.wait(LONG).expect("b");
+    }
+
+    #[test]
+    fn a_background_hold_keeps_warm_ups_back_until_it_drops() {
+        let states = ImageStates::new(Arc::new(Bus::new()), 2);
+        let hold = states.hold_background();
+        let ran = Arc::new(AtomicBool::new(false));
+        let r = ran.clone();
+        let near: Compute = Arc::new(move || {
+            r.store(true, Ordering::SeqCst);
+            Ok(Ready::new(0u32, 0))
+        });
+        let mut warm = states.ask(key("near"), Priority::Prefetch, near);
+        // An interactive ask still runs.
+        states
+            .ask(key("shown"), Priority::Interactive, value(3))
+            .wait(LONG)
+            .expect("shown");
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(!ran.load(Ordering::SeqCst), "held back");
+        drop(hold);
+        warm.wait(LONG).expect("near");
+        assert!(ran.load(Ordering::SeqCst));
     }
 }
