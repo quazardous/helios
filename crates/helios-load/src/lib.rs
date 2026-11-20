@@ -192,12 +192,73 @@ pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Imag
         .filter(|o| (1..=8).contains(o))
         .unwrap_or(1);
     let space = raw_preview_space(&bytes, metadata.as_ref());
-    let _span = helios_core::trace::span("preview.working", String::new);
-    let fit = |img: DynamicImage| match max {
-        Some(m) if img.width().max(img.height()) > m => img.thumbnail(m, m),
-        _ => img,
+    let fit = |img: DynamicImage| {
+        let _span = helios_core::trace::span("preview.shrink", String::new);
+        match max {
+            Some(m) if img.width().max(img.height()) > m => shrink(img, m),
+            _ => img,
+        }
     };
-    Ok((found.map(|img| preview_working(&fit(img), space)), tag))
+    Ok((
+        found.map(|img| {
+            let img = fit(img);
+            let _span = helios_core::trace::span("preview.working", || {
+                format!("{}x{}", img.width(), img.height())
+            });
+            preview_working(&img, space)
+        }),
+        tag,
+    ))
+}
+
+/// `img` made no larger than `max` pixels on its long side, for a first
+/// paint: an 8-bit RGB picture (a JPEG preview) by the mean of each
+/// k × k block, k the smallest whole factor that fits, in row bands over
+/// the machine's threads; any other by [`DynamicImage::thumbnail`]. The
+/// block mean is several times faster than a resampling filter on a
+/// full-size preview, and a first paint is shown at about that size.
+fn shrink(img: DynamicImage, max: u32) -> DynamicImage {
+    let DynamicImage::ImageRgb8(rgb) = img else {
+        return img.thumbnail(max, max);
+    };
+    let (w, h) = rgb.dimensions();
+    let k = w.max(h).div_ceil(max.max(1)).max(1) as usize;
+    let (ow, oh) = ((w as usize / k).max(1), (h as usize / k).max(1));
+    if k == 1 {
+        return DynamicImage::ImageRgb8(rgb);
+    }
+    let src = rgb.as_raw();
+    let stride = w as usize * 3;
+    let mut out = vec![0u8; ow * oh * 3];
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let band = oh.div_ceil(threads).max(1);
+    let area = (k * k) as u32;
+    std::thread::scope(|scope| {
+        for (b, rows) in out.chunks_mut(band * ow * 3).enumerate() {
+            scope.spawn(move || {
+                let mut sums = vec![0u32; ow * 3];
+                for (r, row) in rows.chunks_mut(ow * 3).enumerate() {
+                    let oy = b * band + r;
+                    sums.fill(0);
+                    for sy in oy * k..oy * k + k {
+                        let line = &src[sy * stride..sy * stride + ow * k * 3];
+                        for (ox, block) in line.chunks_exact(k * 3).enumerate() {
+                            for px in block.chunks_exact(3) {
+                                sums[ox * 3] += u32::from(px[0]);
+                                sums[ox * 3 + 1] += u32::from(px[1]);
+                                sums[ox * 3 + 2] += u32::from(px[2]);
+                            }
+                        }
+                    }
+                    for (o, s) in row.iter_mut().zip(&sums) {
+                        *o = u8::try_from((s + area / 2) / area).unwrap_or(u8::MAX);
+                    }
+                }
+            });
+        }
+    });
+    image::RgbImage::from_raw(ow as u32, oh as u32, out)
+        .map_or_else(|| DynamicImage::ImageRgb8(rgb), DynamicImage::ImageRgb8)
 }
 
 /// A raw's EXIF orientation tag, 1 to 8 (1 when it has none), from its
@@ -801,6 +862,19 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shrink_takes_each_blocks_mean_to_fit() {
+        // 7 × 5, at most 3 long: k = 3, 2 × 1 out of the top-left 6 × 3.
+        let rgb =
+            image::RgbImage::from_fn(7, 5, |x, y| image::Rgb([(x * 10) as u8, (y * 20) as u8, 9]));
+        let out = shrink(DynamicImage::ImageRgb8(rgb), 3).to_rgb8();
+        assert_eq!(out.dimensions(), (2, 1));
+        assert_eq!(out.get_pixel(0, 0).0, [10, 20, 9]);
+        assert_eq!(out.get_pixel(1, 0).0, [40, 20, 9]);
+        let small = image::RgbImage::new(3, 2);
+        assert_eq!(shrink(DynamicImage::ImageRgb8(small), 3).width(), 3);
+    }
 
     fn pixel(image: &Image) -> [f32; 3] {
         let d = image.data();
