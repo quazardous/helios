@@ -101,14 +101,14 @@ crates into a registry cache shared by all branches. The target directory
 is a cache too, one per branch, used by one job at a time: a second job on
 the same branch waits for the first.
 
-The box gives each job a fresh clone, so every file is newer than the
-branch's target, and cargo, which judges a workspace crate by its files'
-times, would rebuild all of them on every job. So each Helios job runs
-[`tools/bench/keep-mtimes.py`](../tools/bench/keep-mtimes.py) after
-copying its source: a manifest kept in the target (`/target/.src-mtimes`)
-holds each file's content hash and time from the previous job, and a file
-whose content did not change gets its old time back. Only the crates a
-change touches, and those that depend on them, build again.
+The box gives each job a fresh clone, so every file would be newer than
+the branch's target and cargo would rebuild every workspace crate. Each job
+that builds in a target names it with `source_times = "/target"` (a
+`lock = true` storage): the box gives the files that did not change since
+that target last saw them their old times back, from a record kept in the
+target and seeded with it. The job copies its source with
+`--preserve=mode,timestamps`, so only the crates a change touches, and
+those that depend on them, build again.
 
 ### The target's budget
 

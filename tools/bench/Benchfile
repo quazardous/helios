@@ -218,6 +218,9 @@ flatpak = { about = "the flatpak job's Flatpak installation (the freedesktop run
 # (/work/helios-local-<id>), and cargo does not rebuild a workspace that only
 # moved, so env!("CARGO_MANIFEST_DIR") would point at the other place. A
 # cache built anywhere else (its /target/.built-at says where) starts empty.
+# The copy keeps the files' times: with `source_times = "/target"` the box
+# gives the files unchanged since that target's last job their old times
+# back, so cargo builds again only what changed (docs/bench.md).
 
 # ---------------------------------------------------------------- correctness
 
@@ -228,9 +231,10 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cargo build --workspace --all-targets --locked"""
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo build --workspace --all-targets --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # fast compile and lint feedback: clippy on every target, the repository
@@ -248,10 +252,11 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui -p helios-plugin-darktable-library -p helios-plugin-lightroom-catalog -p helios-plugin-google-photos && cp /target/release/helios-gui /target/release/helios-darktable-library /target/release/helios-lightroom-catalog /target/release/helios-google-photos /out/ && git rev-parse --short HEAD > /out/commit.txt"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 outputs = { gui = { path = "helios-gui", kind = "file" }, darktable-library = { path = "helios-darktable-library", kind = "file" }, lightroom-catalog = { path = "helios-lightroom-catalog", kind = "file" }, google-photos = { path = "helios-google-photos", kind = "file" } }
 timeout = "1h"
 
@@ -268,13 +273,14 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui -p helios-node && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/quit-timing.py --gui /target/release/helios-gui --helios /target/release/helios \
   --corpus /corpus --out /out --runs ${runs:-6} --budget-ms ${budget:-0}"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # how long the main window takes to draw again once the import window
@@ -294,13 +300,14 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui --bin helios-gui && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/import-close.py --gui /target/release/helios-gui --folder /corpus \
   --out /out --runs ${runs:-1} --ways "${ways:-cancel+compositor}" --covers "${covers:-shown+covered}" --budget-ms ${budget:-0}"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "40m"
 
 # the multi-window checklist's probes: helios-gui in release in a headless
@@ -315,12 +322,13 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui --bin helios-gui && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/window-audit.py --gui /target/release/helios-gui --folder /corpus --out /out"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "40m"
 
 # the Settings app's own window closed by every way (title bar, page,
@@ -337,13 +345,14 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui --bin helios-gui && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/settings-close.py --gui /target/release/helios-gui --out /out \
   --compositor ${compositor:-labwc} --ways ${ways:-titlebar+page+escape+command+admin+compositor} --check ${check:-no}"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "40m"
 
 # how long the desktop takes to start: helios-gui in release, in a headless
@@ -359,13 +368,14 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui -p helios-node && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/start-timing.py --gui /target/release/helios-gui --helios /target/release/helios \
   --corpus /corpus --out /out --runs ${runs:-6} --kinds ${kinds:-launcher+library+image} --budget-ms ${budget:-0} --interactive-ms ${interactive:-0}"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # pictures of the Masks panel: helios-gui in release, in a headless labwc
@@ -381,7 +391,7 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 flag=; [ "${doc:-no}" = yes ] && flag=--doc; \
@@ -389,6 +399,7 @@ flag=; [ "${doc:-no}" = yes ] && flag=--doc; \
   --corpus /corpus --out /out --themes ${themes:-helios-dark,helios-light} $flag"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # Helios's scenarios run live (crates/helios-gui/tests/scenarios/*.ron):
@@ -405,13 +416,14 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui --bin helios-gui --example scenarios && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/scenarios.py --gui /target/release/helios-gui --runner /target/release/examples/scenarios \
   --out /out --only "${only:-}""""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # the first-user journey (tools/bench/journey/*.ron): helios-gui in
@@ -434,13 +446,14 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui --bin helios-gui --example scenarios && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/bench/journey.py --gui /target/release/helios-gui --runner /target/release/examples/scenarios \
   --corpus /corpus --out /out"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "40m"
 
 # helios-gui's snapshots regenerated (UPDATE_SNAPSHOTS=1, on lavapipe as
@@ -458,7 +471,7 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "5g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 t="${test:-import_snapshots}"; x=""; if [ -f crates/helios-gui/tests/it/main.rs ]; then sel="--test it"; [ "$t" = it ] || x="test(/^(${t//+/|})::/)"; else sel="--test ${t//+/ --test }"; fi; \
 UPDATE_SNAPSHOTS=${update:-1} cargo nextest run --locked --profile ci --test-threads 5 -p helios-gui $sel ${x:+-E "$x"}; rc=$?; \
 cp target/nextest/ci/junit.xml /out/ 2> /dev/null; \
@@ -466,6 +479,7 @@ mkdir -p /out/snapshots && find crates/helios-gui/tests/snapshots -name '*.png' 
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # the release step (docs/releases.md, "Snapshots before a release"): every
@@ -484,15 +498,16 @@ cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
 command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; \
-mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && \
+mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && \
 { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || \
-{ rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+{ rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 filter=$(cargo xtask snapshots filter) || exit 1; \
 UPDATE_SNAPSHOTS=1 cargo nextest run --workspace --locked --profile ci --test-threads 12 -E "$filter"; rc=$?; \
 s="${since:-}"; cargo xtask snapshots report ${s:+--since $s} --out /out; r=$?; \
 [ "$rc" -ne 0 ] && exit $rc; exit $r"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = {"target/${branch:-main}"="/target", registry="/cargo/registry", cargo-git="/cargo/git", sccache="/sccache"}
+source_times = "/target"
 timeout = "1h"
 
 [jobs.lint]
@@ -501,11 +516,12 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cargo clippy --workspace --all-targets --locked -- -D warnings \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo clippy --workspace --all-targets --locked -- -D warnings \
  && cargo xtask check \
  && cargo xtask i18n check | tee /out/i18n.txt; exit ${PIPESTATUS[0]}"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # HELIOS_SHARED_MACHINE=1 in the test jobs that share the box (test,
@@ -521,12 +537,13 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cargo nextest run --workspace --locked --profile ci --test-threads 12; rc=$?; \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo nextest run --workspace --locked --profile ci --test-threads 12; rc=$?; \
 cp target/nextest/ci/junit.xml /out/ \
  && cargo xtask test-times --from-junit /out/junit.xml --summary > /out/summary.md; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # the code a job will build type-checks, tests included, and nothing more
@@ -547,11 +564,12 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 3
 memory = "3g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 c="${crate:-}"; if [ -n "$c" ]; then sel="-p $c"; else sel=--workspace; fi; cargo clippy --locked --tests --keep-going --message-format short $sel > /tmp/clippy.log 2>&1; s=$?; cat /tmp/clippy.log; \
 n=$(grep -c ': warning:' /tmp/clippy.log); [ "$n" -gt 0 ] && echo "clippy: $n warning(s), all shown above"; [ "$s" -eq 0 ] && [ "$n" -eq 0 ]"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "20m"
 
 # the same for egui-pop's branch (`egui_pop=`), in the target its test
@@ -562,10 +580,11 @@ checkouts = ["egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 c="${crate:-}"; if [ -n "$c" ]; then sel="-p $c"; else sel=--workspace; fi; cargo clippy --locked --tests --message-format short $sel -- -D warnings"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "4" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "20m"
 
 # a fix loop's run: one crate's tests, its test targets (`test=`; `test=lib`
@@ -588,7 +607,7 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 3
 memory = "3g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 t="${test:-}"; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; sel=""; mods=""; whole=""; lib=""; x=""; \
 gui=""; [ "${crate}" = helios-gui ] && [ -f crates/helios-gui/tests/it/main.rs ] && gui=1; \
 for m in ${t//+/ }; do if [ "$m" = lib ]; then sel="$sel --lib"; lib=1; elif [ -z "$gui" ]; then sel="$sel --test $m"; elif [ "$m" = it ]; then whole=1; else mods="$mods|$m"; fi; done; \
@@ -596,6 +615,7 @@ if [ -n "$whole$mods" ]; then sel="$sel --test it"; [ -z "$whole" ] && x="binary
 cargo nextest run --locked --fail-fast -p ${crate} $sel ${x:+-E "$x"} $f"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "30m"
 
 # the tests a change touches (base=<commit or branch>, origin/main by
@@ -611,7 +631,7 @@ about = "the tests a change affects since a base commit, plus the critical set"
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 c="${crates:-}"; sel="${base:-origin/main} ${c:+--crates $c}"; \
 cargo xtask affected $sel > /out/affected.json && filter=$(cargo xtask affected $sel --filter) || exit 1; \
 cargo nextest run --workspace --locked --profile ci --test-threads 12 -E "$filter"; rc=$?; \
@@ -620,6 +640,7 @@ cp target/nextest/ci/junit.xml /out/ \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # quit, kill -9 and reopen: the scenarios that gate a release
@@ -629,9 +650,10 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cargo survival --locked"""
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo survival --locked"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "15m"
 
 # kill -9 in the middle of the headless node's own jobs (a backup, an
@@ -648,7 +670,7 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 HELIOS_STRESS_CLIENTS="${clients:-32}" HELIOS_STRESS_SECONDS="${seconds:-60}" HELIOS_STRESS_SEED="${seed:-5005}" HELIOS_STRESS_REPORT=/out/many-clients.json \
 cargo stability --locked; rc=$?; \
 cp target/nextest/default/junit.xml /out/ \
@@ -656,6 +678,7 @@ cp target/nextest/default/junit.xml /out/ \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "20m"
 
 # the soak: a moderate mix of clients (`clients=`, 8 by default) on one
@@ -672,7 +695,7 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 HELIOS_SOAK_CLIENTS="${clients:-8}" HELIOS_SOAK_MINUTES="${minutes:-60}" HELIOS_SOAK_EVERY="${every:-30}" HELIOS_SOAK_SEED="${seed:-5005}" HELIOS_SOAK_REPORT=/out/soak.json \
 cargo soak --locked; rc=$?; \
 cp target/nextest/default/junit.xml /out/ \
@@ -680,6 +703,7 @@ cp target/nextest/default/junit.xml /out/ \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "3h"
 
 # a release prepared from main's fragments (`cargo xtask release`: the
@@ -694,11 +718,12 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo xtask release && cargo check --offline --workspace && cargo nextest run --workspace --profile ci && \
 git add -A && git diff --cached --binary > /out/release.patch && grep -m1 '^version' Cargo.toml > /out/version.txt"""
 env = { CARGO_NET_OFFLINE = "true", HELIOS_SHARED_MACHINE = "1" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # the Flatpak (packaging/flatpak) as the release workflow builds it, from
@@ -787,11 +812,12 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo xtask i18n extract && cargo xtask i18n stamp fr && cargo xtask i18n check | tee /out/i18n.txt && \
 git add -A i18n && git diff --cached --binary -- i18n > /out/i18n.patch"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # (darktable builds with -Werror; GCC's ASan instrumentation raises false
@@ -846,11 +872,12 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 flag=; [ "${full:-no}" = yes ] && flag=--full; \
 GITHUB_STEP_SUMMARY=/out/check-commits.md cargo xtask check-commits $flag ${base:-origin/main}"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "2h"
 
 # the GPU backend's tests on the box's NVIDIA GPU, not lavapipe
@@ -861,12 +888,13 @@ cores = 4
 memory = "4g"
 resources = ["gpu"]
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
 cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "30m"
 
 # per module, how far the GPU output is from the CPU's (cargo xtask engine-diffstat)
@@ -877,10 +905,11 @@ cores = 4
 memory = "4g"
 resources = ["gpu"]
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo xtask engine-diffstat ${fixture:-all} --json /out/diffstat.jsonl ${module:+--module $module --dump-diff /out/diff} 2>&1 | tee /out/diffstat.txt; exit ${PIPESTATUS[0]}"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "30m"
 
 # the same tests on the Intel iGPU (Mesa ANV), the second real backend
@@ -891,12 +920,13 @@ cores = 4
 memory = "4g"
 resources = ["render"]
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
 cargo test -q --locked -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E '^(GPU|skipped):' | sort -u | tee /out/adapter.txt; \
 cargo nextest run --locked --profile ci -p helios-gpu -p helios-compute; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "30m"
 
 # egui-pop's gate: fmt, clippy, the workspace tests with the doctests, docs.
@@ -910,7 +940,7 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "5g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cargo fmt --all --check \
  && cargo clippy --workspace --all-targets --locked -- -D warnings \
  && { rc=0; cargo nextest run --workspace --locked --profile ci --test-threads 12 --no-fail-fast || rc=$?; \
  cargo test --workspace --locked --doc || rc=$?; \
@@ -922,6 +952,7 @@ command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop
 # two cargo jobs keep it to two links at once
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "75m"
 
 # egui-pop's narrowest test run, for a fix loop: one crate (`crate=`), one
@@ -947,7 +978,7 @@ checkouts = ["egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 t="${test:-}"; case "$t" in lib) sel="--lib";; ""|doc) sel="";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; x=""; \
 if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ] && [ "$t" != doc ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else x="test(/^$t::/)"; fi; fi; \
 fe="${features:-}"; fe="${fe//+/,}"; case "$fe" in *[!A-Za-z0-9_,/-]*) echo "bad features=$fe" >&2; exit 2;; esac; \
@@ -956,6 +987,7 @@ if [ "$t" != doc ]; then cargo nextest run --locked --fail-fast -p ${crate} ${fe
 if [ "$t" = doc ] || { [ -z "$t" ] && [ -z "$f" ] && [ "$d" = 1 ]; }; then echo "== doctests of ${crate}"; cargo test --locked -p ${crate} ${fe:+--features "$fe"} --doc ${f:+-- $f}; fi"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "30m"
 
 # egui-pop's single-process run: one crate's test target under `cargo test`
@@ -971,13 +1003,14 @@ checkouts = ["egui-pop"]
 cores = 4
 memory = "5g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 t="${test}"; case "$t" in lib) sel="--lib";; *) sel="--test $t";; esac; f="${filter:-}"; f="${f//@/::}"; f="${f//+/ }"; \
 if [ "${crate}" = egui-pop-gallery ] && [ -f crates/egui-pop-gallery/tests/it/main.rs ] && [ -n "$t" ] && [ "$t" != lib ] && [ "$t" != it ]; then sel="--test it"; if [ -n "$f" ]; then f=$(printf "$t::%s " $f); else f="$t::"; fi; fi; \
 fe="${features:-}"; fe="${fe//+/,}"; case "$fe" in *[!A-Za-z0-9_,/-]*) echo "bad features=$fe" >&2; exit 2;; esac; \
 cargo test --locked -p ${crate} ${fe:+--features "$fe"} $sel -- $f"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "3", RUST_TEST_THREADS = "3" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "30m"
 
 # egui-pop's gallery snapshots regenerated (UPDATE_SNAPSHOTS=1, on lavapipe
@@ -990,7 +1023,7 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 if [ -f crates/egui-pop-gallery/tests/it/main.rs ]; then sel="--test it -- gallery:: rerun_like:: inspect::"; else sel="--test gallery --test rerun_like --test inspect"; fi; \
 UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-gallery $sel; rc=$?; \
 UPDATE_SNAPSHOTS=1 cargo test --locked -p egui-pop-app-template; rt=$?; [ $rc -eq 0 ] && rc=$rt; \
@@ -999,6 +1032,7 @@ find templates/app/tests/snapshots -name '*.png' ! -name '*.new.png' ! -name '*.
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # egui-pop's frame times under background load (its docs/threading.md):
@@ -1011,11 +1045,12 @@ cores = 8
 memory = "6g"
 timing = true
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 cargo build --release --locked -p egui-pop-gallery --features trace --example threading && \
 THREADING_OUT=/out/threading.jsonl /target/release/examples/threading ${scenarios:-} | tee /out/threading.txt; exit ${PIPESTATUS[0]}"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # egui-pop's performance gate (its docs/testing.md, "Performance"): the
@@ -1033,10 +1068,11 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 cargo build --release --locked -p egui-pop-gallery --example perf"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 [jobs.egui-pop-perf]
@@ -1070,13 +1106,14 @@ memory = "4g"
 resources = ["gpu"]
 timing = true
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && cp "$BENCH_RESOURCES" /out/resources.json 2> /dev/null; \
 vulkaninfo --summary > /out/vulkaninfo.txt 2>&1; \
 cargo build --release --locked -p egui-pop-viewport --example gpu_tiles || exit 1; \
 for period in 8 30; do for intake in ${intakes:-gpu-ui gpu-worker gpu-render cpu-ui cpu-worker}; do \
 GPU_TILES_OUT=/out/gpu-tiles.jsonl /target/release/examples/gpu_tiles $intake $period || exit 1; done; done"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # egui-pop's translation catalogues regenerated (UPDATE_CATALOGUES=1: the
@@ -1093,11 +1130,12 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "4g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 cargo xtask screenshots ${page:-} && mkdir -p /out/screenshots && cp -r docs/screenshots/. /out/screenshots/"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 outputs = { screenshots = { path = "screenshots/", kind = "images" } }
 timeout = "1h"
 
@@ -1111,10 +1149,11 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 cargo build --release --locked -p egui-pop-gallery && cp /target/release/egui-pop-gallery /out/"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 outputs = { gallery = { path = "egui-pop-gallery", kind = "file" } }
 timeout = "1h"
 
@@ -1130,12 +1169,13 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 cargo build --release --locked -p egui-pop-gallery && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 WBOX_COMPOSITOR=${compositor:-labwc} "$WBOX_PYTHON" -I tools/wbox/${script:-titlebar.py} --out /out"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 [jobs.egui-pop-catalogues]
@@ -1145,12 +1185,13 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "7g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 UPDATE_CATALOGUES=1 cargo test --locked -p egui-pop-i18n --test catalogues; rc=$?; \
 cp -r crates/egui-pop-i18n/locales /out/ ; \
 exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # what egui-pop costs an application, per feature set of its facade
@@ -1169,10 +1210,11 @@ checkouts = ["egui-pop"]
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-egui-pop}"
-command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
 python3 -I tools/cost/cost.py --out /out --targets /target/cost --runs ${runs:-10} ${sets:+--sets ${sets}}"""
 env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "5" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git" }
+source_times = "/target"
 timeout = "2h"
 
 # ---------------------------------------------------------------- raw corpus
@@ -1200,11 +1242,12 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 4
 memory = "4g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 flag=; [ "${bless:-no}" = yes ] && flag=--bless; \
 cargo run -q --locked -p helios-corpus -- --dir /corpus --out /out $flag"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "30m"
 
 # raws developed as the desktop develops them: a few files of the raw
@@ -1217,13 +1260,14 @@ about = "corpus raws developed through Develop one image, against the node's raw
 cores = 5
 memory = "6g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 HELIOS_RAW_CORPUS=/corpus HELIOS_TEST_IMAGES=/work/darktable/src/tests/integration/images \
 if [ -f crates/helios-gui/tests/it/main.rs ]; then sel="--test it -E test(/^develop_raw::/)"; else sel="--test develop_raw"; fi; \
 cargo nextest run --locked --profile ci --no-capture -p helios-gui $sel; rc=$?; \
 cp target/nextest/ci/junit.xml /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", sccache = "/sccache" }
+source_times = "/target"
 timeout = "45m"
 
 # ---------------------------------------------------------------- mask parity
@@ -1240,7 +1284,7 @@ about = "Helios's drawn masks against darktable-cli's, pixel by pixel"
 cores = 8
 memory = "8g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 for dt in classic:/work/darktable flexi:/work/darktable-flexi; do \
   DT_JOBS=6 tools/bench/build-darktable.sh ${dt#*:} /work/rawspeed /work/whereami /work/libraw /dt/${dt%%:*}/build /dt/${dt%%:*}/prefix > /out/darktable-${dt%%:*}-build.log 2>&1 || { tail -50 /out/darktable-${dt%%:*}-build.log; exit 1; }; \
 done; \
@@ -1249,6 +1293,7 @@ cargo build -q --release --locked -p helios-parity --bin mask-parity \
  && HELIOS_DARKTABLE_CLI=/dt/classic/prefix/bin/darktable-cli /target/release/mask-parity --corpus /corpus --out /out --darktable-flexi /dt/flexi/prefix/bin/darktable-cli"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic", "darktable-build/flexi" = "/dt/flexi", sccache = "/sccache" }
+source_times = "/target"
 timeout = "2h"
 
 # ---------------------------------------------------------------- raw parity
@@ -1264,13 +1309,14 @@ about = "corpus raws developed by Helios's Develop chain against darktable-cli: 
 cores = 6
 memory = "8g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 DT_JOBS=6 tools/bench/build-darktable.sh /work/darktable /work/rawspeed /work/whereami /work/libraw /dt/classic/build /dt/classic/prefix > /out/darktable-build.log 2>&1 || { tail -50 /out/darktable-build.log; exit 1; }; \
 only=; [ "${only:-all}" = all ] || only="--only ${only:-all}"; \
 cargo build -q --release --locked -p helios-parity --bin raw-parity \
  && HELIOS_DARKTABLE_CLI=/dt/classic/prefix/bin/darktable-cli timeout 50m /target/release/raw-parity --corpus /corpus --out /out $only"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", raw-corpus = "/corpus", "darktable-build/classic" = "/dt/classic", sccache = "/sccache" }
+source_times = "/target"
 outputs = { shots = { path = "shots/", kind = "images" } }
 timeout = "90m"
 
@@ -1284,9 +1330,10 @@ cores = 8
 memory = "6g"
 exclusive = ["machine"]
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cargo xtask bench masks && cp /target/bench/masks.jsonl /out/"""
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask bench masks && cp /target/bench/masks.jsonl /out/"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # the thumbnail benchmark (docs/performance.md): per corpus raw, its
@@ -1302,10 +1349,11 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "8g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui --example thumb_bench"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # the measure only (a timing job: the box's cap and cool-down apply), on the
@@ -1339,10 +1387,11 @@ checkouts = ["helios", "vkdt", "egui-pop"]
 cores = 8
 memory = "8g"
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
 cargo build --locked --release -p helios-gui --example open_timing"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
 
 # the measure only (a timing job: the box's cap and cool-down apply), on the
@@ -1368,8 +1417,9 @@ cores = 8
 memory = "6g"
 exclusive = ["machine"]
 cwd = "/work/${src:-helios}"
-command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && cargo xtask test-times --profile ci | tee /out/test-times.txt; rc=${PIPESTATUS[0]}; \
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode,timestamps . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && cargo xtask test-times --profile ci | tee /out/test-times.txt; rc=${PIPESTATUS[0]}; \
 cp target/nextest/ci/junit.xml /target/test-times/history.jsonl /out/; exit $rc"""
 env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
 timeout = "1h"
