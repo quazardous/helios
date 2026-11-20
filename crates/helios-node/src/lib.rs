@@ -43,6 +43,8 @@
 
 pub mod auto_import;
 pub mod batch;
+#[cfg(unix)]
+pub mod bridge;
 pub mod chain;
 pub mod commands;
 /// darktable's sidecars kept in a vault (`helios_library::darktable`).

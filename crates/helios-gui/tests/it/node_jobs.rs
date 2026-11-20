@@ -65,7 +65,8 @@ impl Node {
     }
 
     /// A node serving its relayable facts, as `helios-node` does: its
-    /// application bus has its fact bus as journal and relay.
+    /// application bus has its fact bus as journal and relay, served over
+    /// bus-bridge on Unix.
     fn relaying(name: &str) -> Node {
         Node::serving(name, helios_core::bus::JOURNAL, true)
     }
@@ -83,6 +84,16 @@ impl Node {
             inspector = inspector.with_relay(kernel.clone());
         }
         helios_inspect::serve(inspector.clone(), &dir.join("node.sock")).unwrap();
+        // On Unix its relayable facts go over bus-bridge, next to its
+        // inspect socket.
+        #[cfg(unix)]
+        if let Some(kernel) = &kernel {
+            helios_node::bridge::serve(
+                kernel.clone(),
+                &helios_inspect::bridge_socket(&dir.join("node.sock")),
+            )
+            .unwrap();
+        }
         let cancels = jobs.clone();
         helios_inspect::serve_at(
             &Listen::Unix(dir.join("control.sock")),
@@ -750,31 +761,59 @@ fn an_older_node_s_fact_lands_under_its_new_name_once() {
             json!({ "layer": "user", "n": n }),
         )
     };
-    let deadline = Instant::now() + LONG;
-    while by_point.recv_timeout(Duration::from_millis(50)).is_err() {
-        layer(1);
-        assert!(Instant::now() < deadline, "no relayed fact within {LONG:?}");
+    // On Unix the facts come over bus-bridge, which an older node does
+    // not serve: its relayable facts come by the event stream, to the
+    // node table's listeners under their new name, once, and no point
+    // listener hears them (bus-bridge crosses a point at its own name).
+    #[cfg(unix)]
+    {
+        drop(facts);
+        let deadline = Instant::now() + LONG;
+        loop {
+            layer(1);
+            if by_table.recv_timeout(Duration::from_millis(50)).is_ok() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "no fact within {LONG:?}");
+        }
+        wait_for_link(&shell_bus);
+        layer(2);
+        let table: Vec<NodeEvent> = std::iter::from_fn(|| by_table.recv_timeout(QUIET).ok())
+            .filter(|e| e.event.payload["n"] == 2)
+            .collect();
+        assert_eq!(table.len(), 1, "the node table's listener: {table:#?}");
+        assert_eq!(table[0].event.kind, LayerChanged::KIND);
+        assert!(by_point.try_recv().is_err(), "no point listener hears it");
     }
-    wait_for_link(&shell_bus);
+    // Elsewhere the inspect stream takes them in under their new name.
+    #[cfg(not(unix))]
+    {
+        let deadline = Instant::now() + LONG;
+        while by_point.recv_timeout(Duration::from_millis(50)).is_err() {
+            layer(1);
+            assert!(Instant::now() < deadline, "no relayed fact within {LONG:?}");
+        }
+        wait_for_link(&shell_bus);
 
-    layer(2);
-    assert_eq!(heard_n(&by_point, 2), 1, "the point's listener, once");
-    let table: Vec<NodeEvent> = std::iter::from_fn(|| by_table.recv_timeout(QUIET).ok())
-        .filter(|e| e.event.payload["n"] == 2)
-        .collect();
-    assert_eq!(table.len(), 1, "the node table's listener: {table:#?}");
-    assert_eq!(table[0].event.kind, LayerChanged::KIND);
-    let landed: Vec<&str> = facts
-        .since(0)
-        .iter()
-        .filter(|e| e.payload["n"] == 2)
-        .map(|e| e.kind)
-        .collect();
-    assert_eq!(
-        landed,
-        [LayerChanged::KIND],
-        "on the desktop's fact bus once"
-    );
+        layer(2);
+        assert_eq!(heard_n(&by_point, 2), 1, "the point's listener, once");
+        let table: Vec<NodeEvent> = std::iter::from_fn(|| by_table.recv_timeout(QUIET).ok())
+            .filter(|e| e.event.payload["n"] == 2)
+            .collect();
+        assert_eq!(table.len(), 1, "the node table's listener: {table:#?}");
+        assert_eq!(table[0].event.kind, LayerChanged::KIND);
+        let landed: Vec<&str> = facts
+            .since(0)
+            .iter()
+            .filter(|e| e.payload["n"] == 2)
+            .map(|e| e.kind)
+            .collect();
+        assert_eq!(
+            landed,
+            [LayerChanged::KIND],
+            "on the desktop's fact bus once"
+        );
+    }
 
     // A job's events, by the event stream: under their new names too.
     let job = node.jobs.start(Start::new("legacy-1", "Scan", "scan"));

@@ -749,6 +749,15 @@ impl rpc::Service for Inspector {
     }
 }
 
+/// The socket where a node whose inspect socket is `inspect` serves its
+/// relayable facts over bus-bridge (Unix only): `<inspect>.bridge`, next
+/// to it. The desktop finds it from the inspect address it was given.
+pub fn bridge_socket(inspect: &Path) -> PathBuf {
+    let mut name = inspect.as_os_str().to_owned();
+    name.push(".bridge");
+    PathBuf::from(name)
+}
+
 /// Serves the inspector on a Unix socket at `path`, one thread per
 /// connection. Returns once the socket is bound; serving goes on in the
 /// background for the life of the process.

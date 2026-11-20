@@ -91,9 +91,9 @@ egui-pop-hooks = "0.4"
 # the buses Helios builds to check they keep the bus contract.
 bus-kernel = "0.3.1"
 # MIT OR Apache-2.0: bus-contract's reference transports (in-process and
-# Unix socket), measured against the node link it may replace (dev only
-# for now, #5318).
-bus-bridge = "0.2"
+# Unix socket): a node's relayable facts reach the desktop over its Unix
+# socket link (Unix only; Windows keeps the inspect stream).
+bus-bridge = "0.2.1"
 # MIT: egui-pop's logic without egui (layouts, panels), for what checks a
 # layout without building the window's stack (workspace templates).
 egui-pop-model = "0.12.1"
