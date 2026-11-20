@@ -15,9 +15,14 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use egui::Role;
+use egui_pop::core::a11y;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
 use helios_core::Message;
 use helios_library::import_history::{Place, Record};
 use helios_shell::commands::Origin;
+use helios_ui::Action;
 use serde_json::{Value, json};
 
 use super::Shell;
@@ -219,31 +224,29 @@ pub(super) fn history_ui(
     history.reader.as_ref()?;
     let mut asked = None;
     // Under the Sources column's History panel, which names it.
-    ui.weak(&words.title);
+    ui.muted(&words.title);
     if history.records.is_empty() {
-        ui.weak(&words.none);
+        ui.muted(&words.none);
     }
     for r in history.records.iter().take(SHOWN) {
         let text = line(r, t);
         ui.horizontal(|ui| {
-            ui.label(&text).on_hover_text(details(r, t));
+            let _ = ui.text_role(TextRole::Body, &text).tip(details(r, t));
             // An importer's import is run again from its menu entry, a
             // connector's from its source (listed or picked anew).
             if r.importer.is_none() && r.remote.is_none() {
-                let button = ui.small_button(&words.again);
+                let button = helios_ui::row_action(ui, Action::Secondary, &words.again);
                 // Each row's button says which import it runs again.
-                let name = format!("{}: {text}", words.again);
-                button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-                if button.on_hover_text(&words.again).clicked() {
+                a11y::name(&button, Role::Button, &format!("{}: {text}", words.again));
+                if button.tip(&words.again).clicked() {
                     asked = Some(r.id.clone());
                 }
             }
             // Its photos, as the Library's import session.
             if r.error.is_none() {
-                let button = ui.small_button(&words.show);
-                let name = format!("{}: {text}", words.show);
-                button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
-                if button.on_hover_text(&words.show).clicked() {
+                let button = helios_ui::row_action(ui, Action::Secondary, &words.show);
+                a11y::name(&button, Role::Button, &format!("{}: {text}", words.show));
+                if button.tip(&words.show).clicked() {
                     crate::dialogs::request(
                         ui.ctx(),
                         crate::dialogs::Request::Run(
