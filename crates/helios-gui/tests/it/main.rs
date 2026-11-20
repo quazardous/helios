@@ -108,6 +108,7 @@ mod scale;
 mod scenario_files;
 mod scopes_size;
 mod scopes_snapshots;
+mod screen_override;
 mod screens;
 mod settings_app;
 mod settings_plugins;

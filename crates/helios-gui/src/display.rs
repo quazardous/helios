@@ -68,6 +68,7 @@ use egui_pop::model::ids::{PluginId, SettingId};
 use egui_pop::model::values::Descriptor;
 use egui_pop::viewport::display::{self as pop_display, DisplayTarget};
 use egui_pop::viewport::image_surface;
+use helios_core::Message;
 use serde_json::{Value as Json, json};
 
 use crate::viewport::rec2020_gamma22;
@@ -404,32 +405,8 @@ pub fn tell_screen_colour(
     name: &str,
     colour: Option<ScreenColour>,
 ) -> Result<(), String> {
-    use egui_pop::model::commands::Origin;
-    use egui_pop::model::ids::OwnerId;
-    use egui_pop::model::values::{Change, Set, Value};
-    let path = screen_key(name);
-    let store = app.store();
-    let mut store = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if store.get(&path).is_none() {
-        store
-            .declare(
-                &OwnerId::from_static("helios.display"),
-                &path,
-                Descriptor::choice(
-                    &format!("What the screen {name} shows"),
-                    &SCREEN_COLOURS,
-                    "unknown",
-                ),
-            )
-            .map_err(|e| e.to_string())?;
-    }
     let value = colour.map_or("unknown", ScreenColour::name);
-    store
-        .set(Set::new(&path, Change::To(Value::Choice(value.into())), Origin::User).untracked())
-        .map(|_| ())
-        .map_err(|e| format!("{e:?}"))
+    set_screen_choice(app, &screen_key(name), name, &SCREEN_COLOURS, value)
 }
 
 impl From<helios_display::Shows> for ScreenColour {
@@ -490,14 +467,271 @@ pub fn read_system_screens(
 /// read from the system again, a screen plugged in being described.
 pub const SCREENS_LISTENER: &str = "helios.display.screen_colour";
 
-/// What the screen `name` shows, when Helios is told; none otherwise
-/// (the window's route then follows what the display offers).
+/// What the screen `name` shows: the person's correction first
+/// ([`screen_override`]), then what the system said
+/// ([`system_screen_colour`]); none when neither tells (the window's
+/// route then follows what the display offers).
 pub fn screen_colour(app: &AppHandle, name: &str) -> Option<ScreenColour> {
+    screen_override(app, name).or_else(|| system_screen_colour(app, name))
+}
+
+/// What the system said the screen `name` shows
+/// ([`tell_described_screens`]), whatever the person's correction.
+pub fn system_screen_colour(app: &AppHandle, name: &str) -> Option<ScreenColour> {
     app.store()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(&screen_key(name))
         .and_then(|e| e.value.as_choice().and_then(ScreenColour::parse))
+}
+
+// --- The person's correction, per screen ---
+
+/// What the person may say a screen shows: `auto` follows the system.
+pub const OVERRIDES: [&str; 4] = ["auto", "srgb", "wide-gamut", "hdr"];
+
+/// The store's path of the person's correction for the screen `name`:
+/// `display/screens/<screen>/override`, a choice of [`OVERRIDES`]. A key
+/// of its own: the system's read (at start, on `screen.added`) writes
+/// [`screen_key`] alone and never overwrites it.
+pub fn override_key(name: &str) -> String {
+    format!("{}/override", screen_key(name))
+}
+
+/// The document the corrections are kept in, in the persistence folder:
+/// `{"overrides": {"<screen>": "srgb"}}`, read at start.
+pub const OVERRIDES_DOC: &str = "display-screens.json";
+
+/// What the person said the screen `name` shows; none for `auto` (or
+/// nothing said).
+pub fn screen_override(app: &AppHandle, name: &str) -> Option<ScreenColour> {
+    app.store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&override_key(name))
+        .and_then(|e| e.value.as_choice().and_then(ScreenColour::parse))
+}
+
+/// Declares `path` as a choice of `choices` for the screen `name` (its
+/// label: the screen's name, as the system gives it) and sets it to
+/// `value`.
+fn set_screen_choice(
+    app: &AppHandle,
+    path: &str,
+    name: &str,
+    choices: &[&str],
+    value: &str,
+) -> Result<(), String> {
+    use egui_pop::model::commands::Origin;
+    use egui_pop::model::ids::OwnerId;
+    use egui_pop::model::values::{Change, Set, Value};
+    let store = app.store();
+    let mut store = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if store.get(path).is_none() {
+        store
+            .declare(
+                &OwnerId::from_static("helios.display"),
+                path,
+                Descriptor::choice(name, choices, choices[0]),
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    store
+        .set(Set::new(path, Change::To(Value::Choice(value.into())), Origin::User).untracked())
+        .map(|_| ())
+        .map_err(|e| format!("{e:?}"))
+}
+
+/// Says what the person corrects the screen `name` to show (none: `auto`,
+/// the system's word again), and keeps every correction for the next
+/// start ([`OVERRIDES_DOC`]). Each window on it follows at its next pass.
+///
+/// # Errors
+/// The store refused the path or the value.
+pub fn set_screen_override(
+    app: &AppHandle,
+    name: &str,
+    colour: Option<ScreenColour>,
+) -> Result<(), String> {
+    let value = colour.map_or("auto", ScreenColour::name);
+    set_screen_choice(app, &override_key(name), name, &OVERRIDES, value)?;
+    let doc = json!({ "overrides": overrides(app) });
+    app.save_later(OVERRIDES_DOC, doc.to_string());
+    app.egui().request_repaint();
+    Ok(())
+}
+
+/// Every correction the person made, by screen name.
+pub fn overrides(app: &AppHandle) -> std::collections::BTreeMap<String, String> {
+    let store = app.store();
+    let store = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    store
+        .list(&format!("{SCREENS_KEY}/"))
+        .into_iter()
+        .filter(|(path, _)| path.ends_with("/override"))
+        .filter_map(|(_, e)| {
+            let v = e.value.as_choice()?;
+            (v != "auto").then(|| (e.descriptor.label.clone(), v.to_owned()))
+        })
+        .collect()
+}
+
+/// Reads the corrections kept at the last run ([`OVERRIDES_DOC`]) into
+/// the store; none without a persistence folder (tests, tools).
+fn load_overrides(app: &AppHandle) {
+    let Some(persist) = app.persist() else {
+        return;
+    };
+    let Ok(text) = std::fs::read_to_string(persist.path(OVERRIDES_DOC)) else {
+        return;
+    };
+    let Ok(doc) = serde_json::from_str::<Json>(&text) else {
+        log::warn!(target: "helios", "display: {OVERRIDES_DOC} is not JSON, ignored");
+        return;
+    };
+    app.saved_already(OVERRIDES_DOC, &text);
+    for (name, v) in doc["overrides"].as_object().into_iter().flatten() {
+        let colour = v.as_str().and_then(ScreenColour::parse);
+        let Some(colour) = colour else { continue };
+        if let Err(e) = set_screen_choice(app, &override_key(name), name, &OVERRIDES, colour.name())
+        {
+            log::warn!(target: "helios", "display: the screen {name}'s correction: {e}");
+        }
+    }
+}
+
+/// A screen as Settings > Display lists it ([`SCREENS_COMMAND`]).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenRow {
+    /// Its name, as the system gives it.
+    pub name: String,
+    /// What the system says it shows: `unknown` until told.
+    pub system: &'static str,
+    /// The same, in words.
+    pub system_text: String,
+    /// The person's correction: `auto` follows the system.
+    pub r#override: &'static str,
+    /// What the windows on it go by ([`screen_colour`]); none: unknown.
+    pub shows: Option<ScreenColour>,
+    /// Connected now (the system lists it).
+    pub connected: bool,
+}
+
+/// What a screen shows, in words; `unknown` as "Not described".
+pub fn colour_text(colour: Option<ScreenColour>) -> Message {
+    match colour {
+        Some(ScreenColour::Srgb) => Message::new("gui-display-screen-srgb", "sRGB"),
+        Some(ScreenColour::WideGamut) => Message::new("gui-display-screen-wide", "Wide gamut"),
+        Some(ScreenColour::Hdr) => Message::new("gui-display-screen-hdr", "HDR"),
+        None => Message::new("gui-display-screen-unknown", "Not described"),
+    }
+}
+
+/// The screens known: those connected now, those the system described
+/// and those the person corrected (connected or not), by name.
+pub fn screen_rows(app: &AppHandle, t: &dyn Fn(Message) -> String) -> Vec<ScreenRow> {
+    let connected: std::collections::BTreeSet<String> = egui_pop::api::window::screen_list()
+        .into_iter()
+        .filter_map(|s| s.name)
+        .collect();
+    let mut names = connected.clone();
+    {
+        let store = app.store();
+        let store = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (path, e) in store.list(&format!("{SCREENS_KEY}/")) {
+            let told =
+                !path.ends_with("/override") && e.value.as_choice().is_some_and(|v| v != "unknown");
+            let corrected =
+                path.ends_with("/override") && e.value.as_choice().is_some_and(|v| v != "auto");
+            if told || corrected {
+                names.insert(e.descriptor.label.clone());
+            }
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            let system = system_screen_colour(app, &name);
+            let corrected = screen_override(app, &name);
+            ScreenRow {
+                system: system.map_or("unknown", ScreenColour::name),
+                system_text: t(colour_text(system)),
+                r#override: corrected.map_or("auto", ScreenColour::name),
+                shows: corrected.or(system),
+                connected: connected.contains(&name),
+                name,
+            }
+        })
+        .collect()
+}
+
+/// The screens Settings > Display lists ([`screen_rows`]), read-only.
+pub const SCREENS_COMMAND: &str = "helios.display.screens";
+/// Corrects what a screen shows (`screen`, `value`: one of
+/// [`OVERRIDES`]); agents may run it.
+pub const SCREEN_OVERRIDE_COMMAND: &str = "helios.display.screen_override";
+
+/// The interface's texts, for the screens' rows.
+pub type Texts = Arc<dyn Fn(Message) -> String + Send + Sync>;
+
+/// Registers [`SCREENS_COMMAND`] and [`SCREEN_OVERRIDE_COMMAND`].
+fn commands(ctx: &mut Ctx<'_>, texts: Texts) -> Result<(), PluginError> {
+    use egui_pop::model::commands::CommandSpec;
+    use egui_pop::model::ids::CommandId;
+    let id = |s: &'static str| CommandId::from_static(s);
+    let t = texts.clone();
+    ctx.command(
+        CommandSpec::new(
+            id(SCREENS_COMMAND),
+            "The screens known (connected, described by the system or corrected by the person): what the system says each shows, the person's correction and what the windows on it go by",
+            "Display",
+        )
+        .read_only()
+        .hidden(),
+        move |call| Ok(json!({ "screens": screen_rows(call.app, &*t) })),
+    )
+    ?;
+    ctx.command(
+        CommandSpec::new(
+            id(SCREEN_OVERRIDE_COMMAND),
+            "Corrects what a screen shows (`screen`: its name; `value`: auto, srgb, wide-gamut or hdr), over what the system says; auto follows the system again",
+            "Display",
+        )
+        .schema(json!({
+            "type": "object",
+            "properties": {
+                "screen": { "type": "string", "minLength": 1 },
+                "value": { "enum": OVERRIDES },
+            },
+            "required": ["screen", "value"],
+        }))
+        .hidden(),
+        move |call| {
+            let name = call.args["screen"].as_str().ok_or("`screen` is missing")?;
+            let value = call.args["value"].as_str().ok_or("`value` is missing")?;
+            let colour = match value {
+                "auto" => None,
+                other => Some(
+                    ScreenColour::parse(other)
+                        .ok_or_else(|| format!("`value`: {other} is not one of {OVERRIDES:?}"))?,
+                ),
+            };
+            set_screen_override(call.app, name, colour)?;
+            let row = screen_rows(call.app, &*texts)
+                .into_iter()
+                .find(|r| r.name == name);
+            Ok(json!({ "screen": row }))
+        },
+    )
+    ?;
+    Ok(())
 }
 
 /// What a window wants, with the Wide-gamut preview setting `wide_gamut`
@@ -705,8 +939,14 @@ fn collector(app: AppHandle) -> FnCollector {
 /// Declares the display's settings and its debug collectors, and says
 /// what each screen shows as the system describes it (`read`, at start
 /// and on `screen.added`).
+///
+/// The person corrects what a screen shows in Settings > Display
+/// ([`SCREEN_OVERRIDE_COMMAND`]); the correction wins over the system's
+/// word ([`screen_colour`]) and is kept for the next start
+/// ([`OVERRIDES_DOC`]).
 pub struct Display {
     read: fn() -> Result<Vec<helios_display::ScreenDescription>, String>,
+    texts: Texts,
 }
 
 impl Default for Display {
@@ -721,7 +961,17 @@ impl Display {
     pub fn reading(
         read: fn() -> Result<Vec<helios_display::ScreenDescription>, String>,
     ) -> Display {
-        Display { read }
+        Display {
+            read,
+            texts: Arc::new(|m: Message| m.to_string()),
+        }
+    }
+
+    /// The screens' rows in the interface's language.
+    #[must_use]
+    pub fn texts(mut self, texts: impl Fn(Message) -> String + Send + Sync + 'static) -> Display {
+        self.texts = Arc::new(texts);
+        self
     }
 }
 
@@ -743,6 +993,10 @@ impl Plugin for Display {
         )?;
         declare(&*ctx.app().bus());
         let (app, read) = (ctx.app(), self.read);
+        // The person's corrections first: the system's read never
+        // overwrites them (a key of their own).
+        load_overrides(&app);
+        commands(ctx, self.texts.clone())?;
         read_system_screens(&app, read);
         let listening = ctx.app().bus().listen_local::<ScreenAdded>(
             SCREENS_LISTENER,

@@ -625,6 +625,7 @@ pub fn manifest(
     })
     .section("hardware/display", &tt("hardware/display"), |s| {
         s.field(Field::setting(crate::display::SETTING_WIDE_GAMUT.as_str()));
+        screens_section(s, t);
     })
     .section("backup/strategy", &tt("backup/strategy"), |s| {
         helios_storage_ui::settings::strategy_section(s, t);
@@ -1130,6 +1131,69 @@ fn clients_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
         &t(Message::new(
             "gui-settings-clients-none",
             "No service signing in through OAuth is installed.",
+        )),
+        None,
+    );
+    s.table(table);
+}
+
+/// The screens (`helios.display.screens`): each with what the system
+/// says it shows and the person's correction (`auto` follows the
+/// system), written by `helios.display.screen_override`. A screen not
+/// connected stays listed while it has a correction.
+fn screens_section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
+    use crate::display::ScreenColour as C;
+    use crate::display::{OVERRIDES, SCREEN_OVERRIDE_COMMAND, SCREENS_COMMAND, colour_text};
+    // In `OVERRIDES`' order: auto, srgb, wide-gamut, hdr.
+    let labels = [
+        t(Message::new(
+            "gui-display-screen-auto",
+            "Auto (what the system says)",
+        )),
+        t(colour_text(Some(C::Srgb))),
+        t(colour_text(Some(C::WideGamut))),
+        t(colour_text(Some(C::Hdr))),
+    ];
+    let choices: Vec<(Json, &str)> = OVERRIDES
+        .iter()
+        .zip(&labels)
+        .map(|(v, l)| (json!(v), l.as_str()))
+        .collect();
+    let table = Records::command(
+        "screens",
+        &t(Message::new("gui-settings-display-screens", "Screens")),
+        SCREENS_COMMAND,
+        "/screens",
+        "name",
+    )
+    .column(
+        "name",
+        &t(Message::new("gui-settings-display-screen", "Screen")),
+    )
+    .column(
+        "systemText",
+        &t(Message::new(
+            "gui-settings-display-system-says",
+            "The system says",
+        )),
+    )
+    .row_field(
+        RowField::choice(
+            "override",
+            &t(Message::new("gui-settings-display-shows", "Shows")),
+            &choices,
+            SCREEN_OVERRIDE_COMMAND,
+            json!({ "screen": "${row.name}", "value": "${value}" }),
+        )
+        .help(&t(Message::new(
+            "gui-settings-display-shows-help",
+            "Corrects what the system says this screen shows; Auto follows the system. HDR is detected and shown only: an HDR screen is drawn as wide gamut for now.",
+        ))),
+    )
+    .empty(
+        &t(Message::new(
+            "gui-settings-display-no-screens",
+            "No screen known yet.",
         )),
         None,
     );
