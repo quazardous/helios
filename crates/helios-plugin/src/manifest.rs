@@ -58,6 +58,17 @@
 //! fixes = ["import.reconnect"]
 //! every_minutes = 360
 //! ```
+//!
+//! `[ui]` lists the plugin's declared pages (the `ui` interface): each an
+//! admin manifest in JSON beside the manifest, read and checked by the
+//! interface before anything of the plugin runs (bounded to the plugin's
+//! own settings and commands, see `helios-gui`'s `config::plugin_pages`).
+//! The plugin draws nothing.
+//!
+//! ```toml
+//! [ui]
+//! pages = ["ui/settings.json"]
+//! ```
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -78,7 +89,11 @@ pub const INTERFACES: &[(&str, &[u32])] = &[
     ("importer", &[1, 2]),
     ("import.source", &[1]),
     ("health", &[1]),
+    ("ui", &[1]),
 ];
+
+/// The most page files a plugin may declare (`[ui] pages`).
+pub const MAX_PAGES: usize = 8;
 
 /// The services a plugin may provide; each is also an interface.
 pub const SERVICES: &[&str] = &["metadata.read", "device", "importer", "import.source"];
@@ -208,6 +223,26 @@ pub struct CommandDecl {
     pub title: String,
     #[serde(default)]
     pub category: String,
+    /// It only reads: a declared page's statuses and record lists may
+    /// call it (`read_only` on the bus).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
+}
+
+/// What the plugin declares for the interface to show (`[ui]`, the `ui`
+/// interface): files beside the manifest, never code.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct UiDecl {
+    /// Its pages: admin manifests in JSON, relative to its directory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<String>,
+}
+
+impl UiDecl {
+    fn is_empty(&self) -> bool {
+        self.pages.is_empty()
+    }
 }
 
 /// What the user picks for an importer: a file or a folder.
@@ -462,6 +497,9 @@ pub struct Manifest {
     /// Its problem checks (`[[health]]`), run through its process.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub health: Vec<HealthDecl>,
+    /// Its declared pages (`[ui]`).
+    #[serde(default, skip_serializing_if = "UiDecl::is_empty")]
+    pub ui: UiDecl,
 }
 
 fn no_limits(limits: &helios_connect::Limits) -> bool {
@@ -558,6 +596,7 @@ impl Manifest {
         p.extend(self.importer_problems());
         p.extend(self.connect_problems());
         p.extend(self.health_problems());
+        p.extend(self.ui_problems());
         for e in &self.activation {
             let ok = match e.split_once(':') {
                 None if e == ON_HEALTH => !self.health.is_empty(),
@@ -635,6 +674,42 @@ impl Manifest {
             }
             if !seen.insert(check.id.as_str()) {
                 p.push(format!("health check `{}` is declared twice", check.id));
+            }
+        }
+        p
+    }
+
+    /// What keeps its declared pages from being read: the `ui` interface
+    /// given, at most [`MAX_PAGES`] files, each a `.json` path inside the
+    /// plugin's directory, each once.
+    fn ui_problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if self.ui.is_empty() {
+            return p;
+        }
+        if !self.compat.interfaces.contains_key("ui") {
+            p.push("`[ui]` without the `ui` interface version in `compat.interfaces`".into());
+        }
+        if self.ui.pages.len() > MAX_PAGES {
+            p.push(format!(
+                "`[ui] pages`: {} files, at most {MAX_PAGES}",
+                self.ui.pages.len()
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for page in &self.ui.pages {
+            let path = Path::new(page);
+            let inside = !path.is_absolute()
+                && path
+                    .components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_)));
+            if !inside || path.extension().and_then(|e| e.to_str()) != Some("json") {
+                p.push(format!(
+                    "`[ui] pages`: `{page}` is not a `.json` file inside the plugin's directory"
+                ));
+            }
+            if !seen.insert(page.as_str()) {
+                p.push(format!("`[ui] pages`: `{page}` is listed twice"));
             }
         }
         p
@@ -764,6 +839,11 @@ impl Manifest {
 
     pub fn declares(&self, capability: &str) -> bool {
         self.capabilities.iter().any(|c| c.name == capability)
+    }
+
+    /// A command it declares, by id.
+    pub fn command(&self, id: &str) -> Option<&CommandDecl> {
+        self.commands.iter().find(|c| c.id == id)
     }
 
     /// Its configuration contracts: its own, each account's and each
@@ -975,5 +1055,41 @@ kind = "form"
             "services = [\"import.source\"]\nbrowsers = [\"collections\", \"timeline\"]",
         ));
         assert_eq!(p, Vec::<String>::new());
+    }
+
+    #[test]
+    fn declared_pages_need_the_ui_interface_and_stay_inside_the_plugin() {
+        let with = |ui: &str, interfaces: &str| {
+            problems(
+                &SOURCE
+                    .replace("\"import.source\" = 1 }", interfaces)
+                    .replace("[settings.api]", &format!("{ui}\n\n[settings.api]")),
+            )
+        };
+        let ok = "\"import.source\" = 1, ui = 1 }";
+        assert_eq!(
+            with("[ui]\npages = [\"ui/settings.json\"]", ok),
+            Vec::<String>::new()
+        );
+        let p = with(
+            "[ui]\npages = [\"ui/settings.json\"]",
+            "\"import.source\" = 1 }",
+        );
+        assert!(p.iter().any(|e| e.contains("`ui` interface")), "{p:?}");
+        for bad in ["../other/page.json", "/etc/page.json", "ui/page.toml"] {
+            let p = with(&format!("[ui]\npages = [\"{bad}\"]"), ok);
+            assert!(
+                p.iter()
+                    .any(|e| e.contains("inside the plugin's directory")),
+                "{bad}: {p:?}"
+            );
+        }
+        let p = with("[ui]\npages = [\"a.json\", \"a.json\"]", ok);
+        assert!(p.iter().any(|e| e.contains("listed twice")), "{p:?}");
+        let p = with("[ui]\nrack = [\"ui/tools.json\"]", ok);
+        assert!(
+            p.iter().any(|e| e.contains("unknown field `rack`")),
+            "{p:?}"
+        );
     }
 }

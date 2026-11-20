@@ -225,6 +225,55 @@ levels, a level twice, a fix that is not a command id, `every_minutes`
 under 5, an event twice, no title, an id twice) refuses the plugin with its reasons, as a bad setting does; so do
 `[[health]]` without `onHealth` or without the `health` interface.
 
+## Declared pages
+
+A plugin shows more than its generated settings through pages it
+declares, never draws: egui-pop admin manifests in JSON beside its
+manifest (the `ui` interface, version 1). Helios reads and checks them
+before anything of the plugin runs, so a page shows for a plugin that is
+stopped or failed to start, and a refusal is said at once.
+
+```toml
+[compat]
+interfaces = { protocol = 1, "import.source" = 1, ui = 1 }
+
+[ui]
+pages = ["ui/settings.json"]            # at most 8, inside the plugin's folder
+
+[[commands]]
+id = "google-photos.api-check"
+title = "Check that Google Photos' Picker API answers"
+read_only = true                        # a status or a record list may read it
+```
+
+A page declares one section, `main` in the `plugins` scope: its groups
+join the plugin's own section of Settings > Plugins, after its
+permissions. What a page may hold:
+
+- fields bound to the plugin's own settings (`<plugin id>.<key>`) or to
+  drafts of its own tasks (`<plugin id>/…`). A contract key the page does
+  not place keeps its generated field, so no setting becomes unreachable;
+- actions naming the plugin's own commands, or a navigation command
+  (`admin.open`, `help.health`);
+- statuses and record lists reading the plugin's own `read_only`
+  commands; row fields and row actions naming its own commands;
+- callouts.
+
+Registered widgets, hooks (field, status, records or confirmation
+hooks), other sections, scopes and wizards are the host's. Every text
+(titles, descriptions, help, callouts, confirmations, columns) is a
+message id of the plugin's own catalogue (`<plugin slug>-…`), translated
+there. A file is at most 256 KB and a page at most 200 items; a newer
+format is refused. A brick this Helios does not know (a newer `node`) is
+left out before the page is read. Whatever is refused is left out alone,
+with its reason, in a callout on the plugin's section and in the log; the
+rest of the page still shows and Settings is never broken.
+
+The official Google Photos plugin declares its settings page this way
+(`plugins/sources/google-photos/ui/settings.json`): its Picker API
+address, a status saying whether the address answers, and a Test
+connection button, both through its `google-photos.api-check` command.
+
 ## Packaging and trust
 
 - A signed archive: the manifest, the plugin's code, its modules.

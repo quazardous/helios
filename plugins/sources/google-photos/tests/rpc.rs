@@ -223,3 +223,24 @@ fn its_accounts_check_says_which_account_needs_reconnecting() {
         .unwrap_err();
     assert_eq!(error["code"], -32602);
 }
+
+/// Its settings page's check: the API's address answers (a refused,
+/// unsigned call is an answer), or it does not.
+#[test]
+fn its_api_check_says_whether_the_address_answers() {
+    let fake = FakePicker::start(1, vec![]);
+    let mut plugin = Plugin::start(&fake.base);
+    let answer = plugin
+        .call("command/execute", json!({"command": "google-photos.api-check", "args": {}}))
+        .unwrap();
+    assert_eq!(answer["answers"], true);
+    assert_eq!(answer["status"]["tone"], "success");
+    assert_eq!(answer["status"]["text"], fake.base.as_str());
+    // Nothing listens on port 9 (discard), refused at once.
+    let mut plugin = Plugin::start("http://127.0.0.1:9/v1");
+    let answer = plugin
+        .call("command/execute", json!({"command": "google-photos.api-check"}))
+        .unwrap();
+    assert_eq!(answer["answers"], false);
+    assert_eq!(answer["status"]["tone"], "danger");
+}

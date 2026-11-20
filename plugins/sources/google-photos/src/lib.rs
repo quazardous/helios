@@ -53,6 +53,10 @@ pub const ID: &str = "google-photos";
 /// Where the Picker API answers.
 pub const API: &str = "https://photospicker.googleapis.com/v1";
 
+/// Its command checking the API's address answers (`read_only`): the
+/// status and the "Test connection" action of its settings page.
+pub const API_CHECK: &str = "google-photos.api-check";
+
 /// What the connector asks of Google at most, as its manifest declares
 /// it (`[limits]`): the import window's read-ahead of glances pauses
 /// there. Every install shares the OAuth client's project quota, so
@@ -357,6 +361,20 @@ impl Picker {
         }
         serde_json::from_str(&text)
             .map_err(|e| ConnectorError::Fatal(format!("the Picker's answer: {e}")))
+    }
+
+    /// Whether the API's address answers at all: any HTTP answer (an
+    /// unsigned call is refused, which is fine), not a failed connection.
+    /// No token is sent.
+    pub fn answers(&self) -> Result<(), ConnectorError> {
+        self.http
+            .get(&format!("{}/sessions/helios-check", self.api))
+            .call()
+            .map(|_| ())
+            .map_err(|e| match e {
+                ureq::Error::Timeout(_) => ConnectorError::Transient(format!("{e}")),
+                _ => ConnectorError::Offline,
+            })
     }
 
     /// A new picking session; `max_items` caps what the person may pick

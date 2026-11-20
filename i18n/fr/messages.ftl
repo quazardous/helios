@@ -3025,6 +3025,8 @@ gui-settings-plugin-no-capability = Elle ne demande aucune autorisation.
 gui-settings-plugin-reason = Pourquoi
 
 gui-settings-plugin-refused = Les réglages de cette extension ne sont pas affichés : { $problems }
+gui-settings-plugin-page = Page déclarée
+gui-settings-plugin-page-refused = Une partie de la page de cette extension n’est pas affichée : { $problems }
 
 gui-settings-plugin-settings = Réglages
 

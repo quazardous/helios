@@ -6,7 +6,7 @@ version = "0.1.0"
 license = "GPL-3.0-or-later"
 command = ["helios-google-photos"]
 services = ["import.source"]
-activation = ["onService:import.source", "onHealth"]
+activation = ["onService:import.source", "onHealth", "onCommand:google-photos.api-check"]
 # Google's API lets an application read only the photos picked in its own
 # page (the library-wide scopes were withdrawn in March 2025): the import
 # window browses this source through that page alone.
@@ -27,13 +27,27 @@ limits = { per_minute = 120, per_day = 10000 }
 
 [compat]
 helios = ">=0.92.0, <0.93.0"
-interfaces = { protocol = 1, "import.source" = 1, health = 1 }
+interfaces = { protocol = 1, "import.source" = 1, health = 1, ui = 1 }
 
 # Where the Picker API answers; only tests change it.
 [settings.api]
 type = "string"
 default = "https://photospicker.googleapis.com/v1"
-about = "The Photos Picker API's base address"
+label = "Picker API address"
+help = "The Photos Picker API's base address; change it only to try another server"
+
+# Its settings page (Settings > Plugins > Google Photos), declared, not
+# drawn: the address, whether it answers, and a button to try it again.
+[ui]
+pages = ["ui/settings.json"]
+
+# Whether the Picker API's address answers: the page's status and its
+# "Test connection" button.
+[[commands]]
+id = "google-photos.api-check"
+title = "Check that Google Photos' Picker API answers"
+category = "Google Photos"
+read_only = true
 
 # Where the photos picked are downloaded at Import: never asked during
 # the flow, shown pre-filled in the import window's Parameters.

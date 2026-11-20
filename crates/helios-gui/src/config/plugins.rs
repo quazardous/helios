@@ -78,6 +78,8 @@ pub struct PluginSettings {
     pub description: String,
     /// Its own settings (the contract's first level).
     pub contract: Contract,
+    /// Its declared pages (`[ui] pages`), read and checked.
+    pub page: super::plugin_pages::Page,
 }
 
 /// The plugins' settings shared between the shell's builder, which
@@ -97,11 +99,16 @@ impl PluginSettings {
                     .find(|t| !t.is_empty())
                     .cloned()
                     .unwrap_or_else(|| id.to_string());
+                let page = broker
+                    .dir(id)
+                    .map(|dir| super::plugin_pages::read(dir, m))
+                    .unwrap_or_default();
                 Some(PluginSettings {
                     id: id.to_string(),
                     title,
                     description: m.description.clone(),
                     contract: m.settings.clone(),
+                    page,
                 })
             })
             .collect();
@@ -322,8 +329,17 @@ pub fn section(s: &mut SectionBuilder<'_>, p: &PluginSettings, t: &dyn Fn(Messag
         ));
         return;
     }
+    page(s, p, t);
+    // The keys its declared page does not place keep their generated
+    // fields, so no setting becomes unreachable.
+    let placed = p.page.placed();
     let mut group: Option<&str> = None;
-    for (name, key) in p.contract.ordered() {
+    for (name, key) in p
+        .contract
+        .ordered()
+        .into_iter()
+        .filter(|(name, _)| !placed.contains(&p.setting(name)))
+    {
         if group != Some(key.group.as_str()) {
             group = Some(&key.group);
             let id = if key.group.is_empty() {
@@ -348,6 +364,44 @@ pub fn section(s: &mut SectionBuilder<'_>, p: &PluginSettings, t: &dyn Fn(Messag
             f = f.when(&c);
         }
         s.field(f);
+    }
+}
+
+/// A plugin's declared page (`[ui] pages`): its groups, translated, and
+/// what was left out of it, said in a callout.
+fn page(s: &mut SectionBuilder<'_>, p: &PluginSettings, t: &dyn Fn(Message) -> String) {
+    use egui_pop::api::admin::model::Item;
+    if !p.page.problems.is_empty() {
+        s.group(
+            "plugin-page-problems",
+            &t(Message::new("gui-settings-plugin-page", "Declared page")),
+        );
+        s.callout(Callout::new(
+            "plugin-page-refused",
+            Tone::Warning,
+            &t(Message::new(
+                "gui-settings-plugin-page-refused",
+                "Part of this plugin's page is not shown: { $problems }",
+            )
+            .with("problems", p.page.problems.join("; "))),
+        ));
+    }
+    for g in super::plugin_pages::translated(&p.page.groups, t) {
+        s.group(&g.meta.id, &g.meta.title);
+        if let Some(c) = &g.meta.when {
+            s.group_when(c);
+        }
+        for item in g.items {
+            match item {
+                Item::Field(f) => s.field(f),
+                Item::Action(a) => s.action(a),
+                Item::Status(st) => s.status(st),
+                Item::Callout(c) => s.callout(c),
+                Item::List(r) => s.list(r),
+                Item::Table(r) => s.table(r),
+                Item::Widget(_) => s,
+            };
+        }
     }
 }
 
@@ -905,6 +959,7 @@ mod tests {
             title: "Fake".into(),
             description: "A fake plugin".into(),
             contract: serde_json::from_str(contract).unwrap(),
+            page: crate::config::plugin_pages::Page::default(),
         }
     }
 
