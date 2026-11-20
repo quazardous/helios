@@ -492,7 +492,7 @@ impl Gallery {
             .into_iter()
             .filter_map(|e| match e {
                 Edit::Number { change, .. } => Some(change),
-                Edit::Set { .. } => None,
+                Edit::Set { .. } | Edit::Tool { .. } | Edit::Cancel { .. } => None,
             })
             .collect();
         self.apply(&control, &changes);
@@ -623,14 +623,16 @@ impl Gallery {
                     };
                     self.apply_at(&control, &path, &[change]);
                 }
-                Edit::Set { to, done: true, .. } => {
+                Edit::Set { to, done: true, .. } | Edit::Tool { to, done: true, .. } => {
                     let _ = self.store.set(helios_values::Set::new(
                         &path,
                         helios_values::Change::To(helios_value(to)),
                         Origin::User,
                     ));
                 }
-                Edit::Set { .. } => {}
+                // A drag's frames and a drag given up: nothing is
+                // written before its end.
+                Edit::Set { .. } | Edit::Tool { .. } | Edit::Cancel { .. } => {}
             }
         }
         for event in out.events {

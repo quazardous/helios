@@ -792,13 +792,18 @@ impl Params {
                 Edit::Number { key, change } => {
                     numbers.entry(key.as_str()).or_default().push(*change);
                 }
-                Edit::Set { to, done, .. } => {
+                // An editor's value (a curve's points, a wheel's colour)
+                // is written as a set one is: at the end of its gesture.
+                Edit::Set { to, done, .. } | Edit::Tool { to, done, .. } => {
                     let to = helios_controls::values::helios_value(to.clone());
                     if *done {
                         let mut s = store.lock().expect("value store lock");
                         write(&mut s, &row.path, Change::To(to), None, false);
                     }
                 }
+                // Nothing of a drag is written before its end: a drag
+                // given up has nothing to put back.
+                Edit::Cancel { .. } => {}
             }
         }
         for (key, changes) in numbers {
