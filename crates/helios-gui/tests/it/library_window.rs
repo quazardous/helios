@@ -325,9 +325,16 @@ fn the_metadata_section_fits_the_narrow_library_panel() {
             "{what} at {r:?} runs past the Filters panel {panel:?}"
         );
     };
+    // Only the Filters panel's marks: the floating panels (the Scopes'
+    // Stops toggle is a CheckBox too) draw theirs elsewhere in the window.
+    let others: Vec<egui::Rect> = helios_gui::FLOATABLE
+        .iter()
+        .filter_map(|id| h.state().target_rect(id).ok())
+        .collect();
     let marks: Vec<(String, egui::Rect)> = h
         .query_all_by_role(Role::CheckBox)
         .map(|n| (format!("{n:?}"), n.rect()))
+        .filter(|(_, r)| !others.iter().any(|o| o.contains_rect(*r)))
         .collect();
     assert!(marks.len() >= 7, "5 labels and 2 flags: {marks:?}");
     for (name, r) in &marks {
