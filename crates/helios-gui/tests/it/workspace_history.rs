@@ -116,14 +116,15 @@ fn set(h: &mut Harness<'static, Shell>, path: &str, v: f64) {
     follow(h);
 }
 
-/// Edit > Undo: what it undid.
+/// Edit > Undo: what it undid. Ctrl+Z walks the newest step of the
+/// image's and the workspace's lines (`Store::undo` alone is the image's).
 fn undo(h: &mut Harness<'static, Shell>) -> Option<String> {
     let undone = h
         .state()
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap();
     follow(h);
     undone
