@@ -160,7 +160,8 @@ fn the_danger_zone_resets_only_once_reset_is_typed_and_never_for_an_agent() {
         "the photos kept are counted"
     );
     assert!(
-        h.query_by_label_contains("moved to the backup folder")
+        h.query_all_by_label_contains("moved to the backup folder")
+            .next()
             .is_some(),
         "what goes is listed"
     );
