@@ -1,30 +1,32 @@
 //! Helios's global items in the title bar (egui-pop's `CAPTION` zone,
 //! before the window's buttons), which stay in full screen with the bar:
 //!
-//! - the jobs going on: a ring with their overall estimate (turning
-//!   while one cannot estimate), a cross when some failed; a click opens
-//!   the Jobs panel;
+//! - the background tasks going on, as the node's promises (the
+//!   status bar's Activity summary, `crate::activity`): a ring with the
+//!   main one's progress (turning while it cannot say), a cross when some
+//!   failed unseen; a click opens the Activity focus on that task, as the
+//!   status bar's item does;
 //! - the decisions waiting for an answer (the stack suggestions): a
 //!   count on a bell; a click opens the Stacks panel;
 //! - the profile in use: a click opens the Profiles menu, to switch.
 //!
 //! Each is drawn only when it has something to say (the profile always).
-//! The shell sets what the jobs centre does not know (the decisions, the
+//! The shell sets what they show (the activity, the decisions, the
 //! profile) in its status line each frame. Each mark has an id that
 //! egui-pop's `indicators` collector reports, so a test or an agent reads
 //! its state.
 
 use egui::Ui;
 use egui_pop::api::AppHandle;
-use egui_pop::api::jobs::{JOBS, status_text};
-use egui_pop::api::jobs_centre::PANEL_JOBS;
 use egui_pop::api::menus::popup_at;
 use egui_pop::core::icon::Icon;
 use egui_pop::core::indicator::{Anchor, Indicator, IndicatorExt as _, Pip};
 use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::widgets;
-use egui_pop::model::ids::{BlockId, PanelId};
+use egui_pop::model::ids::{BlockId, CommandId, PanelId};
 use helios_core::Message;
+use helios_vault::promises::State;
+use serde_json::json;
 
 use crate::i18n::text;
 use crate::jobs::Status;
@@ -32,7 +34,7 @@ use crate::jobs::Status;
 /// The block of the title bar's `CAPTION` zone.
 pub const BLOCK: BlockId = BlockId::from_static("helios.frame.caption");
 
-/// The jobs' mark (`indicators` collector).
+/// The background tasks' mark (`indicators` collector).
 pub const JOBS_MARK: &str = "helios.caption.jobs";
 /// The decisions' count.
 pub const DECISIONS_MARK: &str = "helios.caption.decisions";
@@ -43,13 +45,13 @@ pub const PROFILE: &str = "helios.caption.profile";
 /// next to the window's buttons, then the decisions, then the jobs.
 pub fn block(status: Status) -> impl FnMut(&mut Ui, &AppHandle) + 'static {
     move |ui, app| {
-        let (decisions, profile) = {
+        let (decisions, profile, activity) = {
             let line = status.borrow();
-            (line.decisions, line.profile.clone())
+            (line.decisions, line.profile.clone(), line.activity.clone())
         };
         profile_item(ui, app, &profile);
         decisions_item(ui, app, decisions);
-        jobs_item(ui, app);
+        jobs_item(ui, app, activity.as_ref());
     }
 }
 
@@ -101,27 +103,44 @@ fn decisions_item(ui: &mut Ui, app: &AppHandle, decisions: usize) {
     }
 }
 
-fn jobs_item(ui: &mut Ui, app: &AppHandle) {
-    let Some(jobs) = app.service(&JOBS) else {
+/// The background tasks' mark, from the status bar's Activity summary:
+/// nothing while none runs and none failed unseen.
+fn jobs_item(ui: &mut Ui, app: &AppHandle, activity: Option<&crate::activity::Summary>) {
+    let Some(summary) = activity else {
         return;
     };
-    let summary = jobs.summary();
-    if summary.active == 0 && summary.failed == 0 {
-        return;
-    }
     let ctx = ui.ctx().clone();
-    let (active, failed) = status_text(&ctx, &summary);
-    let pip = if summary.active > 0 {
-        summary
-            .fraction
-            .map_or(Pip::Busy, |f| Pip::Progress(f as f32))
-    } else {
-        Pip::Failed
+    let main = summary.running.first();
+    let pip = match main.map(|p| &p.state) {
+        Some(State::Running {
+            done,
+            total: Some(total),
+            ..
+        }) if *total > 0 => Pip::Progress((*done as f32 / *total as f32).min(1.0)),
+        Some(_) => Pip::Busy,
+        None => Pip::Failed,
     };
-    let meaning = match failed {
-        Some(failed) if summary.active > 0 => format!("{active}, {failed}"),
-        Some(failed) => failed,
-        None => active,
+    let running = (!summary.running.is_empty()).then(|| {
+        text(
+            &ctx,
+            Message::new(
+                "gui-activity-running",
+                "{ $count } background tasks running",
+            )
+            .with("count", summary.running.len()),
+        )
+    });
+    let failed = (summary.failed > 0).then(|| {
+        text(
+            &ctx,
+            Message::new("gui-activity-failed", "{ $count } background tasks failed")
+                .with("count", summary.failed),
+        )
+    });
+    let meaning = match (running, failed) {
+        (Some(running), Some(failed)) => format!("{running}, {failed}"),
+        (Some(said), None) | (None, Some(said)) => said,
+        (None, None) => return,
     };
     let r = ui.add(
         Indicator::pip(pip)
@@ -134,6 +153,12 @@ fn jobs_item(ui: &mut Ui, app: &AppHandle) {
             )),
     );
     if r.clicked() {
-        let _ = app.focus_panel(&PANEL_JOBS);
+        let id = main
+            .map(|p| p.id.clone())
+            .or_else(|| summary.newest_failed.clone());
+        app.run(
+            CommandId::from_static(crate::activity::COMMAND),
+            id.map_or(serde_json::Value::Null, |id| json!({ "id": id })),
+        );
     }
 }

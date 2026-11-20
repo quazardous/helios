@@ -94,7 +94,7 @@ the same patterns as visual-identity.md's audit, on `next` of
 | Calibrate (focus) | mixed | hand-drawn steps around an image (`shell/calibrate_focus.rs`, `calibrate.rs`) | 48, 22 |
 | Macro interface, rule editor | forms | hand-drawn (`macro_interface.rs`, `rule_editor_ui.rs`) | 44, 31 |
 | Workshop design, edit, run, session, generalise | forms today; visual when a run shows on-image controls | `shell/workshop_*.rs`; no on-image drawing yet (0 painter calls) | small |
-| Splash, pointer choice, promise line | forms | hand-drawn | 16, 5, 11 |
+| Splash, pointer choice | forms | hand-drawn (the promise line is gone: promises show in the Activity focus) | 16, 5 |
 | Controls gallery (`crates/helios-controls-gallery`) | visual (a bench) | egui_hud's bench and renderers | 29 |
 
 ### The mixed cases, and their seam

@@ -33,6 +33,7 @@ use std::rc::Rc;
 use egui_pop::api::AppHandle;
 use egui_pop::api::host::Seq;
 use egui_pop::api::jobs::JobsPlugin;
+use egui_pop::core::ui::{TextRole, Tone, UiPop as _};
 use egui_pop::model::jobs::Request;
 use helios_core::Message;
 use helios_core::jobs::Jobs;
@@ -265,27 +266,25 @@ pub fn status_block(status: Status) -> impl FnMut(&mut egui::Ui, &AppHandle) + '
             // Always there: quiet while nothing runs, so the Activity
             // focus (the history) opens from it at any time.
             crate::activity::indicator(ui, app, line.activity.as_ref());
-            ui.separator();
+            ui.divider();
             if let Some((level, count)) = line.health {
                 health_badge(ui, app, level, count);
-                ui.separator();
+                ui.divider();
             }
             if line.pending_decisions > 0 {
                 decisions_badge(ui, app, &line);
-                ui.separator();
+                ui.divider();
             }
             if let Some(keys) = app.pending_keys() {
-                ui.label(format!("{keys} …"));
-                ui.separator();
+                ui.text_role(TextRole::Body, format!("{keys} …"));
+                ui.divider();
             }
             if line.recording {
-                ui.colored_label(ui.visuals().error_fg_color, "● REC");
-                ui.separator();
+                ui.text_tone(Tone::Record, "● REC");
+                ui.divider();
             }
-            if let Some(hint) = &line.hint {
-                ui.label(hint);
-            } else if let Some(note) = &line.note {
-                ui.label(note);
+            if let Some(said) = line.hint.as_ref().or(line.note.as_ref()) {
+                ui.text_role(TextRole::Body, said);
             }
         });
     }
@@ -356,12 +355,12 @@ fn health_badge(ui: &mut egui::Ui, app: &AppHandle, level: helios_health::Level,
         &ctx,
         Message::new("gui-status-health-show", "Open the health check"),
     );
-    let (tone, colour) = if problem {
-        (Tone::Danger, ui.visuals().error_fg_color)
+    let (tone, sign) = if problem {
+        (Tone::Danger, egui_pop::core::ui::Tone::Danger)
     } else {
-        (Tone::Warning, ui.visuals().warn_fg_color)
+        (Tone::Warning, egui_pop::core::ui::Tone::Warning)
     };
-    ui.colored_label(colour, "⚠");
+    ui.text_tone(sign, "⚠");
     let r = ui.add(
         Indicator::count(count as u64)
             .tone(tone)

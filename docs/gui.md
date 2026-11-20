@@ -838,8 +838,9 @@ Helios declares into it:
   layout, opening the layout menu (the area toggles, the arrangements,
   the side bar's side, the bottom panel's alignment), and a toggle per
   area, filled while the area shows. The bar's `CAPTION` zone holds
-  Helios's global items (2026-10-20): the jobs going on (a ring with
-  their estimate, opening the Jobs panel), the decisions waiting for an
+  Helios's global items (2026-10-20): the background tasks going on, as
+  the node's promises (a ring with the main one's progress, a cross when
+  one failed unseen, opening the Activity focus on it, 2026-11-20), the decisions waiting for an
   answer (a count on a bell, opening the Stacks panel) and the profile
   in use (opening the Profiles menu). In full screen the bar stays with
   them, a button leaving full screen in place of maximize;
@@ -1104,6 +1105,13 @@ bottom panel, `Ctrl+E` for the export (`library.export`, which
 | `Ctrl+T`, `Ctrl+C`, `Ctrl+V` | tag, copy and paste edits | no such commands yet |
 
 ## Jobs
+
+Being replaced (2026-11-20): the status bar's Activity item and the
+Activity focus, over the node's promises, are the one place to look.
+The import window draws no promise line of its own, and the title bar's
+mark reads the promises. The jobs centre below stays until its last
+readers move (the image map's pause and resume, the Queue panel's job
+items without a promise).
 
 What runs in the background shows in egui-pop's jobs centre (decided
 2026-10-13): the Jobs panel (closed until asked for) and the popover of

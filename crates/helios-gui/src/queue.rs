@@ -19,7 +19,8 @@
 
 use egui::Ui;
 use egui_pop::api::AppHandle;
-use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Grid, Row, TextRole, Track, UiPop as _};
 use egui_pop::model::ids::PanelId;
 use helios_core::Message;
 
@@ -326,7 +327,7 @@ impl QueuePanel {
         }
         let text = |m: Message| crate::i18n::text(&ctx, m);
         let Some(node) = self.node.clone() else {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-queue-no-selection",
                 "Select a node to see its queue",
             )));
@@ -335,7 +336,7 @@ impl QueuePanel {
         let queue = match &self.queue {
             Some(q) if !q.is_empty() => q,
             _ => {
-                ui.weak(text(
+                ui.muted(text(
                     Message::new("gui-queue-empty", "Nothing queued at { $node }")
                         .with("node", node.as_str()),
                 ));
@@ -347,89 +348,115 @@ impl QueuePanel {
         ui.strong_text(text(
             Message::new("gui-queue-title", "Queue of { $node }").with("node", node.as_str()),
         ));
-        ui.label(text(
-            Message::new(
-                "gui-queue-summary",
-                "{ $waiting } waiting, { $running } running, { $done } done, { $failed } failed",
-            )
-            .with("waiting", summary.waiting)
-            .with("running", summary.running)
-            .with("done", summary.done)
-            .with("failed", summary.failed + summary.cancelled),
-        ));
+        ui.text_role(
+            TextRole::Body,
+            text(
+                Message::new(
+                    "gui-queue-summary",
+                    "{ $waiting } waiting, { $running } running, { $done } done, { $failed } failed",
+                )
+                .with("waiting", summary.waiting)
+                .with("running", summary.running)
+                .with("done", summary.done)
+                .with("failed", summary.failed + summary.cancelled),
+            ),
+        );
         if let Some(wait) = summary.oldest_wait {
-            ui.weak(text(
+            ui.muted(text(
                 Message::new("gui-queue-oldest-wait", "Oldest wait: { $time }")
                     .with("time", duration(&ctx, &locale, wait)),
             ));
         }
-        ui.separator();
+        ui.divider();
         let mut asked = Vec::new();
-        ui.scroll_area(
-            egui::ScrollArea::both().id_salt("helios.queue.scroll"),
-            |ui| {
-                egui::Grid::new("helios.queue.items")
-                    .striped(true)
-                    .num_columns(6)
-                    .show(ui, |ui| {
-                        // Each key written out: the extractor finds them.
-                        for header in [
-                            Message::new("gui-queue-column-state", "State"),
-                            Message::new("gui-queue-column-item", "Item"),
-                            Message::new("gui-queue-column-since", "Since"),
-                            Message::new("gui-queue-column-attempts", "Attempts"),
-                            Message::new("gui-queue-column-where", "Where"),
-                        ] {
-                            ui.strong_text(text(header));
+        // The item's title takes what the other columns leave.
+        let tracks = [
+            Track::CONTENT,
+            Track::fr(1.0),
+            Track::CONTENT,
+            Track::CONTENT,
+            Track::CONTENT,
+            Track::CONTENT,
+        ];
+        helios_ui::scroll(ui, "helios.queue.scroll", helios_ui::Scroll::Region, |ui| {
+            ui.grid(Grid::new("helios.queue.items", tracks), |cells| {
+                // Each key written out: the extractor finds them.
+                for header in [
+                    Message::new("gui-queue-column-state", "State"),
+                    Message::new("gui-queue-column-item", "Item"),
+                    Message::new("gui-queue-column-since", "Since"),
+                    Message::new("gui-queue-column-attempts", "Attempts"),
+                    Message::new("gui-queue-column-where", "Where"),
+                ] {
+                    cells.header(text(header));
+                }
+                cells.cell(|_| ());
+                for (i, item) in queue.items.iter().enumerate() {
+                    cells.cell(|ui| {
+                        let state = ui.text_role(TextRole::Body, text(item.state.message()));
+                        if let Some(error) = &item.error {
+                            state.tip(error.as_str());
                         }
-                        ui.label("");
-                        ui.end_row();
-                        for (i, item) in queue.items.iter().enumerate() {
-                            let state = ui.label(text(item.state.message()));
-                            if let Some(error) = &item.error {
-                                state.on_hover_text(error);
-                            }
-                            ui.label(&item.title);
-                            ui.label(duration(&ctx, &locale, (queue.now - item.since).max(0.0)));
-                            ui.label(item.attempts.to_string());
-                            ui.label(match &item.place {
+                    });
+                    cells.cell(|ui| ui.text_role(TextRole::Body, &item.title));
+                    cells.cell(|ui| {
+                        ui.text_role(
+                            TextRole::Body,
+                            duration(&ctx, &locale, (queue.now - item.since).max(0.0)),
+                        )
+                    });
+                    cells.cell(|ui| ui.text_role(TextRole::Body, item.attempts.to_string()));
+                    cells.cell(|ui| {
+                        ui.text_role(
+                            TextRole::Body,
+                            match &item.place {
                                 Place::Here => text(Message::new("gui-queue-here", "This desktop")),
                                 Place::Node(name) => text(
                                     Message::new("gui-queue-on-node", "Node { $name }")
                                         .with("name", name.as_str()),
                                 ),
-                            });
-                            ui.horizontal(|ui| {
-                                for &action in &item.actions {
-                                    let label = text(action.message());
-                                    let kind = match action {
-                                        Action::Cancel => helios_ui::Action::Danger,
-                                        _ => helios_ui::Action::Secondary,
-                                    };
-                                    let r = helios_ui::row_action(ui, kind, &label);
-                                    let described = format!("{label} {}", item.title);
-                                    r.widget_info(|| {
-                                        egui::WidgetInfo::labeled(
-                                            egui::Role::Button,
-                                            true,
-                                            &described,
-                                        )
-                                    });
-                                    crate::name_rect(
-                                        ui.ctx(),
-                                        &format!("{PANEL}.{i}.{}", action.name()),
-                                        r.rect,
-                                    );
-                                    if r.clicked() {
-                                        asked.push((item.id.clone(), action));
-                                    }
-                                }
-                            });
-                            ui.end_row();
-                        }
+                            },
+                        )
                     });
-            },
-        );
+                    cells.cell(|ui| {
+                        if item.actions.is_empty() {
+                            return;
+                        }
+                        ui.row(
+                            Row::new(item.actions.iter().map(|_| Track::CONTENT)),
+                            |actions| {
+                                for &action in &item.actions {
+                                    actions.cell(|ui| {
+                                        let label = text(action.message());
+                                        let kind = match action {
+                                            Action::Cancel => helios_ui::Action::Danger,
+                                            _ => helios_ui::Action::Secondary,
+                                        };
+                                        let r = helios_ui::row_action(ui, kind, &label);
+                                        let described = format!("{label} {}", item.title);
+                                        r.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::Role::Button,
+                                                true,
+                                                &described,
+                                            )
+                                        });
+                                        crate::name_rect(
+                                            ui.ctx(),
+                                            &format!("{PANEL}.{i}.{}", action.name()),
+                                            r.rect,
+                                        );
+                                        if r.clicked() {
+                                            asked.push((item.id.clone(), action));
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                    });
+                }
+            });
+        });
         self.asked.extend(asked);
         self.run_asked(app);
     }

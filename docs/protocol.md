@@ -727,9 +727,11 @@ them (they survive a restart), and every client of the node sees them.
   re-check, `thumbs`) stands as one promise while it runs, its `request`
   `{"standing": true}`: no total, settled `done` when it stops. The
   status bar does not count it as running.
-- The desktop shows a promise as one line (`helios_gui::promise_line`):
-  what it stands for, its progress, then its outcome, with Cancel while
-  it runs and Retry when it failed and may be retried.
+- The desktop shows the promises in one place: the status bar's
+  Activity item and the Activity focus (what each stands for, its
+  progress, then its outcome, with Cancel while it runs and Retry when
+  it failed and may be retried). The import window shows no line of its
+  own.
 
 **The library's import by rule** answers with one
 ([design/import-slow-sources.md](design/import-slow-sources.md)):

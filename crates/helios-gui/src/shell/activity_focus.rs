@@ -51,8 +51,8 @@ use serde_json::{Value, json};
 
 use super::Shell;
 use super::focus_window::{FocusWindow, WindowFocus};
+use crate::activity::Ask as Action;
 use crate::activity::{LogLine, Logged};
-use crate::promise_line::Action;
 
 /// The focus's OS window: its id, under which egui-pop keeps its size.
 pub const WINDOW: &str = "activity";
