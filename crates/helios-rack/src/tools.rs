@@ -28,6 +28,45 @@
 //! handles and owns their drags, double clicks and wheel turns, and
 //! `egui_hud::render::declare_handle` names their edit areas. This module
 //! holds no egui.
+//!
+//! # A module's on-image tool in 25 lines
+//!
+//! A module declares its parameters to the store and its tool here, with
+//! no egui type, no colour and no size: each handle is a kind from
+//! `egui_hud` naming the parameters it reads and writes, and what the
+//! tool adds of its own (a feather's range and double-click default,
+//! narrower than the parameter's):
+//!
+//! ```
+//! use helios_rack::handle::{Centre, Handle, HandleKind, Look};
+//! use helios_rack::tools::{Tool, ToolHandle};
+//!
+//! let c = Centre::default; // `x`, `y`
+//! let radial = Tool::new("radial-exposure", "radial_exposure")
+//!     .with(ToolHandle::new(
+//!         "center",
+//!         Handle::new("centre", HandleKind::point(c())).look(Look::Move),
+//!     ))
+//!     .with(ToolHandle::new(
+//!         "radius",
+//!         Handle::new("radius", HandleKind::radius(c(), "radius")),
+//!     ))
+//!     .with(
+//!         ToolHandle::new(
+//!             "feather",
+//!             Handle::new("feather", HandleKind::feather(c(), "radius", "feather"))
+//!                 .reset(Some(25.0)),
+//!         )
+//!         .range(0.0, 200.0),
+//!     );
+//! assert_eq!(radial.handle("feather").unwrap().writes(), ["feather"]);
+//! ```
+//!
+//! The rest is the rack's: [`Drag`] makes each drag one undo step that
+//! Escape ([`Drag::cancel`]) gives up, [`reset`] and [`Turn`] the double
+//! click and the wheel, and the module's render reads the store as the
+//! drag writes it. `tests/radial_exposure.rs` drives this example
+//! headless.
 
 use egui_hud::handle::{self, AngleParam, Centre, Handle, HandleKind, Look, Reach};
 use helios_controls::flow::{Cause, ChangeEvent, Steps, Verdict};
@@ -66,11 +105,53 @@ pub struct ToolHandle {
     /// The case's part it shows (`center`, `radius`, `feather`,
     /// `rotation`).
     pub part: &'static str,
+    /// What its first parameter may be on the image, inside the
+    /// parameter's own range: a tool's own bounds (a feather no wider
+    /// than this tool wants). Drags, wheel turns and resets stay in it.
+    pub range: Option<(f64, f64)>,
 }
 
 impl ToolHandle {
-    fn new(part: &'static str, handle: Handle) -> Self {
-        Self { handle, part }
+    /// `handle`, showing the case's part `part`.
+    pub fn new(part: &'static str, handle: Handle) -> Self {
+        Self {
+            handle,
+            part,
+            range: None,
+        }
+    }
+
+    /// Holds its first parameter within `min..=max` on the image.
+    pub fn range(mut self, min: f64, max: f64) -> Self {
+        self.range = Some((min, max));
+        self
+    }
+
+    /// `v` for its first parameter `p`, held in its range; other
+    /// parameters as they are.
+    fn held(&self, p: &str, v: f64) -> f64 {
+        match self.range {
+            Some((lo, hi)) if self.writes().first().is_some_and(|w| w == p) => v.clamp(lo, hi),
+            _ => v,
+        }
+    }
+
+    /// What a drag to `to` writes, from the parameters at its start,
+    /// held in its range.
+    pub fn drag(&self, start: &Params, to: Point) -> Vec<(String, f64)> {
+        self.handle
+            .drag(&ParamsOf(start), to)
+            .into_iter()
+            .map(|(p, v)| {
+                let v = self.held(&p, v);
+                (p, v)
+            })
+            .collect()
+    }
+
+    /// Where it sits on the image, from the shape's parameters.
+    pub fn position(&self, params: &Params) -> Point {
+        self.handle.position(&ParamsOf(params))
     }
 
     /// As the shape's outline names it (`centre`, `radius`...).
@@ -95,6 +176,21 @@ pub struct Tool {
 }
 
 impl Tool {
+    /// The case `control` of `module`'s nodes, with no handle yet.
+    pub fn new(control: &'static str, module: &'static str) -> Self {
+        Self {
+            control,
+            module,
+            handles: Vec::new(),
+        }
+    }
+
+    /// With one more handle.
+    pub fn with(mut self, handle: ToolHandle) -> Self {
+        self.handles.push(handle);
+        self
+    }
+
     /// The handle named `name`.
     pub fn handle(&self, name: &str) -> Option<&ToolHandle> {
         self.handles.iter().find(|h| h.name() == name)
@@ -382,7 +478,7 @@ impl Drag {
     /// Writes what the handle at `to` shows, inside the gesture; the
     /// store's refusal (another origin holds a parameter) when it has one.
     pub fn update(&self, store: &mut Store, to: Point) -> Result<(), String> {
-        for (p, v) in self.handle.handle.drag(&ParamsOf(&self.start), to) {
+        for (p, v) in self.handle.drag(&self.start, to) {
             write(
                 store,
                 &node_path(&self.node, &p),
@@ -426,9 +522,13 @@ pub fn reset(
     handle: &str,
     origin: Origin,
 ) -> bool {
-    let Some((p, to)) = tool.handle(handle).and_then(|h| h.handle.reset_value()) else {
+    let Some((h, (p, to))) = tool
+        .handle(handle)
+        .and_then(|h| Some((h, h.handle.reset_value()?)))
+    else {
         return false;
     };
+    let to = h.held(&p, to);
     let before = values_of(store, node, std::slice::from_ref(&p));
     let g = store.begin_group(origin.clone(), &format!("reset {node} {handle}"));
     let _ = write(store, &node_path(node, &p), to, &origin, g);
@@ -482,6 +582,7 @@ impl Turn {
     ) {
         self.last = now;
         if let Some((p, v)) = h.handle.wheeled(&ParamsOf(params), delta) {
+            let v = h.held(&p, v);
             let _ = write(store, &node_path(node, &p), v, &self.origin, self.gesture);
         }
     }
