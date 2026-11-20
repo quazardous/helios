@@ -89,11 +89,6 @@ impl Kind {
     }
 }
 
-fn read(path: &Path) -> Result<(String, Arc<Vec<u8>>), String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    Ok((blake3::hash(&bytes).to_hex().to_string(), Arc::new(bytes)))
-}
-
 /// A raw file's bytes for its previews and metadata: its sensor data
 /// left out when its layout allows ([`sparse::read`]), else the whole
 /// file. Not for decoding the mosaic, nor for hashing.
@@ -108,19 +103,35 @@ pub fn preview_bytes(path: &Path) -> Result<Arc<Vec<u8>>, String> {
 
 /// Loads a file: a raw mosaic with its camera, or a picture in the working space.
 pub fn load(path: &Path) -> Result<Loaded, String> {
-    let (hash, bytes) = read(path)?;
-    let named = |e: String| format!("{}: {e}", path.display());
-    let (image, camera, sensor, colour, orientation) = match Kind::of(path) {
-        Kind::Picture => {
-            let (image, colour, orientation) = picture(&bytes).map_err(named)?;
-            (image, None, None, Some(colour), orientation)
-        }
-        Kind::Raw => {
-            let (image, camera, sensor) = raw(bytes).map_err(named)?;
-            let orientation = camera.orientation;
-            (image, Some(camera), Some(sensor), None, orientation)
-        }
+    let bytes = {
+        let _span = helios_core::trace::span("decode.read", || path.display().to_string());
+        Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?)
     };
+    let named = |e: String| format!("{}: {e}", path.display());
+    // The file's hash beside the decode, on a thread of its own: the
+    // decode never waits on it.
+    let (hash, decoded) = std::thread::scope(|scope| {
+        let hashing = {
+            let bytes = bytes.clone();
+            scope.spawn(move || {
+                let _span = helios_core::trace::span("decode.file_hash", String::new);
+                blake3::hash(&bytes).to_hex().to_string()
+            })
+        };
+        let decoded = match Kind::of(path) {
+            Kind::Picture => picture(&bytes)
+                .map(|(image, colour, orientation)| (image, None, None, Some(colour), orientation)),
+            Kind::Raw => raw(bytes.clone()).map(|(image, camera, sensor)| {
+                let orientation = camera.orientation;
+                (image, Some(camera), Some(sensor), None, orientation)
+            }),
+        };
+        let hash = hashing
+            .join()
+            .unwrap_or_else(|_| blake3::hash(&bytes).to_hex().to_string());
+        (hash, decoded)
+    });
+    let (image, camera, sensor, colour, orientation) = decoded.map_err(named)?;
     Ok(Loaded {
         hash,
         image,
@@ -146,21 +157,108 @@ pub fn preview(path: &Path) -> Result<Option<Image>, String> {
 /// # Errors
 /// The file cannot be read, or its format is unknown.
 pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
+    preview_oriented_at(path, None)
+}
+
+/// [`preview_oriented`], the preview no larger than `max` pixels on its
+/// long side: scaled down in 8 bits before it is taken to the working
+/// space, so a first paint never converts a full-size preview in
+/// floating point.
+///
+/// The largest preview is decoded alone: the smaller ones are tried only
+/// when it is missing or unreadable.
+///
+/// # Errors
+/// The file cannot be read, or its format is unknown.
+pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Image>, u8), String> {
     let bytes = preview_bytes(path)?;
     let source = RawSource::new_from_shared_vec(bytes.clone());
     let decoder = rawler::get_decoder(&source).map_err(|e| format!("{}: {e}", path.display()))?;
     let params = RawDecodeParams::default();
-    let found = [
-        decoder.full_image(&source, &params),
-        decoder.preview_image(&source, &params),
-        decoder.thumbnail_image(&source, &params),
-    ]
-    .into_iter()
-    .find_map(|r| r.ok().flatten());
-    let tag = raw_tag(decoder.as_ref(), &source);
+    let found = {
+        let _span = helios_core::trace::span("preview.decode", || path.display().to_string());
+        decoder
+            .full_image(&source, &params)
+            .ok()
+            .flatten()
+            .or_else(|| decoder.preview_image(&source, &params).ok().flatten())
+            .or_else(|| decoder.thumbnail_image(&source, &params).ok().flatten())
+    };
     let metadata = decoder.raw_metadata(&source, &params).ok();
+    let tag = metadata
+        .as_ref()
+        .and_then(|m| m.exif.orientation)
+        .and_then(|o| u8::try_from(o).ok())
+        .filter(|o| (1..=8).contains(o))
+        .unwrap_or(1);
     let space = raw_preview_space(&bytes, metadata.as_ref());
-    Ok((found.map(|img| preview_working(&img, space)), tag))
+    let fit = |img: DynamicImage| {
+        let _span = helios_core::trace::span("preview.shrink", String::new);
+        match max {
+            Some(m) if img.width().max(img.height()) > m => shrink(img, m),
+            _ => img,
+        }
+    };
+    Ok((
+        found.map(|img| {
+            let img = fit(img);
+            let _span = helios_core::trace::span("preview.working", || {
+                format!("{}x{}", img.width(), img.height())
+            });
+            preview_working(&img, space)
+        }),
+        tag,
+    ))
+}
+
+/// `img` made no larger than `max` pixels on its long side, for a first
+/// paint: an 8-bit RGB picture (a JPEG preview) by the mean of each
+/// k × k block, k the smallest whole factor that fits, in row bands over
+/// the machine's threads; any other by [`DynamicImage::thumbnail`]. The
+/// block mean is several times faster than a resampling filter on a
+/// full-size preview, and a first paint is shown at about that size.
+fn shrink(img: DynamicImage, max: u32) -> DynamicImage {
+    let DynamicImage::ImageRgb8(rgb) = img else {
+        return img.thumbnail(max, max);
+    };
+    let (w, h) = rgb.dimensions();
+    let k = w.max(h).div_ceil(max.max(1)).max(1) as usize;
+    let (ow, oh) = ((w as usize / k).max(1), (h as usize / k).max(1));
+    if k == 1 {
+        return DynamicImage::ImageRgb8(rgb);
+    }
+    let src = rgb.as_raw();
+    let stride = w as usize * 3;
+    let mut out = vec![0u8; ow * oh * 3];
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let band = oh.div_ceil(threads).max(1);
+    let area = (k * k) as u32;
+    std::thread::scope(|scope| {
+        for (b, rows) in out.chunks_mut(band * ow * 3).enumerate() {
+            scope.spawn(move || {
+                let mut sums = vec![0u32; ow * 3];
+                for (r, row) in rows.chunks_mut(ow * 3).enumerate() {
+                    let oy = b * band + r;
+                    sums.fill(0);
+                    for sy in oy * k..oy * k + k {
+                        let line = &src[sy * stride..sy * stride + ow * k * 3];
+                        for (ox, block) in line.chunks_exact(k * 3).enumerate() {
+                            for px in block.chunks_exact(3) {
+                                sums[ox * 3] += u32::from(px[0]);
+                                sums[ox * 3 + 1] += u32::from(px[1]);
+                                sums[ox * 3 + 2] += u32::from(px[2]);
+                            }
+                        }
+                    }
+                    for (o, s) in row.iter_mut().zip(&sums) {
+                        *o = u8::try_from((s + area / 2) / area).unwrap_or(u8::MAX);
+                    }
+                }
+            });
+        }
+    });
+    image::RgbImage::from_raw(ow as u32, oh as u32, out)
+        .map_or_else(|| DynamicImage::ImageRgb8(rgb), DynamicImage::ImageRgb8)
 }
 
 /// A raw's EXIF orientation tag, 1 to 8 (1 when it has none), from its
@@ -703,10 +801,16 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
     let source = RawSource::new_from_shared_vec(bytes);
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;
     let params = RawDecodeParams::default();
-    let raw = decoder
-        .raw_image(&source, &params, false)
-        .map_err(|e| e.to_string())?;
-    let meta = decoder.raw_metadata(&source, &params).ok();
+    let raw = {
+        let _span = helios_core::trace::span("decode.raw", String::new);
+        decoder
+            .raw_image(&source, &params, false)
+            .map_err(|e| e.to_string())?
+    };
+    let meta = {
+        let _span = helios_core::trace::span("decode.metadata", String::new);
+        decoder.raw_metadata(&source, &params).ok()
+    };
     let RawPhotometricInterpretation::Cfa(config) = &raw.photometric else {
         return Err("not a mosaic (linear or monochrome raws are not supported yet)".into());
     };
@@ -727,16 +831,21 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
         ));
     }
     let cfa = Cfa::parse(&config.cfa.shift(x0, y0).name)?;
-    let value = |i: usize| -> f32 {
-        match &raw.data {
-            RawImageData::Integer(v) => f32::from(v[i]),
-            RawImageData::Float(v) => v[i],
-        }
-    };
+    let _span = helios_core::trace::span("decode.mosaic", || format!("{w}x{h}"));
+    // Row slice by row slice, the sample type matched once: a loop the
+    // compiler vectorises, not a match per photosite.
     let mut data = Vec::with_capacity(w * h);
-    for y in y0..y0 + h {
-        for x in x0..x0 + w {
-            data.push(value(y * raw.width + x));
+    let rows = (y0..y0 + h).map(|y| y * raw.width + x0..y * raw.width + x0 + w);
+    match &raw.data {
+        RawImageData::Integer(v) => {
+            for row in rows {
+                data.extend(v[row].iter().map(|&s| f32::from(s)));
+            }
+        }
+        RawImageData::Float(v) => {
+            for row in rows {
+                data.extend_from_slice(&v[row]);
+            }
         }
     }
     let image = Image::new(Region::sized(w as u32, h as u32), 1, data);
@@ -753,6 +862,19 @@ fn raw(bytes: Arc<Vec<u8>>) -> Result<(Image, CameraInfo, Sensor), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shrink_takes_each_blocks_mean_to_fit() {
+        // 7 × 5, at most 3 long: k = 3, 2 × 1 out of the top-left 6 × 3.
+        let rgb =
+            image::RgbImage::from_fn(7, 5, |x, y| image::Rgb([(x * 10) as u8, (y * 20) as u8, 9]));
+        let out = shrink(DynamicImage::ImageRgb8(rgb), 3).to_rgb8();
+        assert_eq!(out.dimensions(), (2, 1));
+        assert_eq!(out.get_pixel(0, 0).0, [10, 20, 9]);
+        assert_eq!(out.get_pixel(1, 0).0, [40, 20, 9]);
+        let small = image::RgbImage::new(3, 2);
+        assert_eq!(shrink(DynamicImage::ImageRgb8(small), 3).width(), 3);
+    }
 
     fn pixel(image: &Image) -> [f32; 3] {
         let d = image.data();

@@ -11,6 +11,10 @@
 //! each step cost: the decode, the graph, each demosaic call with its
 //! algorithm and megapixels.
 //!
+//! Beside the decode, as the desktop draws it, the raw's embedded preview
+//! (`preview::first_paint`): the first pixels, timed apart from the
+//! first developed frame (the proxy).
+//!
 //! The times are from the open's start; each cell is the median of the
 //! runs. A row whose runs spread more than 15 % (open to fit) is marked
 //! unstable, and the run as a whole is said not stable then: the box's
@@ -107,6 +111,9 @@ fn args() -> Result<Args, String> {
 /// One open of one raw: milliseconds from the open's start, unless said.
 #[derive(Clone, Default)]
 struct Run {
+    /// The embedded preview drawn (`preview::first_paint`, on a thread
+    /// of its own beside the decode, as the desktop draws it).
+    first_pixels: f64,
     decode: f64,
     graph: f64,
     ready: f64,
@@ -193,7 +200,7 @@ fn main() {
                     }
                     let line = json!({
                         "file": name, "run": i, "mp": round(mp),
-                        "decode_ms": run.decode, "graph_ms": run.graph, "ready_ms": run.ready,
+                        "first_pixels_ms": run.first_pixels, "decode_ms": run.decode, "graph_ms": run.graph, "ready_ms": run.ready,
                         "proxy_ms": run.proxy, "preview_ms": run.preview, "histogram_ms": run.histogram,
                         "fit_ms": run.fit, "demosaic_calls": run.demosaics, "demosaic_ms": run.demosaic,
                         "demosaic": run.algorithm,
@@ -501,6 +508,15 @@ fn open(
     engine: &Arc<Engine>,
 ) -> Result<(Run, Region), String> {
     let start = Instant::now();
+    // The first paint beside the decode, as the desktop's opening thread
+    // starts it.
+    let first = {
+        let path = path.to_path_buf();
+        std::thread::Builder::new()
+            .name("open-timing-first-paint".into())
+            .spawn(move || helios_gui::preview::first_paint(&path).map(|_| ms(start)))
+            .expect("a first-paint thread")
+    };
     let (graph, node) = helios_gui::templates::develop_file(path, bundle)?;
     let ready = ms(start);
     let extent = graph
@@ -509,7 +525,12 @@ fn open(
         .ok_or("no extent")?;
     let graph = Arc::new(graph);
     let (proxy, fit, preview, histogram) = concurrent(engine, &graph, node, extent, true, start);
+    let first_pixels = first
+        .join()
+        .expect("the first-paint thread")
+        .unwrap_or(f64::NAN);
     let mut run = Run {
+        first_pixels,
         ready,
         proxy,
         preview,
@@ -692,8 +713,9 @@ fn table(
         let m = |f: fn(&Run) -> f64| format!("{:.0}", median(rs, f));
         let _ = writeln!(
             body,
-            "| {name} | {mp:.1} | {} | {} | {} | {} | {} | {} | {} | {} | {} × {} | {} / {} | {:.0} %{} |",
+            "| {name} | {mp:.1} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} × {} | {} / {} | {:.0} %{} |",
             rs[0].algorithm,
+            m(|r| r.first_pixels),
             m(|r| r.decode),
             m(|r| r.graph),
             m(|r| r.ready),
@@ -720,8 +742,8 @@ fn table(
         },
     );
     out.push_str(
-        "| raw | MP | demosaic | decode | graph build | graph ready | proxy | preview | histogram | fit | demosaic calls × ms | slider fit / preview | spread |\n\
-         |---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "| raw | MP | demosaic | first pixels | decode | graph build | graph ready | proxy (first developed frame) | preview | histogram | fit | demosaic calls × ms | slider fit / preview | spread |\n\
+         |---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     out.push_str(&body);
     out
