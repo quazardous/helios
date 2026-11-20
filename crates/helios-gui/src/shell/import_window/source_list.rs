@@ -80,7 +80,7 @@ struct SourcePlaces {
 }
 
 impl PlaceProvider for SourcePlaces {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "helios.import.sources"
     }
 
@@ -624,7 +624,7 @@ pub(super) fn sources_ui(
                 }
                 if let Some(SourceKey::Account(id)) = places.key(&item.id) {
                     let mut window = window.borrow_mut();
-                    albums_ui(ui, &mut window.0, words, &id);
+                    albums_ui(ui, window.0, words, &id);
                 }
             })
             .under_section(|ui, section| {
