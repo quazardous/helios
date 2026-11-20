@@ -67,7 +67,7 @@ helios-ui = { path = "crates/helios-ui" }
 # Helios; its icon font stays off. Its bundled font pair (Inter
 # and JetBrains Mono NL, SIL Open Font License 1.1) is Helios's interface
 # font.
-egui-pop = { version = "0.18.2", default-features = false, features = ["eframe", "bundled-fonts"] }
+egui-pop = { version = "0.18.3", default-features = false, features = ["eframe", "bundled-fonts"] }
 # MIT: egui-pop's agent socket (the debug bridge served to agents out of
 # the process), off unless EGUI_POP_AGENT_SOCKET asks for it.
 egui-pop-agent = "0.11.2"
@@ -108,8 +108,7 @@ egui-pop-wayland = "0.2"
 egui-pop-fit = "0.1.2"
 # MIT OR Apache-2.0: the controls framework (controls as data, cards on the
 # slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
-# Pinned to egui_hud's 0.10.0 release branch (egui-pop 0.18) until it is on crates.io.
-egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "d9cbed55ede4d7e6476f0cb5aa69f5ac7f900027" }
+egui_hud = "0.10.0"
 blake3 = "1"
 # MIT OR Apache-2.0: the hashes connectors claim for their items (MD5,
 # SHA-1, SHA-256), checked while fetched bytes land.
