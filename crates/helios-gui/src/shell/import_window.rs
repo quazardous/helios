@@ -267,8 +267,10 @@ pub(crate) struct ImportWindow {
     /// card inserted is safe to format, said on its row.
     pub(super) card_list: crate::backup_end::CardList,
     /// The imports running and ended during this run (the node's
-    /// promises, [`crate::activity::Activity::imports`]), shown above the
-    /// footer with their progress, outcome, Cancel and Retry.
+    /// promises, [`crate::activity::Activity::imports`]): the Import
+    /// button waits while one imports the photos it would. Their
+    /// progress shows in the status bar and the Activity focus, the one
+    /// place to look, not here.
     promises: Vec<helios_vault::promises::Promise>,
     /// The OS window opened for it, not seen closed since.
     shown: Option<WindowId>,
@@ -759,8 +761,6 @@ enum Event {
     ManageAccounts,
     /// "Import again" on an import of the history (its id).
     Again(String),
-    /// Cancel or Retry on an import's promise line (its id).
-    Promise(String, crate::promise_line::Action),
 }
 
 /// The window's event for an account's action: Settings > Accounts is
@@ -1543,7 +1543,6 @@ impl Shell {
                 }
             }
             Event::Import => self.import_ticked_sources(),
-            Event::Promise(id, action) => self.core.activity.ask(action, &id),
             Event::Again(id) => {
                 if let Err(e) = self.import_again(&json!({ "id": id }), &Origin::User) {
                     self.warn(e);
@@ -1616,8 +1615,8 @@ impl Shell {
             }
             (w.choices.clone(), copy, std::mem::take(&mut w.ticked))
         };
-        // Whether an import went to the node: the window then stays, its
-        // promise line showing the import, and may be closed any time.
+        // Whether an import went to the node: the window then stays (the
+        // status bar shows the import), and may be closed any time.
         let mut handed = false;
         for path in &ticked {
             let (files, card, own) = {
@@ -2007,8 +2006,7 @@ impl ImportWindow {
                 | Event::Storage
                 | Event::ManageAccounts
                 | Event::Dropped(_)
-                | Event::Again(_)
-                | Event::Promise(..)),
+                | Event::Again(_)),
             ) => {
                 self.events.push(e);
                 super::main_pass::ask(&app, WINDOW);
@@ -2260,16 +2258,6 @@ impl ImportWindow {
             }
         });
         layout.footer(ui, |ui| {
-            // The imports running, and those ended during this run: they
-            // go on when the window closes.
-            if !w.promises.is_empty() {
-                ui.divider();
-            }
-            for p in &w.promises {
-                if let Some(action) = crate::promise_line::show(ui, p) {
-                    event = Some(Event::Promise(p.id.clone(), action));
-                }
-            }
             ui.divider();
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

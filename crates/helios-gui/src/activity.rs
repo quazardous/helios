@@ -60,6 +60,15 @@ const IMPORTS_SHOWN: usize = 4;
 /// How many log lines a job keeps.
 const LOG_LINES: usize = 200;
 
+/// What the person asked of a promise, from the Activity focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ask {
+    /// `promises.cancel`.
+    Cancel,
+    /// `promises.retry`.
+    Retry,
+}
+
 /// A line of a job's log, as followed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogLine {
@@ -267,13 +276,13 @@ impl Activity {
     /// Asks the node to cancel (`promises.cancel`) or retry
     /// (`promises.retry`) promise `id`, on a thread: the answer shows as
     /// the promise is read again.
-    pub fn ask(&self, action: crate::promise_line::Action, id: &str) {
+    pub fn ask(&self, action: Ask, id: &str) {
         let Some(node) = self.node.clone() else {
             return;
         };
         let method = match action {
-            crate::promise_line::Action::Cancel => "promises.cancel",
-            crate::promise_line::Action::Retry => "promises.retry",
+            Ask::Cancel => "promises.cancel",
+            Ask::Retry => "promises.retry",
         };
         let (id, kick) = (id.to_string(), self.kick.clone());
         let asked = std::thread::Builder::new()
@@ -421,6 +430,8 @@ pub fn progress_text(ctx: &egui::Context, p: &Promise) -> String {
 /// newest failure for the badge.
 pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: Option<&Summary>) {
     use egui_pop::core::indicator::{Indicator, Tone};
+    use egui_pop::core::tooltip::TooltipExt as _;
+    use egui_pop::core::ui::UiPop as _;
     let ctx = ui.ctx().clone();
     let text = |m: Message| crate::i18n::text(&ctx, m);
     let Some(summary) = summary else {
@@ -439,7 +450,7 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: Option<&Summary>) 
                 .label(&meaning)
                 .sense_click(),
             )
-            .on_hover_text(&meaning);
+            .tip(meaning.as_str());
         if r.clicked() {
             app.run(
                 egui_pop::model::ids::CommandId::from_static(COMMAND),
@@ -454,7 +465,6 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: Option<&Summary>) 
     ));
     let mut clicked = None;
     if let Some(main) = summary.running.first() {
-        ui.spinner();
         let list = summary
             .running
             .iter()
@@ -468,6 +478,7 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: Option<&Summary>) 
             )
             .with("count", summary.running.len()),
         );
+        helios_ui::progress(ui, helios_ui::Progress::Row, &meaning, None);
         let r = ui.add(
             Indicator::count(summary.running.len() as u64)
                 .tone(Tone::Accent)
@@ -476,22 +487,21 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: Option<&Summary>) 
                 .tooltip(format!("{meaning}\n{list}"))
                 .interactive(action.clone()),
         );
-        let label = ui
-            .add(egui::Label::new(progress_text(&ctx, main)).sense(egui::Sense::click()))
-            .on_hover_text(list);
+        let label =
+            egui_pop::core::widgets::bar_text_button(ui, progress_text(&ctx, main)).tip(list);
         if r.clicked() || label.clicked() {
             clicked = Some(main.id.clone());
         }
     }
     if summary.failed > 0 {
         if !summary.running.is_empty() {
-            ui.separator();
+            ui.divider();
         }
         let meaning = text(
             Message::new("gui-activity-failed", "{ $count } background tasks failed")
                 .with("count", summary.failed),
         );
-        ui.colored_label(ui.visuals().warn_fg_color, "⚠");
+        ui.text_tone(egui_pop::core::ui::Tone::Warning, "⚠");
         let r = ui.add(
             Indicator::count(summary.failed as u64)
                 .tone(Tone::Warning)

@@ -1,19 +1,19 @@
 //! Full screen and zen mode: in full screen the title bar stays with
-//! Helios's global items (jobs, decisions waiting, the profile), each
+//! Helios's global items (background tasks, decisions waiting, the
+//! profile), each
 //! opening what it is about; zen mode (`Ctrl+K Z`) leaves the image
 //! alone, and Escape brings the bars and areas back.
 
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use egui_pop::api::jobs_centre::PANEL_JOBS;
 use egui_pop::core::frame;
 use egui_pop::core::indicator;
 use egui_pop::model::ids::PanelId;
-use helios_core::jobs::{Progress, Start};
 use helios_gui::caption::{DECISIONS_MARK, JOBS_MARK, PROFILE};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_library::stacks::Decision;
+use helios_vault::promises::{Promise, State};
 use serde_json::json;
 
 fn framed() -> Shell {
@@ -21,6 +21,22 @@ fn framed() -> Shell {
     shell.draw_frame(true);
     shell.set_title("photos");
     shell
+}
+
+/// An export running, as the node's promise, at 1 of 4.
+fn export(state: State) -> Promise {
+    Promise {
+        id: "promise-1".into(),
+        owner: "export-1".into(),
+        kind: "export".into(),
+        label: "Export a.png".into(),
+        request: json!({}),
+        state,
+        cancel_asked: false,
+        attempts: 1,
+        created: 1_794_650_000,
+        updated: 1_794_650_000,
+    }
 }
 
 fn full_screen(h: &mut Harness<'_, Shell>, on: bool) {
@@ -60,11 +76,14 @@ fn proposal(id: &str) -> Decision {
 #[test]
 fn full_screen_keeps_the_bar_with_helios_s_global_items() {
     let mut h = headless::harness(framed(), vec2(1280.0, 800.0));
-    let job = h
-        .state()
-        .jobs()
-        .start(Start::new("export-1", "Export a.png", "export").total(4));
-    job.progress(Progress::new().counts(1, 4));
+    h.state_mut().show_activity_at(
+        vec![export(State::Running {
+            done: 1,
+            total: Some(4),
+            note: None,
+        })],
+        1_794_650_000,
+    );
     h.state_mut()
         .stack_review_mut()
         .set_decisions(vec![proposal("stacks-1"), proposal("stacks-2")]);
@@ -97,14 +116,9 @@ fn full_screen_keeps_the_bar_with_helios_s_global_items() {
     );
     assert!(h.query_by_label("default").is_some());
 
-    // Each opens what it is about: the Jobs panel, the Stacks panel,
-    // the Profiles menu.
+    // Each opens what it is about: the Stacks panel, the Profiles menu,
+    // the Activity focus on the task.
     let app = h.state().app().handle().clone();
-    assert!(!app.panel_visible(&PANEL_JOBS));
-    h.get_by_label("Show the jobs").click();
-    h.run();
-    h.run();
-    assert!(app.panel_visible(&PANEL_JOBS));
     h.get_by_label_contains("Decisions waiting").click();
     h.run();
     h.run();
@@ -118,9 +132,19 @@ fn full_screen_keeps_the_bar_with_helios_s_global_items() {
     );
     h.key_press(Key::Escape);
     h.run();
+    assert_eq!(h.state().activity_focus_state()["open"], false);
+    h.get_by_label("Show the jobs").click();
+    h.run();
+    h.run();
+    let focus = h.state().activity_focus_state();
+    assert_eq!(focus["open"], true, "{focus}");
+    assert_eq!(focus["selected"], "promise-1", "{focus}");
 
-    // Nothing to say, nothing shown: the jobs' mark goes with the job.
-    job.finished();
+    // Nothing to say, nothing shown: the mark goes with the task.
+    h.state_mut().show_activity_at(
+        vec![export(State::Done { result: json!({}) })],
+        1_794_650_000,
+    );
     h.state_mut().stack_review_mut().set_decisions(Vec::new());
     h.run();
     h.run();

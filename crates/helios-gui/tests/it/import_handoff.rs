@@ -3,8 +3,10 @@
 //! window's status bar follows the promise: a spinner, the count of tasks
 //! and "Importing 120/412", gone once it settles; a failure leaves a
 //! warning badge until it is clicked, which opens the Activity focus on
-//! the failed import. Cancel on the import's line stops it; Import
-//! again goes through a promise too.
+//! the failed import. The import window shows no line of its own (the
+//! status bar and the Activity focus are the one place to look): Cancel
+//! in the focus stops the import. Import again goes through a promise
+//! too.
 //!
 //! The node is the desktop's (`VaultService` in process) with a stand-in
 //! for the import's work, held until the test lets it end, so every state
@@ -169,15 +171,14 @@ fn import_hands_off_to_a_promise_the_window_may_close_and_the_status_bar_follows
     assert_eq!(request["copy"], json!(true), "{request}");
     assert_eq!(request["darktable"], json!(true), "{request}");
     assert_eq!(request["origin"], json!("user"), "{request}");
-    // The window stays, the import's line in it.
+    // The window stays. The status bar: the count of tasks and the
+    // main one's progress.
     assert!(h.state().import_window_open());
-    until(&mut h, "the import's line", |h| {
-        h.query_by_label("120 of 412").is_some()
-    });
-    // The status bar: the count of tasks and the main one's progress.
     until(&mut h, "the indicator", |h| {
         h.query_by_label("Importing 120/412").is_some()
     });
+    // The window draws no line of its own for the import.
+    assert!(h.query_by_label("120 of 412").is_none());
     let running = shown(&h, helios_gui::activity::MARK).unwrap();
     assert_eq!(running.value, Some(1.0));
     // The window closes; the import goes on, still in the status bar.
@@ -197,25 +198,36 @@ fn import_hands_off_to_a_promise_the_window_may_close_and_the_status_bar_follows
 }
 
 #[test]
-fn cancel_on_the_import_line_stops_it() {
+fn cancel_in_the_activity_focus_stops_the_import() {
     let dir = temp("cancel");
     let gate = Arc::new(Gate::default());
     let mut h = card_window(&dir, node(&dir, &gate));
     import(&mut h, &gate);
-    until(&mut h, "the import's line", |h| {
-        h.query_by_label("120 of 412").is_some()
+    let ctx = h.ctx.clone();
+    h.state_mut().close_import_window(&ctx);
+    h.run_steps(3);
+    until(&mut h, "the indicator", |h| {
+        shown(h, helios_gui::activity::MARK).is_some()
     });
-    // The line's Cancel, above the window's own.
-    let line_cancel = h
+    // The status bar opens the Activity focus on the import.
+    click(&mut h, helios_gui::activity::MARK);
+    until(&mut h, "the Activity focus", |h| {
+        h.state().activity_focus_state()["open"] == true
+    });
+    until(&mut h, "the detail's Cancel", |h| {
+        h.query_all_by_label("Cancel").count() > 0
+    });
+    // The detail's, right of the list's.
+    let cancel = h
         .get_all_by_label("Cancel")
-        .min_by(|a, b| a.rect().min.y.total_cmp(&b.rect().min.y))
+        .max_by(|a, b| a.rect().min.x.total_cmp(&b.rect().min.x))
         .unwrap();
-    line_cancel.click();
+    cancel.click();
     until(&mut h, "the import cancelled", |_| {
         gate.cancelled.load(Ordering::SeqCst)
     });
     until(&mut h, "its outcome", |h| {
-        h.query_by_label("Cancelled").is_some()
+        h.query_all_by_label_contains("Cancelled").count() > 0
     });
     until(&mut h, "the indicator gone", |h| {
         shown(h, helios_gui::activity::MARK).is_none()
@@ -308,8 +320,8 @@ fn import_pressed_twice_starts_one_import_until_it_settles() {
     let gate = Arc::new(Gate::default());
     let mut h = card_window(&dir, node(&dir, &gate));
     import(&mut h, &gate);
-    until(&mut h, "the import's line", |h| {
-        h.query_by_label("120 of 412").is_some()
+    until(&mut h, "the import running", |h| {
+        h.query_by_label("Importing 120/412").is_some()
     });
     // Pressed again while it runs: the button waits, no second import.
     h.get_by_label("Import 1").click();
