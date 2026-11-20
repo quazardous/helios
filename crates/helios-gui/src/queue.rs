@@ -369,15 +369,8 @@ impl QueuePanel {
         }
         ui.divider();
         let mut asked = Vec::new();
-        // The item's title takes what the other columns leave.
-        let tracks = [
-            Track::CONTENT,
-            Track::fr(1.0),
-            Track::CONTENT,
-            Track::CONTENT,
-            Track::CONTENT,
-            Track::CONTENT,
-        ];
+        // Each column as wide as its content, as a table's.
+        let tracks = [Track::CONTENT; 6];
         helios_ui::scroll(ui, "helios.queue.scroll", helios_ui::Scroll::Region, |ui| {
             ui.grid(Grid::new("helios.queue.items", tracks), |cells| {
                 // Each key written out: the extractor finds them.
