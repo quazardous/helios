@@ -27,7 +27,7 @@ fn params() -> Vec<(&'static str, Descriptor)> {
 /// radius (this tool's own range and default, narrower than the
 /// parameter's).
 fn tool() -> Tool {
-    let centre = || Centre::default();
+    let centre = Centre::default; // `x`, `y`
     Tool::new("radial-exposure", "radial_exposure")
         .with(ToolHandle::new(
             "center",
