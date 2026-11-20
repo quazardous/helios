@@ -316,6 +316,14 @@ impl Link {
         let _ = self.0.quit_bus.set(bus);
     }
 
+    /// How long the node's stop takes at most with the jobs adopted now:
+    /// its quit listeners' declared deadlines plus a margin, under a hard
+    /// ceiling ([`crate::node_quit::stop_deadline`]). What a host waits
+    /// for the node's stop.
+    pub fn stop_deadline(&self) -> Duration {
+        crate::node_quit::stop_deadline(&self.0.jobs())
+    }
+
     /// The bus the node's quit is asked on, once handed
     /// ([`LocalNode::quit_on`]): its listeners, for introspection.
     pub fn quit_bus(&self) -> Option<Arc<dyn bus_contract::Bus>> {

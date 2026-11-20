@@ -190,27 +190,8 @@ pub fn listen(
     for l in bus.listeners(QUIT).unwrap_or_default() {
         bus.unlisten(QUIT, &l.id);
     }
-    let mut taken: Vec<String> = Vec::new();
-    // All the jobs' listeners together stay within the node's jobs stop:
-    // what one does not use is not given to the next, but none is given
-    // more than what is left.
-    let mut left = crate::node::JOBS_STOP;
-    for job in jobs {
-        let base = listener_of(&**job);
-        let mut id = base.clone();
-        let mut n = 1;
-        while taken.contains(&id) {
-            n += 1;
-            id = format!("{base}#{n}");
-        }
-        taken.push(id.clone());
-        // Cancelled only (its jobs not waited for): the cancel is given a
-        // moment.
+    for (job, (id, deadline)) in jobs.iter().zip(deadlines(jobs)) {
         let wait = job.stop_within();
-        let deadline = if wait.is_zero() { CANCEL_ONLY } else { wait }
-            .min(left)
-            .max(LEAST);
-        left = left.saturating_sub(deadline);
         let (job, facts, me) = (job.clone(), facts.clone(), id.clone());
         let listened = bus.listen::<NodeQuit>(
             &id,
@@ -256,6 +237,57 @@ pub fn listen(
         log::warn!(target: "helios::node", "{QUIT}: `{VAULT}` not heard: {e}");
     }
 }
+
+/// The jobs' listeners `jobs` get, in their order: each one's id (named
+/// after its adopter, [`listener_of`], numbered when two share a name)
+/// and its deadline, its [`NodeJobs::stop_within`] (a moment for the
+/// cancel when it waits for nothing). All of them together stay within
+/// [`crate::node::JOBS_STOP`], the hard ceiling: what one does not use
+/// is not given to the next, but none is given more than what is left.
+pub fn deadlines(jobs: &[Arc<dyn NodeJobs>]) -> Vec<(String, Duration)> {
+    let mut taken: Vec<String> = Vec::new();
+    let mut left = crate::node::JOBS_STOP;
+    let mut out = Vec::new();
+    for job in jobs {
+        let base = listener_of(&**job);
+        let mut id = base.clone();
+        let mut n = 1;
+        while taken.contains(&id) {
+            n += 1;
+            id = format!("{base}#{n}");
+        }
+        taken.push(id.clone());
+        let wait = job.stop_within();
+        let deadline = if wait.is_zero() { CANCEL_ONLY } else { wait }
+            .min(left)
+            .max(LEAST);
+        left = left.saturating_sub(deadline);
+        out.push((id, deadline));
+    }
+    out
+}
+
+/// What is added to the declared deadlines for the node's own work
+/// between its listeners (its watches stopped, its state said).
+pub const STOP_MARGIN: Duration = Duration::from_secs(1);
+
+/// How long the node's stop takes at most with the adopters `jobs`: its
+/// listeners' declared deadlines one after the other (the jobs', then
+/// the library's close), plus [`STOP_MARGIN`]; never past
+/// [`crate::node::STOP_DEADLINE`] and the margin, the hard ceiling, so a
+/// broken declaration cannot hold the quit. What the host waits for the
+/// node's stop, instead of a constant.
+pub fn stop_deadline(jobs: &[Arc<dyn NodeJobs>]) -> Duration {
+    deadlines(jobs)
+        .into_iter()
+        .fold(Duration::ZERO, |sum, (_, d)| sum.saturating_add(d))
+        .saturating_add(crate::node::LIBRARY_CLOSE)
+        .saturating_add(STOP_MARGIN)
+        .min(STOP_CEILING)
+}
+
+/// The hard ceiling of [`stop_deadline`].
+pub const STOP_CEILING: Duration = crate::node::STOP_DEADLINE.saturating_add(STOP_MARGIN);
 
 /// How long an adopter whose jobs are only cancelled, not waited for
 /// ([`NodeJobs::stop_within`] zero), is given for the cancel.
@@ -426,6 +458,49 @@ mod tests {
         assert!(!again.report().unclean_shutdown, "closed cleanly");
         let _ = std::fs::remove_dir_all(&dir);
         (ended, began, closed)
+    }
+
+    fn within(key: &'static str, within: Duration) -> Arc<dyn NodeJobs> {
+        Arc::new(Named {
+            key,
+            gate: None,
+            within,
+        })
+    }
+
+    /// The node's stop deadline follows its listeners' declared
+    /// deadlines (the jobs', the library's close) plus a margin, never
+    /// past the hard ceiling however long the adopters say they take.
+    #[test]
+    fn the_stop_deadline_follows_the_declared_deadlines_under_a_ceiling() {
+        use crate::node::LIBRARY_CLOSE;
+        let base = LIBRARY_CLOSE + STOP_MARGIN;
+        assert_eq!(stop_deadline(&[]), base, "the library's close alone");
+        let jobs = [
+            within("node-end-exports", Duration::from_secs(2)),
+            within("node-end-map", Duration::from_secs(1)),
+        ];
+        assert_eq!(stop_deadline(&jobs), base + Duration::from_secs(3));
+        assert_eq!(
+            deadlines(&jobs),
+            [
+                (
+                    "helios.node.quit.exports".to_owned(),
+                    Duration::from_secs(2)
+                ),
+                ("helios.node.quit.map".to_owned(), Duration::from_secs(1)),
+            ]
+        );
+        // Cancelled only: a moment for the cancel.
+        let cancel = [within("node-end-health", Duration::ZERO)];
+        assert_eq!(stop_deadline(&cancel), base + CANCEL_ONLY);
+        // A broken declaration (an hour each) stays under the ceiling.
+        let broken = [
+            within("node-end-exports", Duration::from_hours(1)),
+            within("node-end-backups", Duration::from_hours(1)),
+        ];
+        assert_eq!(stop_deadline(&broken), STOP_CEILING);
+        assert!(STOP_CEILING < Duration::from_secs(20));
     }
 
     /// Adopted in any order, the node's listeners run in the declared

@@ -607,6 +607,8 @@ gui-end-node = Asking the library's node to stop
 
 gui-end-node-waiting = Waiting for: { $what }
 
+gui-end-unsaved = Checking the unsaved edits
+
 gui-export-bits = PNG bits per channel
 
 gui-export-cancelled = The export was cancelled: { $written } photos written to { $folder }
@@ -2292,6 +2294,14 @@ gui-quick-open-workspace = workspace { $path }
 gui-quit-jobs-detail = { $count } jobs are running; quitting cancels them
 
 gui-quit-title = Quit Helios?
+
+gui-quit-unsaved-detail = Quitting now loses it: { $why }
+
+gui-quit-unsaved-discard = Quit without saving
+
+gui-quit-unsaved-retry = Retry saving
+
+gui-quit-unsaved-title = An edit could not be saved
 
 gui-quit-verb = Quit
 
