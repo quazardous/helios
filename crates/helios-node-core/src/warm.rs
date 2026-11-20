@@ -7,19 +7,22 @@
 //! order. [`Lifecycle`] turns "this one shown, those near" into the facts
 //! that changed, a photo leaving the window said hidden.
 //!
-//! A [`Warmer`] follows those facts: a photo near has its states asked of
+//! A [`Warmer`] follows those facts: a photo near, once it stayed near for
+//! [`SETTLE`] (a fast scroll warms nothing), has its states asked of
 //! the router ([`crate::image_states`]) at [`Priority::Prefetch`], as the
 //! application's [`Recipe`] names them; a photo hidden has them withdrawn
 //! (a computation waiting or running stops unless another asker wants
 //! it). It keeps only the asks in flight: a state ready stays the
 //! router's, within its budget, never held outside it. The router starts
 //! no background computation while an interactive one runs, so a warm-up
-//! never competes with the shown photo.
+//! never competes with the shown photo. A photo warmed then hidden
+//! without being shown is wasted work: counted ([`WarmCounters`]) and
+//! said ([`facts::WARM_UNUSED`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use helios_core::{Bus, Priority};
 use serde::{Deserialize, Serialize};
@@ -38,8 +41,13 @@ pub mod facts {
     pub const NEAR: &str = "helios.photo.near";
     /// The photo is neither shown nor near any more.
     pub const HIDDEN: &str = "helios.photo.hidden";
+    /// A photo warmed was hidden without being shown: its warm-up was
+    /// wasted work (the warmer's counters keep the total).
+    pub const WARM_UNUSED: &str = "helios.photo.warm_unused";
+    /// The lifecycle facts, which the warmer follows.
+    pub const LIFECYCLE: [&str; 3] = [SHOWN, NEAR, HIDDEN];
     /// Every fact.
-    pub const ALL: [&str; 3] = [SHOWN, NEAR, HIDDEN];
+    pub const ALL: [&str; 4] = [SHOWN, NEAR, HIDDEN, WARM_UNUSED];
 }
 
 /// The payload of a lifecycle fact.
@@ -108,25 +116,125 @@ pub type Recipe = Arc<dyn Fn(&str) -> Vec<(StateKey, Compute)> + Send + Sync>;
 /// How often the warmer looks at its asks and whether it should stop.
 const TICK: Duration = Duration::from_millis(100);
 
+/// How long a photo stays near before its warm-up starts: a fast scroll
+/// or a run of arrows passes photos near and hidden again within it, and
+/// none of them is decoded.
+pub const SETTLE: Duration = Duration::from_millis(200);
+
+/// What the warmer did, since it started.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct WarmCounters {
+    /// Photos whose warm-up was asked of the router.
+    pub started: u64,
+    /// Photos near that were hidden again before they settled: never
+    /// asked, no work done.
+    pub skipped: u64,
+    /// Warmed photos then shown: the warm-up served an open.
+    pub used: u64,
+    /// Warmed photos hidden without being shown: wasted work, also said
+    /// as [`facts::WARM_UNUSED`].
+    pub unused: u64,
+}
+
+/// The warmer's state, shared with its thread.
+#[derive(Default)]
+struct Warming {
+    /// Photos near, waiting to settle, since when.
+    pending: BTreeMap<String, Instant>,
+    /// Asks in flight, by photo.
+    asks: BTreeMap<String, Vec<Handle>>,
+    /// Photos warmed (asked) and not shown since.
+    warmed: BTreeSet<String>,
+    counters: WarmCounters,
+}
+
+impl Warming {
+    /// Follows one lifecycle fact.
+    fn heard(&mut self, bus: &Bus, kind: &str, photo: String) {
+        match kind {
+            facts::NEAR if !self.asks.contains_key(&photo) && !self.warmed.contains(&photo) => {
+                self.pending.entry(photo).or_insert_with(Instant::now);
+            }
+            facts::SHOWN => {
+                // The open asks for its own states (joining a warm-up in
+                // flight); one still settling is not started for it.
+                self.pending.remove(&photo);
+                if self.warmed.remove(&photo) {
+                    self.counters.used += 1;
+                }
+            }
+            facts::HIDDEN => {
+                if self.pending.remove(&photo).is_some() {
+                    self.counters.skipped += 1;
+                }
+                // Withdrawn: dropping an ask cancels it.
+                self.asks.remove(&photo);
+                if self.warmed.remove(&photo) {
+                    self.counters.unused += 1;
+                    let payload =
+                        serde_json::to_value(Photo { photo }).expect("a photo serializes");
+                    bus.publish_value(SOURCE, None, facts::WARM_UNUSED, payload);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Starts the warm-ups of the photos settled near.
+    fn start_settled(&mut self, states: &ImageStates, recipe: &Recipe) {
+        let now = Instant::now();
+        let settled: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(_, since)| now.duration_since(**since) >= SETTLE)
+            .map(|(photo, _)| photo.clone())
+            .collect();
+        for photo in settled {
+            self.pending.remove(&photo);
+            let asks: Vec<Handle> = recipe(&photo)
+                .into_iter()
+                .map(|(key, compute)| states.ask(key, Priority::Prefetch, compute))
+                .collect();
+            if !asks.is_empty() {
+                self.counters.started += 1;
+                self.warmed.insert(photo.clone());
+                self.asks.insert(photo, asks);
+            }
+        }
+    }
+
+    /// How long the thread may wait for a fact: until the next photo
+    /// settles, at most a tick.
+    fn wait(&self) -> Duration {
+        let now = Instant::now();
+        self.pending
+            .values()
+            .map(|since| (*since + SETTLE).saturating_duration_since(now))
+            .min()
+            .map_or(TICK, |d| d.clamp(Duration::from_millis(1), TICK))
+    }
+}
+
 /// Follows the lifecycle facts on the router's bus and warms the photos
-/// near; stops with it.
+/// near once they settle ([`SETTLE`]); stops with it.
 pub struct Warmer {
     stop: Arc<AtomicBool>,
-    warming: Arc<Mutex<BTreeMap<String, Vec<Handle>>>>,
+    warming: Arc<Mutex<Warming>>,
 }
 
 impl Warmer {
     /// Starts following `states`' bus, warming with `recipe`.
     pub fn start(states: ImageStates, recipe: Recipe) -> Warmer {
         let stop = Arc::new(AtomicBool::new(false));
-        let warming: Arc<Mutex<BTreeMap<String, Vec<Handle>>>> = Arc::default();
-        let rx = states.bus().subscribe_kinds(&facts::ALL, None);
+        let warming: Arc<Mutex<Warming>> = Arc::default();
+        let rx = states.bus().subscribe_kinds(&facts::LIFECYCLE, None);
         let (s, w) = (stop.clone(), warming.clone());
         let spawned = std::thread::Builder::new()
             .name("helios-warm".into())
             .spawn(move || {
                 while !s.load(Ordering::SeqCst) {
-                    let fact = match rx.recv_timeout(TICK) {
+                    let wait = w.lock().unwrap_or_else(PoisonError::into_inner).wait();
+                    let fact = match rx.recv_timeout(wait) {
                         Ok(fact) => Some(fact),
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
@@ -135,29 +243,15 @@ impl Warmer {
                     if let Some(fact) = fact
                         && let Ok(Photo { photo }) = serde_json::from_value(fact.payload)
                     {
-                        match fact.kind {
-                            facts::NEAR if !warming.contains_key(&photo) => {
-                                let asks: Vec<Handle> = recipe(&photo)
-                                    .into_iter()
-                                    .map(|(key, compute)| {
-                                        states.ask(key, Priority::Prefetch, compute)
-                                    })
-                                    .collect();
-                                warming.insert(photo, asks);
-                            }
-                            // Withdrawn: dropping an ask cancels it.
-                            facts::HIDDEN => drop(warming.remove(&photo)),
-                            // Shown, its own asks join the warm-up's and
-                            // raise it; near again, it is warming already.
-                            _ => {}
-                        }
+                        warming.heard(states.bus(), fact.kind, photo);
                     }
+                    warming.start_settled(&states, &recipe);
                     // A state ready (or failed) is the router's: its ask
                     // is let go, so nothing holds it past the budget.
-                    for asks in warming.values_mut() {
+                    for asks in warming.asks.values_mut() {
                         asks.retain_mut(|ask| ask.try_get().is_none());
                     }
-                    warming.retain(|_, asks| !asks.is_empty());
+                    warming.asks.retain(|_, asks| !asks.is_empty());
                 }
             });
         if let Err(e) = spawned {
@@ -171,9 +265,18 @@ impl Warmer {
         self.warming
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .asks
             .keys()
             .cloned()
             .collect()
+    }
+
+    /// What it did so far.
+    pub fn counters(&self) -> WarmCounters {
+        self.warming
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .counters
     }
 }
 
@@ -184,6 +287,7 @@ impl Drop for Warmer {
         self.warming
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .asks
             .clear();
     }
 }
@@ -194,7 +298,6 @@ mod tests {
     use crate::image_states::{Ready, StateError, StateKind};
     use helios_core::{ContentHash, cancel};
     use std::sync::atomic::AtomicUsize;
-    use std::time::Instant;
 
     fn ids(names: &[&str]) -> Vec<String> {
         names.iter().map(|s| (*s).to_string()).collect()
@@ -349,6 +452,8 @@ mod tests {
         let photos: Vec<String> = (0..10).map(|i| format!("p{i}")).collect();
         for w in photos.windows(3) {
             life.publish(&bus, Some(&w[1]), &[w[0].clone(), w[2].clone()]);
+            // Each stop long enough for its neighbours to settle.
+            std::thread::sleep(SETTLE + Duration::from_millis(50));
             assert!(states.usage().bytes <= 250, "{:?}", states.usage());
         }
         until("every warm-up done", || warmer.warming().is_empty());
@@ -402,5 +507,65 @@ mod tests {
         open.wait(LONG).expect("shown");
         warm.wait(LONG).expect("near");
         assert!(near_ran.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_fast_scroll_over_a_thousand_photos_decodes_none() {
+        let bus = Arc::new(Bus::new());
+        let states = ImageStates::new(bus.clone(), 2);
+        let (runs, go) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(true)),
+        );
+        let warmer = Warmer::start(states.clone(), recipe(&runs, &go));
+        let mut life = Lifecycle::default();
+        let photos: Vec<String> = (0..1000).map(|i| format!("p{i}")).collect();
+        // A cell a millisecond: each photo near, then shown, then hidden,
+        // well within the settle time.
+        for w in photos.windows(3) {
+            life.publish(&bus, Some(&w[1]), &[w[0].clone(), w[2].clone()]);
+            std::thread::sleep(Duration::from_millis(1));
+            assert_eq!(
+                runs.load(Ordering::SeqCst),
+                0,
+                "a full decode while scrolling"
+            );
+        }
+        let scrolled = warmer.counters();
+        assert_eq!(scrolled.started, 0, "{scrolled:?}");
+        assert!(scrolled.skipped > 900, "{scrolled:?}");
+        assert_eq!(states.counters().computed, 0);
+        // The scroll stops: the last photo's two neighbours settle and
+        // warm.
+        until("the neighbours warmed", || runs.load(Ordering::SeqCst) == 2);
+        assert_eq!(warmer.counters().started, 2);
+    }
+
+    #[test]
+    fn a_warm_up_never_shown_is_counted_unused_and_said() {
+        let bus = Arc::new(Bus::new());
+        let states = ImageStates::new(bus.clone(), 2);
+        let (runs, go) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(true)),
+        );
+        let warmer = Warmer::start(states.clone(), recipe(&runs, &go));
+        let mut life = Lifecycle::default();
+        life.publish(&bus, Some("b"), &ids(&["a", "c"]));
+        until("both warmed", || warmer.counters().started == 2);
+        until("both ready", || warmer.warming().is_empty());
+        // The user moves to "c" (used), "a" leaves unseen (unused).
+        life.publish(&bus, Some("c"), &ids(&["b", "d"]));
+        until("counted", || {
+            let c = warmer.counters();
+            c.used == 1 && c.unused == 1
+        });
+        let said: Vec<_> = bus
+            .since(0)
+            .into_iter()
+            .filter(|e| e.kind == facts::WARM_UNUSED)
+            .map(|e| e.payload["photo"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(said, ["a"]);
     }
 }

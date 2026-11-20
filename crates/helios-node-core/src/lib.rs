@@ -92,5 +92,10 @@ pub const FACTS: &[helios_core::FactDecl] = {
             "{ photo }",
             "The photo is neither shown nor near any more",
         ),
+        FactDecl::json(
+            warm::facts::WARM_UNUSED,
+            "{ photo }",
+            "A photo warmed was hidden without being shown: wasted work",
+        ),
     ]
 };
