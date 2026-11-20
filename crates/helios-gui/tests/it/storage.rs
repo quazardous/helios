@@ -783,11 +783,23 @@ fn a_backup_ended_says_a_card_safe_everywhere_from_one_list() {
 
     // The import window's card rows, at their paint: the same.
     h.step();
-    assert!(
-        h.query_by_label("safe to format").is_some(),
+    // Each card's line, said as its row's description.
+    let said = |part: &str| {
+        h.query_all(egui_kittest::kittest::by().predicate(|n| {
+            n.description().is_some_and(|d| {
+                // A state mark (● ○) leads the line.
+                let d = d.trim_start_matches(['●', '○']).trim_start();
+                d.split(" · ").any(|p| p == part)
+            })
+        }))
+        .count()
+    };
+    assert_eq!(
+        said("safe to format"),
+        1,
         "the first card said safe in the import window"
     );
-    assert!(h.query_by_label("not safe to format yet").is_some());
+    assert_eq!(said("not safe to format yet"), 1);
 }
 
 /// The listeners of `backup.ended`, `card.safe` and `storage.read` as

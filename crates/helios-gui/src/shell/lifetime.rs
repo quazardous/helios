@@ -353,8 +353,10 @@ pub enum Closing {
 }
 
 impl Shell {
-    /// Attaches the local node: Helios quitting asks it to quit.
+    /// Attaches the local node: Helios quitting asks it to quit, and the
+    /// node's own quit (`helios.node.quit`) is asked on this bus.
     pub fn attach_node(&mut self, node: crate::node::Link) {
+        node.quit_on(self.core.app.handle().bus());
         let quit = &self.lifetime.quit;
         quit.slots.set_node(node);
         // Attached late (the start handing the library over after the
@@ -410,6 +412,12 @@ impl Shell {
         let outcome = ask_turn(&*handle.bus(), || handle.drain_asks(), ask);
         quit.ended.borrow_mut().record(listener, &outcome);
         outcome
+    }
+
+    /// What the node's quit did (`helios.node.quit`), kept in the end's
+    /// report with the node's listeners by their id.
+    pub fn quit_node_ended(&self, ended: &helios_node_core::node_quit::QuitEnded) {
+        self.lifetime.quit.ended.borrow_mut().record_node(ended);
     }
 
     /// The host's end step `id` did its part.

@@ -219,6 +219,8 @@ impl VaultNode {
         // The node's jobs mirrored as promises, from the first one.
         let mirrored = bus.subscribe();
         let node = LocalNode::own(vault, bus.clone(), FLUSH_EVERY);
+        // Its stop is a request on the application's bus (`helios.node.quit`).
+        node.quit_on(options.hooks.clone());
         let link = node.link();
         let watch = node.watch_volumes(options.volumes.clone(), options.hooks.clone());
         let backups = Backups::new(

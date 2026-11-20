@@ -575,3 +575,95 @@ impl ShutdownReport {
             .ok()
     }
 }
+
+/// The node's quit (`helios.node.quit`) followed by the end splash, from
+/// the facts the node says over its link: each listener's row named as
+/// it begins ("Stopping the exports", waiting for `exports`), and what
+/// the node's quit did, kept for the end's report.
+pub struct NodeEnd {
+    facts: std::sync::mpsc::Receiver<helios_core::Envelope>,
+    phase: helios_node_core::phases::Phase,
+    /// The row of the node's listener running now.
+    step: Option<helios_node_core::phases::Running>,
+    ended: Option<helios_node_core::node_quit::QuitEnded>,
+}
+
+impl std::fmt::Debug for NodeEnd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeEnd")
+            .field("ended", &self.ended)
+            .finish_non_exhaustive()
+    }
+}
+
+impl NodeEnd {
+    /// Follows the node's quit through `facts` (`Link::follow_quit`), its
+    /// rows on `phase` (the end splash's).
+    pub fn new(
+        facts: std::sync::mpsc::Receiver<helios_core::Envelope>,
+        phase: helios_node_core::phases::Phase,
+    ) -> Self {
+        Self {
+            facts,
+            phase,
+            step: None,
+            ended: None,
+        }
+    }
+
+    /// Reads the node's facts said since the last pass: a listener begun
+    /// gets its row (the one before is done), the end closes the last.
+    pub fn pump(&mut self) {
+        use helios_core::Event as _;
+        use helios_node_core::node_quit::{ListenerBegan, QuitEnded};
+        while let Ok(fact) = self.facts.try_recv() {
+            if fact.kind == ListenerBegan::KIND {
+                let Ok(began) = serde_json::from_value::<ListenerBegan>(fact.payload) else {
+                    continue;
+                };
+                self.step = None;
+                let step = self.phase.begin(began.label);
+                step.why(waiting_for(&began.listener));
+                self.step = Some(step);
+            } else if fact.kind == QuitEnded::KIND {
+                self.step = None;
+                self.ended = serde_json::from_value(fact.payload).ok();
+            }
+        }
+    }
+
+    /// What the node's quit did, once it ended.
+    pub fn ended(&self) -> Option<&helios_node_core::node_quit::QuitEnded> {
+        self.ended.as_ref()
+    }
+}
+
+/// What the end splash says a node listener's row waits for: "Waiting
+/// for: exports".
+pub fn waiting_for(listener: &str) -> Message {
+    let what = listener
+        .strip_prefix(helios_node_core::node_quit::QUIT)
+        .and_then(|l| l.strip_prefix('.'))
+        .unwrap_or(listener);
+    Message::new("gui-end-node-waiting", "Waiting for: { $what }").with("what", what.to_owned())
+}
+
+impl ShutdownReport {
+    /// Keeps what the node's quit did, its listeners by their id, the cut
+    /// ones named.
+    pub fn record_node(&mut self, ended: &helios_node_core::node_quit::QuitEnded) {
+        for id in &ended.finished {
+            self.record(id, &TurnOutcome::Finished);
+        }
+        for late in &ended.late {
+            let outcome = TurnOutcome::Late {
+                deadline: Duration::from_millis(late.deadline_ms),
+                cut: late.cut,
+            };
+            self.record(&late.listener, &outcome);
+        }
+        for (id, why) in &ended.failed {
+            self.record(id, &TurnOutcome::Failed(why.clone()));
+        }
+    }
+}

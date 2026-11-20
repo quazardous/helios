@@ -56,7 +56,20 @@ fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&mut Harness<'_, 
 
 /// Whether a node with this label is shown, once or more.
 fn shown(h: &Harness<'_, Shell>, label: &str) -> bool {
-    h.query_all_by_label(label).next().is_some()
+    h.query_all_by_label(label).next().is_some() || said_in_lines(h, label) > 0
+}
+
+/// How many Sources items' lines (their accessible descriptions, parts
+/// joined by " · ") say `part`.
+fn said_in_lines(h: &Harness<'_, Shell>, part: &str) -> usize {
+    h.query_all(egui_kittest::kittest::by().predicate(|n| {
+        n.description().is_some_and(|d| {
+            // A state mark (● ○) leads the line.
+            let d = d.trim_start_matches(['●', '○']).trim_start();
+            d.split(" · ").any(|p| p == part)
+        })
+    }))
+    .count()
 }
 
 fn run(h: &mut Harness<'_, Shell>, id: &str, args: Value, origin: Origin) -> Result<Value, String> {
@@ -1279,10 +1292,15 @@ fn picking_world_whole(sources: Option<String>, end: End, state: AccountState) -
     let mut h = headless::harness(shell, vec2(1280.0, 1100.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(&mut h, "the account listed", |h| {
-        shown(h, "ann@example.org")
-    });
-    click(&mut h, "ann@example.org");
+    // An account to reconnect is said with its warning mark.
+    let listed = |h: &Harness<'_, Shell>| {
+        ["ann@example.org", "ann@example.org, ▲"]
+            .into_iter()
+            .find(|l| h.query_all_by_label(l).next().is_some())
+    };
+    until(&mut h, "the account listed", |h| listed(h).is_some());
+    let name = listed(&h).expect("listed");
+    click(&mut h, name);
     PickingWorld {
         h,
         opened,
@@ -1958,17 +1976,16 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
     until(&mut h, "the account's address", |h| {
         shown(h, "ann@example.com")
     });
-    assert_eq!(h.query_all_by_label("Fake picks").count(), 2);
+    // The old one's name is said with its warning mark.
+    assert_eq!(h.query_all_by_label("Fake picks").count(), 1);
+    assert_eq!(h.query_all_by_label("Fake picks, ▲").count(), 1);
     assert_eq!(
-        h.query_all_by_label("needs reconnecting").count(),
+        said_in_lines(&h, "needs reconnecting"),
         1,
         "the old account only"
     );
     // Selected, the old account's one action is its reconnection.
-    h.query_all_by_label("Fake picks")
-        .nth(1)
-        .expect("the old account's row")
-        .click();
+    h.get_by_label("Fake picks, ▲").click();
     until(&mut h, "the reconnection offered", |h| {
         shown(h, "Reconnect once to show which account this is.") && shown(h, "Reconnect")
     });

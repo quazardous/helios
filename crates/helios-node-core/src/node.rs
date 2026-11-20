@@ -102,11 +102,12 @@ pub const WAIT_FOR_JOBS: Duration = Duration::from_mins(10);
 /// (exports, backups, the health check): what a quit asks
 /// about, and what the node's stop cancels or waits for.
 ///
-/// The node's stop settles each adopter in turn, as a step of its own
-/// on the end splash ([`NodeJobs::name`]): [`NodeJobs::cancel_all`],
-/// then [`NodeJobs::wait`] up to [`NodeJobs::stop_within`] (and never
-/// past [`JOBS_STOP`] for all of them). An adopter whose stop takes
-/// longer is left, logged by name: it never holds the library open.
+/// The node's stop settles each adopter in turn, as a listener of its
+/// quit request named after it ([`NodeJobs::name`]'s key,
+/// [`crate::node_quit::listener_of`]): [`NodeJobs::cancel_all`], then
+/// [`NodeJobs::wait`] up to [`NodeJobs::stop_within`] (and never past
+/// [`JOBS_STOP`] for all of them). An adopter whose stop takes longer is
+/// cut, reported by name: it never holds the library open.
 pub trait NodeJobs: Send + Sync {
     /// What the end splash shows while the node stops them.
     fn name(&self) -> Message {
@@ -166,6 +167,13 @@ struct Life {
     jobs: Mutex<Vec<Arc<dyn NodeJobs>>>,
     /// The volume watches the node runs, stopped as it stops.
     watches: Mutex<Vec<VolumeWatch>>,
+    /// The application's bus, which the node's own quit is asked on
+    /// (`helios.node.quit`).
+    quit_bus: std::sync::OnceLock<Arc<dyn bus_contract::Bus>>,
+    /// What the node's quit did, once it ended.
+    quit_ended: crate::node_quit::Kept,
+    /// The node's fact bus, where its quit says how it goes.
+    facts: std::sync::OnceLock<Arc<Bus>>,
 }
 
 impl std::fmt::Debug for Life {
@@ -195,26 +203,14 @@ impl Life {
             .clone()
     }
 
-    /// Before the last flush: the jobs cancelled when the quit said so
-    /// (or the stop was forced), waited for otherwise, at most
-    /// [`WAIT_FOR_JOBS`], then cancelled. Each adopter is stopped as a
-    /// step of its own, bounded ([`stop_one`]): what is not stopped in
-    /// time is left, and the library closes all the same. Cancelled
-    /// exports are not waited for: they write nothing to the vault, and
-    /// their renders under way end on their own. A job whose last step
-    /// writes to the vault (a backup recording its copy) has that write
-    /// waited for, within its share.
-    fn settle_jobs(&self) {
-        let jobs = self.jobs();
+    /// Before the node's quit request: a quit that leaves the running
+    /// jobs to finish waits for them, at most [`WAIT_FOR_JOBS`]. The
+    /// request then stops what is left, one listener per adopter
+    /// ([`crate::node_quit`]).
+    fn wait_for_jobs(&self) {
         let waiting = self.read(|s| s.quit == Some(AtQuit::Wait) && !s.force);
         if waiting {
-            wait_for_jobs(&jobs);
-        }
-        // Leaving them is safe: what they wrote is in the vault, the rest
-        // is done again (an export asked again, a backup run again).
-        let until = std::time::Instant::now() + JOBS_STOP;
-        for j in &jobs {
-            stop_one(j, until);
+            wait_for_jobs(&self.jobs());
         }
     }
 }
@@ -257,51 +253,6 @@ fn wait_for_jobs(jobs: &[Arc<dyn NodeJobs>]) {
     }
 }
 
-/// One adopter's jobs stopped, as a step of the end splash named after
-/// them: cancelled, then waited for up to their share, never past
-/// `until`, on a thread of their own so that an adopter whose cancel or
-/// wait does not return in time is left (logged by name), not waited
-/// for. Whether they stopped in time.
-fn stop_one(j: &Arc<dyn NodeJobs>, until: std::time::Instant) -> bool {
-    let name = j.name();
-    let step = crate::phases::end().begin(name.clone()).can_skip();
-    let left = until.saturating_duration_since(std::time::Instant::now());
-    // Cancelled only (an adopter whose jobs are not waited for): the
-    // cancel itself is given a moment.
-    let wait = j.stop_within();
-    let share = if wait.is_zero() { CANCEL_ONLY } else { wait }.min(left);
-    let (done, stopped) = std::sync::mpsc::channel();
-    let job = j.clone();
-    let spawned = std::thread::Builder::new()
-        .name("helios-node-job-stop".into())
-        .spawn(move || {
-            job.cancel_all();
-            let _ = done.send(wait.is_zero() || job.wait(share));
-        });
-    let in_time = match spawned {
-        Ok(_) => stopped.recv_timeout(share).unwrap_or(false),
-        Err(e) => {
-            log::warn!(target: "helios::node", "no thread to stop jobs on: {e}");
-            false
-        }
-    };
-    drop(step);
-    if !in_time {
-        log::warn!(
-            target: "helios::node",
-            "{}: not stopped within {} ms; left, the library closes without them",
-            name.english,
-            share.as_millis()
-        );
-        crate::quit::mark("background jobs left at their deadline");
-    }
-    in_time
-}
-
-/// How long an adopter whose jobs are only cancelled, not waited for
-/// ([`NodeJobs::stop_within`] zero), is given for the cancel.
-const CANCEL_ONLY: Duration = Duration::from_millis(500);
-
 /// A client's way to the node's life, without its vault's type: what the
 /// shell holds to ask the node to quit.
 #[derive(Clone, Debug)]
@@ -333,6 +284,42 @@ impl Link {
     /// The node's jobs running, by id: what a quit would cancel.
     pub fn running_jobs(&self) -> Vec<String> {
         self.0.jobs().iter().flat_map(|j| j.running()).collect()
+    }
+
+    /// What the node's quit did (`helios.node.quit`), once it ended.
+    pub fn quit_ended(&self) -> Option<crate::node_quit::QuitEnded> {
+        self.0.quit_ended.get()
+    }
+
+    /// Follows the node's quit from now on: the facts it says as each of
+    /// its listeners begins ([`crate::node_quit::ListenerBegan`]) and as
+    /// it ends ([`crate::node_quit::QuitEnded`]), kept until read.
+    pub fn follow_quit(&self) -> Option<std::sync::mpsc::Receiver<helios_core::Envelope>> {
+        use helios_core::Event as _;
+        let facts = self.0.facts.get()?;
+        Some(facts.subscribe_kinds(
+            &[
+                crate::node_quit::ListenerBegan::KIND,
+                crate::node_quit::QuitEnded::KIND,
+            ],
+            None,
+        ))
+    }
+
+    /// The node's quit is asked on `bus`, the application's
+    /// (`helios.node.quit`, [`crate::node_quit`]): its jobs' listeners
+    /// and the library's close run there, each within its deadline. The
+    /// first bus handed is kept; without one, the node's stop leaves its
+    /// jobs and closes the library alone.
+    pub fn quit_on(&self, bus: Arc<dyn bus_contract::Bus>) {
+        crate::node_quit::declare(&*bus);
+        let _ = self.0.quit_bus.set(bus);
+    }
+
+    /// The bus the node's quit is asked on, once handed
+    /// ([`LocalNode::quit_on`]): its listeners, for introspection.
+    pub fn quit_bus(&self) -> Option<Arc<dyn bus_contract::Bus>> {
+        self.0.quit_bus.get().cloned()
     }
 
     /// Whether the node was asked to quit.
@@ -426,11 +413,12 @@ impl<S: Store + 'static> LocalNode<S> {
             log::warn!(target: "helios::node", "promises not recovered: {e}");
         }
         let link = Link(Arc::default());
+        let _ = link.0.facts.set(bus.clone());
         let runner = {
-            let (vault, life) = (vault.clone(), link.0.clone());
+            let (vault, life, facts) = (vault.clone(), link.0.clone(), bus.clone());
             std::thread::Builder::new()
                 .name("helios-node".into())
-                .spawn(move || run(&vault, &life, every))
+                .spawn(move || run(&vault, &life, &facts, every))
                 .map_err(|e| log::warn!(target: "helios::node", "no thread to flush on: {e}"))
                 .ok()
         };
@@ -477,6 +465,12 @@ impl<S: Store + 'static> LocalNode<S> {
         watch
     }
 
+    /// The node's quit is asked on `bus`, the application's
+    /// ([`Link::quit_on`]).
+    pub fn quit_on(&self, bus: Arc<dyn bus_contract::Bus>) {
+        self.link.quit_on(bus);
+    }
+
     /// The vault the node owns, for the clients in its process.
     pub fn vault(&self) -> &Arc<Vault<S>> {
         &self.vault
@@ -521,14 +515,14 @@ impl<S: Store + 'static> LocalNode<S> {
                     log::warn!(target: "helios::node", "its thread stopped (a panic)");
                 }
             }
-            None => close(&self.vault, &self.link.0),
+            None => close(&self.vault, &self.link.0, &self.bus),
         }
     }
 }
 
 /// The node's thread: a flush every `every`, until it stops; then the
 /// last flush and the vault shut down.
-fn run<S: Store>(vault: &Vault<S>, life: &Life, every: Duration) {
+fn run<S: Store + 'static>(vault: &Arc<Vault<S>>, life: &Life, facts: &Arc<Bus>, every: Duration) {
     loop {
         let state = life.state.lock().unwrap_or_else(PoisonError::into_inner);
         let (state, _) = life
@@ -544,12 +538,14 @@ fn run<S: Store>(vault: &Vault<S>, life: &Life, every: Duration) {
             Err(e) => log::warn!(target: "helios::node", "cannot flush the vault: {e}"),
         }
     }
-    close(vault, life);
+    close(vault, life, facts);
 }
 
-/// The node's jobs settled, then the vault shut down (flushed, marked
-/// clean, closed to writes).
-fn close<S: Store>(vault: &Vault<S>, life: &Life) {
+/// The node's quit (`helios.node.quit`, [`crate::node_quit`]): its jobs
+/// settled one listener per adopter, each within its deadline, then the
+/// vault shut down (flushed, marked clean, closed to writes), last. What
+/// it did is said on `facts` for the node's clients.
+fn close<S: Store + 'static>(vault: &Arc<Vault<S>>, life: &Life, facts: &Arc<Bus>) {
     for watch in life
         .watches
         .lock()
@@ -558,14 +554,45 @@ fn close<S: Store>(vault: &Vault<S>, life: &Life) {
     {
         watch.stop();
     }
-    life.settle_jobs();
-    let closing = crate::phases::end().begin(Message::new(
-        "node-end-vault",
-        "Saving and closing the library",
-    ));
-    let done = vault.shut_down();
-    drop(closing);
-    if let Err(e) = &done {
+    life.wait_for_jobs();
+    let cancelling = life.read(|s| s.quit != Some(AtQuit::Wait) || s.force);
+    let Some(bus) = life.quit_bus.get().cloned() else {
+        // No application bus handed: no request to settle the jobs with
+        // deadlines; they are left (what they wrote is in the vault, a
+        // later write is refused) and the library closes.
+        log::warn!(target: "helios::node", "no bus for the node's quit: its jobs are left");
+        let done = vault.shut_down();
+        finish(life, &done);
+        return;
+    };
+    // The vault's close says how it went here: the request keeps only
+    // whether its listener did its part.
+    let closed: Arc<Mutex<Option<Result<(), String>>>> = Arc::default();
+    {
+        let (vault, closed) = (vault.clone(), closed.clone());
+        // Its row on the end splash is the client's, from the node's
+        // facts (`node_quit::ListenerBegan`), like the jobs' rows.
+        crate::node_quit::listen(&*bus, facts, &life.jobs(), move || {
+            let done = vault.shut_down();
+            *closed.lock().unwrap_or_else(PoisonError::into_inner) = Some(done.clone());
+            done
+        });
+    }
+    let ended = crate::node_quit::ask(&*bus, facts, crate::node_quit::NodeQuitAsk { cancelling });
+    // The library's close must run: a bus that did not run it (a listener
+    // refused, which none of the node's does) is not trusted with it.
+    let done = closed
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+        .unwrap_or_else(|| vault.shut_down());
+    life.quit_ended.set(ended);
+    finish(life, &done);
+}
+
+/// The node stopped: whether its library closed cleanly.
+fn finish(life: &Life, done: &Result<(), String>) {
+    if let Err(e) = done {
         log::warn!(target: "helios::node", "cannot close the vault cleanly: {e}");
     }
     life.update(|s| {
@@ -712,6 +739,7 @@ mod tests {
         let dir = scratch("stuck-cancel");
         let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
         let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        node.quit_on(Arc::new(egui_pop_hooks::Kernel::new()));
         let link = node.link();
         let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
         link.adopt(Arc::new(Stuck {
@@ -737,6 +765,7 @@ mod tests {
         let dir = scratch("stuck-stop");
         let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
         let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        node.quit_on(Arc::new(egui_pop_hooks::Kernel::new()));
         let link = node.link();
         let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
         link.adopt(Arc::new(Stuck {

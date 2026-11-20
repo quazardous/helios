@@ -34,11 +34,15 @@ use std::sync::{Mutex, PoisonError};
 use egui::Ui;
 use egui_pop::api::AppHandle;
 use egui_pop::core::icon::{Icon, Source, Tone};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::widgets::ToggleChip;
 use egui_pop::model::ids::MenuId;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
 use helios_core::{Graph, Message, NodeId, Value};
 use helios_module_masks::{Operator, fold};
 use helios_shell::commands::Origin;
+use helios_ui::Action;
 use helios_values::{Change, Descriptor, Set, Store, node_path};
 use serde_json::Value as Json;
 
@@ -1471,7 +1475,7 @@ impl MaskTree {
         };
         self.shown = net.clone();
         if net.root.is_none() {
-            ui.weak(crate::i18n::text(
+            ui.muted(crate::i18n::text(
                 ui.ctx(),
                 Message::new(
                     "gui-masks-none",
@@ -1485,10 +1489,10 @@ impl MaskTree {
         let ctx = ui.ctx().clone();
         let tr = |m: Message| crate::i18n::text(&ctx, m);
         if let Some(module) = &net.masked {
-            ui.weak(tr(
+            ui.muted(tr(
                 Message::new("gui-masks-of", "Mask of { $module }").with("module", module)
             ))
-            .on_hover_text(tr(Message::new(
+            .tip(tr(Message::new(
                 "gui-masks-tree-hint",
                 "F2 renames the selected row. Drag a row to reorder it or into a group. Right-click a row for its menu: it never deletes anything.",
             )));
@@ -1506,7 +1510,9 @@ impl MaskTree {
                 )
                 .with("module", module),
             );
-            ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+            // The panel lays out top-down: the muted text wraps at its
+            // width.
+            ui.muted(text);
         }
         let mut commands = Vec::new();
         let mut cycle_display = false;
@@ -1528,15 +1534,19 @@ impl MaskTree {
                 .as_ref()
                 .map_or((false, true), |c| (c.invert, c.opacity > 0.0));
             let member = current.as_ref().map(|c| c.key.clone());
+            // Toggle chips: pressed while the member is inverted, or its
+            // opacity on. A click asks the command; the chip's own flip is
+            // dropped, the next frame reads the member again.
+            let mut pressed = inverted;
             if ui
                 .add_enabled(
                     on,
-                    egui::Button::selectable(
-                        inverted,
+                    ToggleChip::new(
+                        &mut pressed,
                         tr(Message::new("gui-masks-invert", "Invert")),
                     ),
                 )
-                .on_hover_text(tr(Message::new(
+                .tip(tr(Message::new(
                     "gui-masks-invert-hint",
                     "Invert the selected member: it then covers everything except what it covered (for the module's mask, the whole mask)",
                 )))
@@ -1546,15 +1556,16 @@ impl MaskTree {
                     member: member.clone(),
                 });
             }
+            let mut pressed = visible;
             if ui
                 .add_enabled(
                     on,
-                    egui::Button::selectable(
-                        visible,
+                    ToggleChip::new(
+                        &mut pressed,
                         tr(Message::new("gui-masks-opacity", "Opacity")),
                     ),
                 )
-                .on_hover_text(tr(Message::new(
+                .tip(tr(Message::new(
                     "gui-masks-opacity-hint",
                     "Turn the selected member's opacity off, or back to full (its row's eye does the same)",
                 )))
@@ -1566,12 +1577,13 @@ impl MaskTree {
                 });
             }
             let deletable = current.as_ref().is_some_and(|c| c.group.is_some());
+            let take_out = tr(Message::new("gui-masks-take-out", "Take out"));
             if ui
-                .add_enabled(
-                    deletable,
-                    egui::Button::new(tr(Message::new("gui-masks-take-out", "Take out"))),
-                )
-                .on_hover_text(tr(Message::new(
+                .add_enabled_ui(deletable, |ui| {
+                    helios_ui::action(ui, Action::Secondary, &take_out)
+                })
+                .inner
+                .tip(tr(Message::new(
                     "gui-masks-take-out-hint",
                     "Take the selected member out of the mask (Delete, the tree focused). Not an undo step yet.",
                 )))
@@ -1582,9 +1594,12 @@ impl MaskTree {
                     confirmed: false,
                 });
             }
-            let add = ui
-                .button(tr(Message::new("gui-masks-add", "Add…")))
-                .on_hover_text(tr(Message::new(
+            let add = helios_ui::action(
+                ui,
+                Action::Secondary,
+                &tr(Message::new("gui-masks-add", "Add…")),
+            )
+            .tip(tr(Message::new(
                     "gui-masks-add-hint",
                     "Add a shape or a parametric member to the selected group. With the image focused: C a circle, E an ellipse, G a gradient, P a path.",
                 )));
@@ -1608,12 +1623,13 @@ impl MaskTree {
             )
             .with("mask", shown.clone().unwrap_or_default())
             .with("mode", tr(mode.words())));
+            let mut pressed = *mode != crate::mask_display::Mode::Off;
             if ui
-                .selectable_label(
-                    *mode != crate::mask_display::Mode::Off,
+                .add(ToggleChip::new(
+                    &mut pressed,
                     tr(Message::new("gui-mask-display", "Show mask")),
-                )
-                .on_hover_text(hint)
+                ))
+                .tip(hint)
                 .clicked()
             {
                 cycle_display = true;
@@ -1748,7 +1764,7 @@ fn row_toggles(ui: &mut Ui, item: &Item, commands: &mut Vec<Command>) {
     let hint = crate::i18n::text(&ctx, hint.with("name", name));
     if ui
         .add(icon.tone(tone).label(&hint).sense_click())
-        .on_hover_text(&hint)
+        .tip(&hint)
         .clicked()
     {
         commands.push(Command::MemberOpacity {
@@ -1772,7 +1788,7 @@ fn row_toggles(ui: &mut Ui, item: &Item, commands: &mut Vec<Command>) {
     let hint = crate::i18n::text(&ctx, hint.with("name", name));
     if ui
         .add(icon.tone(tone).label(&hint).sense_click())
-        .on_hover_text(&hint)
+        .tip(&hint)
         .clicked()
     {
         commands.push(Command::MemberLock {
@@ -1825,7 +1841,7 @@ pub fn operator_glyph(ui: &mut Ui, operator: &str, hint: &str) -> egui::Response
         }
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, hint));
-    response.on_hover_text(hint)
+    response.tip(hint)
 }
 
 fn add_items() -> Vec<MenuItem> {
