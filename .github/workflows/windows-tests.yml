@@ -98,12 +98,24 @@ jobs:
           shared-key: windows
           # A failing test must not cost the next night a full build.
           cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       # Not continue-on-error, unlike the step it was in ci.yml: alone in
       # its workflow, a swallowed failure would leave nothing to see. The
-      # run goes red while test targets still fail on Windows (listed in
-      # docs/windows-port.md, "Where it stands"); `--no-fail-fast` runs them
-      # all, so one run shows everything that fails.
-      - run: cargo test --locked --workspace --no-fail-fast
+      # run goes red while tests still fail on Windows (listed in
+      # docs/windows-port.md, "Where it stands"); the `ci` profile does not
+      # stop at the first failure, so one run shows everything that fails.
+      #
+      # One process per test, as on Linux (ci.yml): the tests are written
+      # for it (one GPU device a process). Under `cargo test`, the GUI's
+      # hundreds of tests shared one WARP device in one process; their
+      # queued work outlasted egui_kittest's 10 s render wait and the GPU
+      # backend's own deadline, which rebuilt the shared device under the
+      # tests still holding the old one. Doctests: nextest does not run them.
+      - run: cargo nextest run --locked --workspace --profile ci
+      - if: ${{ !cancelled() }}
+        run: cargo test --locked --workspace --doc
 
   # A scheduled run marks the commit it tested, pass or fail: the next night
   # skips it unless `next` moved. A cache entry is the cheapest record the
