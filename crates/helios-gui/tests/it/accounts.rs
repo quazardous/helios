@@ -1289,10 +1289,15 @@ fn picking_world_whole(sources: Option<String>, end: End, state: AccountState) -
     let mut h = headless::harness(shell, vec2(1280.0, 1100.0));
     h.run();
     run(&mut h, "library.importWindow", Value::Null, Origin::User).unwrap();
-    until(&mut h, "the account listed", |h| {
-        shown(h, "ann@example.org")
-    });
-    click(&mut h, "ann@example.org");
+    // An account to reconnect is said with its warning mark.
+    let listed = |h: &Harness<'_, Shell>| {
+        ["ann@example.org", "ann@example.org, ▲"]
+            .into_iter()
+            .find(|l| h.query_all_by_label(l).next().is_some())
+    };
+    until(&mut h, "the account listed", |h| listed(h).is_some());
+    let name = listed(&h).expect("listed");
+    click(&mut h, name);
     PickingWorld {
         h,
         opened,
