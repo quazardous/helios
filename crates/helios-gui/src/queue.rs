@@ -5,29 +5,22 @@
 //!   (`view/graph/selection`, [`crate::params::SELECTION`]): a summary
 //!   (waiting, running, done, failed, the oldest wait), then one row per
 //!   item with its state, since when, its attempts and where it runs.
-//! - What it shows comes from a [`QueueSource`]. Until the workflow level
-//!   runs, the source is [`JobsQueue`]: the jobs that name the node
-//!   (`node` in `helios.job.started`, `helios_core::jobs::Start::node`), as
-//!   egui-pop's jobs model holds them, a connected node's included. The
-//!   workflow's own queue (claims, leases, retries) replaces it without
-//!   touching the panel.
-//! - Its actions go through the jobs' commands, as the jobs centre's do:
-//!   Cancel is `job.cancel`, run in the desktop or sent to the node that
-//!   runs the job. Retry and reprioritise are not offered: no Helios job
-//!   can be retried or moved in its queue yet.
+//! - What it shows comes from a [`QueueSource`]: the workflow level's
+//!   queues ([`crate::workflow_queue::WorkflowQueue`]), a run's rows at
+//!   the node as the connected node runs them, followed on the bus, and
+//!   the long jobs that are not runs, as their promises.
+//! - Its actions are bus commands: Retry, Move to the top or the bottom
+//!   and Cancel run `helios.workflow.retry`, `helios.workflow.prioritize`
+//!   and `helios.workflow.cancel` (the node's `workflow.*`), a promise's
+//!   Cancel `job.cancel`. The rows change when the node says they did.
 //! - Empty (no node selected, or nothing queued at it), the panel shows an
 //!   empty state; with `interface.panels.queue_when_empty` off it closes
 //!   instead, and opens again once the node has work.
 
-use std::collections::BTreeMap;
-
 use egui::Ui;
 use egui_pop::api::AppHandle;
-use egui_pop::api::host::Seq;
-use egui_pop::api::jobs::JOBS;
 use egui_pop::core::ui::UiPop as _;
 use egui_pop::model::ids::PanelId;
-use egui_pop::model::jobs::{Job, JobState, Request};
 use helios_core::Message;
 
 /// The panel's id.
@@ -35,10 +28,6 @@ pub const PANEL: &str = "helios.queue";
 
 /// The setting that keeps the panel shown when the node has no queue.
 pub const WHEN_EMPTY: &str = "interface.panels.queue_when_empty";
-
-/// How many jobs' nodes [`JobsQueue`] remembers before it forgets the
-/// ones the jobs model forgot.
-const REMEMBERED: usize = 512;
 
 /// Where an item is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,12 +71,40 @@ impl ItemState {
 pub enum Action {
     /// Stop it, waiting or running.
     Cancel,
+    /// Queue it again, failed or cancelled.
+    Retry,
+    /// Claim it before every other waiting item.
+    Top,
+    /// Claim it after every other waiting item.
+    Bottom,
+}
+
+impl Action {
+    /// Its button's label.
+    fn message(self) -> Message {
+        match self {
+            Action::Cancel => Message::new("gui-queue-cancel", "Cancel"),
+            Action::Retry => Message::new("gui-queue-retry", "Retry"),
+            Action::Top => Message::new("gui-queue-top", "Top"),
+            Action::Bottom => Message::new("gui-queue-bottom", "Bottom"),
+        }
+    }
+
+    /// Its name in the panel's named places (`helios.queue.0.retry`).
+    fn name(self) -> &'static str {
+        match self {
+            Action::Cancel => "cancel",
+            Action::Retry => "retry",
+            Action::Top => "top",
+            Action::Bottom => "bottom",
+        }
+    }
 }
 
 /// One item of a node's queue.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueueItem {
-    /// What the source acts on (a job's id).
+    /// What the source acts on (a run's item, a promise).
     pub id: String,
     /// What it is, for people.
     pub title: String,
@@ -174,103 +191,11 @@ pub trait QueueSource {
     fn now(&self, _app: &AppHandle) -> Option<f64> {
         None
     }
-}
 
-/// The interim source: the jobs that name a node of the graph, from
-/// egui-pop's jobs model (the desktop's jobs and the connected nodes').
-#[derive(Debug, Default)]
-pub struct JobsQueue {
-    /// The journal read up to here.
-    seen: Seq,
-    /// Each job's node, as its `helios.job.started` named it.
-    nodes: BTreeMap<String, String>,
-}
-
-impl JobsQueue {
-    /// Reads the jobs started since the last call.
-    fn follow(&mut self, app: &AppHandle) {
-        for e in app.events_since(self.seen) {
-            self.seen = e.seq;
-            if e.name != helios_core::jobs::STARTED {
-                continue;
-            }
-            if let (Some(id), Some(node)) = (e.data["id"].as_str(), e.data["node"].as_str()) {
-                self.nodes.insert(id.to_string(), node.to_string());
-            }
-        }
-    }
-}
-
-/// An item's state from its job's: started but without any progress yet,
-/// a job is still waiting in its queue.
-fn state_of(job: &Job) -> ItemState {
-    match job.state {
-        JobState::Running
-            if job.step.is_none() && job.done == 0 && job.item.is_none() && job.phase.is_none() =>
-        {
-            ItemState::Waiting
-        }
-        JobState::Running => ItemState::Running,
-        JobState::Paused => ItemState::Paused,
-        JobState::Cancelling => ItemState::Cancelling,
-        JobState::Done => ItemState::Done,
-        JobState::Failed => ItemState::Failed,
-        JobState::Cancelled => ItemState::Cancelled,
-    }
-}
-
-/// An item from its job.
-fn item_of(job: &Job) -> QueueItem {
-    let state = state_of(job);
-    let place = match crate::relay::split_node_job(&job.id) {
-        Some((node, _)) => Place::Node(node.to_string()),
-        None => Place::Here,
-    };
-    let mut actions = Vec::new();
-    if state.active() && state != ItemState::Cancelling && job.cancellable {
-        actions.push(Action::Cancel);
-    }
-    QueueItem {
-        id: job.id.clone(),
-        title: job.title.clone(),
-        state,
-        since: job.ended_at.unwrap_or(job.started_at),
-        attempts: job.attempts,
-        place,
-        error: job.error.clone(),
-        actions,
-    }
-}
-
-impl QueueSource for JobsQueue {
-    fn queue(&mut self, app: &AppHandle, node: &str) -> Option<NodeQueue> {
-        self.follow(app);
-        let centre = app.service(&JOBS)?;
-        if self.nodes.len() > REMEMBERED {
-            self.nodes.retain(|id, _| centre.job(id).is_some());
-        }
-        let items: Vec<QueueItem> = centre
-            .all()
-            .iter()
-            .filter(|j| self.nodes.get(&j.id).is_some_and(|n| n == node))
-            .map(item_of)
-            .collect();
-        (!items.is_empty()).then(|| NodeQueue {
-            items,
-            now: centre.now(),
-        })
-    }
-
-    fn now(&self, app: &AppHandle) -> Option<f64> {
-        app.service(&JOBS).map(|centre| centre.now())
-    }
-
-    fn act(&mut self, app: &AppHandle, id: &str, action: Action) {
-        match action {
-            // The jobs centre's way: `job.cancel`, run in the desktop or
-            // on the job's node.
-            Action::Cancel => egui_pop::api::jobs::ask(app, id, Request::Cancel),
-        }
+    /// Takes in what came since the last call (facts, reads); whether
+    /// the queue should be read again. Asked each frame: cheap.
+    fn due(&mut self, _app: &AppHandle) -> bool {
+        false
     }
 }
 
@@ -298,7 +223,7 @@ pub struct QueuePanel {
 impl Default for QueuePanel {
     fn default() -> Self {
         Self {
-            source: Box::new(JobsQueue::default()),
+            source: Box::new(crate::workflow_queue::WorkflowQueue::default()),
             node: None,
             queue: None,
             when_empty: true,
@@ -337,6 +262,12 @@ impl QueuePanel {
     /// Whether there is nothing to show.
     pub fn is_empty(&self) -> bool {
         self.queue.as_ref().is_none_or(NodeQueue::is_empty)
+    }
+
+    /// Whether the source took in something that changes the queue: the
+    /// caller reads it again ([`QueuePanel::update`]).
+    pub fn source_due(&mut self, app: &AppHandle) -> bool {
+        self.source.due(app)
     }
 
     /// Asks for `action` on the item `id`, through the source.
@@ -435,7 +366,7 @@ impl QueuePanel {
         ui.separator();
         let mut asked = Vec::new();
         ui.scroll_area(
-            egui::ScrollArea::vertical().id_salt("helios.queue.scroll"),
+            egui::ScrollArea::both().id_salt("helios.queue.scroll"),
             |ui| {
                 egui::Grid::new("helios.queue.items")
                     .striped(true)
@@ -468,20 +399,32 @@ impl QueuePanel {
                                         .with("name", name.as_str()),
                                 ),
                             });
-                            if item.actions.contains(&Action::Cancel) {
-                                let label = text(Message::new("gui-queue-cancel", "Cancel"));
-                                let r = ui.button(&label);
-                                let described = format!("{label} {}", item.title);
-                                r.widget_info(|| {
-                                    egui::WidgetInfo::labeled(egui::Role::Button, true, &described)
-                                });
-                                crate::name_rect(ui.ctx(), &format!("{PANEL}.{i}.cancel"), r.rect);
-                                if r.clicked() {
-                                    asked.push((item.id.clone(), Action::Cancel));
+                            ui.horizontal(|ui| {
+                                for &action in &item.actions {
+                                    let label = text(action.message());
+                                    let kind = match action {
+                                        Action::Cancel => helios_ui::Action::Danger,
+                                        _ => helios_ui::Action::Secondary,
+                                    };
+                                    let r = helios_ui::row_action(ui, kind, &label);
+                                    let described = format!("{label} {}", item.title);
+                                    r.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::Role::Button,
+                                            true,
+                                            &described,
+                                        )
+                                    });
+                                    crate::name_rect(
+                                        ui.ctx(),
+                                        &format!("{PANEL}.{i}.{}", action.name()),
+                                        r.rect,
+                                    );
+                                    if r.clicked() {
+                                        asked.push((item.id.clone(), action));
+                                    }
                                 }
-                            } else {
-                                ui.label("");
-                            }
+                            });
                             ui.end_row();
                         }
                     });

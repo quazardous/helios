@@ -14,6 +14,8 @@ category-node-graph = Graphe de nœuds
 
 category-preferences = Préférences
 
+category-queue = File d’attente
+
 category-workspace = Espace de travail
 
 clip-application-x-helios-images-json =
@@ -117,6 +119,9 @@ plugin-helios-theme-editor =
 
 plugin-helios-workbench =
     .title = Zones de Helios
+
+plugin-helios-workflow =
+    .title = Files d’attente des flux de Helios
 
 setting-display-wide-gamut-preview =
     .description = Affiche l’image en Rec.2020 là où la fenêtre peut la porter (Wayland avec la gestion des couleurs), pour que les couleurs hors du sRGB ne soient pas écrêtées. Ailleurs, l’image reste en sRGB.

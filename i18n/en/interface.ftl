@@ -21,6 +21,8 @@ category-node-graph = Node graph
 
 category-preferences = Preferences
 
+category-queue = Queue
+
 category-workspace = Workspace
 
 clip-application-x-helios-images-json =
@@ -151,6 +153,9 @@ plugin-helios-windowMenu =
 
 plugin-helios-workbench =
     .title = Helios areas
+
+plugin-helios-workflow =
+    .title = Helios workflow queues
 
 setting-catalogue-snapshotEvery =
     .description = Helios takes a verified snapshot of the catalogue this often, keeps it next to the catalogue and copies it to the backup disks plugged in.

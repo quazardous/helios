@@ -100,6 +100,7 @@ pub mod stack_review;
 pub mod stall;
 pub mod start;
 pub mod status_items;
+pub mod workflow_queue;
 pub use helios_storage_ui::read as storage_read;
 pub mod templates;
 pub mod theme;

@@ -387,7 +387,13 @@ exports running now, as a batch's are today), so progress and
 notifications need nothing new.
 
 **`QueueSource`, journal-backed.** `JournalQueue` replaces `JobsQueue`
-for nodes that have runs (and `JobsQueue` stays for the rest):
+for nodes that have runs (and `JobsQueue` stays for the rest).
+Built 2026-11-20 as `WorkflowQueue` (`helios_gui::workflow_queue`, see
+[gui.md](gui.md), "Queue panel"): each node's runs read whole once, then
+followed by their facts; the jobs that are not runs show as their promises,
+and `JobsQueue` is gone. Not built yet from the list below: the per-node
+summary from the relay's counts, paging, `Asking` and `Skipped` as states
+of their own. The design:
 
 - `queue(app, node)`: the summary from the counts the relay keeps; the
   rows from `workflow.items`, fetched a page at a time for the selected
