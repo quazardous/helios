@@ -44,7 +44,13 @@ fn harness() -> Harness<'static, Shell> {
 
 fn bundle(h: &mut Harness<'static, Shell>) -> Json {
     h.state_mut()
-        .run("help.report.bundle", Json::Null, Origin::User)
+        // As an agent: a person's commands are kept as used (`tips.used`),
+        // which would change the settings part between two reports.
+        .run(
+            "help.report.bundle",
+            Json::Null,
+            Origin::Agent("test".into()),
+        )
         .expect("the report's bundle")
 }
 
