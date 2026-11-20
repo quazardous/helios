@@ -9,6 +9,8 @@ category-decisions = Decisions
 
 category-developer = Developer
 
+category-display = Display
+
 category-experimental = Experimental
 
 category-helios = Helios

@@ -42,6 +42,17 @@ always sRGB; only the image asks for more.
   encodes for it. When the setting goes off, the image surface is taken
   down: the image is back on the window at once, and egui-pop drops the
   subsurfaces as the viewport wishes sRGB again.
+- **What each screen shows** (`display/screens/<screen>`): read from the
+  system at start and when a screen is plugged in (on Wayland, each
+  output's image description). The person corrects it in Settings >
+  Display (or an agent with `helios.display.screen_override`, `screen`
+  and `value`: `auto`, `srgb`, `wide-gamut` or `hdr`): the correction is
+  a key of its own (`display/screens/<screen>/override`), kept for the
+  next start in `display-screens.json` in the interface's folder. A
+  window's route goes by the correction first, then the system's word,
+  then, with neither, what the display offers. HDR is detected and shown
+  only: an HDR screen is drawn as wide gamut (SDR); an HDR output mode is
+  not decided.
 - **Diagnostics**: `helios doctor display` ([command line](cli.md#doctor))
   prints the session, what the compositor's `wp_color_management_v1`
   announces, and the route it predicts from that (`viewport`: `route`,

@@ -551,6 +551,8 @@ gui-decisions-waiting-model = Waiting for the model
 
 gui-decisions-why = Why: { $why }
 
+gui-display-screen-auto = Auto (what the system says)
+
 gui-duplicates-asked = Keep it as one more copy, or skip it?
 
 gui-duplicates-clear = Clear the answered
@@ -2594,6 +2596,18 @@ gui-settings-decisions = Decisions
 gui-settings-destinations = Destinations
 
 gui-settings-display = Display
+
+gui-settings-display-no-screens = No screen known yet.
+
+gui-settings-display-screen = Screen
+
+gui-settings-display-screens = Screens
+
+gui-settings-display-shows = Shows
+
+gui-settings-display-shows-help = Corrects what the system says this screen shows; Auto follows the system. HDR is detected and shown only: an HDR screen is drawn as wide gamut for now.
+
+gui-settings-display-system-says = The system says
 
 gui-settings-experimental = Experimental
 

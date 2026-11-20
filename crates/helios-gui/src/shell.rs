@@ -1067,7 +1067,10 @@ impl Shell {
             // console as a terminal.
             .plugin(crate::jobs::plugin(jobs.clone(), relays.clone()))
             .plugin(egui_pop::editors::JobConsolesPlugin)
-            .plugin(crate::display::Display::default())
+            .plugin({
+                let i18n = i18n.clone();
+                crate::display::Display::default().texts(move |m| helios_i18n::message(&i18n, &m))
+            })
             // egui-pop's Settings app (full pages, families on top; `Ctrl+,`
             // and File > Settings), with Helios's scopes and its own
             // settings (`helios-config`) in them. In `DefaultPlugins` too:
