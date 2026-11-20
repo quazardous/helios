@@ -627,14 +627,15 @@ fn view_state_adds_no_undo_step_and_ctrl_z_undoes_the_last_real_edit() {
             },
         )
         .unwrap();
-    // A sort, culling's auto-advance, the import choices.
-    run(&mut h, "library.sort", json!({ "by": "name" }));
-    run(&mut h, "vault.autoAdvance", json!({ "on": true }));
+    // The import choices (the form sets the whole section), a sort,
+    // culling's auto-advance.
     run(
         &mut h,
         "workspace.library",
         json!({ "source": "folder", "placement": "copy", "duplicates": "skip" }),
     );
+    run(&mut h, "library.sort", json!({ "by": "name" }));
+    run(&mut h, "vault.autoAdvance", json!({ "on": true }));
     assert_eq!(steps(&h), before, "view state added no undo step");
     // Kept in the files all the same.
     let kept = files.load().unwrap().bundle.template.library.unwrap();
