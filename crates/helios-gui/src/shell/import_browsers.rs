@@ -27,8 +27,12 @@
 use std::path::{Path, PathBuf};
 
 use egui_pop::api::files::browser::{FileBrowser, MODE_AGENDA};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
+use egui_pop::core::widgets;
 use helios_connect::Browser;
 use helios_core::Message;
+use helios_ui::Scroll;
 
 use super::import_sources::SourceKey;
 use super::import_window::ImportWindow;
@@ -250,10 +254,9 @@ pub(super) fn switch_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &BrowseW
     if offered.len() > 1 {
         let mut chosen = None;
         ui.horizontal_wrapped(|ui| {
-            ui.label(&words.browse);
+            ui.text_role(TextRole::Body, &words.browse);
             for b in &offered {
-                if ui
-                    .selectable_label(w.browsing.current == Some(*b), words.name(*b))
+                if widgets::selectable_label(ui, w.browsing.current == Some(*b), words.name(*b))
                     .clicked()
                 {
                     chosen = Some(*b);
@@ -287,37 +290,34 @@ pub(super) fn tree_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &BrowseWor
     let folders = w.contents.folders();
     let shown = w.contents.folder().map(Path::to_path_buf);
     let mut chosen: Option<Option<PathBuf>> = None;
-    egui::ScrollArea::vertical()
-        .id_salt("helios.import.tree")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if ui
-                .selectable_label(shown.is_none(), &words.every_folder)
-                .clicked()
-            {
-                chosen = Some(None);
-            }
-            for (folder, source) in &folders {
-                let depth = folder
-                    .strip_prefix(source)
-                    .map_or(0, |rel| rel.components().count());
-                let name = folder.file_name().map_or_else(
-                    || folder.display().to_string(),
-                    |n| n.to_string_lossy().into_owned(),
-                );
-                ui.horizontal(|ui| {
-                    #[allow(clippy::cast_precision_loss)]
-                    ui.add_space(12.0 * (depth + 1) as f32);
-                    if ui
-                        .selectable_label(shown.as_ref() == Some(folder), name)
-                        .on_hover_text(folder.display().to_string())
-                        .clicked()
-                    {
-                        chosen = Some(Some(folder.clone()));
-                    }
-                });
-            }
-        });
+    helios_ui::scroll(ui, "helios.import.tree", Scroll::Strip, |ui| {
+        if widgets::selectable_label(ui, shown.is_none(), words.every_folder.as_str()).clicked() {
+            chosen = Some(None);
+        }
+        for (folder, source) in &folders {
+            let depth = folder
+                .strip_prefix(source)
+                .map_or(0, |rel| rel.components().count());
+            let name = folder.file_name().map_or_else(
+                || folder.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            ui.horizontal(|ui| {
+                // The one raw call left: the kit has no row of a flat
+                // tree at a depth (egui-pop's `TreeRow` nests its rows
+                // under open branches, and these folders are listed
+                // flat, an ancestor without photos left out).
+                #[allow(clippy::cast_precision_loss)]
+                ui.add_space(12.0 * (depth + 1) as f32);
+                if widgets::selectable_label(ui, shown.as_ref() == Some(folder), name)
+                    .tip(folder.display().to_string())
+                    .clicked()
+                {
+                    chosen = Some(Some(folder.clone()));
+                }
+            });
+        }
+    });
     if let Some(folder) = chosen {
         w.contents.set_folder(folder);
     }

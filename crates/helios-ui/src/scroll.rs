@@ -22,15 +22,21 @@ pub enum Scroll {
     /// share of the height left, so the grid and the sections below keep
     /// their room; as wide as the panel, whatever its fields' width.
     Form,
+    /// A list filling the strip it is given beside another region (the
+    /// import window's folder tree beside its grid): the strip's whole
+    /// width and height, whatever its rows' size, its bar on the strip's
+    /// edge.
+    Strip,
 }
 
 impl Scroll {
-    pub const ALL: [Scroll; 5] = [
+    pub const ALL: [Scroll; 6] = [
         Scroll::Region,
         Scroll::Tail,
         Scroll::Section,
         Scroll::Dialog,
         Scroll::Form,
+        Scroll::Strip,
     ];
 
     /// How many lines of text a tail shows.
@@ -57,6 +63,7 @@ impl Scroll {
 /// Need (layout): a list in a side panel's section, a few rows high.
 /// Need (layout): a dialog's body, its buttons kept in view below it.
 /// Need (layout): a form in a side panel's section, a share of its height.
+/// Need (layout): a list filling a strip beside another region, its bar on the strip's edge.
 pub fn scroll<R>(ui: &mut Ui, id: &str, kind: Scroll, add: impl FnOnce(&mut Ui) -> R) -> R {
     let area = ScrollArea::vertical().id_salt(id);
     let area = match kind {
@@ -72,6 +79,7 @@ pub fn scroll<R>(ui: &mut Ui, id: &str, kind: Scroll, add: impl FnOnce(&mut Ui) 
                     .clamp(*Scroll::FORM_HEIGHT.start(), *Scroll::FORM_HEIGHT.end()),
             )
             .auto_shrink([false, true]),
+        Scroll::Strip => area.auto_shrink([false, false]),
     };
     ui.scroll_area(area, add).inner
 }
