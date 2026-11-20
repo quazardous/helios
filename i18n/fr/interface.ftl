@@ -2,9 +2,13 @@
 
 category-calibration = Calibration
 
+category-controls = Contrôles
+
 category-decisions = Décisions
 
 category-developer = Développement
+
+category-display = Affichage
 
 category-experimental = Expérimental
 
@@ -45,6 +49,15 @@ command-graph-select =
 command-graph-view =
     .description = Ajuste le graphe d’un éditeur de nœuds (`fit` : true), zoome à un niveau (`level` : overview, ports ou detail) ou cible un nœud (`focus`), à sa prochaine image.
 
+command-window-close =
+    .description = Ferme une fenêtre : celle nommée, ou la fenêtre active.
+
+command-window-pick =
+    .description = Liste les fenêtres ouvertes par titre ; celle choisie passe au premier plan.
+
+command-window-switch =
+    .description = Fait passer une fenêtre au premier plan : celle nommée, ou la suivante.
+
 frame-helios-compare =
     .title = Comparaison
 
@@ -69,6 +82,9 @@ frame-helios-sub-workspace =
 frame-helios-workspace =
     .title = Réseau
 
+menu-app-menu-window =
+    .label = Fenêtre
+
 menu-helios-file-importFrom =
     .label = Importer depuis
 
@@ -87,14 +103,23 @@ menu-helios-system-themes =
 plugin-egui-pop-imaging =
     .title = Outils d’image
 
+plugin-egui-pop-windows =
+    .title = Fenêtres
+
 plugin-helios =
     .title = Helios
+
+plugin-helios-agent-state =
+    .title = État de l’agent
 
 plugin-helios-clipboard =
     .title = Types de presse-papiers d’Helios
 
 plugin-helios-commands =
     .title = Helios
+
+plugin-helios-config =
+    .title = Réglages de Helios
 
 plugin-helios-contexts =
     .title = Lieux et modes d’Helios
@@ -114,8 +139,14 @@ plugin-helios-lists =
 plugin-helios-platform =
     .title = Plateforme de Helios
 
+plugin-helios-quit =
+    .title = Fermeture de Helios
+
 plugin-helios-theme-editor =
     .title = Éditeur de thème
+
+plugin-helios-windowMenu =
+    .title = Menu Fenêtre de Helios
 
 plugin-helios-workbench =
     .title = Zones de Helios

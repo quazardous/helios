@@ -69,6 +69,15 @@ command-helios-filmstrip-dock =
 command-helios-filmstrip-moveTo =
     .title = Déplacer Pellicule vers une zone (`area`)
 
+command-helios-filters-detach =
+    .title = Déplacer Filtres dans une nouvelle fenêtre
+
+command-helios-filters-dock =
+    .title = Remettre Filtres dans sa zone
+
+command-helios-filters-moveTo =
+    .title = Déplacer Filtres vers une zone (`area`)
+
 command-helios-graph-detach =
     .title = Déplacer Graphe dans une nouvelle fenêtre
 
@@ -616,6 +625,9 @@ command-workshop-describe =
 command-workshop-design =
     .title = Expérimental : vérifier un brouillon d’atelier sur l’image ouverte et l’appliquer en une étape d’annulation (`draft` ; `intent` : celui de la session par défaut ; `apply` : vrai par défaut ; `replace` ; `dry_run`)
 
+command-workshop-generalise =
+    .title = Expérimental : rendre automatique l’atelier piloté : une ligne par curseur (une cible qu’une mesure explique, sinon une valeur fixe, ou laissé à l’IA) et par zone d’IA (un masque paramétrique ajusté, ou laissée à l’IA), avec ses preuves, et J, A (l’IA restante, appels par photo) (`rows` : les choix par nom ; `confirm` : écrire la version suivante, à vous seul ; `session` ; `dry_run`)
+
 command-workshop-propose =
     .title = Expérimental : proposer des valeurs pour l’atelier piloté, montrées comme valeurs fantômes que l’utilisateur accepte, remplace ou rejette (`values` : par nom de curseur ; `aim` : les mots auxquels elles répondent ; `session`)
 
@@ -640,6 +652,24 @@ command-workshop-suggest =
 command-help-health =
     .title = Bilan de santé…
 
+command-import-addSource =
+    .title = Ajouter une source à connecter : ouvre la fenêtre d’import et lance les étapes de connexion du connecteur (`connector`)
+
+command-import-disconnect =
+    .title = Déconnecter un compte d’import (`account`) : son jeton révoqué quand le service le permet, ses secrets oubliés ; les sources enregistrées qui l’utilisent sont gardées sans connexion (`sources` : "keep") ou oubliées avec lui ("forget") ; un compte qu’aucune source n’utilise est oublié
+
+command-import-history-again =
+    .title = Importer à nouveau (`id` : une importation de `import.history.list`) : les mêmes sources avec les mêmes choix ; les photos déjà dans la bibliothèque sont ignorées comme doublons
+
+command-import-history-list =
+    .title = Lister l’historique des imports, le plus récent d’abord (`limit`) : pour chaque importation, ses sources, ses choix, ses nombres de photos, quand et qui l’a demandée
+
+command-import-reconnect =
+    .title = Connecter à nouveau un compte d’import, depuis l’étape qui a échoué (`account`)
+
+command-import-signOut =
+    .title = Déconnecter un compte d’import : ses clés et jetons sont oubliés, il reste dans la liste (`account`) ; un choix de photos en cours sur ce compte est d’abord annulé
+
 command-activity-show =
     .title = Activité… (`id` : la tâche sélectionnée, une promesse de `promises.list`)
 
@@ -661,6 +691,33 @@ command-compare-previous =
 command-compare-sync =
     .title = Comparer : zoom et déplacement synchronisés entre les photos (`on` ; basculé en son absence)
 
+command-controls-catalogue =
+    .title = Lister les contrôles enregistrés
+
+command-controls-context =
+    .title = Lire les clés de contexte des contrôles, leur cadre, leur densité et la main ; en régler n’importe lesquelles (`task`, `detail`, `image`, `tool`, `device`, `target`, `density`, `box`, `layouts`, `gesture_open`, `pointer_in_panel`, `handled`)
+
+command-controls-describe =
+    .title = Décrire un contrôle (`id`) : but, connecteur, gestes, crans, variantes, règles d’emplacement, orientations, intégration et repli par surface, avertissements, schéma de réglages ; avec `node`, sa place sur la carte de ce nœud et pourquoi
+
+command-controls-find =
+    .title = Chercher les contrôles d’un nœud (`node`, `query`), affichés ou repliés, avec leur place et sa raison
+
+command-controls-nudge =
+    .title = Faire avancer un contrôle d’un nœud de quelques pas (`node`, `control`, `steps` ; `fine`, `coarse`)
+
+command-controls-reset =
+    .title = Remettre un contrôle d’un nœud à sa valeur par défaut (`node`, `control`)
+
+command-controls-reveal =
+    .title = Montrer pour l’instant une partie repliée de la carte d’un nœud (`node`, `key`)
+
+command-controls-reveal-all =
+    .title = Montrer pour l’instant toutes les parties de la carte d’un nœud (`node`)
+
+command-controls-set =
+    .title = Régler un contrôle d’un nœud (`node`, `control`, `value` ; `force`)
+
 command-compare-add =
     .title = Comparer : ajouter des photos à la comparaison ouverte (`images` : identifiants, sinon la sélection ; `at` : avant la photo à cette place, sinon en dernier ; seize au plus)
 
@@ -672,6 +729,9 @@ command-compare-set =
 
 command-compare-clear =
     .title = Comparer : vider la comparaison et quitter Comparer
+
+command-compare-leave =
+    .title = Quitter Comparer : retour à la grille, ou là d’où Comparer a été ouvert (Échap)
 
 command-compare-active =
     .title = Comparer : les photos comparées et la photo active (`image` : rendre active cette photo comparée)
@@ -769,6 +829,9 @@ command-library-scanFolder =
 
 command-helios-quit-confirmed =
     .title = Quitter Helios en annulant les tâches en cours
+
+command-helios-quit-unsaved =
+    .title = Avant de quitter, une retouche non enregistrée : réessayer l’enregistrement ou quitter sans enregistrer (`value`)
 
 command-helios-window-main =
     .title = Fenêtre principale
