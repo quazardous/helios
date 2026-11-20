@@ -14,7 +14,7 @@
 "promise_line.rs" = 13
 "queue.rs" = 16
 "scopes.rs" = 4
-"shell.rs" = 5
+"shell.rs" = 2
 "shell/import_browsers.rs" = 1
 "shell/import_window.rs" = 1
 "shell/library_focus.rs" = 2
