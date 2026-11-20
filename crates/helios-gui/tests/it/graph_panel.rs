@@ -300,9 +300,16 @@ fn a_node_header_carries_the_engine_status() {
     }
     frames(&mut h);
     // Done, or served from the cache when the viewport's tiles found
-    // what the render above computed.
-    let says =
-        |h: &Harness<'static, Shell>, text: &str| h.query_all_by_label(text).next().is_some();
+    // what the render above computed: the node's status, the start of
+    // its accessible description (its detail follows).
+    let says = |h: &Harness<'static, Shell>, text: &str| {
+        h.query_all(egui_kittest::kittest::by().predicate(|n| {
+            n.description()
+                .is_some_and(|d| d == text || d.starts_with(&format!("{text}, ")))
+        }))
+        .next()
+        .is_some()
+    };
     assert!(
         says(&h, "done · CPU") || says(&h, "cached · CPU"),
         "no header says done"
