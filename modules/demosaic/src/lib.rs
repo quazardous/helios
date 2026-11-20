@@ -22,6 +22,16 @@
 //! declared context input, anchored at the image origin (the loader shifts
 //! it to its crop).
 //!
+//! Small renders (a quarter of full resolution or less: the viewport's
+//! first proxy, the 256 px preview the histogram is computed on) skip the
+//! full demosaic: each output pixel is the mean of each colour's
+//! photosites under it, read from the full-resolution mosaic, as
+//! darktable's thumbnail pipes zoom a mosaic straight to their size
+//! (`dt_iop_clip_and_zoom_demosaic_half_size_f` and
+//! `dt_iop_clip_and_zoom_demosaic_third_size_xtrans_f` in its
+//! `src/common/imagebuf.c`/`demosaic.c`, <https://github.com/darktable-org/darktable>).
+//! Larger renders demosaic at full resolution, then reduce.
+//!
 //! Known limit: within two pixels of the image border the framework
 //! replicates edge photosites, whose filter color is not the one the
 //! pattern gives there; those pixels are approximate.
@@ -53,7 +63,19 @@ pub struct Plan {
     /// The largest value to expect: darktable's processed maximum, the
     /// largest white-balance coefficient (at least 1). RCD normalizes by it.
     maximum: f32,
+    /// The render's scale: below 1 only when the engine asks for the
+    /// output straight at a small scale ([`DIRECT_REDUCTION`]).
+    scale: f64,
 }
+
+/// At a scale of 1/4 or less the output is computed straight from the
+/// mosaic, each output pixel the mean of each colour's photosites under
+/// it (at least 4 × 4 of them, every colour of a Bayer or X-Trans pattern
+/// among them): what a full demosaic reduced as much would average too,
+/// at a fraction of its cost. The viewport's proxy (the power of two at
+/// or below the fit) and the preview take it; a fit closer than 1/4 still
+/// demosaics fully.
+pub const DIRECT_REDUCTION: u32 = 4;
 
 fn index(c: Channel) -> usize {
     match c {
@@ -93,6 +115,7 @@ impl Module for Demosaic {
             needs: Needs {
                 overlap: 2,
                 full_resolution: true,
+                direct_reduction: Some(DIRECT_REDUCTION),
                 ..Needs::default()
             },
             kind: ModuleKind::Process,
@@ -139,6 +162,14 @@ impl Module for Demosaic {
             cfa,
             method,
             maximum,
+            scale: 1.0,
+        })
+    }
+
+    fn prepare_at(&self, params: &Params, context: &Context, scale: f64) -> Result<Plan, String> {
+        Ok(Plan {
+            scale,
+            ..self.prepare(params, context)?
         })
     }
 
@@ -167,6 +198,19 @@ impl Module for Demosaic {
         output: Region,
     ) -> Result<Vec<Image>, String> {
         let input = inputs[0];
+        if plan.scale < 1.0 {
+            let _span = helios_core::trace::span("demosaic.direct", || {
+                format!(
+                    "{}x{} at {:.4} {:.2} MP",
+                    output.width,
+                    output.height,
+                    plan.scale,
+                    output.area() as f64 / 1e6
+                )
+            });
+            let cancel = helios_core::cancel::current();
+            return direct(plan, input, output, threads(), &cancel).map(|image| vec![image]);
+        }
         let _span = helios_core::trace::span("demosaic", || {
             format!(
                 "{:?} {}x{} {:.2} MP",
@@ -215,6 +259,106 @@ impl Module for Demosaic {
 /// tiles them so too), large enough that the border each tile computes
 /// again around it stays a small part of the work.
 const TILE: u32 = 256;
+
+/// The output over `output` at `plan.scale` straight from the mosaic
+/// `input` (full resolution): each pixel the mean of each colour's
+/// photosites under it, the window grown by one photosite at a time
+/// (at most twice) where a colour has none; alpha 1. Rows are shared among
+/// `threads` threads in bands; `cancel` is checked before each band.
+fn direct(
+    plan: &Plan,
+    input: &Image,
+    output: Region,
+    threads: usize,
+    cancel: &helios_core::cancel::Token,
+) -> Result<Image, String> {
+    let row = output.width as usize * 4;
+    let mut data = vec![0.0f32; output.area() * 4];
+    if row == 0 {
+        return Ok(Image::new(output, 4, data));
+    }
+    let bounds = input.region();
+    // The full-resolution columns under each output column, once.
+    let columns: Vec<(i64, i64)> = (output.x..output.right())
+        .map(|x| {
+            let f = Region::new(x, output.y, 1, 1).full_resolution(plan.scale);
+            (f.x, f.right())
+        })
+        .collect();
+    let pixel = |x: i64, y: i64, out: &mut [f32]| {
+        let f = Region::new(x, y, 1, 1).full_resolution(plan.scale);
+        let (mut x0, mut x1) = columns[(x - output.x) as usize];
+        let (mut y0, mut y1) = (f.y, f.bottom());
+        for grow in 0..3 {
+            if grow > 0 {
+                (x0, x1, y0, y1) = (x0 - 1, x1 + 1, y0 - 1, y1 + 1);
+            }
+            let mut sum = [0.0f32; 3];
+            let mut n = [0u32; 3];
+            for fy in y0..y1 {
+                let cy = fy.clamp(bounds.y, bounds.bottom() - 1);
+                for fx in x0..x1 {
+                    let cx = fx.clamp(bounds.x, bounds.right() - 1);
+                    // The pattern at the photosite read (an edge one
+                    // replicated keeps its own colour).
+                    let c = index(plan.cfa.color_at(cx, cy));
+                    sum[c] += input.pixel(cx, cy)[0];
+                    n[c] += 1;
+                }
+            }
+            if n.iter().all(|&k| k > 0) || grow == 2 {
+                for c in 0..3 {
+                    out[c] = if n[c] > 0 { sum[c] / n[c] as f32 } else { 0.0 };
+                }
+                out[3] = 1.0;
+                return;
+            }
+        }
+    };
+    let rows_per_band = 16usize;
+    let band = rows_per_band * row;
+    let work = |first: usize, chunk: &mut [f32]| -> Result<(), String> {
+        if cancel.is_cancelled() {
+            return Err(helios_core::cancel::CANCELLED.to_string());
+        }
+        for (i, line) in chunk.chunks_mut(row).enumerate() {
+            let y = output.y + (first + i) as i64;
+            for (j, out) in line.chunks_mut(4).enumerate() {
+                pixel(output.x + j as i64, y, out);
+            }
+        }
+        Ok(())
+    };
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let chunks: Vec<_> = data
+        .chunks_mut(band)
+        .map(|c| std::sync::Mutex::new(Some(c)))
+        .collect();
+    let threads = threads.clamp(1, chunks.len());
+    std::thread::scope(|s| {
+        let worker = || -> Result<(), String> {
+            loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(slot) = chunks.get(i) else {
+                    return Ok(());
+                };
+                let chunk = slot
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take()
+                    .expect("each band is taken once");
+                work(i * rows_per_band, chunk)?;
+            }
+        };
+        let handles: Vec<_> = (0..threads).map(|_| s.spawn(worker)).collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)))
+            .collect::<Result<Vec<()>, String>>()
+    })?;
+    drop(chunks);
+    Ok(Image::new(output, 4, data))
+}
 
 /// The threads a demosaic may use: the machine's.
 fn threads() -> usize {

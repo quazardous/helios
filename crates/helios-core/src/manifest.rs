@@ -380,6 +380,18 @@ pub struct Needs {
     /// computes the module, and what it reads, at full resolution over the
     /// pixels the render covers, then reduces its output.
     pub full_resolution: bool,
+    /// With `full_resolution`: at a scale of 1/N or less (N this value),
+    /// the module computes its output straight at the render's scale from
+    /// its full-resolution inputs, a fast method for small renders (a
+    /// sensor mosaic's photosites averaged per colour over each output
+    /// pixel), instead of being computed at full resolution and then
+    /// reduced. Its plan is prepared at the render's scale
+    /// ([`crate::Module::prepare_at`], below 1 only on this path) and its
+    /// `input_region` is asked for the full-resolution region the output
+    /// covers. A render that holds the full-size steps
+    /// ([`crate::Engine::hold_at`]) never takes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_reduction: Option<u32>,
     /// Its outputs cover another region of the plane than its first
     /// input (a quarter turn, a flip off the origin, later a crop): the
     /// engine and [`crate::Graph::extent`] ask its plan for the output's
