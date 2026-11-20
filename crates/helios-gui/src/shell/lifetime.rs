@@ -61,6 +61,8 @@ pub(super) const QUIT_UNSAVED: &str = "helios.quit.unsaved";
 pub(super) const RETRY_SAVE: &str = "retry";
 /// "Quit without saving": the edit not saved is lost, Helios quits.
 pub(super) const DISCARD: &str = "discard";
+/// On the journal: a quit's request ended without Helios quitting.
+pub const QUIT_ABANDONED: &str = "helios.quit.abandoned";
 /// Brings the main window forward.
 pub(super) const MAIN_WINDOW: &str = "helios.window.main";
 
@@ -109,6 +111,29 @@ enum MainWindow {
     /// Asked back: shown at the next pass.
     Reopening,
 }
+
+/// Where the quit's request stands, from the main window's close that
+/// would end Helios to Helios ending or staying: a request refused, or
+/// its question answered with anything but Quit, is **abandoned**, and
+/// what was waiting on that quit is dropped ([`Shell::on_quit_abandoned`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Attempt {
+    /// No quit asked, or the last one settled.
+    #[default]
+    Idle,
+    /// Refused, its question (the dialog's id) asked: the request lives
+    /// while the question is open.
+    Question(u64),
+    /// "Retry saving" chosen: the host's persistence saves, then asks the
+    /// quit again ([`Shell::quit_again`]).
+    Retrying,
+    /// The quit goes.
+    Going,
+}
+
+/// What waits on a quit and goes when it is abandoned: a notice to show,
+/// if it had something to drop.
+type Abandoned = Box<dyn Fn() -> Option<Message>>;
 
 /// Where the application's life stands.
 #[derive(Debug)]
@@ -165,6 +190,12 @@ pub(crate) struct Quit {
     retry_save: Cell<bool>,
     /// What the last quit's request did.
     report: RefCell<Option<crate::app_quit::QuitReport>>,
+    /// Where the quit's request stands.
+    attempt: Cell<Attempt>,
+    /// A quit's request was abandoned since the shell's last pass.
+    abandoned: Cell<bool>,
+    /// What waits on a quit ([`Shell::on_quit_abandoned`]).
+    on_abandoned: RefCell<Vec<Abandoned>>,
     /// Confirmations are answered yes by policy: nothing is asked.
     assume_yes: Cell<bool>,
     /// The local node and the GUI client, told to quit and detached by
@@ -198,6 +229,9 @@ impl Quit {
             unsaved_discarded: Cell::new(false),
             retry_save: Cell::new(false),
             report: RefCell::new(None),
+            attempt: Cell::new(Attempt::Idle),
+            abandoned: Cell::new(false),
+            on_abandoned: RefCell::default(),
             assume_yes: Cell::new(false),
             slots: Arc::default(),
             ended: RefCell::default(),
@@ -211,6 +245,7 @@ impl Quit {
     /// ([`crate::app_quit::NODE`]); dropped before, the shell tells it.
     fn quitting(&self, cancel_jobs: bool) {
         self.quitting.set(true);
+        self.attempt.set(Attempt::Going);
         self.cancel_jobs.set(self.cancel_jobs.get() | cancel_jobs);
     }
 
@@ -265,18 +300,32 @@ impl Quit {
         let refused = report.refused.clone();
         *self.report.borrow_mut() = Some(report);
         let Some((listener, reason)) = refused else {
+            self.attempt.set(Attempt::Going);
             return Before::Go;
         };
-        if listener == app_quit::JOBS {
-            self.ask(app, running);
+        let question = if listener == app_quit::JOBS {
+            self.ask(app, running)
         } else if listener == app_quit::UNSAVED {
-            self.ask_unsaved(app);
+            self.ask_unsaved(app)
         } else {
             // Kept open for another reason: the jobs are asked about
             // again at the next quit.
             self.jobs_confirmed.set(false);
+            None
+        };
+        match question {
+            Some(id) => self.attempt.set(Attempt::Question(id)),
+            // Refused with nothing asked: the request ends here.
+            None => self.abandon(),
         }
         Before::Veto(format!("{listener}: {reason}"))
+    }
+
+    /// The quit's request ends without Helios quitting: what waits on it
+    /// is dropped at the shell's next pass ([`Shell::settle_quit`]).
+    fn abandon(&self) {
+        self.attempt.set(Attempt::Idle);
+        self.abandoned.set(true);
     }
 
     /// The after-hook of `window.close`: the main window closed, Helios
@@ -300,13 +349,13 @@ impl Quit {
     /// classic three answers: "Retry saving", "Quit without saving", and
     /// the dialog's Cancel, which keeps Helios open. egui-pop's choice
     /// dialog ([`QUIT_UNSAVED`] runs with the answer's value).
-    fn ask_unsaved(&self, app: &AppHandle) {
+    fn ask_unsaved(&self, app: &AppHandle) -> Option<u64> {
         use egui_pop::api::dialogs::{Choose, ChooseOption};
         use egui_pop::model::ids::CommandId;
         let text = |m: Message| helios_i18n::message(&self.i18n, &m);
         let why = self.unsaved.borrow().clone().unwrap_or_default();
         let Ok(command) = CommandId::new(QUIT_UNSAVED) else {
-            return;
+            return None;
         };
         let choose = Choose::with_options(
             &text(Message::new(
@@ -332,16 +381,15 @@ impl Quit {
             Message::new("gui-quit-unsaved-detail", "Quitting now loses it: { $why }")
                 .with("why", why),
         ));
-        match app.service(&egui_pop::api::dialogs::DIALOGS) {
-            Some(dialogs) => {
-                dialogs.open(choose);
-            }
-            None => log::warn!(target: "helios", "no dialogs to ask before quitting"),
-        }
+        let Some(dialogs) = app.service(&egui_pop::api::dialogs::DIALOGS) else {
+            log::warn!(target: "helios", "no dialogs to ask before quitting");
+            return None;
+        };
+        Some(dialogs.open(choose))
     }
 
     /// The one question before quitting: what it would cancel.
-    fn ask(&self, app: &AppHandle, running: usize) {
+    fn ask(&self, app: &AppHandle, running: usize) -> Option<u64> {
         let text = |m: Message| helios_i18n::message(&self.i18n, &m);
         let confirm = crate::dialogs::Confirm {
             title: text(Message::new("gui-quit-title", "Quit Helios?")),
@@ -361,11 +409,15 @@ impl Quit {
             app.service(&egui_pop::api::dialogs::DIALOGS),
             super::confirm_dialog(confirm),
         ) {
-            (Some(dialogs), Ok(dialog)) => {
-                dialogs.open(dialog);
+            (Some(dialogs), Ok(dialog)) => Some(dialogs.open(dialog)),
+            (None, _) => {
+                log::warn!(target: "helios", "no dialogs to ask before quitting");
+                None
             }
-            (None, _) => log::warn!(target: "helios", "no dialogs to ask before quitting"),
-            (_, Err(e)) => log::warn!(target: "helios", "the question before quitting: {e}"),
+            (_, Err(e)) => {
+                log::warn!(target: "helios", "the question before quitting: {e}");
+                None
+            }
         }
     }
 }
@@ -580,6 +632,7 @@ impl Shell {
         match answer {
             RETRY_SAVE => {
                 self.lifetime.quit.retry_save.set(true);
+                self.lifetime.quit.attempt.set(Attempt::Retrying);
                 Ok(())
             }
             DISCARD => {
@@ -589,6 +642,56 @@ impl Shell {
                 Ok(())
             }
             other => Err(format!("`{other}`: neither `{RETRY_SAVE}` nor `{DISCARD}`")),
+        }
+    }
+
+    /// Runs `dropped` when a quit's request is abandoned: refused, or its
+    /// question answered with anything but Quit (Cancel, Escape, the
+    /// dialog closed). What was confirmed for one quit (a reset, a
+    /// catalogue restore) registers here, so it never waits for a later,
+    /// ordinary quit the person did not mean for it. `dropped` says what
+    /// it dropped, shown as a warning notice; `None` when it held nothing.
+    pub fn on_quit_abandoned(&self, dropped: impl Fn() -> Option<Message> + 'static) {
+        self.lifetime
+            .quit
+            .on_abandoned
+            .borrow_mut()
+            .push(Box::new(dropped));
+    }
+
+    /// The shell's pass: a quit's question no longer open while the quit
+    /// does not go abandons the request; an abandoned request drops what
+    /// waits on it ([`Shell::on_quit_abandoned`]), said on the journal
+    /// ([`QUIT_ABANDONED`]) and in a notice.
+    pub(super) fn settle_quit(&mut self) {
+        let quit = self.lifetime.quit.clone();
+        if let Attempt::Question(id) = quit.attempt.get() {
+            let open = self
+                .core
+                .app
+                .handle()
+                .service(&egui_pop::api::dialogs::DIALOGS)
+                .is_some_and(|d| d.is_open(id));
+            if !open && !quit.quitting.get() {
+                quit.abandon();
+            }
+        }
+        if !quit.abandoned.replace(false) {
+            return;
+        }
+        log::info!(target: "helios::quit", "the quit's request was abandoned: Helios goes on");
+        self.core
+            .app
+            .handle()
+            .publish("helios", None, QUIT_ABANDONED, Value::Null);
+        let notices: Vec<Message> = quit
+            .on_abandoned
+            .borrow()
+            .iter()
+            .filter_map(|dropped| dropped())
+            .collect();
+        for notice in notices {
+            self.notify(crate::dialogs::Level::Warning, notice);
         }
     }
 

@@ -303,15 +303,18 @@ fn seconds() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Set by a catalogue restore: Helios starts again once its window has
-/// closed and its vault is released, the restore applied at the opening.
+/// Set by a catalogue restore or a reset: Helios starts again once its
+/// window has closed and its vault is released. Cleared when that quit
+/// is abandoned (`Shell::on_quit_abandoned`): a later, ordinary quit
+/// never restarts.
 static RESTART: AtomicBool = AtomicBool::new(false);
 
 /// A reset the person confirmed (Settings > Danger zone): run once the
 /// window has closed and the library is released, before Helios starts
-/// again on its first-run setup (`helios_gui::reset`).
-static PENDING_RESET: std::sync::Mutex<Option<helios_node_core::reset::Plan>> =
-    std::sync::Mutex::new(None);
+/// again on its first-run setup (`helios_gui::reset`). Dropped when the
+/// quit it was confirmed for is abandoned.
+static PENDING_RESET: std::sync::LazyLock<helios_gui::reset::Pending> =
+    std::sync::LazyLock::new(helios_gui::reset::Pending::default);
 
 /// The reset's commands (`helios_gui::reset`): the photo folders read
 /// through the node (`library.folders`) and the library's folder, the
@@ -339,20 +342,24 @@ fn reset_commands(
         reset::photos_of(&folders, folder)
     };
     let egui = ctx.clone();
-    let go = move |plan: helios_node_core::reset::Plan| {
-        *PENDING_RESET
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(plan);
+    let go = move || {
         RESTART.store(true, Ordering::Relaxed);
         QUIT_ASKED.store(true, Ordering::SeqCst);
         egui.request_repaint();
         Ok(())
     };
+    // The quit abandoned: no restart at a later quit (the plan itself is
+    // dropped by `reset::register`'s own hook).
+    shell.on_quit_abandoned(|| {
+        RESTART.store(false, Ordering::Relaxed);
+        None
+    });
     reset::register(
         shell,
         reset::Reset {
             places,
             photos: Arc::new(photos),
+            pending: PENDING_RESET.clone(),
             go: Arc::new(go),
         },
     )
@@ -458,6 +465,26 @@ fn catalogue_commands(
                 .map_err(|e| e.to_string())
         },
     )?;
+    // The restore lives for the quit it asked: that quit abandoned, the
+    // request is dropped, so a later launch does not replace the
+    // catalogue the person went on working in.
+    let at = file.clone();
+    shell.on_quit_abandoned(move || {
+        RESTART.store(false, Ordering::Relaxed);
+        let marker = helios_vault_sqlite::snapshot::pending_file(&at);
+        if !marker.exists() {
+            return None;
+        }
+        if let Err(e) = std::fs::remove_file(&marker) {
+            warn(&format!("catalogue restore: {}: {e}", marker.display()));
+            return None;
+        }
+        warn("catalogue restore dropped: Helios did not quit, the catalogue stays");
+        Some(Message::new(
+            "gui-catalogue-restore-dropped",
+            "Catalogue restore cancelled: Helios did not quit, so the catalogue was not replaced. Ask for the restore again.",
+        ))
+    });
     let (at, egui) = (file.clone(), ctx.clone());
     shell.register(
         CommandSpec::new(
@@ -2215,11 +2242,7 @@ fn main() -> Result<(), String> {
             ending.finish();
             // A reset was confirmed: the library is closed now, its plan
             // runs before Helios starts again (on its first-run setup).
-            let reset = PENDING_RESET
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            if let Some(plan) = reset {
+            if let Some(plan) = PENDING_RESET.take() {
                 let report = helios_node_core::reset::run(&plan);
                 if let Some((path, why)) = &report.failed {
                     warn(&format!("reset: stopped at {}: {why}", path.display()));
