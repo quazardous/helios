@@ -12,6 +12,10 @@
 //! it each frame), and the Library, the import window and the health
 //! check hear it through the bus.
 
+// The rows and groups are built from the link's maps, always the
+// standard hasher: generic hashers would only widen the API.
+#![allow(clippy::implicit_hasher)]
+
 pub mod admin;
 pub mod backup_end;
 pub mod link;
