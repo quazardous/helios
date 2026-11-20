@@ -13,12 +13,16 @@
 //! `edit.undo`, `edit.redo` and `edit.jump` on them. A photo switch
 //! drops the edit's steps and keeps the workspace's.
 //!
-//! - **Which scope Ctrl+Z walks**, until it follows the focused view: both
-//!   scopes are always active, like the edit alone was, so egui-pop picks
-//!   the one whose last step is the newest (each step is stamped when
-//!   first seen). Ctrl+Z after a graph edit undoes it, after an exposure
-//!   change the exposure, as when both were one line; the History panel
-//!   and agents name the scope they walk.
+//! - **Which scope Ctrl+Z walks** follows the focused view (#5258 R3,
+//!   egui-pop's `Routing::Focus`, set by the shell): each scope names the
+//!   panels that work on it ([`EDIT_FOCUS`], [`WORKSPACE_FOCUS`], the
+//!   library's [`crate::library_history::FOCUS`]), and Ctrl+Z and
+//!   Ctrl+Shift+Z go to the scope of the focused one, even when another
+//!   scope has a newer step. With the focus where no scope is named (the
+//!   menu bar, nothing clicked), they go to the scope focused last while
+//!   one of its panels is shown, then to the newest step. A scope is
+//!   active while one of its panels is shown. The History panel and
+//!   agents name the scope they walk.
 //!
 //! - **Steps** keep the id the store gave them
 //!   ([`helios_values::Step::id`]) while they are undone, redone or
@@ -101,6 +105,27 @@ pub const EDIT: ScopeId = ScopeId::from_static("edit");
 /// network and graph, macros, sub-workspaces, workshop design, name and
 /// icon, keys, tools, a reset. Kept across photos.
 pub const WORKSPACE: ScopeId = ScopeId::from_static("workspace");
+
+/// The panels that work on the photo's edit: Ctrl+Z there undoes in
+/// [`EDIT`].
+pub const EDIT_FOCUS: &[&str] = &[
+    "helios.viewport",
+    "helios.modules",
+    "helios.masks",
+    "helios.params",
+    "helios.scopes",
+    "helios.navigator",
+];
+
+/// The panels that work on the workspace: the graph and the Workshops.
+/// Ctrl+Z there undoes in [`WORKSPACE`].
+pub const WORKSPACE_FOCUS: &[&str] = &["helios.graph", crate::workshops::PANEL];
+
+fn scope_info(id: ScopeId, title: &str, focus: &[&str]) -> ScopeInfo {
+    let mut info = ScopeInfo::new(id, title);
+    info.focus = focus.iter().map(|s| (*s).to_string()).collect();
+    info
+}
 
 /// The store's history scope behind one of egui-pop's, if any.
 fn store_scope(scope: &ScopeId) -> Option<HistoryScope> {
@@ -705,10 +730,11 @@ impl HeliosHistory {
 
 impl History for HeliosHistory {
     fn scopes(&self) -> Vec<ScopeInfo> {
-        // Both always active until Ctrl+Z follows the focused view.
+        // Each active while one of its panels is shown; Ctrl+Z goes to
+        // the focused panel's.
         vec![
-            ScopeInfo::new(EDIT, "Edit"),
-            ScopeInfo::new(WORKSPACE, "Workspace"),
+            scope_info(EDIT, "Edit", EDIT_FOCUS),
+            scope_info(WORKSPACE, "Workspace", WORKSPACE_FOCUS),
             LibraryHistory::scope(),
         ]
     }
@@ -1353,7 +1379,7 @@ mod tests {
         assert!(
             h.scopes()
                 .iter()
-                .any(|s| s.id == WORKSPACE && s.focus.is_empty())
+                .any(|s| s.id == WORKSPACE && s.focus.iter().any(|f| f == "helios.graph"))
         );
         let edit = h.line(&EDIT).unwrap();
         let ws = h.line(&WORKSPACE).unwrap();
