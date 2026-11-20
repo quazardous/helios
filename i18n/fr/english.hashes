@@ -598,6 +598,8 @@ gui-end-host-step e058c7f3d16a68b4
 gui-end-interface 977fdf5514d528ca
 gui-end-jobs e97654bb26fd93bb
 gui-end-node 0a25ca6a4532dd3f
+gui-end-node-waiting 8bd57176afe443d3
+gui-end-unsaved 90091da06e8514f5
 gui-export-bits 445ead6584b2ae46
 gui-export-cancelled 1b689c82cb971e12
 gui-export-clash 49f01efc23c89024
@@ -1417,6 +1419,10 @@ gui-quick-open-title d9995403971598bf
 gui-quick-open-workspace 83fb01ff0702e457
 gui-quit-jobs-detail 70be8d39bb030494
 gui-quit-title 8d4beb9036a59719
+gui-quit-unsaved-detail fa87403b713d1fe9
+gui-quit-unsaved-discard 9bba398000e76f02
+gui-quit-unsaved-retry f44b627cb86c5719
+gui-quit-unsaved-title d2e2973c4176e252
 gui-quit-verb a4050ce0b3604cfc
 gui-recent-filters-none 478b93a2d42fc0d2
 gui-recent-filters-pinned 05bd6622ccf8a2e7
@@ -1492,7 +1498,12 @@ gui-rule-value-name 2c5f8334d5a96db8
 gui-scene-saved 60fcaa10812571b8
 gui-scopes-blue 4993860c16de56cd
 gui-scopes-green e75b76ee627e2c3a
+gui-scopes-histogram 957634470d7a6999
+gui-scopes-no-image af7c1df3bac2a9c9
+gui-scopes-parade 3719f9c87aca6ffe
 gui-scopes-red ec567f4422597e6a
+gui-scopes-stops 347769dcdd2911d0
+gui-scopes-waveform d59f7c83d51bc600
 gui-settings-account-last-used e896e0a432b5edc8
 gui-settings-account-rename e8f800548ef8413c
 gui-settings-account-rename-help cfccf47f6b1f502b
