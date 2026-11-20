@@ -425,7 +425,9 @@ fn a_reset_whose_quit_is_cancelled_never_runs_at_a_later_quit() {
         .count();
     assert_eq!(abandoned, 1, "the journal says the quit was abandoned");
     assert!(
-        h.query_by_label_contains("Reset cancelled").is_some(),
+        h.query_all_by_label_contains("Reset cancelled")
+            .next()
+            .is_some(),
         "a notice says the reset was cancelled"
     );
 
