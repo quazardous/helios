@@ -3,7 +3,7 @@
 //!
 //! **It draws nothing.** A module declares its parameters (their
 //! descriptors in the value store, the controls patched to them); the
-//! rack resolves them as a card in the controls' context, egui_hud lays
+//! rack resolves them as a card in the controls' context, `egui_hud` lays
 //! the card out and chooses egui-pop's widgets for each part (sliders,
 //! curves, colour wheels, folded lists, read-out lines, menus with
 //! previews, text fields), and the rack binds what they change to the
@@ -252,7 +252,7 @@ fn folded(ctx: &egui::Context, path: &str, d: &Descriptor, v: &Value) -> Folded 
     }
 }
 
-/// The card's host: Helios's words, verdicts and marks on what egui_hud
+/// The card's host: Helios's words, verdicts and marks on what `egui_hud`
 /// draws, and what the shell is to touch. No drawing of its own.
 struct Host<'r> {
     app: Option<&'r egui_pop::api::AppHandle>,
@@ -633,7 +633,7 @@ impl Rack {
 
     /// One card: the parameters `paths` of `node` through the controls
     /// layer, resolved in `keys` (the shared reveals and hand, `id`'s
-    /// previous resolution), drawn by egui_hud, their changes written to
+    /// previous resolution), drawn by `egui_hud`, their changes written to
     /// the store as the user. `extras` holds what the shell adds to a
     /// parameter, by path.
     #[expect(
