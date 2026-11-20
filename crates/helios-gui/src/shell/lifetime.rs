@@ -57,7 +57,7 @@ pub(super) const QUIT_CONFIRMED: &str = "helios.quit.confirmed";
 /// The answer to "An edit could not be saved" before quitting: its
 /// `value` is [`RETRY_SAVE`] or [`DISCARD`].
 pub(super) const QUIT_UNSAVED: &str = "helios.quit.unsaved";
-/// "Retry saving": the save tried again, then the quit asked again.
+/// "Save": the save tried again, then the quit asked again.
 pub(super) const RETRY_SAVE: &str = "retry";
 /// "Quit without saving": the edit not saved is lost, Helios quits.
 pub(super) const DISCARD: &str = "discard";
@@ -124,7 +124,7 @@ enum Attempt {
     /// Refused, its question (the dialog's id) asked: the request lives
     /// while the question is open.
     Question(u64),
-    /// "Retry saving" chosen: the host's persistence saves, then asks the
+    /// "Save" chosen: the host's persistence saves, then asks the
     /// quit again ([`Shell::quit_again`]).
     Retrying,
     /// The quit goes.
@@ -185,7 +185,7 @@ pub(crate) struct Quit {
     /// "Quit without saving" was chosen: the next quit's request lets the
     /// unsaved edit go.
     unsaved_discarded: Cell<bool>,
-    /// "Retry saving" was chosen: the host's persistence tries the save
+    /// "Save" was chosen: the host's persistence tries the save
     /// again, then quits again ([`Shell::take_save_retry`]).
     retry_save: Cell<bool>,
     /// What the last quit's request did.
@@ -346,37 +346,37 @@ impl Quit {
     }
 
     /// The question before quitting with an edit whose save failed, the
-    /// classic three answers: "Retry saving", "Quit without saving", and
-    /// the dialog's Cancel, which keeps Helios open. egui-pop's choice
-    /// dialog ([`QUIT_UNSAVED`] runs with the answer's value).
+    /// classic three buttons: "Save" (the default, Enter: the save tried
+    /// again), "Quit without saving" (the danger tone, never the default)
+    /// and Cancel, which keeps Helios open. egui-pop's three-button
+    /// confirmation ([`QUIT_UNSAVED`] runs with the answer's `value`).
     fn ask_unsaved(&self, app: &AppHandle) -> Option<u64> {
-        use egui_pop::api::dialogs::{Choose, ChooseOption};
+        use egui_pop::api::dialogs::{Confirm, Secondary};
         use egui_pop::model::ids::CommandId;
         let text = |m: Message| helios_i18n::message(&self.i18n, &m);
         let why = self.unsaved.borrow().clone().unwrap_or_default();
         let Ok(command) = CommandId::new(QUIT_UNSAVED) else {
             return None;
         };
-        let choose = Choose::with_options(
+        let discard = Secondary::new(
+            &text(Message::new(
+                "gui-quit-unsaved-discard",
+                "Quit without saving",
+            )),
+            command.clone(),
+        )
+        .args(serde_json::json!({ "value": DISCARD }))
+        .danger();
+        let confirm = Confirm::new(
             &text(Message::new(
                 "gui-quit-unsaved-title",
                 "An edit could not be saved",
             )),
-            vec![
-                ChooseOption::new(
-                    &text(Message::new("gui-quit-unsaved-retry", "Retry saving")),
-                    Value::from(RETRY_SAVE),
-                ),
-                ChooseOption::new(
-                    &text(Message::new(
-                        "gui-quit-unsaved-discard",
-                        "Quit without saving",
-                    )),
-                    Value::from(DISCARD),
-                ),
-            ],
+            &text(Message::new("gui-quit-unsaved-save", "Save")),
             command,
         )
+        .args(serde_json::json!({ "value": RETRY_SAVE }))
+        .secondary(discard)
         .detail(&text(
             Message::new("gui-quit-unsaved-detail", "Quitting now loses it: { $why }")
                 .with("why", why),
@@ -385,7 +385,7 @@ impl Quit {
             log::warn!(target: "helios", "no dialogs to ask before quitting");
             return None;
         };
-        Some(dialogs.open(choose))
+        Some(dialogs.open(confirm))
     }
 
     /// The one question before quitting: what it would cancel.
@@ -612,14 +612,14 @@ impl Shell {
         *self.lifetime.quit.unsaved.borrow_mut() = why;
     }
 
-    /// "Retry saving" was chosen before quitting: taken once by the host's
+    /// "Save" was chosen before quitting: taken once by the host's
     /// persistence, which tries the save again and quits again
     /// ([`Shell::quit_again`]).
     pub fn take_save_retry(&self) -> bool {
         self.lifetime.quit.retry_save.replace(false)
     }
 
-    /// Asks the quit again after "Retry saving": the edit saved, it goes
+    /// Asks the quit again after "Save": the edit saved, it goes
     /// (the jobs' question may still be asked); its save failed again,
     /// the question is asked again.
     pub fn quit_again(&mut self) {

@@ -879,8 +879,11 @@ fn a_failed_save_asks_before_quitting_cancel_keeps_open_discard_quits() {
     let (by, why) = report.refused.expect("refused");
     assert_eq!(by, UNSAVED, "the refusal names its listener");
     assert!(why.contains("could not be saved"), "{why}");
-    assert!(d.h.query_by_label("Retry saving").is_some());
+    // egui-pop's three-button confirmation: Save, Quit without saving
+    // (the danger choice) and Cancel.
+    assert!(d.h.query_by_label("Save").is_some());
     assert!(d.h.query_by_label("Quit without saving").is_some());
+    assert!(d.h.query_by_label("Cancel").is_some());
 
     d.h.get_by_label("Cancel").click();
     d.h.run_steps(2);
@@ -908,7 +911,7 @@ fn a_failed_save_asks_before_quitting_cancel_keeps_open_discard_quits() {
     assert_eq!(d.saved_versions(), 0, "the edit was not saved");
 }
 
-/// "Retry saving" tries the save again: failing again, the question is
+/// "Save" tries the save again: failing again, the question is
 /// asked again; once the vault lets go, the edit is saved and Helios
 /// quits.
 #[test]
@@ -920,7 +923,7 @@ fn retry_saving_asks_again_while_it_fails_then_saves_and_quits() {
     assert!(d.asked());
 
     // The vault still held: the retry fails, asked again.
-    d.h.get_by_label("Retry saving").click();
+    d.h.get_by_label("Save").click();
     d.h.run_steps(2);
     d.frame();
     assert!(!d.h.state().quitting(), "the save failed again");
@@ -929,7 +932,7 @@ fn retry_saving_asks_again_while_it_fails_then_saves_and_quits() {
 
     // The vault let go: the retry saves, and the quit goes.
     release(blocker);
-    d.h.get_by_label("Retry saving").click();
+    d.h.get_by_label("Save").click();
     d.h.run_steps(2);
     d.frame();
     assert!(!d.persist.unsaved(), "saved on retry");

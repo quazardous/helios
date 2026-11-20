@@ -3000,7 +3000,7 @@ gui-quit-unsaved-detail = Quitter maintenant la perd : { $why }
 
 gui-quit-unsaved-discard = Quitter sans enregistrer
 
-gui-quit-unsaved-retry = Réessayer l’enregistrement
+gui-quit-unsaved-save = Enregistrer
 
 gui-quit-unsaved-title = Une retouche n’a pas pu être enregistrée
 

@@ -2359,7 +2359,7 @@ gui-quit-unsaved-detail = Quitting now loses it: { $why }
 
 gui-quit-unsaved-discard = Quit without saving
 
-gui-quit-unsaved-retry = Retry saving
+gui-quit-unsaved-save = Save
 
 gui-quit-unsaved-title = An edit could not be saved
 
