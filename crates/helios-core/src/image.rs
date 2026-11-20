@@ -367,11 +367,30 @@ impl Image {
         }
         let r = self.region;
         assert!(!r.is_empty(), "cannot sample an empty image");
-        Image::from_fn(region, self.channels, |x, y, c| {
-            let cx = x.clamp(r.x, r.right() - 1);
-            let cy = y.clamp(r.y, r.bottom() - 1);
-            self.pixel(cx, cy)[c as usize]
-        })
+        // Row by row: the columns inside copied at once, those past each
+        // side the edge pixel repeated.
+        let channels = self.channels as usize;
+        let mut data = Vec::with_capacity(region.area() * channels);
+        let (left, right) = (region.x, region.right());
+        let (inside_from, inside_to) = (left.clamp(r.x, r.right()), right.clamp(r.x, r.right()));
+        for y in region.y..region.bottom() {
+            let row = self.row(y.clamp(r.y, r.bottom() - 1));
+            let at = |x: i64| {
+                let i = (x.clamp(r.x, r.right() - 1) - r.x) as usize * channels;
+                &row[i..i + channels]
+            };
+            for x in left..inside_from.min(right) {
+                data.extend_from_slice(at(x));
+            }
+            if inside_from < inside_to {
+                let (a, b) = ((inside_from - r.x) as usize, (inside_to - r.x) as usize);
+                data.extend_from_slice(&row[a * channels..b * channels]);
+            }
+            for x in inside_to.max(left)..right {
+                data.extend_from_slice(at(x));
+            }
+        }
+        Image::new(region, self.channels, data)
     }
 
     /// [`Image::sample`] at a scale: `region` is in pixels at that scale,

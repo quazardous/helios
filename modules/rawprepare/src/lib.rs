@@ -76,10 +76,19 @@ impl Module for RawPrepare {
         output: Region,
     ) -> Result<Vec<Image>, String> {
         let input = inputs[0];
-        Ok(vec![Image::from_fn(output, 1, |x, y, _| {
-            let black = plan.black[((y & 1) * 2 + (x & 1)) as usize];
-            (input.pixel(x, y)[0] - black) / (plan.white - black)
-        })])
+        // Row by row over slices (a pixel at a time cost ~8 ns each on a
+        // 25 MP mosaic, a fifth of a second).
+        let from = (output.x - input.region().x) as usize;
+        let mut data = Vec::with_capacity(output.area());
+        for y in output.y..output.bottom() {
+            let row = &input.row(y)[from..from + output.width as usize];
+            let pair = ((y & 1) * 2) as usize;
+            data.extend(row.iter().enumerate().map(|(i, v)| {
+                let black = plan.black[pair + ((output.x + i as i64) & 1) as usize];
+                (v - black) / (plan.white - black)
+            }));
+        }
+        Ok(vec![Image::new(output, 1, data)])
     }
 }
 
