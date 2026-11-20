@@ -63,6 +63,7 @@ category-helios 28daeae8a505789f
 category-masks 6849246780dae374
 category-node-graph d36686706dbe1885
 category-preferences 0f02ef52eedd2e4d
+category-queue 8dd348ad2ba6981e
 category-workspace d29e383b2905127c
 clip-application-x-helios-images-json.title cafd24c4eaef756b
 clip-application-x-helios-mask-json.title 2f3bd09547ac8967
@@ -1388,7 +1389,7 @@ gui-profile-keys-error 81148fc1d6828ea9
 gui-profile-keys-skipped f1cc88962bdc0e37
 gui-profile-layout-error 0920390b6dde7b73
 gui-profile-variants c6c2d7f979583206
-gui-queue-bottom 73008d178c37c666
+gui-queue-bottom e6f706260ebad648
 gui-queue-cancel e09b40fcf1e41cfb
 gui-queue-column-attempts b04dbbde4c82f25f
 gui-queue-column-item 2ec86d203d6111fc
@@ -1413,7 +1414,7 @@ gui-queue-state-running 1798b7652272f21a
 gui-queue-state-waiting a27bd7e042807abe
 gui-queue-summary c2d0c33967192a03
 gui-queue-title 4bf5bb4b41d5e877
-gui-queue-top d4c6d3dffef75154
+gui-queue-top 9d09890e6623859a
 gui-quick-open-image 629f69163a374538
 gui-quick-open-module 94e6d2cc1b97242f
 gui-quick-open-source 0a91c26e765f385e
@@ -2271,6 +2272,7 @@ plugin-helios-lists.title 70a8f95b6cc02a1c
 plugin-helios-platform.title 2ab53894da44fd90
 plugin-helios-theme-editor.title 3cf4b14fef58503f
 plugin-helios-workbench.title 43f0563e9981a775
+plugin-helios-workflow.title b05070a39744017a
 plugin-helios.title 28daeae8a505789f
 resolve-failed 5e58276302ccbd1f
 resolve-not-asked 13de0758c1aa2baf

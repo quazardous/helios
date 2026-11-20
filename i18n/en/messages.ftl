@@ -2237,10 +2237,9 @@ gui-promise-retry = Retry
 
 gui-promise-so-far = { $done } so far
 
-gui-queue-cancel = Cancel
-gui-queue-retry = Retry
-gui-queue-top = Top
 gui-queue-bottom = Bottom
+
+gui-queue-cancel = Cancel
 
 gui-queue-column-attempts = Attempts
 
@@ -2266,6 +2265,8 @@ gui-queue-oldest-wait = Oldest wait: { $time }
 
 gui-queue-on-node = Node { $name }
 
+gui-queue-retry = Retry
+
 gui-queue-seconds = { $n } s
 
 gui-queue-state-cancelled = Cancelled
@@ -2285,6 +2286,8 @@ gui-queue-state-waiting = Waiting
 gui-queue-summary = { $waiting } waiting, { $running } running, { $done } done, { $failed } failed
 
 gui-queue-title = Queue of { $node }
+
+gui-queue-top = Top
 
 gui-quick-open-image = image
 
