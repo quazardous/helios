@@ -35,7 +35,7 @@ use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract::{
     self, Bus, HookError, ListenOpts, Point, PointDecl, Refused,
 };
-use helios_library::import::{Card, Report};
+use helios_library::import::Report;
 use helios_vault::undo::Changes;
 use serde_json::{Value, json};
 
@@ -468,37 +468,7 @@ pub fn merged(reports: Vec<Report>) -> Report {
     into
 }
 
-/// A card from an import's report line (`helios_library::import::Card`
-/// as it serializes).
-pub fn card_of(v: &Value) -> Option<Card> {
-    let files = v["files"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|f| {
-            let path = std::path::PathBuf::from(f.get(0)?.as_str()?);
-            let id = f
-                .get(1)
-                .and_then(Value::as_str)
-                .and_then(|h| helios_vault::ImageId::from_hex(h).ok());
-            Some((path, id))
-        })
-        .collect();
-    Some(Card {
-        path: v["path"].as_str()?.into(),
-        label: v["label"].as_str()?.to_string(),
-        photos: v["photos"].as_u64().unwrap_or(0),
-        missing: v["missing"].as_u64().unwrap_or(0),
-        want: v["want"]
-            .as_u64()
-            .and_then(|w| u8::try_from(w).ok())
-            .unwrap_or(0),
-        short: v["short"].as_u64().unwrap_or(0),
-        safe_to_format: v["safe_to_format"] == true,
-        root: v["root"].as_str()?.into(),
-        files,
-    })
-}
+pub use helios_storage_ui::card_of;
 
 /// Who asked for an import, by its request.
 fn origin_of(request: &Value) -> String {
@@ -543,6 +513,7 @@ fn report_of(v: &Value) -> Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use helios_library::import::Card;
 
     #[test]
     fn listeners_run_in_the_declared_order_whatever_order_they_register_in() {

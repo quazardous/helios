@@ -151,6 +151,14 @@ const NAMED: &[(&str, World)] = &[
     ("helios-ui", World::FormsFramework),
     ("helios-rack", World::VisualFramework),
     ("helios-gui", World::Shell),
+    // A feature of the desktop in a crate of its own: the Storage and
+    // Backup pages, mounted by helios-gui. It reaches the rest of the
+    // desktop through the bus, and egui-pop's Settings app and
+    // application handle directly, as the shell does.
+    ("helios-storage-ui", World::Shell),
+    // Test support: runs one feature crate without the desktop, for its
+    // tests (a dev-dependency only).
+    ("helios-feature-host", World::DevTool),
     ("helios-controls", World::Visual),
     // The i18n extractor: a binary that builds a headless shell to collect
     // every declared text.

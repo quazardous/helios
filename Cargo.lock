@@ -2567,6 +2567,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-feature-host"
+version = "0.92.0"
+dependencies = [
+ "egui-pop",
+ "egui_kittest",
+ "helios-i18n",
+ "helios-shell",
+ "serde_json",
+]
+
+[[package]]
 name = "helios-gpu"
 version = "0.92.0"
 dependencies = [
@@ -2639,6 +2650,7 @@ dependencies = [
  "helios-scopes",
  "helios-shell",
  "helios-storage",
+ "helios-storage-ui",
  "helios-template",
  "helios-thumbs",
  "helios-ui",
@@ -3132,6 +3144,29 @@ dependencies = [
  "serde",
  "serde_json",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "helios-storage-ui"
+version = "0.92.0"
+dependencies = [
+ "chrono",
+ "egui-pop",
+ "egui_kittest",
+ "helios-connect",
+ "helios-core",
+ "helios-feature-host",
+ "helios-i18n",
+ "helios-inspect",
+ "helios-library",
+ "helios-node-core",
+ "helios-shell",
+ "helios-storage",
+ "helios-vault",
+ "helios-vault-sqlite",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
