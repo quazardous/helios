@@ -8138,6 +8138,7 @@ impl Shell {
     /// offered and wanted: an area at the bottom of the window over the
     /// panels, not a dialog, so it blocks neither keys nor clicks.
     fn pointer_choice_ui(&mut self, ctx: &Egui) {
+        use egui_pop::core::ui::UiPop as _;
         let h = self.core.app.handle().clone();
         if !self.core.pointer_choice || !crate::pointer_choice::wanted(&h) {
             return;
@@ -8146,7 +8147,7 @@ impl Shell {
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -48.0))
             .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.popover(|ui| {
                     crate::pointer_choice::body(ui, &h);
                 });
             });
@@ -8393,7 +8394,6 @@ fn menu_rows(
     items: &[MenuItem],
     chosen: &mut Option<(String, Value)>,
 ) {
-    use egui_pop::core::tooltip::TooltipExt as _;
     use egui_pop::core::ui::UiPop as _;
     for item in items {
         match item {
@@ -8416,19 +8416,24 @@ fn menu_rows(
                     continue;
                 };
                 let title = label.clone().unwrap_or_else(|| h.command_menu_title(&spec));
-                let mut button = egui::Button::new(&title);
-                if let Some(k) = h.keys_for(&cid).first() {
-                    button = button.shortcut_text(k.clone());
-                }
-                let applies = h.applies(&cid, cx);
-                let r = ui.add_enabled(applies && *enabled, button);
-                // A menu's row, for screen readers and accesskit tests.
-                egui_pop::core::a11y::name(&r, egui::Role::MenuItem, &title);
-                // A row its owner greyed (an offline folder's) says
-                // nothing more; one whose command does not apply, why.
-                if *enabled && !applies {
-                    r.disabled_tip(format!("Does not apply here ({})", spec.when));
-                } else if r.clicked() {
+                let keys = h.keys_for(&cid).first().cloned();
+                // A row whose command does not apply says why; one its
+                // owner greyed (an offline folder's) says nothing more.
+                let why = (*enabled && !h.applies(&cid, cx))
+                    .then(|| format!("Does not apply here ({})", spec.when));
+                // egui-pop's menu row: the kit's look, a menu item named by
+                // its title for screen readers and accesskit tests.
+                let r = ui
+                    .add_enabled_ui(*enabled, |ui| {
+                        egui_pop::api::menus::command_row(
+                            ui,
+                            &title,
+                            keys.as_deref(),
+                            why.as_deref(),
+                        )
+                    })
+                    .inner;
+                if r.clicked() {
                     *chosen = Some((id.clone(), args.clone()));
                     ui.close();
                 }
