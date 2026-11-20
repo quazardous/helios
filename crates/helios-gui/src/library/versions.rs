@@ -8,6 +8,8 @@
 //! of the library's history.
 
 use egui::Ui;
+use egui_pop::core::ui::{TextRole, UiPop as _};
+use egui_pop::core::widgets::SelectableRow;
 use helios_core::Message;
 
 use super::Library;
@@ -176,7 +178,7 @@ impl Library {
         let texture = self.textures.get(image).map(|t| (t.id(), t.size_vec2()));
         let mut picked = None;
         ui.horizontal_wrapped(|ui| {
-            ui.label(title);
+            ui.text_role(TextRole::Body, title);
             for head in &heads {
                 let name = format!(
                     "{} {}",
@@ -189,17 +191,22 @@ impl Library {
                         }
                     })
                 );
+                // The kit's selectable row, the current head selected;
+                // the photo's thumbnail before its number and name.
                 let button = match texture {
                     Some((id, size)) => {
                         let scale = 32.0 / size.x.max(size.y).max(1.0);
-                        egui::Button::image_and_text(
-                            egui::Image::new(egui::load::SizedTexture::new(id, size * scale)),
-                            name,
+                        SelectableRow::new(
+                            head.current,
+                            (
+                                egui::Image::new(egui::load::SizedTexture::new(id, size * scale)),
+                                name.clone(),
+                            ),
                         )
                     }
-                    None => egui::Button::new(name),
+                    None => SelectableRow::new(head.current, name.clone()),
                 }
-                .selected(head.current);
+                .name(name);
                 if ui.add(button).clicked() && !head.current {
                     picked = Some(head.version.clone());
                 }
