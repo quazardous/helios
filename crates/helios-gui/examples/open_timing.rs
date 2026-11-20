@@ -23,8 +23,9 @@
 //! kept after), then the first opened again: its fit should read the kept
 //! step, with no demosaic.
 //!
-//! Then a warmed neighbour (the two largest raws): the largest opened
-//! cold while the next one warms (its `developed` state, as the desktop
+//! Then a warmed neighbour (`--warm`: the first raw whose name holds it,
+//! a NEF by default; the largest other raw shown): the shown one opened
+//! cold while the neighbour warms (its `developed` state, as the desktop
 //! warms a neighbour), background work free then held back from the
 //! open's start to its preview; then the neighbour opened: its frame and
 //! histogram times, the KPI of a warmed open.
@@ -56,6 +57,9 @@ struct Args {
     runs: usize,
     /// At most this many raws.
     n: usize,
+    /// The warmed neighbour: the first raw whose name holds it (any
+    /// case); the shown one is the largest other raw.
+    warm: String,
 }
 
 fn args() -> Result<Args, String> {
@@ -64,6 +68,7 @@ fn args() -> Result<Args, String> {
         out: PathBuf::from("."),
         runs: 3,
         n: usize::MAX,
+        warm: ".nef".into(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -73,6 +78,7 @@ fn args() -> Result<Args, String> {
             "--out" => a.out = value()?.into(),
             "--runs" => a.runs = value()?.parse().map_err(|e| format!("--runs: {e}"))?,
             "--n" => a.n = value()?.parse().map_err(|e| format!("--n: {e}"))?,
+            "--warm" => a.warm = value()?.to_lowercase(),
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -206,8 +212,15 @@ fn main() {
         );
     }
     if files.len() >= 2 {
-        // The largest raw shown, its neighbour (the next largest) warmed.
-        let (shown, near) = (&files[0], &files[1]);
+        // The neighbour warmed: the first raw named after `--warm` (a
+        // Nikon's by default, as the journey's), else the second largest;
+        // the largest other raw shown.
+        let named = |p: &PathBuf| {
+            p.file_name()
+                .is_some_and(|f| f.to_string_lossy().to_lowercase().contains(&a.warm))
+        };
+        let near = files.iter().find(|p| named(p)).unwrap_or(&files[1]);
+        let shown = files.iter().find(|p| *p != near).unwrap_or(&files[0]);
         for hold in [false, true] {
             let line = match warmed_neighbour(shown, near, &bundle, gpu.as_ref(), hold, &records) {
                 Ok(line) => line,
