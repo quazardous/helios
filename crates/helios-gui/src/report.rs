@@ -302,17 +302,19 @@ pub fn library_shape(lib: &Library, ctx: &egui::Context) -> Json {
         "rejected": rejected,
         "selected": lib.selection().len(),
         "limited_to": limits,
-        "filter_terms": filter_terms(&lib.filter().text),
+        "filter_terms": filter_terms(lib.filter()),
         "open": lib.selected().and_then(|i| lib.entries.get(i)).map(|e| e.id.clone()),
     })
 }
 
-/// A filter's terms by their key alone (`folder`, `rating`), and how many
-/// free words it has: never a value, which may name a place or a person.
-fn filter_terms(text: &str) -> Json {
+/// A filter's criteria without their private values: the stars, how many
+/// labels, flags and tags, whether it has dates; the text's terms by their
+/// key alone (`folder`), and how many free words it has. Never a tag, a
+/// day or a term's value, which may name a place or a person.
+fn filter_terms(filter: &egui_pop::views::library::filter::Filter) -> Json {
     let mut keys: Vec<String> = Vec::new();
     let mut words = 0;
-    for token in text.split_whitespace() {
+    for token in filter.text.split_whitespace() {
         match token.split_once(':') {
             Some((key, _))
                 if !key.is_empty()
@@ -325,7 +327,15 @@ fn filter_terms(text: &str) -> Json {
             _ => words += 1,
         }
     }
-    json!({ "keys": keys, "words": words })
+    json!({
+        "keys": keys,
+        "words": words,
+        "min_rating": filter.min_rating,
+        "labels": filter.labels.len(),
+        "flags": filter.flags.len(),
+        "tags": filter.tags.len(),
+        "dates": filter.from.is_some() || filter.to.is_some(),
+    })
 }
 
 #[cfg(test)]
@@ -418,11 +428,115 @@ mod tests {
         assert!(!is_image_id(&"zz".repeat(32)));
     }
 
+    /// A library of five photos: a raw+JPEG pair named after a person,
+    /// a stacked and edited raw, an offline JPEG, a missing PNG.
+    fn fixture() -> Library {
+        use crate::library::{Entry, StackOf};
+        use helios_vault::Presence;
+        let id = |c: char| c.to_string().repeat(64);
+        let mut lib = Library::default();
+        lib.set_entries(vec![
+            Entry {
+                id: id('a'),
+                name: "Jane wedding 001.CR2".into(),
+                picked: true,
+                ..Entry::default()
+            },
+            Entry {
+                id: id('b'),
+                name: "Jane wedding 001.JPG".into(),
+                picked: true,
+                ..Entry::default()
+            },
+            Entry {
+                id: id('c'),
+                name: "Ann at home.NEF".into(),
+                rejected: true,
+                edited: true,
+                stack: Some(StackOf {
+                    id: "s1".into(),
+                    top: id('c'),
+                    count: 1,
+                }),
+                ..Entry::default()
+            },
+            Entry {
+                id: id('d'),
+                name: "beach.jpeg".into(),
+                presence: Presence::Offline,
+                offline_on: Some("Ann's disk".into()),
+                ..Entry::default()
+            },
+            Entry {
+                id: id('e'),
+                name: "scan.png".into(),
+                presence: Presence::Missing,
+                ..Entry::default()
+            },
+        ]);
+        lib.select(0);
+        lib
+    }
+
+    #[test]
+    fn the_library_shape_counts_a_fixture() {
+        let lib = fixture();
+        let shape = library_shape(&lib, &egui::Context::default());
+        let n = |key: &str| {
+            shape[key]
+                .as_u64()
+                .unwrap_or_else(|| panic!("{key}: {shape}"))
+        };
+        assert_eq!(n("photos"), 5);
+        assert_eq!(n("raw"), 2);
+        assert_eq!(n("jpeg"), 2);
+        assert_eq!(n("other"), 1);
+        assert_eq!(n("raw_jpeg_pairs"), 1);
+        assert_eq!(n("stacked"), 1);
+        assert_eq!(n("edited"), 1);
+        assert_eq!(n("offline"), 1);
+        assert_eq!(n("missing"), 1);
+        assert_eq!(n("shown"), 5);
+        assert_eq!(n("picked"), 2);
+        assert_eq!(n("rejected"), 1);
+        assert_eq!(n("selected"), 1);
+        assert_eq!(shape["limited_to"], json!([]));
+        // The open photo by its id, which the report aliases.
+        assert_eq!(shape["open"], json!("a".repeat(64)));
+    }
+
+    #[test]
+    fn the_library_shape_holds_no_name_nor_path() {
+        let mut lib = fixture();
+        lib.set_filter(egui_pop::views::library::filter::Filter::parse(
+            "folder:\"/home/ann/Wedding\" tag:Jane rating:3 beach",
+        ));
+        let shape = library_shape(&lib, &egui::Context::default());
+        let text = shape.to_string();
+        for leak in [
+            "Jane", "Ann", "ann", "wedding", "Wedding", "beach", "scan", "CR2", "NEF", ".jpeg",
+            "home", "/", "disk",
+        ] {
+            assert!(!text.contains(leak), "{leak:?} in {text}");
+        }
+        let terms = &shape["filter_terms"];
+        assert_eq!(terms["keys"], json!(["folder"]));
+        assert_eq!(terms["words"], 1);
+        assert_eq!(terms["tags"], 1);
+        assert_eq!(terms["min_rating"], 3);
+    }
+
     #[test]
     fn a_filter_gives_its_keys_never_its_values() {
-        let t = filter_terms("folder:\"/home/ann/Wedding\" rating:>=3 jane");
-        assert_eq!(t["keys"], json!(["folder", "rating"]));
+        let t = filter_terms(&egui_pop::views::library::filter::Filter::parse(
+            "folder:\"/home/ann/Wedding\" kind:raw rating:3 tag:jane date:2026-01-01.. jane",
+        ));
+        assert_eq!(t["keys"], json!(["folder", "kind"]));
         assert_eq!(t["words"], 1);
+        assert_eq!(t["min_rating"], 3);
+        assert_eq!(t["tags"], 1);
+        assert_eq!(t["dates"], true);
+        assert!(!t.to_string().contains("2026"));
         assert!(!t.to_string().contains("ann"));
         assert!(!t.to_string().contains("jane"));
     }
