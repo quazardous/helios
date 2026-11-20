@@ -103,6 +103,7 @@ mod quick_open;
 mod quick_settings;
 mod quit;
 mod raw_front;
+mod reset;
 mod scale;
 mod scenario_files;
 mod scopes_size;

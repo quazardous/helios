@@ -307,6 +307,57 @@ fn seconds() -> u64 {
 /// closed and its vault is released, the restore applied at the opening.
 static RESTART: AtomicBool = AtomicBool::new(false);
 
+/// A reset the person confirmed (Settings > Danger zone): run once the
+/// window has closed and the library is released, before Helios starts
+/// again on its first-run setup (`helios_gui::reset`).
+static PENDING_RESET: std::sync::Mutex<Option<helios_node_core::reset::Plan>> =
+    std::sync::Mutex::new(None);
+
+/// The reset's commands (`helios_gui::reset`): the photo folders read
+/// through the node (`library.folders`) and the library's folder, the
+/// plan confirmed kept for the end, then Helios asked to quit.
+fn reset_commands(
+    shell: &mut Shell,
+    persist: Option<&Persist>,
+    library: Option<Library>,
+    file: Option<PathBuf>,
+    ctx: &egui::Context,
+) -> Result<(), String> {
+    use helios_gui::reset;
+    let places = reset::places(file).ok_or("Helios's folders cannot be told here")?;
+    let node = persist.map(|p| p.node().clone());
+    let photos = move || {
+        let folders = node
+            .as_ref()
+            .and_then(|n| {
+                n.call("library.folders", serde_json::json!({}))
+                    .wait_timeout(std::time::Duration::from_secs(10))
+            })
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        let folder = library.as_ref().and_then(|l| l.folder().ok().flatten());
+        reset::photos_of(&folders, folder)
+    };
+    let egui = ctx.clone();
+    let go = move |plan: helios_node_core::reset::Plan| {
+        *PENDING_RESET
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(plan);
+        RESTART.store(true, Ordering::Relaxed);
+        QUIT_ASKED.store(true, Ordering::SeqCst);
+        egui.request_repaint();
+        Ok(())
+    };
+    reset::register(
+        shell,
+        reset::Reset {
+            places,
+            photos: Arc::new(photos),
+            go: Arc::new(go),
+        },
+    )
+}
+
 /// The person chose "Quit now" on the end splash: the node's stop is left.
 static QUIT_NOW: AtomicBool = AtomicBool::new(false);
 
@@ -2162,6 +2213,18 @@ fn main() -> Result<(), String> {
                 warn(&format!("quit: {left} was left unfinished"));
             }
             ending.finish();
+            // A reset was confirmed: the library is closed now, its plan
+            // runs before Helios starts again (on its first-run setup).
+            let reset = PENDING_RESET
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(plan) = reset {
+                let report = helios_node_core::reset::run(&plan);
+                if let Some((path, why)) = &report.failed {
+                    warn(&format!("reset: stopped at {}: {why}", path.display()));
+                }
+            }
             // A catalogue restore was asked: the next Helios applies it as
             // it opens the library.
             if RESTART.load(Ordering::Relaxed) {
@@ -2595,6 +2658,15 @@ fn main() -> Result<(), String> {
                 && let Err(e) = catalogue_commands(&mut shell, p, file, ctx)
             {
                 shell.notes.push(format!("catalogue commands: {e}"));
+            }
+            if let Err(e) = reset_commands(
+                &mut shell,
+                persist.as_ref(),
+                library.clone(),
+                catalogue_file.clone(),
+                ctx,
+            ) {
+                shell.notes.push(format!("reset commands: {e}"));
             }
             if let Err(e) = helios_gui::caches::register(&mut shell) {
                 shell.notes.push(format!("cache commands: {e}"));

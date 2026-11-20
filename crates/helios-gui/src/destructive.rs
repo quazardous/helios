@@ -51,6 +51,22 @@ pub const DESTRUCTIVE: &[&str] = &[
     "workspace.reset",
 ];
 
+/// Commands kept from agents whatever their grant: the agent bridge
+/// refuses them (egui-pop's `CommandSpec::no_agent`), only the person
+/// runs them, from the interface. Each is destructive too
+/// ([`is_destructive`]). Registered by the desktop, they are not in the
+/// catalogue the tests below read.
+pub const NOT_FOR_AGENTS: &[&str] = &[
+    // Puts Helios's own folders aside and restarts it: the word typed by
+    // the person is its confirmation (`crate::reset`).
+    "helios.app.reset",
+];
+
+/// Whether the agent bridge refuses `command` ([`NOT_FOR_AGENTS`]).
+pub fn is_for_agents(command: &str) -> bool {
+    !NOT_FOR_AGENTS.contains(&command)
+}
+
 /// Commands destructive only when an argument has a value: the
 /// command, the argument and the value. An agent's call with it waits for
 /// the user's yes; its other calls run at once.
@@ -63,7 +79,7 @@ pub const DESTRUCTIVE_IF: &[(&str, &str, &str)] = &[
 /// Whether an agent must ask the user before any run of `command`
 /// ([`DESTRUCTIVE`]).
 pub fn is_destructive(command: &str) -> bool {
-    DESTRUCTIVE.contains(&command)
+    DESTRUCTIVE.contains(&command) || NOT_FOR_AGENTS.contains(&command)
 }
 
 /// The arguments and values that make a call of `command` destructive
@@ -235,6 +251,12 @@ mod tests {
             assert!(
                 !is_destructive(id),
                 "{id} is destructive whole and per call"
+            );
+        }
+        for id in NOT_FOR_AGENTS {
+            assert!(
+                is_destructive(id),
+                "{id} is kept from agents, not destructive"
             );
         }
     }
