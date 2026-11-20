@@ -3158,7 +3158,9 @@ fn an_export_keeps_running_when_its_window_closes() {
     let deadline = Instant::now() + Duration::from_mins(1);
     while !link.running_jobs().is_empty() {
         assert!(Instant::now() < deadline, "the export did not end in 60 s");
-        h.run();
+        // One frame at a time: the Queue panel repaints while the job
+        // moves, so the frames never settle until it ends.
+        h.step();
         std::thread::sleep(Duration::from_millis(10));
     }
     h.run_steps(3);

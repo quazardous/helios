@@ -17,7 +17,7 @@ To add an entry, give the public item a doc line
 `/// Need (group): a search field.`, a preset using the same words as
 the widget it wraps; the group is one of: `text`, `layout`, `action`, `input`, `state`, `status`, `icon`, `help`, `dialog`, `data`, `image`.
 
-egui-pop in the lock: 0.18.3.
+egui-pop in the lock: 0.19.0.
 
 ## Text and titles
 
@@ -49,6 +49,7 @@ egui-pop in the lock: 0.18.3.
 | a log filling its panel, the newest line kept in view | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 | a scrolling region | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 |  | `ui.scroll_area(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::scroll_area` | Shows egui's scroll area with its bars drawn from the kit's `scroll-bar` (`Stock::ScrollBar`: the thumb's fills and corners, the track), `add` its content, drawn in this `Ui`'s own style. |
+| a tab bar button that moves a whole tab group into a window of its own | `DockControls` (egui-pop)<br>`egui_pop::api::workbench::DockControls` | The controls the workbench's docks show beyond the tabs, as the application sets them (`AppBuilder::dock_controls`). |
 | a widget of a fixed size, filling its box (add_sized) | `ui.sized(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::sized` | `widget` in a box of `size` at the layout's cursor, filling it (centred and justified along the layout's direction): a row the width of its room, a field of a set width. |
 | collapsible sections in a panel | `Sections` (egui-pop)<br>`egui_pop::core::sections::Sections` | A stack of collapsible sections filling the room it is given (a panel's height), named for its memory and for agents. |
 | content in a box of a fixed size (allocate_ui_with_layout) | `ui.sized_ui(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::sized_ui` | `add` in a box of exactly `size` at the layout's cursor, laid out by `layout` (`Layout::centered_and_justified` to fill it): a cell of a set width in a row. |
@@ -66,6 +67,7 @@ egui-pop in the lock: 0.18.3.
 | a button with a menu of alternatives (split button) | `input::split_button(..)` (egui-pop)<br>`egui_pop::core::input::split_button` | A split button on its own: an action (`text`) and a chevron opening a menu of `items`. |
 | a small (compact) button in a dense list row | `RowButton` (egui-pop)<br>`egui_pop::core::compact::RowButton` | A button small enough for a list's row (see the module). |
 | a small action in a list's row (Cancel beside a job) | **`helios_ui::row_action(..)`** (Helios preset)<br>`helios_ui::row_action` | A small button for `kind` of action in a list's row, labelled `label` (Cancel or Retry beside a job): egui-pop's compact row button in the action's tone, no taller than the row. |
+| a small frameless text button in a bar (a breadcrumb, a name in a title bar) | `widgets::bar_text_button(..)` (egui-pop)<br>`egui_pop::core::widgets::bar_text_button` | A frameless text button sized for a bar: small text, no box, as wide as its text, egui's hover look (its text brightens under the pointer) and the focus ring when it has the keyboard. |
 | an icon button | `IconWidget` (egui-pop)<br>`egui_pop::core::icon::IconWidget` | An icon as a widget. |
 | the screen's primary or secondary action | **`helios_ui::action(..)`** (Helios preset)<br>`helios_ui::action` | A button for `kind` of action, labelled `label`: egui-pop's button in the action's tone. |
 
@@ -154,12 +156,15 @@ egui-pop in the lock: 0.18.3.
 | Need | Use | What it is |
 |---|---|---|
 | a command palette | `Palette` (egui-pop)<br>`egui_pop::api::palette::Palette` | The palettes' state, one per window group (`AppHandle::window_group`): open or not, the query. |
-| a confirmation dialog | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action. |
+| a command row with its shortcut in a menu drawn by hand | `menus::command_row(..)` (egui-pop)<br>`egui_pop::api::menus::command_row` | A command row in a menu drawn by hand (a popup or context menu built in a closure), drawn as the declared menus' command rows: the kit's `menu-item`, its label at the start, `shortcut` (the keys' text, such as `Ctrl+C`) muted at the end in the menu's key font. |
+| a confirmation dialog | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action: a primary button and Cancel, or, with a `Secondary`, the classic three buttons ("Save", "Don't save", "Cancel") in the platform's order (`ButtonOrder`). |
 | a file or folder picker | `FileBrowser` (egui-pop)<br>`egui_pop::api::files::browser::FileBrowser` | The file browser: entries from a `FileSource`, shown by a `ViewMode` chosen in its toolbar (or with `Ctrl+1` to `Ctrl+9`), kept per dialog in the host's store when drawn with `FileBrowser::show_in`. |
+| a popover's surface in an area the application places itself | `ui.popover(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::popover` | `add` on the kit's popover surface (its `popover` component, with egui's popup shadow): the look of egui-pop's own popovers, for an area the application places itself (a first-run notice, a hint by a control), outside the overlay stack. |
 | a settings or admin page declared as a manifest | `Admin` (egui-pop)<br>`egui_pop::api::admin::Admin` | The administration app's state, manifests, hooks, widget kinds and value layers. |
 | a side panel of places, with sections of an application's | `PlacesPanel` (egui-pop)<br>`egui_pop::api::files::places::PlacesPanel` | A side panel of places: sections, each a heading over its items, as the in-app picker lists them (an import window's sources column). |
 | a submenu in a context menu drawn by hand | `menus::submenu(..)` (egui-pop)<br>`egui_pop::api::menus::submenu` | A submenu item in a menu drawn by hand (a context menu built in a closure, `egui_pop_core::pointer::claim::context_menu`), drawn as the declared menus' submenu items: the kit's `menu-item` with the submenu arrow, `selected` while its submenu is open. |
-| ask before a destructive action | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action. |
+| a three-button question (Save, Don't save, Cancel) | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action: a primary button and Cancel, or, with a `Secondary`, the classic three buttons ("Save", "Don't save", "Cancel") in the platform's order (`ButtonOrder`). |
+| ask before a destructive action | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action: a primary button and Cancel, or, with a `Secondary`, the classic three buttons ("Save", "Don't save", "Cancel") in the platform's order (`ButtonOrder`). |
 
 ## Lists, trees and tables
 
@@ -184,5 +189,6 @@ egui-pop in the lock: 0.18.3.
 | a grid of thumbnails | `ThumbnailGrid` (egui-pop)<br>`egui_pop::core::thumbnail::ThumbnailGrid` | `thumbnail_grid` with its options: where it keeps its scrolling, how high it gets, and a cell to bring into view, drawn or not. |
 | a histogram | `Histogram` (egui-pop)<br>`egui_pop::viewport::histogram::Histogram` | The histogram widget. |
 | a zoom control | `ZoomControl` (egui-pop)<br>`egui_pop::viewport::navigator::ZoomControl` | The zoom control: zoom out, the zoom, zoom in, fit, 100 %. |
+| an application's logo in its own title bar, beside its name | `.logo(..)` (egui-pop)<br>`egui_pop::api::frame::FramePlugin::logo` | The application's logo, drawn after the system menu button and before its name, a toolbar icon's size (`size.icon.toolbar`), so the application keeps the frame's menu block instead of replacing it. |
 | an image navigator (overview with the visible area) | `Navigator` (egui-pop)<br>`egui_pop::viewport::navigator::Navigator` | The navigator: the whole image and the part in view. |
 | an image viewport (pan, zoom, tiles) | `Viewport` (egui-pop)<br>`egui_pop::viewport::widget::Viewport` | The viewport widget, built per frame. |
