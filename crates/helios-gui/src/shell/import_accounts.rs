@@ -1089,35 +1089,32 @@ pub(crate) fn header_of(account: &Account, name: Option<&str>) -> String {
     }
 }
 
-/// An account's menu in the Sources column: "Choose photos…" when its
-/// service's page chooses them, "Reconnect", "Manage accounts…", then
-/// what `items` adds (a saved source's own items).
+/// An account's menu in the Sources column, drawn in the menu's `ui`:
+/// "Choose photos…" when its service's page chooses them (`picks`),
+/// "Reconnect", "Manage accounts…", then what `items` adds (a saved
+/// source's own items).
 pub(crate) fn account_menu(
-    response: &egui::Response,
-    accounts: &mut Accounts,
-    connectors: &Connectors,
+    ui: &mut egui::Ui,
+    picks: bool,
     id: &str,
     items: &mut dyn FnMut(&mut egui::Ui),
     t: &dyn Fn(Message) -> String,
 ) -> Option<Asked> {
-    let picks = accounts.picks(id, connectors);
     let mut asked = None;
-    response.context_menu(|ui| {
-        let choose = t(Message::new("gui-account-choose", "Choose photos…"));
-        if picks && menu_item(ui, &choose) {
-            asked = Some(Asked::Pick(id.to_owned()));
-        }
-        if menu_item(ui, &t(Message::new("gui-account-reconnect", "Reconnect"))) {
-            asked = Some(Asked::Reconnect(id.to_owned()));
-        }
-        if menu_item(
-            ui,
-            &t(Message::new("gui-account-manage", "Manage accounts…")),
-        ) {
-            asked = Some(Asked::Manage);
-        }
-        items(ui);
-    });
+    let choose = t(Message::new("gui-account-choose", "Choose photos…"));
+    if picks && menu_item(ui, &choose) {
+        asked = Some(Asked::Pick(id.to_owned()));
+    }
+    if menu_item(ui, &t(Message::new("gui-account-reconnect", "Reconnect"))) {
+        asked = Some(Asked::Reconnect(id.to_owned()));
+    }
+    if menu_item(
+        ui,
+        &t(Message::new("gui-account-manage", "Manage accounts…")),
+    ) {
+        asked = Some(Asked::Manage);
+    }
+    items(ui);
     asked
 }
 

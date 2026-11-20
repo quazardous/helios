@@ -1,31 +1,41 @@
 //! The import window's Sources column, the left zone
 //! (`docs/design/import-window.md`), after Lightroom's import source
-//! panel: collapsible panels, each holding the same item for every
-//! source, and one source selected at a time.
+//! panel: sections that fold, each holding the same item for every
+//! source, and one source selected at a time. egui-pop's places panel
+//! (`files::places::PlacesPanel`) draws it; this module only says what is
+//! in it, from the connectors' sources and the window's memory.
 //!
 //! - **Favorites**: the sources the person pinned (the pin on an item).
 //! - **History**: the folders imported from lately, newest first, from
 //!   the import history; then the imports themselves, each with "Import
-//!   again".
-//! - **Folders**: the folders saved or given.
-//! - **Cards and cameras**: the cards mounted.
-//! - **Services**: the accounts.
+//!   again" (the panel's room under the section).
+//! - **Folders**: the sources given (those of a connector that does not
+//!   detect its sources and needs no account).
+//! - **Cards and cameras**: the sources a connector detects (`caps.detect`).
+//! - **Services**: the accounts (connectors with `caps.accounts`), each
+//!   with its albums under it when its connector lists them
+//!   (`caps.collections`, the panel's room under the item).
 //!
 //! One "Add…" button under the title opens the wizard creating a source
 //! of any connector installed ([`crate::shell::import_wizard`]); the
-//! panels only list what exists, an empty one saying so.
+//! sections only list what exists, an empty one saying so.
 //!
-//! Every item is one size and one shape: an icon, the name, one detail
-//! line (the path, the account's address and state, the last import).
-//! Clicking an item selects that source alone: the middle zone shows its
-//! photos, the right zone its detail. A source may show in several
-//! panels; it is highlighted in each while selected.
+//! Every item is one size and one shape: an icon, the name, one line
+//! under it (the path, the account's address and state, the last
+//! import), read out as the item's description; an account to reconnect
+//! leads its line with a warning mark. Clicking an item selects that
+//! source alone: the middle zone shows its photos, the right zone its
+//! detail. A source may show in several sections; it is highlighted in
+//! each while selected.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use egui_pop::core::fold::Fold;
-use egui_pop::core::icon::{Icon, Size, Tone};
+use egui_pop::api::files::places::{
+    PlaceItem, PlaceProvider, PlaceSection, PlaceToggle, PlacesPanel,
+};
+use egui_pop::core::icon::{Icon, Size};
 use egui_pop::core::kit;
 use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::ui::{TextRole, UiPop as _};
@@ -39,150 +49,86 @@ use crate::backup_end::CardState;
 use crate::shell::import_auto::Trigger;
 use crate::shell::import_sources::SourceKey;
 
-/// An icon by its Phosphor name, else egui-pop's own `fallback`.
-fn icon(name: &str, fallback: Icon) -> Icon {
-    egui_pop::core::icon::registry::lookup(&format!("phosphor:{name}")).unwrap_or(fallback)
-}
+/// The sections' ids, which the panel's fold state and the window's own
+/// content under a section go by.
+const FAVOURITES: &str = "favourites";
+const HISTORY: &str = "history";
+const GIVEN: &str = "given";
+const DETECTED: &str = "detected";
+const ACCOUNTS: &str = "accounts";
 
-/// What an item's detail line says, beside its text: an account's state
-/// mark, in its tone.
-struct Mark {
-    text: &'static str,
-    tone: kit::Tone,
-}
+/// The pin's icon, at an item's end.
+const PIN: &str = "phosphor:push-pin";
 
-/// One source in a panel: what every item shows, whatever its kind.
-struct Item {
-    key: SourceKey,
-    icon: Icon,
-    name: String,
-    /// The detail line's parts, each a label of its own.
-    detail: Vec<String>,
-    mark: Option<Mark>,
-    /// The full path or address, on hover.
-    hover: Option<String>,
-}
-
-/// What an item asked this frame.
-struct ItemAsked {
-    response: egui::Response,
-    pin: bool,
-}
-
-/// An item: one fixed height, the selected one highlighted, its pin at
-/// the end of the line (filled when pinned). Named for screen readers and
-/// tests by the source's name.
-fn item_ui(
-    ui: &mut egui::Ui,
-    item: &Item,
-    selected: bool,
-    pinned: bool,
-    words: &Words,
-) -> ItemAsked {
-    let body = ui.text_style_height(&egui::TextStyle::Body);
-    let small = ui.text_style_height(&egui::TextStyle::Small);
-    let height = body + small + 16.0;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::click(),
-    );
-    let name = item.name.clone();
-    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &name));
-    let visuals = ui.visuals().clone();
-    let fill = if selected {
-        Some(visuals.selection.bg_fill)
-    } else if response.hovered() {
-        Some(visuals.widgets.hovered.weak_bg_fill)
-    } else {
-        None
-    };
-    if let Some(fill) = fill {
-        ui.painter().rect_filled(rect, 4.0, fill);
+/// An item's id in the panel: its source's, the same in every section, so
+/// that a source selected is highlighted wherever it shows.
+fn item_id(key: &SourceKey) -> String {
+    match key {
+        SourceKey::Folder(p) => format!("path:{}", p.display()),
+        SourceKey::Account(id) => format!("account:{id}"),
     }
-    let text_colour = if selected {
-        visuals.selection.stroke.color
-    } else {
-        visuals.text_color()
-    };
-    let pin_size = body + 4.0;
-    let inner = rect.shrink2(egui::vec2(6.0, 5.0));
-    let mut pin = false;
-    // A child in the item's rect, never allocating past it.
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(inner)
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    {
-        let ui = &mut child;
-        {
-            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
-            ui.add(item.icon.size(Size::Toolbar));
-            let text_width = (ui.available_width() - pin_size - 4.0).max(0.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(text_width, inner.height()),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.set_width(text_width);
-                    // The name is painted: the item itself carries it.
-                    let galley = ui.painter().layout(
-                        item.name.clone(),
-                        egui::TextStyle::Body.resolve(ui.style()),
-                        text_colour,
-                        text_width,
-                    );
-                    let (at, _) =
-                        ui.allocate_exact_size(egui::vec2(text_width, body), egui::Sense::hover());
-                    ui.painter()
-                        .with_clip_rect(at)
-                        .galley(at.min, galley, text_colour);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        // Not selectable, so a click on the line is the
-                        // item's; cut at the item's end.
-                        ui.style_mut().interaction.selectable_labels = false;
-                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                        if let Some(mark) = &item.mark {
-                            ui.text_tone(mark.tone, mark.text);
-                        }
-                        for part in &item.detail {
-                            ui.meta(part);
-                        }
-                    });
-                },
-            );
-            let text = if pinned {
-                &words.remove_favourite
-            } else {
-                &words.add_favourite
-            };
-            let tone = if pinned { Tone::Accent } else { Tone::Muted };
-            let button = ui.add(
-                icon("push-pin", Icon::Dot)
-                    .size(Size::Inline)
-                    .tone(tone)
-                    .label(text)
-                    .selected(pinned)
-                    .sense_click(),
-            );
-            if button.tip(text).clicked() {
-                pin = true;
+}
+
+/// The Sources column's sections as egui-pop's places: a snapshot built
+/// each frame from what the window holds (never a disk or a network),
+/// with the source each item stands for.
+#[derive(Debug, Default)]
+struct SourcePlaces {
+    sections: Vec<PlaceSection>,
+    /// Each item's id and its source.
+    keys: Vec<(String, SourceKey)>,
+}
+
+impl PlaceProvider for SourcePlaces {
+    fn id(&self) -> &'static str {
+        "helios.import.sources"
+    }
+
+    fn sections(&self) -> Vec<PlaceSection> {
+        self.sections.clone()
+    }
+}
+
+impl SourcePlaces {
+    /// The source an item of the panel stands for.
+    fn key(&self, id: &str) -> Option<SourceKey> {
+        self.keys
+            .iter()
+            .find(|(i, _)| i == id)
+            .map(|(_, k)| k.clone())
+    }
+
+    /// A section that folds, open at first, saying `empty` when it has
+    /// no item.
+    fn section(&mut self, id: &str, title: &str, empty: Option<&str>, items: Vec<Placed>) {
+        let mut section = PlaceSection::new(id, title).foldable(true);
+        section = match empty {
+            Some(line) => section.empty(line),
+            None => section.keep(),
+        };
+        for placed in items {
+            if !self.keys.iter().any(|(i, _)| *i == placed.item.id) {
+                self.keys.push((placed.item.id.clone(), placed.key));
             }
+            section = section.item(placed.item);
         }
+        self.sections.push(section);
     }
-    let response = match &item.hover {
-        Some(h) => response.tip(h),
-        None => response,
-    };
-    ItemAsked { response, pin }
 }
 
-/// A panel: its header band, open at first, its items or what it lacks.
-/// Its open state is kept where egui's collapsing header kept it.
-fn panel(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
-    Fold::new(("helios.import.sources.panel", title), title)
-        .default_open(true)
-        .show(ui, add);
+/// An item's line: its parts, a state mark leading them as a sign, not
+/// one of the parts.
+fn line_of(mark: Option<&str>, parts: &[String]) -> String {
+    match mark {
+        Some(mark) => format!("{mark} {}", parts.join(" · ")),
+        None => parts.join(" · "),
+    }
+}
+
+/// One source as a panel's item.
+struct Placed {
+    key: SourceKey,
+    item: PlaceItem,
 }
 
 impl ImportWindow {
@@ -219,8 +165,45 @@ impl ImportWindow {
         }
     }
 
-    /// A folder's item: its saved name, else its own.
-    fn folder_item(&self, path: &Path, label: Option<String>, words: &Words) -> Item {
+    /// An item of `key`: its icon, its name, its line, its tip and its
+    /// pin, in its state.
+    fn placed(
+        &self,
+        key: SourceKey,
+        icon: &str,
+        name: String,
+        line: String,
+        tip: Option<String>,
+        words: &Words,
+    ) -> Placed {
+        let pinned = self.pinned(&key);
+        let pin = if pinned {
+            &words.remove_favourite
+        } else {
+            &words.add_favourite
+        };
+        let mut item = PlaceItem::new(item_id(&key), name)
+            .icon(icon)
+            .toggle(PlaceToggle::new(PIN, pinned, pin.clone()));
+        if !line.is_empty() {
+            item = item.line(line);
+        }
+        if let Some(tip) = tip {
+            item = item.detail(tip);
+        }
+        Placed { key, item }
+    }
+
+    /// A source of a path's item: its saved name, else its connector's
+    /// label, else its own; its last import, else where it is.
+    fn path_item(
+        &self,
+        path: &Path,
+        label: Option<String>,
+        detected: bool,
+        line: Option<Vec<String>>,
+        words: &Words,
+    ) -> Placed {
         let key = SourceKey::Folder(path.to_path_buf());
         let name = self
             .sources
@@ -228,33 +211,30 @@ impl ImportWindow {
             .map(str::to_owned)
             .or(label)
             .unwrap_or_else(|| name_of(path));
-        let parent = path
-            .parent()
-            .map_or_else(|| path.display().to_string(), |p| p.display().to_string());
-        let mut detail = vec![parent];
-        if let Some(when) = self.last_import_of(path) {
-            detail = vec![when];
-        }
-        Item {
-            key,
-            icon: if self.is_card(path) {
-                icon("sd-card", Icon::Disc)
-            } else {
-                icon("folder", Icon::Folder)
-            },
-            name,
-            detail,
-            // Its own choices, marked.
-            mark: self.sources.has_own(path).then_some(Mark {
-                text: "●",
-                tone: kit::Tone::Muted,
-            }),
-            hover: Some(if self.sources.has_own(path) {
-                format!("{}\n{}", path.display(), words.choices.own_choices)
-            } else {
-                path.display().to_string()
-            }),
-        }
+        let line = line.unwrap_or_else(|| vec![self.where_line(path)]);
+        // Its own choices, marked.
+        let own = self.sources.has_own(path);
+        let tip = if own {
+            format!("{}\n{}", path.display(), words.choices.own_choices)
+        } else {
+            path.display().to_string()
+        };
+        // A source its connector detects (a card, a camera) shows as one.
+        let icon = if detected || self.is_card(path) {
+            "phosphor:sd-card"
+        } else {
+            "phosphor:folder"
+        };
+        let mark = own.then_some("●");
+        self.placed(key, icon, name, line_of(mark, &line), Some(tip), words)
+    }
+
+    /// A path source's line by default: its last import, else where it is.
+    fn where_line(&self, path: &Path) -> String {
+        self.last_import_of(path).unwrap_or_else(|| {
+            path.parent()
+                .map_or_else(|| path.display().to_string(), |p| p.display().to_string())
+        })
     }
 
     /// When the folder was last imported from, as the history says.
@@ -272,30 +252,34 @@ impl ImportWindow {
     }
 
     /// An account's item: its saved source's name, else its own; its
-    /// address when the name does not say it, and its state in a word.
+    /// address when the name does not say it, and its state in a word,
+    /// marked in the state's tone.
     fn account_item(
-        &mut self,
+        &self,
         account: &helios_connect::account::Account,
         saved: &BTreeMap<String, String>,
-    ) -> Item {
+        words: &Words,
+    ) -> Placed {
         let t = |m: Message| match self.texts.as_ref() {
             Some(t) => t(m),
             None => m.english,
         };
         let attention = matches!(account.state, AccountState::NeedsAttention { .. })
             || self.accounts.identity_missing(account);
-        let (mark, tone) = match account.state {
-            _ if attention => ("▲", kit::Tone::Warning),
-            AccountState::Connected => ("●", kit::Tone::Neutral),
-            _ => ("○", kit::Tone::Muted),
-        };
         let name = saved
             .get(&account.id)
             .cloned()
             .unwrap_or_else(|| account.label.clone());
-        let mut detail = Vec::new();
+        // A connected account's mark is plain, another's muted; one to
+        // reconnect is the warning badge leading the line.
+        let mark = match account.state {
+            _ if attention => None,
+            AccountState::Connected => Some("●"),
+            _ => Some("○"),
+        };
+        let mut line = Vec::new();
         if let Some(email) = account.email().filter(|e| !name.contains(e)) {
-            detail.push(email.to_owned());
+            line.push(email.to_owned());
         }
         // Why in a word, on the item itself: never in a tooltip only.
         let word = match &account.state {
@@ -307,9 +291,9 @@ impl ImportWindow {
             state => Some(crate::shell::import_accounts::state_text(state)),
         };
         if let Some(word) = word {
-            detail.push(t(word));
+            line.push(t(word));
         }
-        if detail.is_empty() {
+        if line.is_empty() {
             let connector = self.connectors.provider(&account.connector).map_or_else(
                 || account.connector.clone(),
                 |p| {
@@ -319,58 +303,162 @@ impl ImportWindow {
                     )
                 },
             );
-            detail.push(connector);
+            line.push(connector);
         }
-        Item {
-            key: SourceKey::Account(account.id.clone()),
-            icon: icon("cloud", Icon::Circle),
+        let mut placed = self.placed(
+            SourceKey::Account(account.id.clone()),
+            "phosphor:cloud",
             name,
-            detail,
-            mark: Some(Mark { text: mark, tone }),
-            hover: account.email().map(str::to_owned),
+            line_of(mark, &line),
+            account.email().map(str::to_owned),
+            words,
+        );
+        if attention {
+            placed.item = placed.item.badge("▲").badge_tone(kit::Tone::Warning);
         }
+        placed
+    }
+
+    /// The column's sections, from the connectors' sources, the accounts,
+    /// the history and the window's memory.
+    fn source_places(&mut self, words: &Words) -> SourcePlaces {
+        // The registry's sources: those detected, those given (recent and
+        // favourite).
+        let mut places = self.memory.recent.clone();
+        places.extend(self.memory.favourites.iter().cloned());
+        self.connectors.set_places(places);
+        let sources = self.connectors.sources();
+        let (detected, given): (Vec<_>, Vec<_>) = sources.into_iter().partition(|(_, d)| *d);
+        let label_of = |path: &Path| {
+            given
+                .iter()
+                .find(|(s, _)| s.root.as_deref() == Some(path))
+                .map(|(s, _)| s.label.clone())
+        };
+        let named = self.sources.named();
+        let saved_accounts: BTreeMap<String, String> = named
+            .iter()
+            .filter_map(|(k, name)| match k {
+                SourceKey::Account(id) => Some((id.clone(), name.clone())),
+                SourceKey::Folder(_) => None,
+            })
+            .collect();
+        let accounts = if self.accounts.has_book() {
+            self.accounts.listed().to_vec()
+        } else {
+            Vec::new()
+        };
+        let account_items: Vec<Placed> = accounts
+            .iter()
+            .map(|a| self.account_item(a, &saved_accounts, words))
+            .collect();
+        let detected_items: Vec<Placed> = detected
+            .iter()
+            .filter_map(|(source, _)| {
+                let root = source.root.as_ref()?;
+                let mut line = Vec::new();
+                if let Some(b) = source.capacity {
+                    line.push(helios_storage::capacity_text(b));
+                }
+                // Its volume, briefly: the same card wherever it is
+                // mounted.
+                if let Some(id) = self
+                    .sources
+                    .card_at(root)
+                    .and_then(|m| crate::shell::import_sources::brief_id(&m.id))
+                {
+                    line.push(id);
+                }
+                let mut line = if line.is_empty() {
+                    vec![self.where_line(root)]
+                } else {
+                    vec![line.join(" · ")]
+                };
+                // Whether it may be formatted, from the one card list.
+                if let Some(state) = self.card_list.state_of(root) {
+                    line.push(match state {
+                        CardState::Safe => words.card_safe.clone(),
+                        CardState::Waiting => words.card_waiting.clone(),
+                    });
+                }
+                Some(self.path_item(root, Some(source.label.clone()), true, Some(line), words))
+            })
+            .collect();
+        let mut out = SourcePlaces::default();
+        // Favorites: the sources pinned.
+        let mut favourites = Vec::new();
+        for path in &self.memory.favourites {
+            // Another card mounted where a pinned card was is not the
+            // favourite.
+            if self.memory.favourite(path, &self.sources.mounted) {
+                favourites.push(self.path_item(path, label_of(path), false, None, words));
+            }
+        }
+        for a in &accounts {
+            if self.memory.pinned.contains(&a.id) {
+                favourites.push(self.account_item(a, &saved_accounts, words));
+            }
+        }
+        out.section(
+            FAVOURITES,
+            &words.favourites,
+            Some(&words.no_favourites),
+            favourites,
+        );
+        // History: the folders imported from lately, then the imports
+        // (drawn under the section).
+        let recent = self
+            .history
+            .recent_folders(&self.sources.mounted)
+            .iter()
+            .map(|p| self.path_item(p, label_of(p), false, None, words))
+            .collect();
+        out.section(HISTORY, &words.history, None, recent);
+        // The sources given: those saved, then those given lately.
+        let mut shown: Vec<PathBuf> = Vec::new();
+        let mut paths: Vec<PathBuf> = named
+            .iter()
+            .filter_map(|(k, _)| match k {
+                SourceKey::Folder(p) => Some(p.clone()),
+                SourceKey::Account(_) => None,
+            })
+            .collect();
+        paths.extend(self.sources.folders());
+        paths.extend(self.memory.recent.iter().cloned());
+        let mut given_items = Vec::new();
+        for path in paths {
+            if shown.contains(&path) || self.is_card(&path) {
+                continue;
+            }
+            given_items.push(self.path_item(&path, label_of(&path), false, None, words));
+            shown.push(path);
+        }
+        out.section(GIVEN, &words.folders, Some(&words.no_folders), given_items);
+        out.section(
+            DETECTED,
+            &words.cards,
+            Some(&words.no_cards),
+            detected_items,
+        );
+        out.section(
+            ACCOUNTS,
+            &words.services,
+            Some(&words.no_services),
+            account_items,
+        );
+        out
     }
 }
 
-/// An item drawn and answered: selected on a click, pinned or unpinned,
-/// its menu on a secondary click.
-fn show_item(
+/// A path source's menu: "Edit source…" and "Import automatically" for a
+/// saved one, "Forget this folder".
+fn path_menu(
     ui: &mut egui::Ui,
-    w: &mut ImportWindow,
-    words: &Words,
-    item: &Item,
-    event: &mut Option<Event>,
-) {
-    // An account is not highlighted while one of its albums is.
-    let selected = w.selected_key().as_ref() == Some(&item.key)
-        && !matches!(&item.key, SourceKey::Account(id) if w.albums.selected(id).is_some());
-    let pinned = w.pinned(&item.key);
-    let asked = item_ui(ui, item, selected, pinned, words);
-    if asked.response.clicked() && !selected {
-        w.select(item.key.clone());
-    }
-    if asked.pin {
-        match &item.key {
-            SourceKey::Folder(p) => *event = Some(Event::Favourite(p.clone(), !pinned)),
-            SourceKey::Account(id) => *event = Some(Event::Pin(id.clone(), !pinned)),
-        }
-    }
-    match &item.key {
-        SourceKey::Folder(path) => folder_menu(&asked.response, w, words, path, event),
-        SourceKey::Account(id) => account_menu(&asked.response, w, words, id, event),
-    }
-}
-
-/// A folder's or card's menu: "Edit source…" and "Import automatically"
-/// for a saved one, "Forget this folder".
-fn folder_menu(
-    response: &egui::Response,
     w: &mut ImportWindow,
     words: &Words,
     path: &Path,
     event: &mut Option<Event>,
 ) {
-    let mut asked: Option<MenuAsked> = None;
     let kept = w.sources.kept();
     // The automatic import its connector offers, if any.
     let set = w
@@ -381,21 +469,19 @@ fn folder_menu(
         .path_setup(path)
         .auto
         .map(|offered| (Trigger::from(offered), set));
-    response.context_menu(|ui| {
-        if kept {
-            asked = menu_items(ui, words, auto);
-            ui.divider();
-        }
-        // The action's button, which egui's menu style draws as a menu's
-        // item.
-        if helios_ui::action(ui, Action::Secondary, &words.forget)
-            .tip(&words.forget_hint)
-            .clicked()
-        {
-            *event = Some(Event::Forget(path.to_path_buf()));
-            ui.close();
-        }
-    });
+    let mut asked: Option<MenuAsked> = None;
+    if kept {
+        asked = menu_items(ui, words, auto);
+        ui.divider();
+    }
+    // The action's button, which egui's menu style draws as a menu's item.
+    if helios_ui::action(ui, Action::Secondary, &words.forget)
+        .tip(&words.forget_hint)
+        .clicked()
+    {
+        *event = Some(Event::Forget(path.to_path_buf()));
+        ui.close();
+    }
     if let Some(asked) = asked {
         w.source_menu_asked(asked, SourceKey::Folder(path.to_path_buf()));
     }
@@ -404,7 +490,7 @@ fn folder_menu(
 /// An account's menu: "Choose photos…" when its service's page chooses
 /// them, Reconnect, "Manage accounts…", and its saved source's items.
 fn account_menu(
-    response: &egui::Response,
+    ui: &mut egui::Ui,
     w: &mut ImportWindow,
     words: &Words,
     id: &str,
@@ -422,11 +508,11 @@ fn account_menu(
             .map(|offered| (Trigger::from(offered), set))
     });
     let saved = saved.is_some();
+    let picks = w.accounts.picks(id, &w.connectors);
     let mut item = None;
     let asked = crate::shell::import_accounts::account_menu(
-        response,
-        &mut w.accounts,
-        &w.connectors,
+        ui,
+        picks,
         id,
         &mut |ui: &mut egui::Ui| {
             if kept && saved {
@@ -437,7 +523,7 @@ fn account_menu(
         &|m| texts(m),
     );
     if let Some(a) = item {
-        w.source_menu_asked(a, SourceKey::Account(id.to_owned()));
+        w.source_menu_asked(a, key);
     }
     if let Some(asked) = asked {
         *event = Some(account_event(asked));
@@ -464,7 +550,11 @@ fn albums_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, id: &str) {
     ui.indent(("helios.import.albums", id), |ui| {
         for album in &listed.albums {
             ui.horizontal(|ui| {
-                ui.add(icon("images", Icon::Folder).size(Size::Inline));
+                ui.add(
+                    egui_pop::core::icon::registry::lookup("phosphor:images")
+                        .unwrap_or(Icon::Folder)
+                        .size(Size::Inline),
+                );
                 let on = selected.as_deref() == Some(album.source.id.as_str());
                 if widgets::selectable_label(ui, on, &album.source.label).clicked() && !on {
                     chosen = Some(album.source.clone());
@@ -493,7 +583,8 @@ fn albums_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &Words, id: &str) {
     }
 }
 
-/// The Sources column: its title and "Add…", then its panels.
+/// The Sources column: its title and "Add…", then its sections in
+/// egui-pop's places panel.
 pub(super) fn sources_ui(
     ui: &mut egui::Ui,
     w: &mut ImportWindow,
@@ -511,150 +602,66 @@ pub(super) fn sources_ui(
             }
         });
     });
-    helios_ui::scroll(ui, "helios.import.sources", Scroll::Region, |ui| {
-        ui.spacing_mut().item_spacing.y = 2.0;
-        // The registry's sources: the cards detected, the folders
-        // given (recent and favourite).
-        let mut places = w.memory.recent.clone();
-        places.extend(w.memory.favourites.iter().cloned());
-        w.connectors.set_places(places);
-        let sources = w.connectors.sources();
-        let (detected, given): (Vec<_>, Vec<_>) = sources.into_iter().partition(|(_, d)| *d);
-        let label_of = |path: &Path| {
-            given
-                .iter()
-                .find(|(s, _)| s.root.as_deref() == Some(path))
-                .map(|(s, _)| s.label.clone())
-        };
-        let named = w.sources.named();
-        let saved_accounts: BTreeMap<String, String> = named
-            .iter()
-            .filter_map(|(k, name)| match k {
-                SourceKey::Account(id) => Some((id.clone(), name.clone())),
-                SourceKey::Folder(_) => None,
+    let places = w.source_places(words);
+    // An account is not highlighted while one of its albums is.
+    let selected = w
+        .selected_key()
+        .filter(|k| !matches!(k, SourceKey::Account(id) if w.albums.selected(id).is_some()))
+        .map(|k| item_id(&k));
+    let sections = places.sections();
+    let window = RefCell::new((w, event));
+    let out = helios_ui::scroll(ui, "helios.import.sources", Scroll::Region, |ui| {
+        PlacesPanel::new("helios.import.sources.places", &sections)
+            .selected(selected.as_deref())
+            .menu(|ui, _, item| {
+                let mut window = window.borrow_mut();
+                let (w, event) = &mut *window;
+                match places.key(&item.id) {
+                    Some(SourceKey::Folder(path)) => path_menu(ui, w, words, &path, event),
+                    Some(SourceKey::Account(id)) => account_menu(ui, w, words, &id, event),
+                    None => {}
+                }
             })
-            .collect();
-        let accounts = if w.accounts.has_book() {
-            w.accounts.listed().to_vec()
-        } else {
-            Vec::new()
-        };
-        let mut account_items = Vec::new();
-        for a in &accounts {
-            account_items.push(w.account_item(a, &saved_accounts));
-        }
-        let card_items: Vec<Item> = detected
-            .iter()
-            .filter_map(|(source, _)| {
-                let root = source.root.as_ref()?;
-                let mut item = w.folder_item(root, Some(source.label.clone()), words);
-                let mut detail = Vec::new();
-                if let Some(b) = source.capacity {
-                    detail.push(helios_storage::capacity_text(b));
+            .under_item(|ui, section, item| {
+                if section.id != ACCOUNTS {
+                    return;
                 }
-                // The card's volume, briefly: the same card wherever
-                // it is mounted.
-                if let Some(id) = w
-                    .sources
-                    .card_at(root)
-                    .and_then(|m| crate::shell::import_sources::brief_id(&m.id))
-                {
-                    detail.push(id);
+                if let Some(SourceKey::Account(id)) = places.key(&item.id) {
+                    let mut window = window.borrow_mut();
+                    albums_ui(ui, window.0, words, &id);
                 }
-                if !detail.is_empty() {
-                    item.detail = vec![detail.join(" · ")];
-                }
-                // Whether it may be formatted, from the one card list.
-                if let Some(state) = w.card_list.state_of(root) {
-                    item.detail.push(match state {
-                        CardState::Safe => words.card_safe.clone(),
-                        CardState::Waiting => words.card_waiting.clone(),
-                    });
-                }
-                item.icon = icon("sd-card", Icon::Disc);
-                Some(item)
             })
-            .collect();
-        // Favorites: the folders and accounts pinned.
-        panel(ui, &words.favourites, |ui| {
-            let mut any = false;
-            for path in w.memory.favourites.clone() {
-                // Another card mounted where a pinned card was is not
-                // the favourite.
-                if !w.memory.favourite(&path, &w.sources.mounted) {
-                    continue;
+            .under_section(|ui, section| {
+                if section.id != HISTORY {
+                    return;
                 }
-                let item = w.folder_item(&path, label_of(&path), words);
-                show_item(ui, w, words, &item, event);
-                any = true;
-            }
-            let pinned: Vec<&Item> = account_items.iter().filter(|i| w.pinned(&i.key)).collect();
-            for item in pinned {
-                show_item(ui, w, words, item, event);
-                any = true;
-            }
-            if !any {
-                ui.muted(&words.no_favourites);
-            }
-        });
-        // History: the folders imported from lately, then the imports.
-        let history_title = words.history.clone();
-        panel(ui, &history_title, |ui| {
-            for path in w.history.recent_folders(&w.sources.mounted) {
-                let item = w.folder_item(&path, label_of(&path), words);
-                show_item(ui, w, words, &item, event);
-            }
-            if let Some(texts) = w.texts.clone() {
-                let hw = crate::shell::import_history::Words::new(&|m| texts(m));
-                if let Some(id) =
-                    crate::shell::import_history::history_ui(ui, &w.history, &hw, &|m| texts(m))
-                {
-                    *event = Some(Event::Again(id));
+                let mut window = window.borrow_mut();
+                let (w, event) = &mut *window;
+                if let Some(texts) = w.texts.clone() {
+                    let hw = crate::shell::import_history::Words::new(&|m| texts(m));
+                    if let Some(id) =
+                        crate::shell::import_history::history_ui(ui, &w.history, &hw, &|m| texts(m))
+                    {
+                        **event = Some(Event::Again(id));
+                    }
                 }
-            }
-        });
-        // Folders: those saved, then those given lately.
-        panel(ui, &words.folders, |ui| {
-            let mut shown: Vec<PathBuf> = Vec::new();
-            let mut folders: Vec<PathBuf> = named
-                .iter()
-                .filter_map(|(k, _)| match k {
-                    SourceKey::Folder(p) => Some(p.clone()),
-                    SourceKey::Account(_) => None,
-                })
-                .collect();
-            folders.extend(w.sources.folders());
-            folders.extend(w.memory.recent.iter().cloned());
-            for path in folders {
-                if shown.contains(&path) || w.is_card(&path) {
-                    continue;
-                }
-                let item = w.folder_item(&path, label_of(&path), words);
-                show_item(ui, w, words, &item, event);
-                shown.push(path);
-            }
-            if shown.is_empty() {
-                ui.muted(&words.no_folders);
-            }
-        });
-        panel(ui, &words.cards, |ui| {
-            if card_items.is_empty() {
-                ui.muted(&words.no_cards);
-            }
-            for item in &card_items {
-                show_item(ui, w, words, item, event);
-            }
-        });
-        panel(ui, &words.services, |ui| {
-            for item in &account_items {
-                show_item(ui, w, words, item, event);
-                if let SourceKey::Account(id) = &item.key {
-                    albums_ui(ui, w, words, id);
-                }
-            }
-            if account_items.is_empty() {
-                ui.muted(&words.no_services);
-            }
-        });
+            })
+            .show(ui)
     });
+    let (w, event) = window.into_inner();
+    if let Some((_, item)) = out.chosen
+        && let Some(key) = places.key(&item.id)
+        && selected.as_deref() != Some(item.id.as_str())
+    {
+        w.select(key);
+    }
+    if let Some((_, item)) = out.toggled
+        && let Some(key) = places.key(&item.id)
+    {
+        let pinned = w.pinned(&key);
+        *event = Some(match key {
+            SourceKey::Folder(p) => Event::Favourite(p, !pinned),
+            SourceKey::Account(id) => Event::Pin(id, !pinned),
+        });
+    }
 }

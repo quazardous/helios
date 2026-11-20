@@ -343,3 +343,57 @@ fn the_sessions_are_read_on_events_never_on_an_idle_pass() {
     h.run_steps(30);
     assert_eq!(reads.load(Ordering::Relaxed), 2);
 }
+
+/// The import window's Sources column on egui-pop's places panel: the
+/// window's own content (History's imports, each with its buttons) sits
+/// in the panel's room under its section and folds with it; an item's
+/// pin is the panel's toggle, and pinned, the source is among the
+/// Favourites too, its pin pressed in both.
+#[test]
+fn the_sources_column_folds_pins_and_holds_the_history_through_the_places_panel() {
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    let mut s = setup("places");
+    s.import("roll", 2, "user");
+    s.h.state_mut()
+        .run("library.importWindow", Value::Null, Origin::User)
+        .unwrap();
+    s.h.run_steps(4);
+    let history =
+        |h: &Harness<'static, Shell>| h.query_all_by_label_contains("Show in Library: ").count();
+    assert_eq!(history(&s.h), 1, "the import under History");
+    // History folds, its imports with it; opened again, they are back.
+    s.h.get_by_label("History").click();
+    s.h.run_steps(10);
+    assert_eq!(history(&s.h), 0, "folded with its section");
+    s.h.get_by_label("History").click();
+    s.h.run_steps(10);
+    assert_eq!(history(&s.h), 1, "open again");
+    // The folder imported from is listed, its line its last import, said
+    // as its description.
+    let rolls = s.h.query_all_by_label("roll").count();
+    assert!(rolls >= 1, "the folder imported from");
+    let line =
+        s.h.get_all_by_label("roll")
+            .next()
+            .unwrap()
+            .accesskit_node()
+            .description();
+    assert!(
+        line.as_deref()
+            .is_some_and(|l| l.starts_with("Last import")),
+        "{line:?}"
+    );
+    // Pinned through the panel's toggle: among the Favourites too.
+    assert_eq!(s.h.query_all_by_label("Remove from favourites").count(), 0);
+    s.h.get_all_by_label("Add to favourites")
+        .next()
+        .unwrap()
+        .click();
+    s.h.run_steps(4);
+    assert_eq!(s.h.query_all_by_label("roll").count(), rolls + 1);
+    assert_eq!(
+        s.h.query_all_by_label("Remove from favourites").count(),
+        rolls + 1,
+        "its pin pressed wherever it shows"
+    );
+}

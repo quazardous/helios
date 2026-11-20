@@ -259,8 +259,12 @@ fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
     assert!(h.state().import_window_open());
     // Listed by its label, its capacity on its detail line, and
     // selected first.
-    let _ = h.get_by_label("EOS_DIGITAL");
-    let _ = h.get_by_label("64 GB");
+    let line = h
+        .get_by_label("EOS_DIGITAL")
+        .accesskit_node()
+        .description()
+        .unwrap_or_default();
+    assert!(line.contains("64 GB"), "{line}");
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&card));
     h.get_by_label("Import 1").click();
     for _ in 0..3 {
