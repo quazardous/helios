@@ -712,10 +712,14 @@ fn the_shapes_not_selected_are_drawn_faint_with_no_handles() {
 fn a_path_s_bezier_handles_are_controls() {
     use egui_pop::viewport::overlay::HandleKind;
     use helios_gui::masks::kind_of;
-    assert_eq!(kind_of("corner.0"), HandleKind::Point);
-    assert_eq!(kind_of("before.0"), HandleKind::Control);
-    assert_eq!(kind_of("after.2"), HandleKind::Control);
-    assert_eq!(kind_of("centre"), HandleKind::Move);
+    assert_eq!(kind_of("mask_path", "corner.0"), HandleKind::Point);
+    assert_eq!(kind_of("mask_path", "before.0"), HandleKind::Control);
+    assert_eq!(kind_of("mask_path", "after.2"), HandleKind::Control);
+    // A case's handles look as the rack's tools declare them.
+    assert_eq!(kind_of("mask_circle", "centre"), HandleKind::Move);
+    assert_eq!(kind_of("mask_circle", "radius"), HandleKind::Size);
+    assert_eq!(kind_of("mask_gradient", "rotation"), HandleKind::Rotate);
+    assert_eq!(kind_of("mask_ellipse", "feather"), HandleKind::Feather);
 }
 
 /// A shape copied pastes into the mask as a new shape, named as new

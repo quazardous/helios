@@ -154,7 +154,7 @@ then it is offered as "ColorChecker 24 (2014 formulation)".
 | Area | Files | Use here |
 |------|-------|----------|
 | Handle kit | egui-pop's viewport overlay (`egui_pop::viewport::overlay`: `Handle`, `HandleKind`, `Overlay`, `Shape`, `HIT_RADIUS`; hooks `before_handle`, `under_overlays`, `after_paint`), used by `crates/helios-gui/src/masks.rs` | the four corner handles and the drawn patch grid |
-| Handles as controls | `crates/helios-controls/src/gizmo.rs` (`Gizmo`, `HandleSpec`, `Drag`: one store gesture per drag, one undo step, Escape cancels, Shift and Ctrl snapping, `mask.handle.move` for agents) | the corners declared as a gizmo of four point handles; the agents' moves go through the same `Drag` |
+| Handles as controls | `crates/helios-rack/src/tools.rs` (`Tool`, `ToolHandle` on `egui_hud::handle`, `Drag`: one store gesture per drag, one undo step, Escape cancels, Shift and Ctrl snapping, `mask.handle.move` for agents) | the corners declared as a gizmo of four point handles; the agents' moves go through the same `Drag` |
 | Viewport | `crates/helios-gui/src/viewport.rs` (egui-pop's viewport on the engine, the display transform, view values at `view/viewport/*`) | the chart shot shown, zoomed on a corner while dragging |
 | Raw chain | `templates/composites/helios.raw-front@1.helios-composite.json` (`rawprepare`, `whitebalance`, `highlights`, `demosaic`, `colorin`), `modules/*` | the measurement taps `demosaic`'s output |
 | Input profile | `modules/colorin/src/lib.rs` (the camera's matrix from the context field `XYZ_TO_CAMERA`, rows normalised so camera white stays white), `crates/helios-photo/src/color.rs` (`camera_to_working`, `Mat3`, `mul`, `inverse`) | the base matrix the profile corrects |

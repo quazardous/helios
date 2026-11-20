@@ -366,12 +366,27 @@ fn a_mask_handle_edits_its_parameter_and_the_image_only_navigates() {
         radius.control.is_some() && radius.value.is_some(),
         "{radius:?}"
     );
+    // Declared through egui_hud's `declare_handle`: the overlay's hit
+    // target, sensing the hover alone.
+    let target = helios_controls::render::HANDLE_TARGET;
+    assert!(
+        (radius.rect.width() - target).abs() < 1e-3,
+        "{radius:?} is {target} wide"
+    );
     let path = radius.path.clone().unwrap();
     let before = f(&h, &path);
+    let undo_steps = h.state().values().lock().unwrap().undo_steps().len();
     let mut a = audit(&h);
     let from = radius.rect.center();
     let from_areas = a.drag(&mut h, from, from + vec2(30.0, 0.0));
+    // The overlay keeps the drag under the declared area: the radius
+    // moves, as one undo step.
     assert!((f(&h, &path) - before).abs() > 1e-6, "the drag moved it");
+    assert_eq!(
+        h.state().values().lock().unwrap().undo_steps().len(),
+        undo_steps + 1,
+        "one undo step per drag"
+    );
     assert!(
         from_areas.iter().any(|r| r.id == radius.id),
         "{from_areas:?}"

@@ -399,11 +399,7 @@ impl Calibration {
                 && at == i
             {
                 let d = r.drag_delta();
-                let k = if fine {
-                    helios_controls::gizmo::FINE
-                } else {
-                    1.0
-                } / scale;
+                let k = if fine { helios_rack::tools::FINE } else { 1.0 } / scale;
                 let c = &mut self.corners[i];
                 c[0] = (c[0] + f64::from(d.x) * k).clamp(0.0, size[0]);
                 c[1] = (c[1] + f64::from(d.y) * k).clamp(0.0, size[1]);

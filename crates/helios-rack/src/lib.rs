@@ -24,7 +24,12 @@
 //! choice's words and previews, read-out lines), and what the shell does
 //! with the parts comes back as data ([`Output`]: touches for its names,
 //! menus and clipboard, notes to show). The picker is a bus event.
+//!
+//! The rack also hosts the on-image tools ([`tools`]): a shape's handles
+//! declared on `egui_hud`'s handle kinds ([`handle`]), each drag, double
+//! click and wheel turn bound to the value store the same way.
 
+pub mod tools;
 mod words;
 
 use std::collections::BTreeMap;
@@ -47,6 +52,7 @@ use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, Entry, GestureId, Set, Store, Type};
 use serde_json::json;
 
+pub use egui_hud::handle;
 pub use egui_hud::render::{Line, Preview};
 pub use words::{
     choice, description, fixed, gesture_hint, label, locale, param_name, shown_in, text,

@@ -10,12 +10,14 @@
 //!   dashed. A path point's control lines are painted under the
 //!   overlays (the viewport's `under_overlays` hook), the path being
 //!   drawn above them (`after_paint`).
-//! - **The handles of a circle, an ellipse and a gradient** are their cases' image
-//!   surface in `helios_controls::gizmo`: each handle names the
-//!   parameters it writes, its Shift snap, its reset and its wheel, and
-//!   its drag, reset and wheel turn go through the `controls.change` step
-//!   with the controls the panel's rows have. A path's handles are still
-//!   written here, until its case moves there too.
+//! - **The handles of a circle, an ellipse and a gradient** are on-image
+//!   tools hosted by the rack (`helios_rack::tools`): each is an
+//!   `egui_hud` handle of a kind that carries its maths (a point, a
+//!   radius, a feather, an angle, a band), with its Shift snap, its reset
+//!   and its wheel, and its drag, reset and wheel turn go through the
+//!   `controls.change` step with the controls the panel's rows have. A
+//!   path's handles keep their maths here, behind `egui_hud`'s code hook
+//!   ([`HandleMaths`]), until its case moves to the rack too.
 //! - **A drag** is one gesture of the value store: its Begin opens it,
 //!   each Update writes the parameters the handle moves (from the values
 //!   at the gesture's start), End closes it (one undo step), Cancel
@@ -39,10 +41,15 @@ use egui_pop::viewport::hooks::HandleMove;
 use egui_pop::viewport::overlay::{self, HIT_RADIUS, Handle, HandleKind, Overlay, Shape};
 use egui_pop::viewport::tokens::ViewportTokens;
 use egui_pop::viewport::{Cause, Mapping, Phase, Signal, Verdict, ViewChange};
-use helios_controls::gizmo::{self, Shift};
+use helios_controls::render::overlay_kind;
 use helios_core::{Graph, Message, ModuleRef, NodeId, Params, Value};
-use helios_module_masks::shape::{Outline, PathPoint, path_points, path_values};
+use helios_module_masks::shape::{Outline, PATH_POINT_VALUES, PathPoint, path_points, path_values};
 use helios_module_masks::{MaskCircle, MaskEllipse, MaskGradient, MaskPath};
+use helios_rack::handle::{
+    self as hud, Centre, Handle as HudHandle, HandleKind as HudKind, HandleMaths, Look,
+    Snap as HudSnap,
+};
+use helios_rack::tools::{self, ParamsOf};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, GestureId, Set, Store, node_path};
 
@@ -69,7 +76,7 @@ pub const KINDS: [(&str, &str); 4] = [
     ("path", "mask_path"),
 ];
 
-pub use helios_controls::gizmo::{ANGLE_STEP, FINE};
+pub use helios_rack::handle::{ANGLE_STEP, FINE};
 /// A gradient's rotation and feather handles sit at least this far
 /// along its line from the anchor, in points.
 const LINE_HANDLE: f64 = 80.0;
@@ -243,17 +250,109 @@ pub fn members(graph: &Graph, store: &Store, mask: &str) -> Vec<Member> {
         .collect()
 }
 
-/// The handle kit's kind for a handle of `outline()`.
-pub fn kind_of(name: &str) -> HandleKind {
-    match name.split('.').next().unwrap_or(name) {
-        "centre" => HandleKind::Move,
-        "radius" | "radius_x" | "radius_y" => HandleKind::Size,
-        "rotation" => HandleKind::Rotate,
-        "feather" => HandleKind::Feather,
-        "before" | "after" => HandleKind::Control,
-        // A path's corners.
-        _ => HandleKind::Point,
+/// The handle kit's kind for a handle of `outline()` on a node of
+/// `module`: its look, as its `egui_hud` handle declares it.
+pub fn kind_of(module: &str, name: &str) -> HandleKind {
+    overlay_kind(handle_of(module, name).map_or(Look::Point, |h| h.look))
+}
+
+/// The `egui_hud` handle named `name` on a node of `module`: a case's
+/// from the rack's tools, a path's from its maths here.
+pub fn handle_of(module: &str, name: &str) -> Option<HudHandle> {
+    if let Some(t) = tools::of_module(module) {
+        return t.handle(name).map(|h| h.handle.clone());
     }
+    if module == "mask_path" {
+        return path_handle(name);
+    }
+    (name == "centre").then(|| HudHandle::new("centre", HudKind::point(Centre::default())))
+}
+
+/// Which handle of a path point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Side {
+    Corner,
+    Before,
+    After,
+}
+
+/// A path's handle (`corner.n`, `before.n`, `after.n`), its maths
+/// through `egui_hud`'s code hook: the path's values read and written as
+/// `points.i`, the point's corner, then its handle before, then after.
+#[derive(Debug)]
+struct PathHandle {
+    side: Side,
+    n: usize,
+}
+
+impl PathHandle {
+    fn at(&self, p: &dyn hud::Params, k: usize) -> [f64; 2] {
+        let i = PATH_POINT_VALUES * self.n + 2 * k;
+        let v = |i: usize| p.float(&format!("points.{i}")).unwrap_or(0.0);
+        [v(i), v(i + 1)]
+    }
+}
+
+impl HandleMaths for PathHandle {
+    fn writes(&self) -> Vec<String> {
+        let i = PATH_POINT_VALUES * self.n;
+        (i..i + PATH_POINT_VALUES)
+            .map(|i| format!("points.{i}"))
+            .collect()
+    }
+
+    fn position(&self, p: &dyn hud::Params) -> [f64; 2] {
+        self.at(p, self.side as usize)
+    }
+
+    fn drag(&self, start: &dyn hud::Params, to: [f64; 2]) -> Vec<(String, f64)> {
+        let (mut corner, mut before, mut after) =
+            (self.at(start, 0), self.at(start, 1), self.at(start, 2));
+        match self.side {
+            Side::Corner => {
+                let delta = sub(to, corner);
+                corner = to;
+                before = add(before, delta);
+                after = add(after, delta);
+            }
+            // The other handle mirrors it: a smooth point.
+            Side::Before => {
+                before = to;
+                after = sub(scale(corner, 2.0), to);
+            }
+            Side::After => {
+                after = to;
+                before = sub(scale(corner, 2.0), to);
+            }
+        }
+        self.writes()
+            .into_iter()
+            .zip([corner, before, after].into_iter().flatten())
+            .collect()
+    }
+
+    /// A Bézier handle turns around its corner.
+    fn pivot(&self, p: &dyn hud::Params) -> [f64; 2] {
+        self.at(p, 0)
+    }
+}
+
+/// A path's handle by its name: a corner moves along the axes with
+/// Shift, a Bézier handle turns around its corner to 15° steps.
+fn path_handle(name: &str) -> Option<HudHandle> {
+    let (side, n) = name.split_once('.')?;
+    let n: usize = n.parse().ok()?;
+    let (side, look, snap) = match side {
+        "corner" => (Side::Corner, Look::Point, HudSnap::Axes),
+        "before" => (Side::Before, Look::Control, HudSnap::Angle),
+        "after" => (Side::After, Look::Control, HudSnap::Angle),
+        _ => return None,
+    };
+    Some(
+        HudHandle::new(name, HudKind::custom(PathHandle { side, n }))
+            .look(look)
+            .snap(Some(snap)),
+    )
 }
 
 fn sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
@@ -320,7 +419,7 @@ pub fn shown(member: &Member, point: Option<usize>, m: Option<&Mapping>) -> Vec<
         })
         .map(|(i, h)| Handle {
             index: i as u32,
-            kind: kind_of(&h.name),
+            kind: kind_of(&member.module, &h.name),
             at: placed(member, i, m),
         })
         .collect()
@@ -380,61 +479,40 @@ pub fn drag_writes(
     start: &Params,
     to: [f64; 2],
 ) -> Result<Vec<(String, Value)>, String> {
-    let f = |v: f64| Value::Float(v);
-    if let Some(g) = gizmo::of_module(module) {
-        let h = g
-            .handle(handle)
-            .ok_or_else(|| format!("no handle `{handle}` on `{module}`"))?;
-        return Ok((h.apply)(start, to)
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), f(v)))
-            .collect());
-    }
-    let w = |pairs: &[(&str, f64)]| {
-        pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), f(*v)))
-            .collect::<Vec<_>>()
-    };
-    Ok(match (module, handle) {
-        ("mask_path", h) => {
-            let values = start.get("points").and_then(Value::as_list).unwrap_or(&[]);
-            let mut points = path_points(values)?;
-            let (side, n) = h
-                .split_once('.')
-                .ok_or_else(|| format!("no handle `{h}` on a path"))?;
-            let n: usize = n.parse().map_err(|_| format!("no handle `{h}`"))?;
-            let p = points
-                .get_mut(n)
-                .ok_or_else(|| format!("no point {n} on the path"))?;
-            match side {
-                "corner" => {
-                    let delta = sub(to, p.corner);
-                    p.corner = to;
-                    p.before = add(p.before, delta);
-                    p.after = add(p.after, delta);
-                }
-                // The other handle mirrors it: a smooth point.
-                "before" => {
-                    p.before = to;
-                    p.after = sub(scale(p.corner, 2.0), to);
-                }
-                "after" => {
-                    p.after = to;
-                    p.before = sub(scale(p.corner, 2.0), to);
-                }
-                _ => return Err(format!("no handle `{h}` on a path")),
-            }
-            vec![("points".into(), path_values(&points))]
+    if module == "mask_path" {
+        let h = handle;
+        let values = start.get("points").and_then(Value::as_list).unwrap_or(&[]);
+        let count = path_points(values)?.len();
+        let (_, n) = h
+            .split_once('.')
+            .ok_or_else(|| format!("no handle `{h}` on a path"))?;
+        let n: usize = n.parse().map_err(|_| format!("no handle `{h}`"))?;
+        if n >= count {
+            return Err(format!("no point {n} on the path"));
         }
-        (_, "centre") => w(&[("x", to[0]), ("y", to[1])]),
-        (m, h) => return Err(format!("no handle `{h}` on `{m}`")),
-    })
+        let ph = path_handle(h).ok_or_else(|| format!("no handle `{h}` on a path"))?;
+        let mut list = values.to_vec();
+        for (k, v) in ph.drag(&ParamsOf(start), to) {
+            if let Some(i) = k
+                .rsplit_once('.')
+                .and_then(|(_, i)| i.parse::<usize>().ok())
+            {
+                list[i] = v;
+            }
+        }
+        return Ok(vec![("points".into(), Value::List(list))]);
+    }
+    let h =
+        handle_of(module, handle).ok_or_else(|| format!("no handle `{handle}` on `{module}`"))?;
+    Ok(h.drag(&ParamsOf(start), to)
+        .into_iter()
+        .map(|(k, v)| (k, Value::Float(v)))
+        .collect())
 }
 
 /// A shape's centre or anchor (`x`, `y`; a path has none: the origin).
 fn centre_of(params: &Params) -> [f64; 2] {
-    gizmo::centre_of(params)
+    Centre::default().at(&ParamsOf(params))
 }
 
 /// A point on a cubic Bézier segment.
@@ -543,7 +621,7 @@ pub fn distance_to(points: &[[f64; 2]], closed: bool, m: &Mapping, p: Pos2) -> f
 }
 
 /// How a handle is held by Shift, and the point an angle turns around.
-type Constraint = (Option<Shift>, [f64; 2]);
+type Constraint = (Option<HudSnap>, [f64; 2]);
 
 /// What the `before_handle` and `before_view` hooks know, set before
 /// each frame.
@@ -580,7 +658,7 @@ struct Double {
 }
 
 /// What Shift does to a handle's drag.
-pub type ShiftSnap = Shift;
+pub type ShiftSnap = HudSnap;
 
 /// The gestures a handle takes, said in the status line while it is
 /// hovered: Ctrl moves any handle finely; the rest depend on the handle.
@@ -641,7 +719,7 @@ impl Gestures {
 /// A drag under way.
 enum Drag {
     /// A handle of a case declared with the controls.
-    Control(gizmo::Drag),
+    Control(Box<tools::Drag>),
     /// A handle written here (a path's).
     Hand {
         gesture: GestureId,
@@ -688,7 +766,7 @@ impl Drag {
 enum Wheel {
     /// Over a handle of a case declared with the controls.
     Control {
-        turn: gizmo::Turn,
+        turn: tools::Turn,
         node: String,
         handle: String,
     },
@@ -839,14 +917,17 @@ impl Masks {
             let Some(m) = self.member(&o.id) else {
                 continue;
             };
-            let case = gizmo::of_module(&m.module);
+            let case = tools::of_module(&m.module);
             for k in &o.handles {
                 let Some(h) = m.outline.handles.get(k.index as usize) else {
                     continue;
                 };
                 let param = match &case {
-                    Some(g) => match g.handle(&h.name).and_then(|s| s.writes.first()) {
-                        Some(p) => (*p).to_string(),
+                    Some(t) => match t
+                        .handle(&h.name)
+                        .and_then(|s| s.writes().into_iter().next())
+                    {
+                        Some(p) => p,
                         None => continue,
                     },
                     None => "points".to_string(),
@@ -906,7 +987,7 @@ impl Masks {
             let s = snap.borrow();
             let key = (mv.overlay.clone(), mv.handle);
             let (rule, pivot) = s.constraints.get(&key).copied().unwrap_or((None, mv.start));
-            let to = gizmo::snapped(
+            let to = hud::snapped(
                 rule,
                 pivot,
                 mv.start,
@@ -1010,27 +1091,13 @@ impl Masks {
                 o.handles.clear();
             }
             let centre = centre_of(&member.params);
-            let case = gizmo::of_module(&member.module);
             for h in &o.handles {
                 let name = &member.outline.handles[h.index as usize].name;
-                let c: Constraint = match (&case, member.module.as_str(), name.as_str()) {
-                    (Some(g), _, n) => (g.handle(n).and_then(|s| s.shift), centre),
-                    (None, _, "centre") => (Some(Shift::Axes), centre),
-                    (None, _, n) if n.starts_with("corner.") => (Some(Shift::Axes), centre),
-                    (None, "mask_path", n) => {
-                        // A Bézier handle turns around its corner.
-                        let i: usize = n
-                            .split_once('.')
-                            .and_then(|(_, i)| i.parse().ok())
-                            .unwrap_or(0);
-                        member
-                            .outline
-                            .handles
-                            .get(3 * i)
-                            .map_or((None, centre), |c| (Some(Shift::Angle), c.at))
-                    }
-                    _ => (None, centre),
-                };
+                // What Shift does, and what an angle turns around (a
+                // shape's centre, a Bézier handle's corner).
+                let c: Constraint = handle_of(&member.module, name).map_or((None, centre), |k| {
+                    (k.snap, k.kind.pivot(&ParamsOf(&member.params)))
+                });
                 snap.constraints.insert((o.id.clone(), h.index), c);
                 if member.module == "mask_path" && name.starts_with(['b', 'a']) {
                     let i = h.index as usize / 3 * 3;
@@ -1047,10 +1114,10 @@ impl Masks {
                 let o = &self.overlays[i];
                 let member = self.members.iter().find(|mb| mb.node == o.id)?;
                 let name = &member.outline.handles.get(h.index as usize)?.name;
-                if let Some(g) = gizmo::of_module(&member.module) {
-                    let spec = g.handle(name)?;
+                if let Some(t) = tools::of_module(&member.module) {
+                    let spec = &t.handle(name)?.handle;
                     return Some(Gestures {
-                        shift: spec.shift,
+                        shift: spec.snap,
                         reset: spec.reset.is_some(),
                         wheel: spec.wheel.is_some(),
                     });
@@ -1141,9 +1208,9 @@ impl Masks {
                 if let Some((_, n)) = handle.split_once('.') {
                     put(store, POINT, Value::Int(n.parse().unwrap_or(-1)));
                 }
-                if let Some(g) = gizmo::of_module(&module) {
-                    self.drag = gizmo::Drag::begin(store, &g, node, &handle, start, Origin::User)
-                        .map(Drag::Control);
+                if let Some(t) = tools::of_module(&module) {
+                    self.drag = tools::Drag::begin(store, &t, node, &handle, start, Origin::User)
+                        .map(|d| Drag::Control(Box::new(d)));
                     return;
                 }
                 let label = format!("drag {node} {}", handle.split('.').next().unwrap_or(""));
@@ -1182,12 +1249,12 @@ impl Masks {
         let Some((module, handle, params)) = self.handle_name(node, index) else {
             return;
         };
-        if let Some(g) = gizmo::of_module(&module) {
+        if let Some(t) = tools::of_module(&module) {
             let steps = crate::controls::steps()
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let registry = crate::controls::registry();
-            gizmo::reset(store, registry, &steps, &g, node, &handle, Origin::User);
+            tools::reset(store, registry, &steps, &t, node, &handle, Origin::User);
             return;
         }
         let writes = match handle.split_once('.') {
@@ -1220,8 +1287,8 @@ impl Masks {
             return;
         };
         let k = f64::from(delta);
-        if let Some(g) = gizmo::of_module(&module) {
-            let Some(spec) = g.handle(&handle).copied() else {
+        if let Some(t) = tools::of_module(&module) {
+            let Some(spec) = t.handle(&handle).cloned() else {
                 return;
             };
             // A turn over another handle is a step of its own.
@@ -1231,7 +1298,7 @@ impl Masks {
                 w.end(store);
             }
             if self.wheel.is_none() {
-                let Some(turn) = gizmo::Turn::begin(store, &g, node, &handle, Origin::User, now)
+                let Some(turn) = tools::Turn::begin(store, &t, node, &handle, Origin::User, now)
                 else {
                     return;
                 };
@@ -1251,7 +1318,7 @@ impl Masks {
                 let p = handle.as_str();
                 (p, (params.float(p) * (k * 0.002).exp()).max(0.0))
             }
-            "rotation" => ("rotation", gizmo::wrap(params.float("rotation") + k * 0.1)),
+            "rotation" => ("rotation", hud::wrap(params.float("rotation") + k * 0.1)),
             _ => return,
         };
         if matches!(self.wheel, Some(Wheel::Control { .. }))
