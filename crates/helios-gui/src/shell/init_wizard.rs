@@ -8,7 +8,7 @@
 //! registry ([`crate::config::init_wizard`]); each step's fields are the
 //! settings it fills.
 //!
-//! This is a [`Host`] for [`helios_init::ensure`]: the steps say what
+//! This is a [`helios_init::Host`] for [`helios_init::ensure`]: the steps say what
 //! they ask, the host draws them, the outcome is read from the settings.
 //!
 //! - **First run**: once the library is known, when a required step is
