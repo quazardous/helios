@@ -4,13 +4,19 @@
 //! transfer functions and rendering intents. [`drawn`] says what the
 //! desktop's viewport draws on it today, and why.
 //!
+//! What each screen shows, read from its description ([`screens`]),
+//! is in [`ScreenDescription`].
+//!
 //! `helios doctor display` prints it; the desktop's debug bridge shows it
 //! beside what the viewport actually resolved.
 
 use serde::Serialize;
 
+mod screens;
 #[cfg(target_os = "linux")]
 mod wayland;
+
+pub use screens::{Chromaticities, ScreenDescription, Shows, WIDE_GAMUT_AREA, screens};
 
 /// The kind of display session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

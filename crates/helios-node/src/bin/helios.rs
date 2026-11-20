@@ -106,7 +106,8 @@
 //! `doctor display` says what the display offers the desktop: the session
 //! (Wayland, X11 or none), on Wayland what the compositor's colour
 //! management (`wp_color_management_v1`) supports, and what the viewport
-//! draws there with the Wide-gamut preview setting on, and why. It asks
+//! draws there with the Wide-gamut preview setting on, and why, and what
+//! each screen shows (its output's image description). It asks
 //! the compositor only; the running desktop's debug bridge says what its
 //! window actually resolved.
 //!
@@ -1658,11 +1659,17 @@ fn doctor(args: &[String]) -> ExitCode {
     match args {
         [what] if what == "display" => {
             let offer = helios_display::probe();
+            let screens = helios_display::screens();
             let report = serde_json::json!({
                 "session": offer.session,
                 "color_management": offer.color_management,
                 "error": offer.error,
                 "viewport": helios_display::drawn(&offer),
+                "screens": screens.as_ref().ok().map(|all| all
+                    .iter()
+                    .map(|s| serde_json::json!({ "description": s, "shows": s.shows() }))
+                    .collect::<Vec<_>>()),
+                "screens_error": screens.err(),
             });
             out!(
                 "{}",
