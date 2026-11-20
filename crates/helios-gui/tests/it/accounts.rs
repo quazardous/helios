@@ -2738,13 +2738,13 @@ fn an_account_clicked_then_focused_is_drawn_selected() {
             (
                 n.accesskit_node().label(),
                 n.accesskit_node().role(),
-                n.toggled(),
+                n.accesskit_node().toggled(),
                 n.is_focused(),
             )
         })
         .collect();
     assert_eq!(
-        row.toggled(),
+        row.accesskit_node().toggled(),
         Some(egui::accesskit::Toggled::True),
         "the account clicked is selected: {all:?}; selected {:?}",
         selected_items(&h)
@@ -2754,7 +2754,7 @@ fn an_account_clicked_then_focused_is_drawn_selected() {
     let row = h.get_by_label("ann@example.org");
     assert!(row.is_focused());
     assert_eq!(
-        row.toggled(),
+        row.accesskit_node().toggled(),
         Some(egui::accesskit::Toggled::True),
         "focused, still selected"
     );

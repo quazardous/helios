@@ -187,11 +187,11 @@ fn a_connector_without_albums_lists_none() {
 /// toggled state, set from the flag the selected fill is painted from).
 fn drawn_selected(h: &Harness<'_, Shell>, label: &str) -> bool {
     h.query_all_by_label(label)
-        .any(|n| n.toggled() == Some(egui::accesskit::Toggled::True))
+        .any(|n| n.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True))
 }
 
 /// The Sources item labelled `label` (the first node of that label).
-fn row<'a>(h: &'a Harness<'_, Shell>, label: &str) -> egui_kittest::Node<'a> {
+fn row<'a>(h: &'a Harness<'_, Shell>, label: &'a str) -> egui_kittest::Node<'a> {
     h.query_all_by_label(label)
         .next()
         .unwrap_or_else(|| panic!("no {label}"))
