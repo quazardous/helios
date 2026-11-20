@@ -461,7 +461,7 @@ fn an_agent_designs_the_backlit_workshop_and_the_panel_shows_only_its_sliders() 
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
     follow(&mut h);
@@ -617,7 +617,7 @@ fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
     follow(&mut h);
