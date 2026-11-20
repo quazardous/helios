@@ -2786,6 +2786,8 @@ dependencies = [
  "helios-export",
  "helios-photo",
  "image",
+ "jpeg-decoder",
+ "memchr",
  "png",
  "rawler",
  "serde",
@@ -3243,8 +3245,6 @@ dependencies = [
  "helios-cache",
  "helios-load",
  "image",
- "jpeg-decoder",
- "memchr",
  "rawler",
 ]
 

@@ -288,14 +288,16 @@ pub fn image(value: Value) -> Option<Arc<Image>> {
     value.downcast::<Image>().ok()
 }
 
-/// The longest side of a raw's first paint, in pixels: a full-screen
-/// viewport's size, never the embedded preview's full size (6048 px on
-/// a Nikon Z6 II), whose float conversion and hash cost more than the
-/// JPEG's decode.
+/// The long side a raw's first paint keeps at least, in pixels: a
+/// full-screen viewport's size. The embedded preview is decoded at the
+/// smallest DCT scale that keeps it (3024 px of a Nikon Z6 II's 6048),
+/// never at its full size, whose decode, float conversion and hash cost
+/// more than the paint needs.
 pub const FIRST_PAINT_SIDE: u32 = 2560;
 
 /// A raw's embedded preview alone in a graph (its source's `image`
-/// port), at most [`FIRST_PAINT_SIDE`] pixels long, turned by the raw's
+/// port), at least [`FIRST_PAINT_SIDE`] pixels long when it is that
+/// large (less than twice that), turned by the raw's
 /// EXIF orientation as the development will be: what the desktop draws
 /// while the raw is developed. `None` for a picture or a raw without one.
 ///

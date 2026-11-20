@@ -22,6 +22,7 @@
 
 pub mod capture;
 mod colour;
+pub mod embedded;
 pub mod sparse;
 
 pub use colour::{Colour, ColourTag};
@@ -160,13 +161,20 @@ pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
     preview_oriented_at(path, None)
 }
 
-/// [`preview_oriented`], the preview no larger than `max` pixels on its
-/// long side: scaled down in 8 bits before it is taken to the working
-/// space, so a first paint never converts a full-size preview in
-/// floating point.
+/// [`preview_oriented`] for a first paint `max` pixels long: the preview
+/// at least `max` pixels on its long side (when it is that large), and
+/// less than twice that, made in 8 bits before it is taken to the working
+/// space, so a first paint never converts a full-size preview in floating
+/// point.
 ///
-/// The largest preview is decoded alone: the smaller ones are tried only
-/// when it is missing or unreadable.
+/// The colour JPEG stream the file embeds that is the smallest at least
+/// `max` long (else the largest) is decoded at the smallest DCT scale
+/// that keeps it so ([`embedded::decode_scaled`]): a Nikon Z6 II's
+/// 6048 px preview asked 2560 px is decoded at 3024 px, never whole.
+/// A raw whose previews are no JPEG stream falls back to rawler, which
+/// decodes its largest preview alone (the smaller ones only when it is
+/// missing or unreadable), then the result is scaled by a whole-factor
+/// block mean.
 ///
 /// # Errors
 /// The file cannot be read, or its format is unknown.
@@ -175,7 +183,17 @@ pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Imag
     let source = RawSource::new_from_shared_vec(bytes.clone());
     let decoder = rawler::get_decoder(&source).map_err(|e| format!("{}: {e}", path.display()))?;
     let params = RawDecodeParams::default();
-    let found = {
+    let scaled = max.and_then(|m| {
+        let _span = helios_core::trace::span("preview.decode", || {
+            format!("{} scaled to {m}", path.display())
+        });
+        embedded::choose(&embedded::embedded_jpegs(&bytes), m)
+            .into_iter()
+            .filter(|e| !e.grey())
+            .find_map(|e| embedded::decode_scaled(&bytes[e.offset..], m).ok())
+            .map(DynamicImage::ImageRgb8)
+    });
+    let found = scaled.or_else(|| {
         let _span = helios_core::trace::span("preview.decode", || path.display().to_string());
         decoder
             .full_image(&source, &params)
@@ -183,7 +201,7 @@ pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Imag
             .flatten()
             .or_else(|| decoder.preview_image(&source, &params).ok().flatten())
             .or_else(|| decoder.thumbnail_image(&source, &params).ok().flatten())
-    };
+    });
     let metadata = decoder.raw_metadata(&source, &params).ok();
     let tag = metadata
         .as_ref()
@@ -195,7 +213,7 @@ pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Imag
     let fit = |img: DynamicImage| {
         let _span = helios_core::trace::span("preview.shrink", String::new);
         match max {
-            Some(m) if img.width().max(img.height()) > m => shrink(img, m),
+            Some(m) if img.width().max(img.height()) >= m.saturating_mul(2) => shrink(img, m),
             _ => img,
         }
     };
@@ -211,18 +229,18 @@ pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Imag
     ))
 }
 
-/// `img` made no larger than `max` pixels on its long side, for a first
-/// paint: an 8-bit RGB picture (a JPEG preview) by the mean of each
-/// k × k block, k the smallest whole factor that fits, in row bands over
-/// the machine's threads; any other by [`DynamicImage::thumbnail`]. The
-/// block mean is several times faster than a resampling filter on a
-/// full-size preview, and a first paint is shown at about that size.
-fn shrink(img: DynamicImage, max: u32) -> DynamicImage {
+/// `img` made smaller for a first paint at least `min` pixels long: an
+/// 8-bit RGB picture (a JPEG preview) by the mean of each k × k block, k
+/// the largest whole factor that keeps it at least `min` long, in row
+/// bands over the machine's threads; any other by
+/// [`DynamicImage::thumbnail`] to `min`. The block mean is several times
+/// faster than a resampling filter on a full-size preview.
+fn shrink(img: DynamicImage, min: u32) -> DynamicImage {
     let DynamicImage::ImageRgb8(rgb) = img else {
-        return img.thumbnail(max, max);
+        return img.thumbnail(min, min);
     };
     let (w, h) = rgb.dimensions();
-    let k = w.max(h).div_ceil(max.max(1)).max(1) as usize;
+    let k = (w.max(h) / min.max(1)).max(1) as usize;
     let (ow, oh) = ((w as usize / k).max(1), (h as usize / k).max(1));
     if k == 1 {
         return DynamicImage::ImageRgb8(rgb);
@@ -476,8 +494,14 @@ fn integer_bits(img: &DynamicImage) -> Option<u32> {
     }
 }
 
-/// An image in `space` to the working space, RGBA.
+/// An image in `space` to the working space, RGBA. An 8-bit RGB image (a
+/// JPEG preview) goes the u8 path ([`InputSpace::rgb8_to_working`]): the
+/// same values, bit for bit, without its float copy.
 fn convert(img: &DynamicImage, space: &InputSpace) -> Result<Image, String> {
+    if let DynamicImage::ImageRgb8(rgb) = img {
+        let data = space.rgb8_to_working(rgb.as_raw())?;
+        return Ok(Image::new(Region::sized(rgb.width(), rgb.height()), 4, data));
+    }
     let rgba = img.to_rgba32f();
     let (w, h) = rgba.dimensions();
     let mut data = rgba.into_raw();
@@ -864,16 +888,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shrink_takes_each_blocks_mean_to_fit() {
-        // 7 × 5, at most 3 long: k = 3, 2 × 1 out of the top-left 6 × 3.
+    fn shrink_takes_each_blocks_mean_keeping_the_size_asked() {
+        // 7 × 5, at least 3 long: k = 2, 3 × 2 out of the top-left 6 × 4.
         let rgb =
             image::RgbImage::from_fn(7, 5, |x, y| image::Rgb([(x * 10) as u8, (y * 20) as u8, 9]));
         let out = shrink(DynamicImage::ImageRgb8(rgb), 3).to_rgb8();
-        assert_eq!(out.dimensions(), (2, 1));
-        assert_eq!(out.get_pixel(0, 0).0, [10, 20, 9]);
-        assert_eq!(out.get_pixel(1, 0).0, [40, 20, 9]);
-        let small = image::RgbImage::new(3, 2);
-        assert_eq!(shrink(DynamicImage::ImageRgb8(small), 3).width(), 3);
+        assert_eq!(out.dimensions(), (3, 2));
+        assert_eq!(out.get_pixel(0, 0).0, [5, 10, 9]);
+        assert_eq!(out.get_pixel(1, 0).0, [25, 10, 9]);
+        let small = image::RgbImage::new(5, 2);
+        assert_eq!(shrink(DynamicImage::ImageRgb8(small), 3).width(), 5);
     }
 
     fn pixel(image: &Image) -> [f32; 3] {

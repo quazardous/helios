@@ -2,7 +2,6 @@
 //! decoded with DCT scaling straight to 8-bit sRGB (no floating point, no
 //! full-size decode), then scaled to the size asked.
 
-use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -13,108 +12,7 @@ use rawler::rawsource::RawSource;
 
 use crate::Rgb8;
 
-/// An embedded JPEG stream: where it starts, its size in pixels and its
-/// colour components (1 for a grey stream, 3 or 4 for a colour one).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Embedded {
-    pub offset: usize,
-    pub width: u32,
-    pub height: u32,
-    pub components: u8,
-}
-
-impl Embedded {
-    fn long(&self) -> u32 {
-        self.width.max(self.height)
-    }
-
-    /// A one-component stream: a grey picture, or no picture at all (a
-    /// phone's HDR gain map, a depth map).
-    pub fn grey(&self) -> bool {
-        self.components == 1
-    }
-}
-
-/// The baseline or progressive JPEG streams a file holds (a raw's
-/// previews and thumbnail, a JPEG itself and its Exif thumbnail), found by
-/// their start marker and checked up to their frame header. Lossless
-/// streams (a raw's mosaic) are left out.
-pub fn embedded_jpegs(bytes: &[u8]) -> Vec<Embedded> {
-    let mut found = Vec::new();
-    for offset in memchr::memmem::find_iter(bytes, b"\xFF\xD8\xFF") {
-        if let Some((width, height, components)) = frame_size(&bytes[offset..])
-            && width > 0
-            && height > 0
-        {
-            found.push(Embedded {
-                offset,
-                width,
-                height,
-                components,
-            });
-        }
-    }
-    found
-}
-
-/// A JPEG stream's size and component count from its baseline, extended
-/// or progressive frame header; `None` when its markers do not read as a
-/// JPEG's.
-fn frame_size(jpeg: &[u8]) -> Option<(u32, u32, u8)> {
-    let mut at = 2;
-    for _ in 0..64 {
-        if *jpeg.get(at)? != 0xFF {
-            return None;
-        }
-        let mut marker = *jpeg.get(at + 1)?;
-        // Fill bytes.
-        while marker == 0xFF {
-            at += 1;
-            marker = *jpeg.get(at + 1)?;
-        }
-        match marker {
-            0xC0..=0xC2 => {
-                let h = u16::from_be_bytes([*jpeg.get(at + 5)?, *jpeg.get(at + 6)?]);
-                let w = u16::from_be_bytes([*jpeg.get(at + 7)?, *jpeg.get(at + 8)?]);
-                let components = *jpeg.get(at + 9)?;
-                return Some((u32::from(w), u32::from(h), components));
-            }
-            0x01 | 0xD0..=0xD7 => at += 2,
-            // Lossless, arithmetic or hierarchical frames (a raw's
-            // mosaic, not a preview), or a stream with no frame header.
-            0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF | 0xD8..=0xDA | 0x00 => return None,
-            _ => {
-                let len = u16::from_be_bytes([*jpeg.get(at + 2)?, *jpeg.get(at + 3)?]);
-                if len < 2 {
-                    return None;
-                }
-                at += 2 + usize::from(len);
-            }
-        }
-    }
-    None
-}
-
-/// The streams to read for a thumbnail `long` pixels on its long side, in
-/// order: the colour ones before the grey ones, and among each the
-/// smallest at least that large, else the largest there is. A phone's
-/// JPEG carries grey streams beside its picture (an Ultra HDR gain map, a
-/// depth map), smaller than the picture and large enough: taken first,
-/// they would show a colour photo grey. A grey picture's only stream is
-/// still read.
-pub fn choose(found: &[Embedded], long: u32) -> Vec<Embedded> {
-    let mut order: Vec<Embedded> = found.to_vec();
-    // Large enough first, smallest first; then the rest, largest first.
-    order.sort_by_key(|e| {
-        let (rank, size) = if e.long() >= long {
-            (0, e.long())
-        } else {
-            (1, u32::MAX - e.long())
-        };
-        (e.grey(), rank, size)
-    });
-    order
-}
+pub use helios_load::embedded::{Embedded, choose, embedded_jpegs};
 
 /// Whether a file holds a grey JPEG stream beside a colour one: what
 /// [`choose`] took first before it put colour streams first.
@@ -126,35 +24,7 @@ pub fn has_grey_beside_colour(bytes: &[u8]) -> bool {
 /// Decodes a JPEG stream at the smallest DCT scale that keeps its long
 /// side at least `long`, then scales it to `long` (never up).
 pub fn decode_jpeg(jpeg: &[u8], long: u32) -> Result<Rgb8, String> {
-    let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(jpeg));
-    decoder.read_info().map_err(|e| e.to_string())?;
-    let info = decoder.info().ok_or("no frame header")?;
-    let (w, h) = (u32::from(info.width), u32::from(info.height));
-    let ratio = f64::from(long) / f64::from(w.max(h).max(1));
-    if ratio < 1.0 {
-        let want = |v: u32| ((f64::from(v) * ratio).ceil() as u16).max(1);
-        decoder.scale(want(w), want(h)).map_err(|e| e.to_string())?;
-    }
-    let pixels = decoder.decode().map_err(|e| e.to_string())?;
-    let info = decoder.info().ok_or("no frame header")?;
-    let (w, h) = (u32::from(info.width), u32::from(info.height));
-    let rgb = match info.pixel_format {
-        jpeg_decoder::PixelFormat::RGB24 => pixels,
-        jpeg_decoder::PixelFormat::L8 => pixels.iter().flat_map(|&v| [v, v, v]).collect(),
-        jpeg_decoder::PixelFormat::L16 => pixels
-            .chunks_exact(2)
-            .flat_map(|v| [v[0], v[0], v[0]])
-            .collect(),
-        jpeg_decoder::PixelFormat::CMYK32 => pixels
-            .chunks_exact(4)
-            .flat_map(|p| {
-                let k = u16::from(p[3]);
-                [0, 1, 2].map(|c| ((u16::from(p[c]) * k) / 255) as u8)
-            })
-            .collect(),
-    };
-    let image = RgbImage::from_raw(w, h, rgb).ok_or("a short JPEG decode")?;
-    Ok(fit(image, long))
+    helios_load::embedded::decode_scaled(jpeg, long).map(|image| fit(image, long))
 }
 
 /// An image scaled to `long` on its long side (never up), as 8-bit RGB.

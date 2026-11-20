@@ -307,6 +307,82 @@ impl InputSpace {
     }
 }
 
+impl InputSpace {
+    /// 8-bit RGB pixels (an embedded JPEG preview) to the working space,
+    /// as RGBA (alpha 1): the same values, bit for bit, as widening them
+    /// to floats in [0, 1] and calling [`InputSpace::to_working`] with 8
+    /// bits, without the float buffer in between. With a matrix, each
+    /// code value is looked up in the table of its curve straight away
+    /// (the float path rounds `v / 255 * 255` back to `v`), in bands of
+    /// pixels over the machine's threads.
+    ///
+    /// # Errors
+    /// The ICC transform's, when the space is converted by one.
+    pub fn rgb8_to_working(&self, rgb: &[u8]) -> Result<Vec<f32>, String> {
+        let Convert::Matrix { curves, to_working } = &self.convert else {
+            let mut rgba: Vec<f32> = rgb
+                .chunks_exact(3)
+                .flat_map(|p| {
+                    [
+                        f32::from(p[0]) / 255.0,
+                        f32::from(p[1]) / 255.0,
+                        f32::from(p[2]) / 255.0,
+                        1.0,
+                    ]
+                })
+                .collect();
+            self.to_working(&mut rgba, Some(8))?;
+            return Ok(rgba);
+        };
+        let table: Vec<[f64; 3]> = (0..=255u32)
+            .map(|i| {
+                let v = f64::from(i) / 255.0;
+                [curves[0].eval(v), curves[1].eval(v), curves[2].eval(v)]
+            })
+            .collect();
+        let pixels = rgb.len() / 3;
+        let mut rgba = vec![0.0f32; pixels * 4];
+        let convert = |src: &[u8], out: &mut [f32]| {
+            for (p, px) in src.chunks_exact(3).zip(out.chunks_exact_mut(4)) {
+                let linear = [
+                    table[usize::from(p[0])][0],
+                    table[usize::from(p[1])][1],
+                    table[usize::from(p[2])][2],
+                ];
+                let o = apply(to_working, linear);
+                px[0] = o[0] as f32;
+                px[1] = o[1] as f32;
+                px[2] = o[2] as f32;
+                px[3] = 1.0;
+            }
+        };
+        let threads = band_threads(pixels);
+        if threads == 1 {
+            convert(rgb, &mut rgba);
+            return Ok(rgba);
+        }
+        let band = pixels.div_ceil(threads);
+        std::thread::scope(|s| {
+            for (src, out) in rgb.chunks(band * 3).zip(rgba.chunks_mut(band * 4)) {
+                let convert = &convert;
+                s.spawn(move || convert(src, out));
+            }
+        });
+        Ok(rgba)
+    }
+}
+
+/// The threads a conversion of `pixels` pixels is split over: the
+/// machine's, one per band of at least 32 Ki pixels (below it, a thread
+/// costs more than it saves).
+fn band_threads(pixels: usize) -> usize {
+    const MIN_PIXELS: usize = 1 << 15;
+    std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(pixels.div_ceil(MIN_PIXELS))
+        .max(1)
+}
+
 /// Runs `convert` on bands of whole pixels of `rgba` over the machine's
 /// threads, the calling thread taking one: a first paint converts a
 /// 2.7 MP preview at about 60 ns a pixel on one thread (some 0.17 s).
@@ -314,14 +390,8 @@ impl InputSpace {
 /// result is the one-thread result, bit for bit. A small picture is
 /// converted on the calling thread.
 fn in_bands(rgba: &mut [f32], convert: impl Fn(&mut [f32]) + Sync) {
-    /// Pixels a band holds at least: below it, a thread costs more than
-    /// it saves.
-    const MIN_PIXELS: usize = 1 << 15;
     let pixels = rgba.len() / 4;
-    let threads = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZero::get)
-        .min(pixels.div_ceil(MIN_PIXELS))
-        .max(1);
+    let threads = band_threads(pixels);
     if threads == 1 {
         convert(rgba);
         return;
@@ -473,6 +543,37 @@ mod tests {
         space.to_working(&mut px, bits).unwrap();
         assert_eq!(px[3], 1.0, "alpha untouched");
         [px[0], px[1], px[2]]
+    }
+
+    #[test]
+    fn eight_bit_pixels_convert_as_their_floats_do_bit_for_bit() {
+        // Every code value in each channel, in a picture large enough to
+        // be split in bands: the u8 path matches widening then
+        // `to_working(8)`, bit for bit, in sRGB and in Adobe RGB.
+        let pixels = 1 << 17;
+        let rgb: Vec<u8> = (0..pixels * 3)
+            .map(|i| ((i * 7 + i / 3 * 13) % 256) as u8)
+            .collect();
+        for space in [OutputSpace::Srgb, OutputSpace::AdobeRgb] {
+            let space = InputSpace::of(space);
+            let mut floats: Vec<f32> = rgb
+                .chunks_exact(3)
+                .flat_map(|p| {
+                    [
+                        f32::from(p[0]) / 255.0,
+                        f32::from(p[1]) / 255.0,
+                        f32::from(p[2]) / 255.0,
+                        1.0,
+                    ]
+                })
+                .collect();
+            space.to_working(&mut floats, Some(8)).unwrap();
+            let direct = space.rgb8_to_working(&rgb).unwrap();
+            assert_eq!(direct.len(), floats.len());
+            for (a, b) in direct.iter().zip(&floats) {
+                assert_eq!(a.to_bits(), b.to_bits());
+            }
+        }
     }
 
     #[test]

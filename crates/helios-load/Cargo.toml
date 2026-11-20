@@ -18,6 +18,11 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # MIT OR Apache-2.0, already in the tree through `image`: PNG's cICP, sRGB,
 # gAMA and cHRM chunks, which `image` does not expose.
 png = "0.18"
+# MIT OR Apache-2.0: a JPEG decoder with DCT scaling (1/2, 1/4, 1/8), so a
+# large preview is decoded at a fraction of its size.
+jpeg-decoder = { version = "0.3", default-features = false }
+# MIT OR Unlicense, already in the tree: finding embedded JPEG streams.
+memchr = "2"
 
 [dev-dependencies]
 helios-export.workspace = true
