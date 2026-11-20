@@ -226,7 +226,12 @@ fn after_a_reset_the_setup_adds_the_photos_back_where_they_are() {
         wizard(h, "init.setup").is_none()
     });
     // Added in place: the import asked for the folder, nothing copied.
-    assert_eq!(imports.len(), 1, "{imports:?}");
+    assert_eq!(
+        imports.len(),
+        1,
+        "{imports:?}, finished with {}",
+        draft["draft"]
+    );
     assert_eq!(imports[0]["paths"], json!([photos]));
     assert_eq!(imports[0]["copy"], json!(false));
     assert!(imports[0].get("into").is_none());

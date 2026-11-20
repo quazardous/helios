@@ -410,8 +410,10 @@ impl Shell {
         // The re-import offered: the photos added back where they are, or
         // the offer declined; made once either way.
         let mut reimported = Value::Null;
-        if values.get(REIMPORT_OFFERED) == Some(&json!(true)) {
-            if values.get(REIMPORT_KEY) == Some(&json!(true)) {
+        // The step's field is handed on only when the step was shown (a
+        // draft value of no field is not).
+        if let Some(add) = values.get(REIMPORT_KEY) {
+            if add == &json!(true) {
                 match self.reimport() {
                     Ok(out) => reimported = out,
                     Err(e) => {
