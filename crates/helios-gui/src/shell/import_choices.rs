@@ -26,12 +26,16 @@
 
 use std::path::{Path, PathBuf};
 
-use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::input::Input;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{Space, Tone, UiPop as _};
+use egui_pop::core::widgets;
 use helios_core::Message;
 use helios_library::import::{Duplicates, Layout};
 use helios_library::import_profile::{Apply, Filter};
 use helios_library::rename::{Naming, Pattern};
 use helios_library::signals::{self, Signals};
+use helios_ui::Action;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -528,52 +532,46 @@ pub(super) fn copy_choices_ui(
             .into
             .as_deref()
             .map_or_else(|| words.library_folder.clone(), folder_name);
-        let button = ui.button(format!("{shown} …")).on_hover_text(&words.change);
-        if button.clicked() {
+        if helios_ui::action(ui, Action::Secondary, &format!("{shown} …"))
+            .tip(&words.change)
+            .clicked()
+        {
             *asked = Some(Asked::Into);
         }
     });
     ui.horizontal_wrapped(|ui| {
         for (layout, label) in Layout::ALL.into_iter().zip(&words.layouts) {
-            ui.selectable_value(&mut c.layout, layout, label);
+            widgets::selectable_value(ui, &mut c.layout, layout, label);
         }
     });
-    match &words.folder_example {
-        Some(example) => ui.weak(example),
-        None => ui.weak(&words.no_sample),
-    };
-    ui.add_space(4.0);
+    ui.muted(words.folder_example.as_ref().unwrap_or(&words.no_sample));
+    ui.space_role(Space::Group);
     ui.strong_text(&words.name);
     let preset = words.names.iter().position(|(p, _)| *p == c.rename);
     ui.horizontal_wrapped(|ui| {
         for (pattern, label) in &words.names {
-            if ui
-                .selectable_label(c.rename == *pattern && !w.custom, label)
-                .clicked()
-            {
+            if widgets::selectable_label(ui, c.rename == *pattern && !w.custom, label).clicked() {
                 c.rename.clone_from(pattern);
                 w.custom = false;
             }
         }
-        if ui
-            .selectable_label(w.custom || preset.is_none(), &words.custom)
-            .clicked()
-        {
+        if widgets::selectable_label(ui, w.custom || preset.is_none(), &words.custom).clicked() {
             w.custom = true;
         }
     });
     if w.custom || preset.is_none() {
-        ui.add(
-            egui::TextEdit::singleline(&mut c.rename)
-                .hint_text("{date}_{stem}")
-                .desired_width(f32::INFINITY),
-        )
-        .on_hover_text("{date} {time} {year} {month} {day} {camera} {maker} {frame} {stem} {seq}");
+        let typed = Input::text(&mut c.rename, &words.name)
+            .placeholder("{date}_{stem}")
+            .width(ui.available_width())
+            .show(ui);
+        let _ = typed
+            .response
+            .tip("{date} {time} {year} {month} {day} {camera} {maker} {frame} {stem} {seq}");
     }
     if let Some(e) = &words.bad_name {
-        ui.colored_label(ui.visuals().error_fg_color, e);
+        ui.text_tone(Tone::Danger, e.as_str());
     } else if let Some(example) = &words.name_example {
-        ui.weak(example);
+        ui.muted(example);
     }
 }
 
