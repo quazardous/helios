@@ -500,7 +500,11 @@ fn integer_bits(img: &DynamicImage) -> Option<u32> {
 fn convert(img: &DynamicImage, space: &InputSpace) -> Result<Image, String> {
     if let DynamicImage::ImageRgb8(rgb) = img {
         let data = space.rgb8_to_working(rgb.as_raw())?;
-        return Ok(Image::new(Region::sized(rgb.width(), rgb.height()), 4, data));
+        return Ok(Image::new(
+            Region::sized(rgb.width(), rgb.height()),
+            4,
+            data,
+        ));
     }
     let rgba = img.to_rgba32f();
     let (w, h) = rgba.dimensions();
