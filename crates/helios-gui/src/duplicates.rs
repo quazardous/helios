@@ -13,12 +13,14 @@
 //! Nothing is ever deleted. The host sends each import's lines here, from
 //! the thread the import runs on ([`Duplicates::sink`]).
 
-use egui_pop::core::ui::UiPop as _;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::Ui;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
 use helios_core::Message;
+use helios_ui::{Action, Scroll};
 use serde_json::{Value, json};
 
 /// The panel's id.
@@ -199,7 +201,7 @@ impl Duplicates {
         let ctx = ui.ctx().clone();
         let text = |m: Message| crate::i18n::text(&ctx, m);
         if self.found.is_empty() {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-duplicates-none",
                 "No duplicates found at import",
             )));
@@ -217,117 +219,130 @@ impl Duplicates {
                     )
                     .with("count", waiting),
                 ));
-                if ui
-                    .button(text(Message::new("gui-duplicates-keep-all", "Keep all")))
-                    .clicked()
+                if helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new("gui-duplicates-keep-all", "Keep all")),
+                )
+                .clicked()
                 {
                     all = Some(true);
                 }
-                if ui
-                    .button(text(Message::new("gui-duplicates-skip-all", "Skip all")))
-                    .clicked()
+                if helios_ui::action(
+                    ui,
+                    Action::Secondary,
+                    &text(Message::new("gui-duplicates-skip-all", "Skip all")),
+                )
+                .clicked()
                 {
                     all = Some(false);
                 }
             }
-            if ui
-                .button(text(Message::new(
-                    "gui-duplicates-clear",
-                    "Clear the answered",
-                )))
-                .clicked()
+            if helios_ui::action(
+                ui,
+                Action::Secondary,
+                &text(Message::new("gui-duplicates-clear", "Clear the answered")),
+            )
+            .clicked()
             {
                 clear = true;
             }
         });
         let mut answers = Vec::new();
-        ui.scroll_area(
-            egui::ScrollArea::vertical().id_salt("helios.duplicates.scroll"),
-            |ui| {
-                for (i, f) in self.found.iter().enumerate() {
-                    ui.separator();
-                    let name = f.path.file_name().map_or_else(
-                        || f.path.display().to_string(),
-                        |n| n.to_string_lossy().into(),
-                    );
-                    ui.label(&name).on_hover_text(f.path.display().to_string());
-                    let copies = f
-                        .copies
-                        .iter()
-                        .map(|p| p.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    ui.weak(if f.of == "source" {
-                        text(
-                            Message::new(
-                                "gui-duplicates-of-source",
-                                "The same file as { $first }, earlier in this import",
-                            )
-                            .with("first", copies),
+        helios_ui::scroll(ui, "helios.duplicates.scroll", Scroll::Region, |ui| {
+            for (i, f) in self.found.iter().enumerate() {
+                ui.divider();
+                let name = f.path.file_name().map_or_else(
+                    || f.path.display().to_string(),
+                    |n| n.to_string_lossy().into(),
+                );
+                ui.text_role(TextRole::Body, name)
+                    .tip(f.path.display().to_string());
+                let copies = f
+                    .copies
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ui.muted(if f.of == "source" {
+                    text(
+                        Message::new(
+                            "gui-duplicates-of-source",
+                            "The same file as { $first }, earlier in this import",
                         )
-                    } else {
-                        text(
-                            Message::new(
-                                "gui-duplicates-of-library",
-                                "Already in the library: { $at }",
-                            )
-                            .with("at", copies),
+                        .with("first", copies),
+                    )
+                } else {
+                    text(
+                        Message::new(
+                            "gui-duplicates-of-library",
+                            "Already in the library: { $at }",
                         )
-                    });
-                    match f.fate {
-                        Fate::Asked => {
-                            ui.horizontal(|ui| {
-                                ui.label(text(Message::new(
+                        .with("at", copies),
+                    )
+                });
+                match f.fate {
+                    Fate::Asked => {
+                        ui.horizontal(|ui| {
+                            ui.text_role(
+                                TextRole::Body,
+                                text(Message::new(
                                     "gui-duplicates-asked",
                                     "Keep it as one more copy, or skip it?",
-                                )));
-                                let keep =
-                                    ui.button(text(Message::new("gui-duplicates-keep", "Keep")));
-                                crate::name_rect(
-                                    ui.ctx(),
-                                    &format!("helios.duplicates.{i}.keep"),
-                                    keep.rect,
-                                );
-                                if keep.clicked() {
-                                    answers.push((i, true));
-                                }
-                                let skip =
-                                    ui.button(text(Message::new("gui-duplicates-skip", "Skip")));
-                                crate::name_rect(
-                                    ui.ctx(),
-                                    &format!("helios.duplicates.{i}.skip"),
-                                    skip.rect,
-                                );
-                                if skip.clicked() {
-                                    answers.push((i, false));
-                                }
-                            });
-                        }
-                        Fate::Skipped => {
-                            ui.weak(text(Message::new(
-                                "gui-duplicates-skipped",
-                                "Skipped, as the import's policy said",
-                            )));
-                        }
-                        Fate::Located => {
-                            ui.weak(text(Message::new(
-                                "gui-duplicates-located",
-                                "Kept as one more copy, as the import's policy said",
-                            )));
-                        }
-                        Fate::Kept => {
-                            ui.weak(text(Message::new(
-                                "gui-duplicates-kept",
-                                "Kept as one more copy",
-                            )));
-                        }
-                        Fate::Declined => {
-                            ui.weak(text(Message::new("gui-duplicates-declined", "Skipped")));
-                        }
+                                )),
+                            );
+                            let keep = helios_ui::row_action(
+                                ui,
+                                Action::Secondary,
+                                &text(Message::new("gui-duplicates-keep", "Keep")),
+                            );
+                            crate::name_rect(
+                                ui.ctx(),
+                                &format!("helios.duplicates.{i}.keep"),
+                                keep.rect,
+                            );
+                            if keep.clicked() {
+                                answers.push((i, true));
+                            }
+                            let skip = helios_ui::row_action(
+                                ui,
+                                Action::Secondary,
+                                &text(Message::new("gui-duplicates-skip", "Skip")),
+                            );
+                            crate::name_rect(
+                                ui.ctx(),
+                                &format!("helios.duplicates.{i}.skip"),
+                                skip.rect,
+                            );
+                            if skip.clicked() {
+                                answers.push((i, false));
+                            }
+                        });
+                    }
+                    Fate::Skipped => {
+                        ui.muted(text(Message::new(
+                            "gui-duplicates-skipped",
+                            "Skipped, as the import's policy said",
+                        )));
+                    }
+                    Fate::Located => {
+                        ui.muted(text(Message::new(
+                            "gui-duplicates-located",
+                            "Kept as one more copy, as the import's policy said",
+                        )));
+                    }
+                    Fate::Kept => {
+                        ui.muted(text(Message::new(
+                            "gui-duplicates-kept",
+                            "Kept as one more copy",
+                        )));
+                    }
+                    Fate::Declined => {
+                        ui.muted(text(Message::new("gui-duplicates-declined", "Skipped")));
                     }
                 }
-            },
-        );
+            }
+        });
         for (i, keep) in answers {
             let _ = if keep { self.keep(i) } else { self.skip(i) };
         }
