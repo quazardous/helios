@@ -157,7 +157,12 @@ why on stderr. It changes no CI yet: B3 runs it beside the full suite.
 cargo xtask ci-broker select [--base origin/next] [--history DIR] [--runs 20]
 cargo nextest run --workspace -E "$(cargo xtask ci-broker select)"
 cargo xtask ci-broker select --explain 'helios-gui::it import::a_card_imports'
+# a past commit, read from git alone (the map and the suites are today's)
+cargo xtask ci-broker select --base 31b2a1f7^ --head 31b2a1f7
 ```
+
+With a history, the summary ends with a measure: how many of the current
+tests (those listed in its last 10 runs) the set holds.
 
 The set is the union of four sources:
 
@@ -190,6 +195,50 @@ The set is the union of four sources:
      `it` binary runs. helios-gui's other tests (unit tests) and the crates
      depending on it run too. A changed `it` module selects itself and the
      modules naming it (`crate::<module>`: shared helpers).
+   - **A feature crate** cut out of helios-gui (`helios-storage-ui`; the
+     `FEATURES` table in `xtask/src/ci_select.rs`) **stops at the app
+     crate** when an edit leaves its contract alone. It then selects:
+     - the crate's own tests;
+     - the unit tests of its mount in helios-gui (`src/shell/storage.rs`);
+     - the `it` modules exercising it: those the mount maps to (as above),
+       those naming the crate (`helios_storage_ui`) or a name helios-gui
+       re-exports from it (`pub use helios_storage_ui::…`), those quoting
+       one of its public string ids (its commands and bus points, such as
+       `"library.storage"`), and the table's own override modules.
+
+     It does not select all of helios-gui, nor the crates depending on it.
+     The contract is read without compiling
+     (`xtask/src/ci_broker/contract.rs`). It holds:
+     - the file's `pub` items: signatures, not bodies, for functions and
+       structs; the whole item for enums, traits, consts and their values;
+     - its top-level consts and statics, public or not: point ids and
+       contract tables such as `POINTS`;
+     - its `impl` headers, and the associated consts, types and signatures
+       of its trait impls (a bus point's `const ID`);
+     - its derives and its crate attributes other than lint levels.
+
+     Comments, function bodies, private items and lint attributes are not
+     part of it. The idea comes from
+     [`cargo public-api`](https://github.com/cargo-public-api/cargo-public-api)
+     and [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks),
+     which diff a crate's public API between two versions. Both need a
+     rustdoc JSON build, too slow before any build, so this check reads
+     more than the API, never less.
+
+     The crate selects like any other crate (itself, helios-gui and every
+     crate depending on them) in these cases:
+     - the edit changes that contract;
+     - the file is not a source (`Cargo.toml`, data);
+     - the file is new or deleted and has public items;
+     - a crate other than helios-gui depends on the feature.
+
+     A crate missing from the table selects like any crate: add a line
+     when a feature leaves helios-gui.
+
+     Measured on 2026-11-20 against the history's 3283 current tests:
+     - a body edit in `helios-storage-ui` selects 155 tests instead of
+       1167; so does 31b2a1f7, a lint attribute on its `lib.rs`;
+     - an edit to a description in its `POINTS` table still selects 1167.
 2. **changed tests**: the `#[test]` functions whose lines the diff adds or
    edits (`git diff -U0`), all of them for a new file. Mostly inside
    source 1 already; listed so `--explain` says it.

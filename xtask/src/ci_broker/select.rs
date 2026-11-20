@@ -266,6 +266,27 @@ impl Selection {
         self.picks.iter().any(|p| p.scope.contains(binary, name))
     }
 
+    /// Of the history's current tests (listed in one of its last `recent`
+    /// runs), how many the set holds: `(held, current)`. What a change
+    /// would run, measured against what a full run runs.
+    pub fn held_of(&self, summary: &Summary, recent: u64) -> (usize, usize) {
+        let since = summary.runs.saturating_sub(recent);
+        let current: Vec<&String> = summary
+            .tests
+            .iter()
+            .filter(|(_, t)| t.last_seen > since)
+            .map(|(id, _)| id)
+            .collect();
+        let held = current
+            .iter()
+            .filter(|id| {
+                id.split_once(' ')
+                    .is_some_and(|(b, n)| self.selects(b, n.trim()))
+            })
+            .count();
+        (held, current.len())
+    }
+
     /// The picks that select a test, named as nextest and the history name
     /// it: `<binary id> <test name>`.
     pub fn explain(&self, test: &str) -> Result<Vec<&Pick>, String> {
@@ -621,5 +642,37 @@ mod tests {
         assert_eq!(recent[0].0, "helios-gui::it a::flaky");
         assert!(recent[0].1.starts_with("flaked in run 29 (0123456789"));
         assert_eq!(recent_failures(&summary, 30).len(), 2);
+    }
+
+    #[test]
+    fn the_set_is_measured_against_the_current_tests() {
+        let mut summary = Summary {
+            runs: 30,
+            ..Summary::default()
+        };
+        for (id, seen) in [
+            ("helios-gui::it import::a", 30),
+            ("helios-gui::it undo::b", 29),
+            ("helios-gui c::d", 30),
+            ("helios-gui::it import::gone", 3),
+        ] {
+            summary.tests.insert(
+                id.into(),
+                TestStats {
+                    last_seen: seen,
+                    ..TestStats::default()
+                },
+            );
+        }
+        let mut s = Selection::default();
+        s.add(
+            Source::Affected,
+            Scope::Module {
+                binary: "helios-gui::it".into(),
+                module: "import".into(),
+            },
+            "near",
+        );
+        assert_eq!(s.held_of(&summary, 10), (1, 3));
     }
 }
