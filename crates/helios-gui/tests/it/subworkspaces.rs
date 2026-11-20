@@ -249,12 +249,13 @@ fn a_sub_workspace_undone_while_shown_is_left_in_the_same_pass() {
     delegate(&mut h);
     run(&mut h, "subworkspace.enter", json!({ "id": "mask" }));
     assert_eq!(crumbs(&h), ["Helios", "Light & mask", "Mask"]);
-    // The nested one's delegation undone: it is gone.
+    // The nested one's delegation undone: it is gone. The delegation is
+    // on the workspace's line, so Ctrl+Z's newest-of-both walk reaches it.
     h.state()
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap();
     h.step();
     assert_eq!(crumbs(&h), ["Helios", "Light & mask"], "left in one pass");
