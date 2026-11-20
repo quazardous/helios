@@ -679,10 +679,19 @@ Every agent follows them.
   a test after 120 s; `cargo survival` runs under nextest too.
 - After a job hangs or times out (exit 124), find why before queuing it
   again: the same run will block the box for the same time.
-- A job of yours that hangs or is no longer wanted: stop it with
-  `ssh … cancel <id>` (or `cancel --branch <branch>` for all of a branch's
-  jobs) rather than letting it run to its timeout; its log and `out/` are
-  kept. A timeout now stops the container too.
+- **Submit from your own worktree.** `branch=` defaults to the checkout's
+  branch, and `bench-remote` refuses a job when that is `main` ("running
+  from the main checkout; run from your worktree, or pass branch=main
+  explicitly"): twice on 2026-11-19 an agent's jobs went out as main's
+  from the main checkout (a `cd` lost in a shell grouping). A run that
+  really wants main passes `branch=main`. Each command of a batch runs in
+  the worktree: `cd` once before them all, or give each the full path.
+- A job of yours that hangs, is no longer wanted or went out by mistake:
+  stop it with `cargo xtask bench-remote cancel <ext_job_id>` (the name
+  `bench-remote` printed; `ssh … cancel <id>` or `cancel --branch
+  <branch>` for all of a branch's jobs work too) rather than letting it
+  run to its timeout; its log and `out/` are kept. Cancel only your own
+  jobs. A timeout now stops the container too.
 - One job of yours per branch at a time; never push to a branch while a job
   of yours on it is queued.
 

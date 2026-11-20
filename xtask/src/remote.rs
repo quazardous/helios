@@ -8,7 +8,9 @@
 //!    per checkout so parallel worktrees never overwrite each other, and the
 //!    job runs on it (`src=helios-local-<id>`) instead of the pushed branch.
 //! 3. `run <job> [key=value...]`, its log followed; `branch=` defaults to
-//!    the current branch, `ext_job_id=` to `<project>-<branch>-<job>`, with
+//!    the current branch (refused when it is `main`: a job sent from the
+//!    main checkout by mistake; `branch=main` says it is meant),
+//!    `ext_job_id=` to `<project>-<branch>-<job>`, with
 //!    a hash of the job's own parameters when it has some (see
 //!    `default_ext_job_id`: a resubmission replaces the stale job), and
 //!    `priority=` to `high` for egui-pop's jobs (`--priority` sets it). On a
@@ -42,7 +44,9 @@
 //! failed ends with 79.
 //!
 //! `cargo xtask bench-remote queue` prints the box's `queue`: what runs,
-//! what waits and why, to read before submitting.
+//! what waits and why, to read before submitting. `cargo xtask
+//! bench-remote cancel <ext_job_id>` stops one of one's own jobs, queued or
+//! running (`cancel x:<name>` on the box).
 //!
 //! The box is `HELIOS_BENCH_HOST` (`user@host`, or `host` for the user
 //! `bench-helios`) and the key `HELIOS_BENCH_KEY` (default
@@ -59,7 +63,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-pub const USAGE: &str = "bench-remote failures [--all] | bench-remote why <id> <reason> | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue";
+pub const USAGE: &str = "bench-remote failures [--all] | bench-remote why <id> <reason> | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | bench-remote cancel <ext_job_id>";
+
+/// Why a job whose branch would be `main` by default is refused.
+pub const MAIN_REFUSED: &str = "running from the main checkout; run from your worktree, \
+                                or pass branch=main explicitly";
 
 /// The exit code of a job the box could not serve.
 pub const EX_TEMPFAIL: u8 = 75;
@@ -641,8 +649,14 @@ fn current_branch(root: &Path) -> Option<String> {
 /// from GitHub (its Benchfile, its target cache) before building the
 /// pushed code, so it is never swapped for main: a branch only this
 /// checkout has would build main's tree in the check (a new crate missing).
+///
+/// `main` is refused: a job sent from the main checkout by mistake (a `cd`
+/// into the worktree lost in a shell grouping) runs main's code and wastes
+/// box time. A run that really wants main says so with `branch=main`, which
+/// never comes here.
 pub fn branch_for(current: Option<&str>, push: bool) -> Result<String, String> {
     match current {
+        Some("main") => Err(MAIN_REFUSED.into()),
         Some(b) if !b.is_empty() && b != "HEAD" => Ok(b.to_string()),
         _ if push => Err(
             "--push needs a named branch and this checkout is on a detached \
@@ -909,6 +923,16 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
             });
         }
         _ => {}
+    }
+    if let ["cancel", rest @ ..] = args {
+        let Some(name) = parse_cancel(rest) else {
+            eprintln!("bench-remote: usage: bench-remote cancel <ext_job_id>");
+            return Some(ExitCode::from(2));
+        };
+        return Some(match cancel(root, &name) {
+            Ok(code) => ExitCode::from(code),
+            Err(e) => crate::fail(&[e]),
+        });
     }
     if args == ["queue"] {
         return Some(match queue(root) {
@@ -1254,7 +1278,8 @@ fn preflight(
     Ok(())
 }
 
-/// `branch=` when none is given: the current branch. With `--push`, the
+/// `branch=` when none is given: the current branch, refused when it is
+/// `main` (see `branch_for`). With `--push`, the
 /// branch is also put on origin when only this checkout has it.
 fn set_branch(root: &Path, req: &mut Request) -> Result<(), String> {
     if req.param("branch").is_none() {
@@ -1907,6 +1932,36 @@ fn watch_queue(b: Bench, id: String, stop: Arc<AtomicBool>) {
 }
 
 /// `bench-remote queue`: the box's `queue`, as it prints it.
+/// `cancel <ext_job_id>`: the box's job id for one job by its name,
+/// `x:<name>`, the name made acceptable to the box as `ext_job_id=` is (an
+/// `x:` already there is kept once). One name, nothing else.
+pub fn parse_cancel(args: &[&str]) -> Option<String> {
+    let [name] = args else { return None };
+    let name = name.strip_prefix("x:").unwrap_or(name);
+    if name.is_empty() || name.starts_with('-') {
+        return None;
+    }
+    let name = clean_ext_job_id(name);
+    (!name.is_empty()).then(|| format!("x:{name}"))
+}
+
+/// `cancel x:<name>` on the box: the job stops, queued or running; its log
+/// and `out/` are kept. For one's own jobs only (docs/bench.md, "Rules for
+/// agents").
+fn cancel(root: &Path, id: &str) -> Result<u8, String> {
+    let b = Bench::configure(root)?;
+    let status = b
+        .ssh(5, &["cancel", id])
+        .stdin(Stdio::null())
+        .status()
+        .map_err(|e| format!("cannot run ssh: {e}"))?;
+    Ok(match classify(status.code()) {
+        Outcome::Exit(c) => c,
+        Outcome::Unavailable => EX_TEMPFAIL,
+        Outcome::Lost => unavailable(&format!("unreachable ({})", b.destination)),
+    })
+}
+
 fn queue(root: &Path) -> Result<u8, String> {
     let b = Bench::configure(root)?;
     let status = b
@@ -2397,7 +2452,52 @@ mod tests {
             "a detached HEAD is refused"
         );
         assert!(branch_for(Some("HEAD"), true).is_err());
-        assert_eq!(branch_for(Some("main"), false).as_deref(), Ok("main"));
+    }
+
+    #[test]
+    fn an_implicit_main_is_refused_an_explicit_one_and_a_worktree_branch_pass() {
+        // from the main checkout, no branch= given: refused, with or without --push
+        for push in [false, true] {
+            let why = branch_for(Some("main"), push).unwrap_err();
+            assert_eq!(why, MAIN_REFUSED);
+            assert!(
+                why.contains("branch=main") && why.contains("worktree"),
+                "{why}"
+            );
+        }
+        // a worktree's branch goes through unchanged
+        assert_eq!(
+            branch_for(Some("feat/5356-x"), false).as_deref(),
+            Ok("feat/5356-x")
+        );
+        assert_eq!(
+            branch_for(Some("mainline"), true).as_deref(),
+            Ok("mainline")
+        );
+        // an explicit branch=main is kept as given: set_branch only asks
+        // branch_for when no branch= is there
+        let req = parse_args(&["check", "branch=main"]).unwrap();
+        assert_eq!(req.param("branch"), Some("main"));
+    }
+
+    #[test]
+    fn cancel_takes_one_job_name() {
+        assert_eq!(
+            parse_cancel(&["helios-wip-undo-lint"]).as_deref(),
+            Some("x:helios-wip-undo-lint")
+        );
+        assert_eq!(
+            parse_cancel(&["x:helios-wip-undo-lint"]).as_deref(),
+            Some("x:helios-wip-undo-lint")
+        );
+        assert_eq!(
+            parse_cancel(&["helios-feat/x-check"]).as_deref(),
+            Some(format!("x:{}", clean_ext_job_id("helios-feat/x-check")).as_str())
+        );
+        assert!(parse_cancel(&[]).is_none());
+        assert!(parse_cancel(&["a", "b"]).is_none());
+        assert!(parse_cancel(&["--branch"]).is_none());
+        assert!(parse_cancel(&["x:"]).is_none());
     }
 
     #[test]
