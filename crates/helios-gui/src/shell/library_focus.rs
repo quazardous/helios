@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 use egui::{Context as Egui, Rect};
 use egui_pop::api::windows::WindowId;
+use egui_pop::core::ui::UiPop as _;
 use helios_core::Message;
 use serde_json::{Value, json};
 
@@ -194,5 +195,5 @@ pub(super) fn elsewhere_ui(ui: &mut egui::Ui) {
             "The Library is open in its own window",
         ),
     );
-    ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+    ui.muted(text);
 }
