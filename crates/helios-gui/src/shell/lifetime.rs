@@ -381,13 +381,11 @@ impl Quit {
             Message::new("gui-quit-unsaved-detail", "Quitting now loses it: { $why }")
                 .with("why", why),
         ));
-        match app.service(&egui_pop::api::dialogs::DIALOGS) {
-            Some(dialogs) => Some(dialogs.open(choose)),
-            None => {
-                log::warn!(target: "helios", "no dialogs to ask before quitting");
-                None
-            }
-        }
+        let Some(dialogs) = app.service(&egui_pop::api::dialogs::DIALOGS) else {
+            log::warn!(target: "helios", "no dialogs to ask before quitting");
+            return None;
+        };
+        Some(dialogs.open(choose))
     }
 
     /// The one question before quitting: what it would cancel.
