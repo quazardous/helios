@@ -24,7 +24,7 @@
 //! step, with no demosaic.
 //!
 //! Then a warmed neighbour (`--warm`: the first raw whose name holds it,
-//! a NEF by default; the largest other raw shown): the shown one opened
+//! a NEF by default; the return scenario's first raw shown): the shown one opened
 //! cold while the neighbour warms (its `developed` state, as the desktop
 //! warms a neighbour), background work free then held back from the
 //! open's start to its preview; then the neighbour opened: its frame and
@@ -220,7 +220,14 @@ fn main() {
                 .is_some_and(|f| f.to_string_lossy().to_lowercase().contains(&a.warm))
         };
         let near = files.iter().find(|p| named(p)).unwrap_or(&files[1]);
-        let shown = files.iter().find(|p| *p != near).unwrap_or(&files[0]);
+        // Shown: the raw the return scenario opens first (one the
+        // network develops), else another.
+        let mid = &files[files.len() / 2 - 1];
+        let shown = if mid == near {
+            files.iter().find(|p| *p != near).unwrap_or(&files[0])
+        } else {
+            mid
+        };
         for hold in [false, true] {
             let line = match warmed_neighbour(shown, near, &bundle, gpu.as_ref(), hold, &records) {
                 Ok(line) => line,

@@ -452,6 +452,8 @@ mod tests {
         let photos: Vec<String> = (0..10).map(|i| format!("p{i}")).collect();
         for w in photos.windows(3) {
             life.publish(&bus, Some(&w[1]), &[w[0].clone(), w[2].clone()]);
+            // Each stop long enough for its neighbours to settle.
+            std::thread::sleep(SETTLE + Duration::from_millis(50));
             assert!(states.usage().bytes <= 250, "{:?}", states.usage());
         }
         until("every warm-up done", || warmer.warming().is_empty());
@@ -533,9 +535,10 @@ mod tests {
         assert_eq!(scrolled.started, 0, "{scrolled:?}");
         assert!(scrolled.skipped > 900, "{scrolled:?}");
         assert_eq!(states.counters().computed, 0);
-        // The scroll stops: the last photo's neighbour settles and warms.
-        until("the neighbour warmed", || runs.load(Ordering::SeqCst) == 1);
-        assert_eq!(warmer.counters().started, 1);
+        // The scroll stops: the last photo's two neighbours settle and
+        // warm.
+        until("the neighbours warmed", || runs.load(Ordering::SeqCst) == 2);
+        assert_eq!(warmer.counters().started, 2);
     }
 
     #[test]
