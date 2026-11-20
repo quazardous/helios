@@ -161,37 +161,53 @@ pub fn preview_oriented(path: &Path) -> Result<(Option<Image>, u8), String> {
     preview_oriented_at(path, None)
 }
 
-/// [`preview_oriented`] for a first paint `max` pixels long: the preview
-/// made in 8 bits before it is taken to the working space, so a first
-/// paint never converts a full-size preview in floating point.
+/// The size of a first paint: the long side it aims at, and the smallest
+/// long side a large embedded preview may be decoded at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaintSize {
+    /// The long side the paint aims at: a preview at least twice that
+    /// long is decoded at a DCT scale, a smaller one is shrunk only while
+    /// it stays at least that long.
+    pub side: u32,
+    /// The smallest long side a scaled decode may give, at most `side`.
+    pub floor: u32,
+}
+
+/// [`preview_oriented`] for a first paint of `size`: the preview made in
+/// 8 bits before it is taken to the working space, so a first paint never
+/// converts a full-size preview in floating point.
 ///
-/// When the file embeds a colour JPEG stream at least twice `max` long,
-/// the smallest such stream is decoded at the smallest DCT scale that
-/// keeps it at least `max` long ([`embedded::decode_scaled`]): a Nikon
-/// Z6 II's 6048 px preview asked 2560 px is decoded at 3024 px, never
-/// whole. A stream shorter than that gains nothing from the scaling and
-/// would cost a whole decode of a stream larger than the preview a raw
-/// names (a Sony A7S III's ARW holds one larger than its 1616 px
-/// preview, and decoding it took first pixels from 67 to 294 ms): rawler then decodes the raw's own largest preview alone
-/// (the smaller ones only when it is missing or unreadable), as before,
-/// and a whole-factor block mean shrinks it only while it stays at least
-/// `max` long.
+/// When the file embeds a colour JPEG stream at least twice `size.side`
+/// long, the smallest such stream is decoded at the smallest DCT scale
+/// that keeps it at least `size.floor` long ([`embedded::decode_scaled`]):
+/// a Nikon Z6 II's 6048 px preview, with a side of 2560 and a floor of
+/// 1440, is decoded at 1/4, 1512 px, never whole. A stream shorter than
+/// twice the side gains nothing from the scaling and would cost a whole
+/// decode of a stream larger than the preview a raw names (a Sony A7S
+/// III's ARW holds one larger than its 1616 px preview, and decoding it
+/// took first pixels from 67 to 294 ms): rawler then decodes the raw's
+/// own largest preview alone (the smaller ones only when it is missing or
+/// unreadable), as before, and a whole-factor block mean shrinks it only
+/// while it stays at least `size.side` long.
 ///
 /// # Errors
 /// The file cannot be read, or its format is unknown.
-pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Image>, u8), String> {
+pub fn preview_oriented_at(
+    path: &Path,
+    size: Option<PaintSize>,
+) -> Result<(Option<Image>, u8), String> {
     let bytes = preview_bytes(path)?;
     let source = RawSource::new_from_shared_vec(bytes.clone());
     let decoder = rawler::get_decoder(&source).map_err(|e| format!("{}: {e}", path.display()))?;
     let params = RawDecodeParams::default();
-    let scaled = max.and_then(|m| {
+    let scaled = size.and_then(|PaintSize { side, floor }| {
         let _span = helios_core::trace::span("preview.decode", || {
-            format!("{} scaled to {m}", path.display())
+            format!("{} scaled to {floor}", path.display())
         });
-        embedded::choose(&embedded::embedded_jpegs(&bytes), m)
+        embedded::choose(&embedded::embedded_jpegs(&bytes), side)
             .into_iter()
-            .filter(|e| !e.grey() && e.long() >= m.saturating_mul(2))
-            .find_map(|e| embedded::decode_scaled(&bytes[e.offset..], m).ok())
+            .filter(|e| !e.grey() && e.long() >= side.saturating_mul(2))
+            .find_map(|e| embedded::decode_scaled(&bytes[e.offset..], floor.min(side)).ok())
             .map(DynamicImage::ImageRgb8)
     });
     let found = scaled.or_else(|| {
@@ -213,8 +229,12 @@ pub fn preview_oriented_at(path: &Path, max: Option<u32>) -> Result<(Option<Imag
     let space = raw_preview_space(&bytes, metadata.as_ref());
     let fit = |img: DynamicImage| {
         let _span = helios_core::trace::span("preview.shrink", String::new);
-        match max {
-            Some(m) if img.width().max(img.height()) >= m.saturating_mul(2) => shrink(img, m),
+        match size {
+            Some(PaintSize { side, .. })
+                if img.width().max(img.height()) >= side.saturating_mul(2) =>
+            {
+                shrink(img, side)
+            }
             _ => img,
         }
     };

@@ -288,16 +288,25 @@ pub fn image(value: Value) -> Option<Arc<Image>> {
     value.downcast::<Image>().ok()
 }
 
-/// The long side a raw's first paint keeps at least, in pixels: a
-/// full-screen viewport's size. The embedded preview is decoded at the
-/// smallest DCT scale that keeps it (3024 px of a Nikon Z6 II's 6048),
-/// never at its full size, whose decode, float conversion and hash cost
-/// more than the paint needs.
+/// The long side a raw's first paint aims at, in pixels: a full-screen
+/// viewport's size. An embedded preview at least twice that long is
+/// decoded at a DCT scale, down to [`FIRST_PAINT_FLOOR`]; a smaller one
+/// is shrunk only while it stays at least this long.
 pub const FIRST_PAINT_SIDE: u32 = 2560;
 
+/// The smallest long side a large embedded preview is decoded at for the
+/// first paint, in pixels. A 3:2 photo fit in a 1920 x 1080 viewport is
+/// 1620 px long; this floor allows a first paint about 0.9 of that, so a
+/// 24 MP camera's 6048 px preview (a Nikon Z6 II's) is decoded at 1/4,
+/// 1512 px, a quarter of the pixels to decode, convert and hash of the
+/// 1/2 scale. The developed proxy replaces the paint soon after. A 45 MP
+/// camera's 8256 px preview stays at 1/4 (2064 px), its 1/8 being below
+/// the floor.
+pub const FIRST_PAINT_FLOOR: u32 = 1440;
+
 /// A raw's embedded preview alone in a graph (its source's `image`
-/// port), at least [`FIRST_PAINT_SIDE`] pixels long when it is that
-/// large (less than twice that), turned by the raw's
+/// port), sized for a first paint ([`FIRST_PAINT_SIDE`],
+/// [`FIRST_PAINT_FLOOR`]), turned by the raw's
 /// EXIF orientation as the development will be: what the desktop draws
 /// while the raw is developed. `None` for a picture or a raw without one.
 ///
@@ -307,7 +316,14 @@ pub fn first_paint(path: &std::path::Path) -> Option<(Graph, NodeId)> {
     if helios_load::Kind::of(path) != helios_load::Kind::Raw {
         return None;
     }
-    let (preview, tag) = helios_load::preview_oriented_at(path, Some(FIRST_PAINT_SIDE)).ok()?;
+    let (preview, tag) = helios_load::preview_oriented_at(
+        path,
+        Some(helios_load::PaintSize {
+            side: FIRST_PAINT_SIDE,
+            floor: FIRST_PAINT_FLOOR,
+        }),
+    )
+    .ok()?;
     let preview = helios_load::upright(preview?, tag);
     let mut graph = Graph::new();
     let node = graph.add_source("source", preview);
