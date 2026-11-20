@@ -54,10 +54,20 @@ runs:
       if: ${{ !cancelled() }}
       shell: bash
       run: cargo xtask ui-index --check
+    # A pull request: also fails on the translation gaps it adds since its
+    # merge base (English without French, reworded English whose French
+    # was not reviewed); the older gaps are the catch-up's backlog.
     - name: translation catalogues
       if: ${{ !cancelled() }}
       shell: bash
-      run: cargo xtask i18n check
+      env:
+        BASE: ${{ inputs.base }}
+      run: |
+        if [ -n "$BASE" ]; then
+          cargo xtask i18n check --new-since "$BASE"
+        else
+          cargo xtask i18n check
+        fi
     - name: changelog fragments, plugin ranges and Cargo.lock
       if: ${{ !cancelled() }}
       shell: bash

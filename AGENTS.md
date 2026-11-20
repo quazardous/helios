@@ -36,6 +36,11 @@ with its test manifest, stop; the tester runs the box jobs and merges). It appli
   touched, one test name per filter, never `test-affected` or the whole
   suite), stop. Authors never merge and never wait for the box or CI; the
   tester does both.
+- A change that adds or rewords an English string (a declaration's label,
+  a `Message::new`) writes its French in `i18n/fr/` and runs `cargo xtask
+  i18n extract`, then `cargo xtask i18n stamp fr` (`--all` after
+  reviewing reworded keys): pr-lint fails a pull request that leaves new
+  English untranslated (see `i18n/README.md`).
 - The bench box is shared by several agents: follow "Rules for agents" in
   `docs/bench.md` (narrowest job first, deadlines in tests, one blocking
   wait per job, never `pgrep`/`pkill` waiters).
