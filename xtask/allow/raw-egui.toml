@@ -5,7 +5,7 @@
 
 [files]
 "activity.rs" = 6
-"caption.rs" = 4
+"caption.rs" = 2
 "graph.rs" = 2
 "jobs.rs" = 10
 "library/versions.rs" = 3
