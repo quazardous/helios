@@ -8,7 +8,7 @@
 //! `before`), each with its deadline:
 //!
 //! - [`UNSAVED`]: an edit whose save failed and that nobody chose to
-//!   discard: it refuses, and the hook asks "Retry saving", "Quit
+//!   discard: it refuses, and the hook asks "Save", "Quit
 //!   without saving" or Cancel;
 //! - [`JOBS`]: jobs are running and nobody confirmed cancelling them:
 //!   it refuses, and the hook asks "Quit Helios?";

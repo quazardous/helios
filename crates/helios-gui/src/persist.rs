@@ -2772,7 +2772,7 @@ impl<S: Store + 'static> Persist<S> {
             .map(|e| e.failed.clone().unwrap_or_else(|| "its save failed".into()))
     }
 
-    /// "Retry saving" chosen before quitting ([`Shell::take_save_retry`]):
+    /// "Save" chosen before quitting ([`Shell::take_save_retry`]):
     /// the edit open saved now, its answer waited for, then the quit asked
     /// again: saved, it goes; failed again, the question is asked again.
     fn retry_save_on_quit(&mut self, shell: &mut Shell, now: f64) {

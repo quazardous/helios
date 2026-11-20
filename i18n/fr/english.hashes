@@ -1527,7 +1527,7 @@ gui-quit-jobs-detail 70be8d39bb030494
 gui-quit-title 8d4beb9036a59719
 gui-quit-unsaved-detail fa87403b713d1fe9
 gui-quit-unsaved-discard 9bba398000e76f02
-gui-quit-unsaved-retry f44b627cb86c5719
+gui-quit-unsaved-save 835b5f8f6d37f13e
 gui-quit-unsaved-title d2e2973c4176e252
 gui-quit-verb a4050ce0b3604cfc
 gui-recent-filters-none 478b93a2d42fc0d2
