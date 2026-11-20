@@ -106,7 +106,9 @@ impl Side {
         assert!(refused.is_empty(), "{refused:?}");
         let refused = declare_all(
             &*kernel,
-            &[PointDecl::of::<Ping>("A ping, answered on the node").facets(PING_FACETS)],
+            &[PointDecl::of::<Ping>("A ping, answered on the node")
+                .facets(PING_FACETS)
+                .fail_closed()],
         );
         assert!(refused.is_empty(), "{refused:?}");
         Side { facts, kernel }

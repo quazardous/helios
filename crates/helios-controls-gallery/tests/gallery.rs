@@ -10,7 +10,6 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::egui::accesskit::{Orientation, Role};
 use helios_controls::catalogue::EXPOSURE;
 use helios_controls::render::Drawn;
-use helios_controls::slot::Fallback;
 use helios_controls_gallery::{Fit, Gallery, VIEWS, View, set_value};
 
 type Implicit = (Gallery, Vec<(String, Drawn)>);
@@ -134,20 +133,22 @@ fn drawn(h: &Harness<'_, Implicit>, key: &str) -> Drawn {
 }
 
 #[test]
-fn the_implicit_card_draws_its_curve_and_wheel_wide_and_falls_back_compact() {
+fn the_implicit_card_draws_its_curve_and_wheel_wide_and_as_rows_compact() {
     let mut results = egui_kittest::SnapshotResults::new();
     let mut h = implicit_harness(Fit::Wide);
     h.run();
-    assert_eq!(drawn(&h, "curve"), Drawn::Integrated);
-    assert_eq!(drawn(&h, "lift"), Drawn::Integrated);
+    // egui_hud draws them since 0.10: egui-pop's editors, managed.
+    assert_eq!(drawn(&h, "curve"), Drawn::Managed);
+    assert_eq!(drawn(&h, "lift"), Drawn::Managed);
     assert_eq!(drawn(&h, "amount"), Drawn::Managed);
     assert!(h.query_by_label("Preserve colours").is_some());
     snapshot_into(&mut h, "implicit_card_wide", &mut results);
 
     let mut h = implicit_harness(Fit::Compact);
     h.run();
-    assert_eq!(drawn(&h, "curve"), Drawn::Fallback(Fallback::ValueType));
-    assert_eq!(drawn(&h, "lift"), Drawn::Fallback(Fallback::ValueType));
+    // In a row, egui_hud draws their value type's rows itself.
+    assert_eq!(drawn(&h, "curve"), Drawn::Managed);
+    assert_eq!(drawn(&h, "lift"), Drawn::Managed);
     // The curve's points as numbered rows, the wheel's channels.
     assert!(h.query_by_label("Curve 1 x").is_some());
     assert!(h.query_by_label("Lift Luminance").is_some());
