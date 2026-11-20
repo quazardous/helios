@@ -2711,3 +2711,51 @@ fn accounts_snapshots() {
     h.run_steps(4);
     results.add(h.try_window_shot("accounts-connect-form-pop-dark-1x", "Import photos"));
 }
+
+/// Every Sources item drawn selected (accesskit's toggled state, which
+/// egui-pop's places panel sets from the same flag it paints the selected
+/// fill from), by label.
+pub fn selected_items(h: &Harness<'_, Shell>) -> Vec<String> {
+    h.query_all(egui_kittest::kittest::by().predicate(|n| {
+        n.toggled() == Some(egui::accesskit::Toggled::True) && n.description().is_some()
+    }))
+    .filter_map(|n| n.accesskit_node().label())
+    .collect()
+}
+
+/// An account clicked in Sources is drawn selected, with the keyboard on
+/// it as well: the selected fill under the focus outline, never the
+/// outline alone (the snapshot `accounts-choose` showed only a hover
+/// border).
+#[test]
+fn an_account_clicked_then_focused_is_drawn_selected() {
+    let (mut h, ..) = picking_world(None);
+    h.run_steps(4);
+    let row = h.get_by_label("ann@example.org");
+    let all: Vec<_> = h
+        .query_all_by_label_contains("ann@example.org")
+        .map(|n| {
+            (
+                n.accesskit_node().label(),
+                n.accesskit_node().role(),
+                n.toggled(),
+                n.is_focused(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        row.toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "the account clicked is selected: {all:?}; selected {:?}",
+        selected_items(&h)
+    );
+    row.focus();
+    h.run_steps(3);
+    let row = h.get_by_label("ann@example.org");
+    assert!(row.is_focused());
+    assert_eq!(
+        row.toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "focused, still selected"
+    );
+}
