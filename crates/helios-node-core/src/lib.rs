@@ -30,6 +30,7 @@ pub mod phases;
 pub mod promises;
 pub mod quit;
 pub mod reads;
+pub mod reset;
 pub mod settings;
 pub mod volumes;
 pub mod warm;
