@@ -1247,9 +1247,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop"
-version = "0.18.1"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aac5da0e7b2d2533cab0d3c26120d6e73def8ca4587b70168c75ec8d2235dfb0"
+checksum = "5a8616011f7a529b97f4f2fc2bda55d967a906e935d79a5ba27c963bfbedac61"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1267,9 +1267,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-agent"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8a03983b5a8a6d322761e9aa9055c7ce3e0caddc2fb7011eadd7685db7c9836"
+checksum = "507291a57d3558b827505b6291ffde437c8f4e669fd466a99517c3d0179cefdc"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1286,9 +1286,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-api"
-version = "0.16.1"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa99402b6a8f0fb9c90325cb6c19894817f5385c6984fc2a03cd7fab20d519fd"
+checksum = "30bf33a9ea3498c2410daacb26fca63d78fc6e316d87bb57a5818cfacd2c3d90"
 dependencies = [
  "bus-contract",
  "bus-contract-crossing",
@@ -1402,9 +1402,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-model"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d19ae6ee7c485454f145e67fe90988fc18bfbdb6a82e3e497aae8c1f9705ed5"
+checksum = "90291ab2ff030c083e0635a0dae3a23f22cd29095b2096a3ef2c01acce28b3b0"
 dependencies = [
  "idna",
  "log",
@@ -1447,9 +1447,9 @@ dependencies = [
 
 [[package]]
 name = "egui-pop-test"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b53a6aafc55002ec53760fa64aeb515e58ec9d499ab013a7a5bda99c223226c6"
+checksum = "4c719e5912976571c634835c2e1c2add87cb63ad2325cab68fcaa4a5d338b05b"
 dependencies = [
  "egui",
  "egui-pop-api",
@@ -1647,9 +1647,9 @@ dependencies = [
 
 [[package]]
 name = "egui_stack"
-version = "0.30.1"
+version = "0.30.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4c81cb8ce1d9c24d3dfff80bce1ada4cff75b29ccde5e9aaf25c8a75f362944"
+checksum = "cfda3f2530631ee064ef61de58550c949be16f08c442b205a4a96305615ebf28"
 dependencies = [
  "bus-contract",
  "duplicate",

@@ -2,11 +2,15 @@
 //! (`egui_pop_test::scenario::live::cli`), built in this workspace so the
 //! box's `scenarios` job (tools/bench/scenarios.py) needs no other
 //! checkout. It drives a `helios-gui` already running with its agent
-//! socket on (`EGUI_POP_AGENT_SOCKET`) and writable (`HELIOS_AGENT_PRESET=scenario+private`);
-//! see docs/gui.md, "Agents".
+//! socket on (`EGUI_POP_AGENT_SOCKET`) and writable (`HELIOS_AGENT_PRESET=scenario+private`),
+//! the runner paired by the token Helios issued at start: `--token`,
+//! `--token-file`, else `EGUI_POP_AGENT_TOKEN` or
+//! `EGUI_POP_AGENT_TOKEN_FILE`, as given to helios-gui; see docs/gui.md,
+//! "Agents".
 //!
 //! ```text
-//! scenarios --socket PATH [--out DIR] [--var NAME=VALUE]... [--shot CAPABILITY ARGS_JSON] FILE_OR_DIR...
+//! scenarios --socket PATH [--out DIR] [--var NAME=VALUE]... [--shot CAPABILITY ARGS_JSON]
+//!           [--deadline-ms N] [--connect-ms N] [--token TOKEN | --token-file PATH] FILE_OR_DIR...
 //! ```
 
 #[cfg(unix)]

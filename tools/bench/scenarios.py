@@ -12,7 +12,8 @@ library (`--vault`), a workspace, a configuration with the first-run
 questions answered, and a folder of known photos (the plugin tests'
 JPEG fixtures and a synthetic picture). `helios-gui` starts in its own
 compositor with its agent socket on and writable (`EGUI_POP_AGENT_SOCKET`,
-`HELIOS_AGENT_PRESET=scenario+private`); the runner (`--runner`, the `scenarios`
+`HELIOS_AGENT_PRESET=scenario+private`, the runner's token in
+`EGUI_POP_AGENT_TOKEN`); the runner (`--runner`, the `scenarios`
 example: egui-pop's scenario command line) replays the scenario over the
 socket, with `$folder`, `$image` and `$count` (the photos in
 `$folder`) set and `gui.snapshot` as the shot
@@ -35,6 +36,7 @@ import argparse
 import importlib.util
 import json
 import os
+import secrets
 import shutil
 import socket
 import subprocess
@@ -47,6 +49,38 @@ from wbox.server import build_compositor
 APP_ID = "helios-gui"
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE.parents[1] / "crates/helios-plugin/tests/fixtures/rated-photos"
+
+
+# The scenario preset pairs one runner in advance (docs/gui.md, "Agents"):
+# helios-gui is given this token at start, and each connection says
+# `hello` with it before its request; an unpaired client only reads.
+TOKEN_ENV = "EGUI_POP_AGENT_TOKEN"
+TOKEN = secrets.token_hex(32)
+
+
+def read_line(s: socket.socket) -> dict:
+    """One JSON-RPC answer line from `s`, `{}` when the socket closes first."""
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+    return json.loads(data.decode() or "{}")
+
+
+def say_hello(s: socket.socket, token: str = TOKEN) -> None:
+    """Pairs this connection with the pre-issued `token`, or raises."""
+    line = {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "hello",
+        "params": {"name": "helios-bench", "token": token},
+    }
+    s.sendall((json.dumps(line) + "\n").encode())
+    answer = read_line(s)
+    if "error" in answer or not answer:
+        raise RuntimeError(f"hello: {answer.get('error', 'no answer')}")
 
 
 def synthetic_picture(path: Path) -> None:
@@ -106,7 +140,7 @@ def world(work: Path) -> dict:
     }
 
 
-def quit_app(sock: Path, proc, within: float = 10.0) -> str:
+def quit_app(sock: Path, proc, within: float = 10.0, token: str = TOKEN) -> str:
     """Closes helios-gui through `workbench.quit` on its agent socket, before
     the compositor stops: `clean` when it exits within `within` seconds,
     else why not (the compositor's stop then ends it)."""
@@ -126,10 +160,11 @@ def quit_app(sock: Path, proc, within: float = 10.0) -> str:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(within)
             s.connect(str(sock))
+            say_hello(s, token)
             s.sendall((json.dumps(request) + "\n").encode())
             # The answer, or the socket closing with the application.
             s.recv(65536)
-    except OSError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return f"no quit: {exc}"
     try:
         proc.wait(timeout=within)
@@ -164,6 +199,7 @@ def run_one(args, scenario: Path) -> dict:
             "XDG_STATE_HOME": str(work / "state"),
             "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
             "HELIOS_AGENT_PRESET": "scenario+private",
+            TOKEN_ENV: TOKEN,
             "HELIOS_SCENARIO_STDERR": str(keep / "stderr.txt"),
         }
         entry["launch"] = comp.launch(cmd, env)
@@ -193,7 +229,12 @@ def run_one(args, scenario: Path) -> dict:
         ]
         try:
             done = subprocess.run(
-                runner, capture_output=True, text=True, timeout=args.timeout, check=False
+                runner,
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
+                check=False,
+                env={**os.environ, TOKEN_ENV: TOKEN},
             )
             entry["rc"] = done.returncode
             lines = [json.loads(line) for line in done.stdout.splitlines() if line.startswith("{")]

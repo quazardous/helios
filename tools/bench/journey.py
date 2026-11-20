@@ -66,6 +66,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -240,6 +241,9 @@ def profile(work: Path) -> dict[str, str]:
         "XDG_PICTURES_DIR": str(dirs["home"] / "Pictures"),
         "EGUI_POP_AGENT_SOCKET": str(dirs["agent"] / "helios.sock"),
         "HELIOS_AGENT_PRESET": "scenario+private",
+        # The runner's pairing, issued by helios-gui at start: the runner
+        # reads the same variable, `rpc` says `hello` with it.
+        "EGUI_POP_AGENT_TOKEN": secrets.token_hex(32),
     }
 
 
@@ -345,14 +349,9 @@ class Journey:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(within)
             s.connect(self.env["EGUI_POP_AGENT_SOCKET"])
+            self.mod.say_hello(s, self.env["EGUI_POP_AGENT_TOKEN"])
             s.sendall((json.dumps(request) + "\n").encode())
-            buf = b""
-            while not buf.endswith(b"\n"):
-                chunk = s.recv(1 << 16)
-                if not chunk:
-                    break
-                buf += chunk
-        answer = json.loads(buf)
+            answer = self.mod.read_line(s)
         if "error" in answer:
             raise RuntimeError(f"{method}: {answer['error']}")
         return answer.get("result")
@@ -430,7 +429,12 @@ class Journey:
         entry: dict = {"step": step}
         try:
             done = subprocess.run(
-                runner, capture_output=True, text=True, timeout=self.args.timeout, check=False
+                runner,
+                capture_output=True,
+                text=True,
+                timeout=self.args.timeout,
+                check=False,
+                env={**os.environ, "EGUI_POP_AGENT_TOKEN": self.env["EGUI_POP_AGENT_TOKEN"]},
             )
             entry["rc"] = done.returncode
             if done.returncode != 0:
@@ -446,7 +450,12 @@ class Journey:
 
     def quit(self) -> dict:
         proc = self.comp.state.app_proc
-        how = self.mod.quit_app(Path(self.env["EGUI_POP_AGENT_SOCKET"]), proc, within=20.0)
+        how = self.mod.quit_app(
+            Path(self.env["EGUI_POP_AGENT_SOCKET"]),
+            proc,
+            within=20.0,
+            token=self.env["EGUI_POP_AGENT_TOKEN"],
+        )
         entry: dict = {"step": "quit", "how": how}
         code = None if proc is None else proc.poll()
         entry["exit"] = code

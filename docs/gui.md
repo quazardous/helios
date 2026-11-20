@@ -1397,7 +1397,10 @@ when a command whose title names a `path`, `folder`, `source`,
 that delete or forget data (photos to the trash, albums, keywords,
 versions, nodes), overwrite marks or settings, sign an account out or reset
 more than one value are declared destructive to egui-pop (the list is
-`destructive::DESTRUCTIVE` in helios-gui): an agent's call opens a
+`destructive::DESTRUCTIVE` in helios-gui). A command destructive only
+with some arguments is listed with them in `destructive::DESTRUCTIVE_IF`
+and declared with egui-pop's `destructive_if`: `library.export` asks only
+with `clash: overwrite`. An agent's destructive call opens a
 confirmation naming the agent and its arguments, and runs only once the
 user accepts; the user's own runs are never asked. The commands agents
 use most, and every destructive and private one, declare their
@@ -1409,18 +1412,24 @@ since the user's own runs are checked too. Unit tests fail when a
 command whose words say it may destroy is in neither list, or when a
 command with arguments has no schema and no reason.
 
-**Writing agents and scenarios (2026-11-19).**
-`HELIOS_AGENT_PRESET=scenario` makes the bridge writable and gives every
-agent, paired or not, the scenario grant: every command, value writes
-and `ui` actions, private data withheld; `scenario+private` adds private
-data, which importing a folder or opening a file by its path needs.
-Destructive commands are still confirmed by the user. Scenario runners
-do not say `hello` yet, so the grant goes to unpaired clients too. The
-agent may then import, open images, change parameters and undo, as a
-person would. It is meant for runs on a throwaway library, never set by
-Helios itself. `HELIOS_AGENT_WRITE=1`, the switch before it, still works
-for one release as an alias of `scenario+private`, with a warning in the
-log. Quick open's
+**Writing agents and scenarios (2026-11-19, paired 2026-11-20).**
+`HELIOS_AGENT_PRESET=scenario` makes the bridge writable and pairs the
+scenario runner in advance: at start Helios issues a pairing (agent id
+`scenario`) with the scenario grant, every command, value writes and
+`ui` actions, private data withheld; `scenario+private` adds private
+data, which importing a folder or opening a file by its path needs. The
+token is the one `EGUI_POP_AGENT_TOKEN` gives (32 characters at least),
+else a new one Helios writes to the file `EGUI_POP_AGENT_TOKEN_FILE`
+names, readable by the user only. The runner says `hello` with it
+(`scenarios --token-file PATH`, or the same variables), and the grant
+reaches that client only: unpaired clients still only read, and agents
+the user pairs get the scenario grant too. Without either variable the
+preset logs a warning and no runner writes. Destructive calls are still
+confirmed by the user. The agent may then import, open images, change
+parameters and undo, as a person would. It is meant for runs on a
+throwaway library, never set by Helios itself. `HELIOS_AGENT_WRITE`, the
+switch before the preset, was removed: it grants nothing and logs a
+warning. Quick open's
 `workbench.quickOpen.go` also takes `file:<path>`, so an agent opens an
 image by its path. Helios's scenarios (`crates/helios-gui/tests/scenarios`,
 egui-pop's `docs/scenarios.md`) are replayed that way by the box's

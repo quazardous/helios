@@ -400,6 +400,20 @@ mod tests {
     }
 
     #[test]
+    fn a_per_call_destructive_rule_names_a_value_its_schema_allows() {
+        for (id, arg, value) in crate::destructive::DESTRUCTIVE_IF {
+            let s = schema(id).unwrap_or_else(|| panic!("{id} has no schema"));
+            let allowed = &s["properties"][arg]["enum"];
+            assert!(
+                allowed
+                    .as_array()
+                    .is_some_and(|a| a.contains(&json!(value))),
+                "{id}: `{arg}: {value}` is not a value its schema allows ({allowed})"
+            );
+        }
+    }
+
+    #[test]
     fn every_destructive_command_with_arguments_has_a_schema() {
         let catalogue = catalogue();
         let missing: Vec<_> = crate::destructive::DESTRUCTIVE

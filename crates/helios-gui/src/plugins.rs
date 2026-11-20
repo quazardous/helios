@@ -360,6 +360,9 @@ pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, Plug
     if crate::destructive::is_destructive(&spec.id) {
         s = s.destructive();
     }
+    for (arg, value) in crate::destructive::destructive_if(&spec.id) {
+        s = s.destructive_if(arg, serde_json::json!(value));
+    }
     Ok(s)
 }
 

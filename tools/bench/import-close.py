@@ -10,7 +10,8 @@ Python that has the wbox library:
                     [--budget-ms MS]
 
 `helios-gui` starts in its own compositor on a throwaway library, with its
-agent socket on (`EGUI_POP_AGENT_SOCKET`, `HELIOS_AGENT_PRESET=scenario+private`) and its
+agent socket on (`EGUI_POP_AGENT_SOCKET`, `HELIOS_AGENT_PRESET=scenario+private`, the
+pre-issued token in `EGUI_POP_AGENT_TOKEN`) and its
 frame trace (`HELIOS_FRAME_TRACE`: a line on standard error per frame
 begun, with the viewport, and when the import window closes). For each
 way of closing, in turn: the import window is opened on `--folder` (a
@@ -45,6 +46,7 @@ import argparse
 import contextlib
 import json
 import os
+import secrets
 import shutil
 import socket
 import subprocess
@@ -103,11 +105,44 @@ def world(work: Path) -> dict:
     }
 
 
+# The scenario preset pairs one runner in advance (docs/gui.md, "Agents"):
+# helios-gui is given this token at start, and each connection says
+# `hello` with it before its request; an unpaired client only reads.
+TOKEN_ENV = "EGUI_POP_AGENT_TOKEN"
+TOKEN = secrets.token_hex(32)
+
+
+def read_line(s: socket.socket) -> dict:
+    """One JSON-RPC answer line from `s`, `{}` when the socket closes first."""
+    data = b""
+    while not data.endswith(b"\n"):
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+    return json.loads(data.decode() or "{}")
+
+
+def say_hello(s: socket.socket, token: str = TOKEN) -> None:
+    """Pairs this connection with the pre-issued `token`, or raises."""
+    line = {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "hello",
+        "params": {"name": "helios-bench", "token": token},
+    }
+    s.sendall((json.dumps(line) + "\n").encode())
+    answer = read_line(s)
+    if "error" in answer or not answer:
+        raise RuntimeError(f"hello: {answer.get('error', 'no answer')}")
+
+
 class Agent:
     """helios-gui's agent socket: one JSON-RPC request per connection."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, token: str = TOKEN):
         self.path = path
+        self.token = token
         self.next_id = 0
 
     def request(self, method: str, params: dict, within: float = 30.0) -> dict:
@@ -116,14 +151,9 @@ class Agent:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(within)
             s.connect(str(self.path))
+            say_hello(s, self.token)
             s.sendall((json.dumps(line) + "\n").encode())
-            data = b""
-            while not data.endswith(b"\n"):
-                chunk = s.recv(65536)
-                if not chunk:
-                    break
-                data += chunk
-        answer = json.loads(data.decode() or "{}")
+            answer = read_line(s)
         if "error" in answer:
             raise RuntimeError(f"{method}: {answer['error']}")
         return answer.get("result", {})
@@ -395,6 +425,7 @@ def run(args, index: int, way: str, cover: str) -> dict:
             "XDG_CACHE_HOME": str(work / "cache"),
             "EGUI_POP_AGENT_SOCKET": str(w["socket"]),
             "HELIOS_AGENT_PRESET": "scenario+private",
+            TOKEN_ENV: TOKEN,
             "HELIOS_FRAME_TRACE": "1",
             "HELIOS_TRACE_FILE": str(trace),
         }
