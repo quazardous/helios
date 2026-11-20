@@ -6,8 +6,6 @@
 //!   traits, and Helios's values, descriptors and parameter widgets
 //!   mapped to the framework's.
 //! - [`flow`]: the value flow on `helios_values::Store`.
-//! - [`gizmo`]: handles on the image, a shape's case drawn as one more
-//!   surface of its parameters' controls.
 //! - [`commands`]: the `controls.*` commands declared in the shell's
 //!   command registry, and what the `controls` collector reads.
 //! - [`HeliosRegistry`]: the standard registry (the catalogue) and the
@@ -20,7 +18,6 @@
 pub mod catalogue;
 pub mod commands;
 pub mod flow;
-pub mod gizmo;
 pub mod values;
 
 #[cfg(feature = "render")]

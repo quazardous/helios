@@ -269,10 +269,6 @@ fn scaled_to(image: &Image, extent: Region) -> Image {
 /// The image's id as egui-pop's canvas in use (`egui_pop::core::canvas`).
 pub const CANVAS: &str = "helios.viewport.canvas";
 
-/// The side of a mask handle's edit area, in points (the viewport's
-/// overlay senses its drag over about as much).
-const HANDLE_AREA: f32 = 14.0;
-
 /// What the zoom commands ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZoomTo {
@@ -807,8 +803,8 @@ impl Viewport {
                 let m = self.shape(store, shape.as_deref())?;
                 unlocked(store, &m.node)?;
                 // A case's handle: the drag its pointer makes, at once.
-                if let Some(g) = helios_controls::gizmo::of_module(&m.module) {
-                    let d = helios_controls::gizmo::Drag::begin(
+                if let Some(g) = helios_rack::tools::of_module(&m.module) {
+                    let d = helios_rack::tools::Drag::begin(
                         store,
                         &g,
                         &m.node,
@@ -1185,11 +1181,12 @@ impl Viewport {
     /// the split), or edits while a path is being drawn on it; each
     /// handle of the selected shape edits the parameter it drags, named
     /// with its value in its hover card. The viewport keeps sensing the
-    /// handles' drags (its overlays) and their cursor: their areas sense
-    /// the hover alone.
+    /// handles' drags (its overlays) and their cursor: each handle is
+    /// declared through `egui_hud`'s `declare_handle`, which senses the
+    /// hover alone over the overlay's hit target.
     fn declare_areas(
         &self,
-        ui: &Ui,
+        ui: &mut Ui,
         response: &egui::Response,
         mapping: Option<&egui_pop::viewport::Mapping>,
         store: &Store,
@@ -1201,25 +1198,24 @@ impl Viewport {
         };
         areas::register(ui, response, image);
         let Some(m) = mapping else { return };
-        let ctx = ui.ctx();
-        let locale = crate::i18n::locale(ctx);
+        let ctx = ui.ctx().clone();
+        let locale = crate::i18n::locale(&ctx);
         for h in self.masks.handle_areas() {
             let at = m.image_to_screen(h.at);
-            let rect = egui::Rect::from_center_size(at, egui::vec2(HANDLE_AREA, HANDLE_AREA));
             if !response.rect.contains(at) {
                 continue;
             }
-            let r = ui.interact(rect, ui.scope_id().with(&h.id), egui::Sense::hover());
+            let id = ui.scope_id().with(&h.id);
             let entry = store.get(&h.path);
             let control = entry.map_or_else(
                 || h.path.clone(),
-                |e| crate::params::label(ctx, &h.path, &e.descriptor),
+                |e| crate::params::label(&ctx, &h.path, &e.descriptor),
             );
             let mut spec = AreaSpec::edit(h.id, control).path(h.path.clone());
             if let Some(e) = entry.filter(|e| matches!(e.value, Value::Float(_) | Value::Int(_))) {
                 spec = spec.value(crate::params::shown_in(&locale, &e.descriptor, &e.value));
             }
-            areas::register(ui, &r, spec);
+            helios_controls::render::declare_handle(ui, at, id, spec);
         }
     }
 

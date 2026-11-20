@@ -70,7 +70,7 @@ the same patterns as visual-identity.md's audit, on `next` of
 
 | Panel | World | Today's source of controls | Raw |
 |---|---|---|---|
-| Image (`helios.viewport`) | visual | egui-pop's viewport (tiles, display transform, navigation) in `viewport.rs`; mask outlines and handles on egui-pop's overlay kit in `masks.rs`, their behaviour declared in `helios-controls/src/gizmo.rs` | 1 + 0 |
+| Image (`helios.viewport`) | visual | egui-pop's viewport (tiles, display transform, navigation) in `viewport.rs`; mask outlines and handles on egui-pop's overlay kit in `masks.rs`, their behaviour declared in `helios-rack/src/tools.rs` on `egui_hud::handle`'s kinds | 1 + 0 |
 | Graph (`helios.graph`) | visual | egui-pop's graph view (`egui_pop::viewport::graph`) in `graph.rs` | 6 |
 | Library (`helios.vault`) | mixed | grid, marks, tags, compare from `egui_pop::views::library`; filters and search hand-drawn around it in `library.rs`, `library/keywords.rs`, `recent_filters.rs` | 40 + 6 |
 | Modules (`helios.modules`) | forms | hand-drawn list, `modules.rs` | 17 |
@@ -306,7 +306,7 @@ read.
 | Keyboard shortcuts | egui-pop's keymap and commands | helios-ui actions and rack controls declare commands; keys bound in the keymap (controls.md slice 15) |
 | Accessibility names | egui-pop (every widget sets its `WidgetInfo`) | the label given in the declaration; never set by Helios code |
 | Agent control | egui-pop-agent (the bridge), commands | forms: commands and labels; rack: `controls.*` commands and named controls, the same bridge |
-| Undo and history | egui-pop's history contract | helios-ui actions run commands (one step each); rack gestures are store gestures, one step per drag (as `gizmo.rs` does) |
+| Undo and history | egui-pop's history contract | helios-ui actions run commands (one step each); rack gestures are store gestures, one step per drag (as `helios-rack/src/tools.rs` does) |
 | i18n | egui-pop-i18n; Helios's catalogues in helios-i18n | declarations carry message ids; frameworks resolve them |
 | Notifications | the log sink (log-alerts.md) | `helios_ui::notify`; the rack reports a module's state to the same sink |
 | Tokens and theme | egui-pop | read by egui-pop's widgets only; neither helios-ui, helios-rack nor egui_hud reads a colour |
@@ -400,7 +400,7 @@ mask:
 
 | Today | Lines | egui knowledge |
 |---|---|---|
-| the gizmo declaration (`helios-controls/src/gizmo.rs`, `circle_mask`) | about 45 | none (already declarative) |
+| the gizmo declaration (`helios-controls/src/gizmo.rs`, `circle_mask`; now `helios-rack/src/tools.rs`) | about 45 | none (already declarative) |
 | the patch to the catalogue (as `modules/exposure`' `patches`) | about 20 | none |
 | hosting in the viewport: outlines, handle positions, signals, drags, Escape, wheel (`helios-gui/src/masks.rs` is 1,509 lines for all shapes; a new tool's share) | 200 to 400 | `Rect`, `Pos2`, `Response`, overlay `Signal`s, the viewport's hooks |
 | a side toolbox, hand-drawn | 50 to 100 | `ui.horizontal`, buttons, tooltips |
@@ -414,7 +414,9 @@ for every tool.
 `apply` function per handle is code today (`gizmo.rs`' `Apply`); the
 frame needs handle *kinds* that know their own maths (point, radius
 around a point, feather outside a radius, angle, line), with a code
-hook only for unusual shapes. A per-patch range and default (controls.md
+hook only for unusual shapes. (Done 2026-11-20: `egui_hud::handle`'s
+kinds and `HandleMaths` hook, egui_hud 0.11; the circle, ellipse and
+gradient tools are declared on them in `helios-rack/src/tools.rs`.) A per-patch range and default (controls.md
 slice 12, open) is needed for `feather`. The scalar handle and mapping
 hook (controls.md items 3 and 4) are needed for oriented spaces.
 
