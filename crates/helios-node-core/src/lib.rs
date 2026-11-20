@@ -25,6 +25,7 @@ pub mod jobs;
 pub mod library;
 pub mod map;
 pub mod node;
+pub mod node_quit;
 pub mod phases;
 pub mod promises;
 pub mod quit;
@@ -48,6 +49,14 @@ pub const FACTS: &[helios_core::FactDecl] = {
             .relayable(),
         FactDecl::of::<settings::LayerChanged>("A settings layer the node keeps changed")
             .relayable(),
+        FactDecl::of::<node_quit::ListenerBegan>(
+            "A listener of the node's quit began: the one the quit waits on now",
+        )
+        .relayable(),
+        FactDecl::of::<node_quit::QuitEnded>(
+            "The node's quit ended: each listener finished, late (cut or not) or failed",
+        )
+        .relayable(),
         // Their typed points are this crate's own (`volumes::POINTS`).
         FactDecl::of::<volumes::Mounted>(
             "A volume mounted: plugged in, or there at the first look",

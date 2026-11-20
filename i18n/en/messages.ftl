@@ -605,6 +605,8 @@ gui-end-jobs = Checking the running jobs
 
 gui-end-node = Asking the library's node to stop
 
+gui-end-node-waiting = Waiting for: { $what }
+
 gui-export-bits = PNG bits per channel
 
 gui-export-cancelled = The export was cancelled: { $written } photos written to { $folder }

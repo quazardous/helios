@@ -373,6 +373,8 @@ gui-end-jobs = Vérification des tâches en cours
 
 gui-end-node = Demande d’arrêt au nœud de la bibliothèque
 
+gui-end-node-waiting = En attente de : { $what }
+
 gui-end-client = Déconnexion du nœud de la bibliothèque
 
 gui-end-host-step = { $step } (fenêtre)

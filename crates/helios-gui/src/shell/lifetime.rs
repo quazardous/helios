@@ -412,6 +412,12 @@ impl Shell {
         outcome
     }
 
+    /// What the node's quit did (`helios.node.quit`), kept in the end's
+    /// report with the node's listeners by their id.
+    pub fn quit_node_ended(&self, ended: &helios_node_core::node_quit::QuitEnded) {
+        self.lifetime.quit.ended.borrow_mut().record_node(ended);
+    }
+
     /// The host's end step `id` did its part.
     pub fn quit_host_step_done(&self, id: &str) {
         let done = crate::app_quit::TurnOutcome::Finished;

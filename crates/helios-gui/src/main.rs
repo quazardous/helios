@@ -1055,6 +1055,8 @@ struct App {
     /// The end's steps, in order: the quit request's listeners and the
     /// host's own (`helios.app.quit`, `Shell::end_steps`).
     end_steps: Vec<String>,
+    /// The node's quit, followed by the end splash.
+    node_end: Option<std::rc::Rc<std::cell::RefCell<helios_gui::app_quit::NodeEnd>>>,
     /// The interface's settings were saved by the end's step.
     shell_exited: bool,
     _rest_dropped: quit::MarkOnDrop,
@@ -1474,10 +1476,27 @@ impl App {
                 }
             };
         }
-        // The node closes the library once the GUI is gone (its own
-        // steps: the background jobs stopped, the library closed).
+        // The node closes the library once the GUI is gone, as its own
+        // quit request (`helios.node.quit`): each of its listeners gets
+        // its row as the node says it begins, and what it did goes in
+        // the end's report.
         if let Some(link) = node {
-            end = end.waiting_for(move || link.stopped());
+            let follow = link.follow_quit().map(|facts| {
+                std::rc::Rc::new(std::cell::RefCell::new(helios_gui::app_quit::NodeEnd::new(
+                    facts,
+                    phases::end().clone(),
+                )))
+            });
+            self.node_end = follow.clone();
+            end = end.waiting_for(move || {
+                // Stopped read first: what the node said before it
+                // stopped is then all there to read.
+                let stopped = link.stopped();
+                if let Some(follow) = &follow {
+                    follow.borrow_mut().pump();
+                }
+                stopped
+            });
         }
         self.end = Some(end);
         quit::mark("end splash begun");
@@ -1529,6 +1548,13 @@ impl App {
             }
             // What the end did, on the journal and for the next start.
             let steps: Vec<&str> = self.end_steps.iter().map(String::as_str).collect();
+            if let Some(follow) = &self.node_end {
+                let mut follow = follow.borrow_mut();
+                follow.pump();
+                if let Some(ended) = follow.ended() {
+                    self.shell.quit_node_ended(ended);
+                }
+            }
             let report = self.shell.end_report(&steps);
             if let Err(e) = report.write(&helios_gui::shell::config_dir()) {
                 warn(&format!("the quit's report cannot be written: {e}"));
@@ -2629,6 +2655,7 @@ fn main() -> Result<(), String> {
                 boot,
                 end: None,
             end_steps: Vec::new(),
+                node_end: None,
                 shell_exited: false,
                 _rest_dropped: quit::MarkOnDrop(
                     "images, library readers and exporter dropped",
