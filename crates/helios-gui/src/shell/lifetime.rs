@@ -353,8 +353,10 @@ pub enum Closing {
 }
 
 impl Shell {
-    /// Attaches the local node: Helios quitting asks it to quit.
+    /// Attaches the local node: Helios quitting asks it to quit, and the
+    /// node's own quit (`helios.node.quit`) is asked on this bus.
     pub fn attach_node(&mut self, node: crate::node::Link) {
+        node.quit_on(self.core.app.handle().bus());
         let quit = &self.lifetime.quit;
         quit.slots.set_node(node);
         // Attached late (the start handing the library over after the

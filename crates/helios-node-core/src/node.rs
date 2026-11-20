@@ -306,6 +306,16 @@ impl Link {
         ))
     }
 
+    /// The node's quit is asked on `bus`, the application's
+    /// (`helios.node.quit`, [`crate::node_quit`]): its jobs' listeners
+    /// and the library's close run there, each within its deadline. The
+    /// first bus handed is kept; without one, the node's stop leaves its
+    /// jobs and closes the library alone.
+    pub fn quit_on(&self, bus: Arc<dyn bus_contract::Bus>) {
+        crate::node_quit::declare(&*bus);
+        let _ = self.0.quit_bus.set(bus);
+    }
+
     /// The bus the node's quit is asked on, once handed
     /// ([`LocalNode::quit_on`]): its listeners, for introspection.
     pub fn quit_bus(&self) -> Option<Arc<dyn bus_contract::Bus>> {
@@ -456,13 +466,9 @@ impl<S: Store + 'static> LocalNode<S> {
     }
 
     /// The node's quit is asked on `bus`, the application's
-    /// (`helios.node.quit`, [`crate::node_quit`]): its jobs' listeners
-    /// and the library's close run there, each within its deadline. Set
-    /// once; without it, the node's stop leaves its jobs and closes the
-    /// library alone.
+    /// ([`Link::quit_on`]).
     pub fn quit_on(&self, bus: Arc<dyn bus_contract::Bus>) {
-        crate::node_quit::declare(&*bus);
-        let _ = self.link.0.quit_bus.set(bus);
+        self.link.quit_on(bus);
     }
 
     /// The vault the node owns, for the clients in its process.
