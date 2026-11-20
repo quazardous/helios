@@ -1487,7 +1487,7 @@ impl App {
                     phases::end().clone(),
                 )))
             });
-            self.node_end = follow.clone();
+            self.node_end.clone_from(&follow);
             end = end.waiting_for(move || {
                 // Stopped read first: what the node said before it
                 // stopped is then all there to read.

@@ -548,7 +548,7 @@ fn close<S: Store + 'static>(vault: &Arc<Vault<S>>, life: &Life, facts: &Arc<Bus
         // Its row on the end splash is the client's, from the node's
         // facts (`node_quit::ListenerBegan`), like the jobs' rows.
         crate::node_quit::listen(&*bus, facts, &life.jobs(), move || {
-            let done = vault.shut_down().map_err(|e| e.to_string());
+            let done = vault.shut_down();
             *closed.lock().unwrap_or_else(PoisonError::into_inner) = Some(done.clone());
             done
         });
@@ -560,7 +560,7 @@ fn close<S: Store + 'static>(vault: &Arc<Vault<S>>, life: &Life, facts: &Arc<Bus
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .take()
-        .unwrap_or_else(|| vault.shut_down().map_err(|e| e.to_string()));
+        .unwrap_or_else(|| vault.shut_down());
     life.quit_ended.set(ended);
     if let Err(e) = &done {
         log::warn!(target: "helios::node", "cannot close the vault cleanly: {e}");
