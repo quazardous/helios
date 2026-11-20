@@ -166,6 +166,78 @@ setting-notifications-jobs =
     .description = Affiche une notification sur le bureau quand une longue tâche (un export, un lot, un import, une sauvegarde, un bilan de santé) se termine ou échoue alors qu’aucune fenêtre de Helios n’a le focus, quelle qu’en soit l’origine.
     .label = Notifier la fin d’une longue tâche
 
+setting-project-decisions-mode =
+    .description = Comment les nœuds de décision sont résolus par défaut dans ce projet.
+    .label = Nœuds de décision
+
+setting-project-decisions-mode-choice-ai-assisted = assisté par l’IA
+
+setting-project-decisions-mode-choice-full-ai = tout par l’IA
+
+setting-project-decisions-mode-choice-human = humain
+
+setting-system-ai-calls =
+    .description = Combien d’appels aux modèles d’IA (nœuds de décision) tournent en même temps.
+    .label = Appels de modèle simultanés
+
+setting-system-cache-budget =
+    .description = La mémoire que le cache de rendu peut utiliser avant d’évincer ce qui a servi le moins récemment ; 0 : une part de la mémoire de la machine (le réglage ci-dessous).
+    .label = Cache de rendu
+
+setting-system-cache-share =
+    .description = La part de la mémoire de la machine que le cache de rendu peut utiliser quand aucune taille n’est donnée ci-dessus ; 0 : sans limite.
+    .label = Part du cache de rendu
+
+setting-system-cache-states =
+    .description = La mémoire que peuvent occuper les états calculés des photos (l’étape pleine taille de la photo affichée, gardée pour que l’ajustement et un zoom ne la recalculent pas, et ceux des photos récentes) ; 0 : 12,5 % de la mémoire de la machine, entre 1 et 4 Gio.
+    .label = États de photo gardés
+
+setting-system-cache-textures =
+    .description = La mémoire graphique que peuvent occuper les vignettes des grilles ; au-delà, les vignettes hors de vue sont libérées, les plus anciennement vues d’abord, et relues depuis le cache des vignettes quand elles reviennent.
+    .label = Textures des vignettes
+
+setting-system-cache-thumbnails =
+    .description = L’espace disque que le cache des vignettes de la bibliothèque (.helios/thumbs à côté du catalogue) peut utiliser avant d’évincer les vignettes les moins récemment utilisées.
+    .label = Cache des vignettes
+
+setting-system-events-journal =
+    .description = Combien d’événements récents le bus garde pour l’inspection et les attentes.
+    .label = Journal des événements
+
+setting-system-map-defaults =
+    .description = Si la carte des images laisse de côté les dossiers du système, les données propres de Helios, les caches, les arbres de compilation, les dossiers cachés, la corbeille et les bibliothèques des autres applications photo ; désactivé, seules les règles ci-dessus restent.
+    .label = Liste d’exclusion par défaut
+
+setting-system-map-exclude =
+    .description = Des règles ajoutées à la liste d’exclusion de la carte des images, en liste JSON : chaque `{"{"}"glob": "**/Private/**"{"}"}` correspond au chemin absolu, ou avec `"volume": "<id>"` au chemin dans ce volume ; un glob qui commence par `!` réinclut ce qu’un défaut exclut. La dernière règle qui correspond l’emporte.
+    .label = Lieux jamais enregistrés
+
+setting-system-map-keepMissing =
+    .description = Combien de temps un fichier vu mais hors de la Bibliothèque reste dans la carte des images une fois absent de sa place.
+    .label = Fichiers manquants gardés
+
+setting-system-map-limit =
+    .description = Combien de fichiers vus mais hors de la Bibliothèque la carte des images garde ; au-delà, les plus anciennement vus sont oubliés d’abord. Les fichiers de la Bibliothèque ne comptent jamais.
+    .label = Fichiers vus gardés
+
+setting-system-map-record =
+    .description = Ce que la carte des images enregistre : partout (chaque liste de dossier, et les analyses en arrière-plan des volumes connus), les listes (ce que Helios affiche, plus les analyses des volumes qui ont un rôle) ou l’import (seulement ce qui est importé).
+    .label = La carte des images enregistre
+
+setting-system-map-record-choice-everywhere = partout
+
+setting-system-map-record-choice-import = l’import
+
+setting-system-map-record-choice-listings = les listes
+
+setting-system-scheduler-workers =
+    .description = Combien de tâches tournent en même temps sur cette machine ; 0 : une par processeur.
+    .label = Fils de travail
+
+setting-system-workflow-keep-days =
+    .description = Combien de temps un lot terminé (une exécution du niveau flux de travail) reste dans le coffre, échecs compris, avant d’être retiré en entier ; 0 : il est retiré au prochain démarrage du nœud.
+    .label = Lots terminés gardés
+
 setting-catalogue-snapshotEvery =
     .description = Helios prend un instantané vérifié du catalogue à cet intervalle, le garde à côté du catalogue et le copie sur les disques de sauvegarde branchés.
     .label = Instantané du catalogue toutes les (heures)
@@ -191,3 +263,19 @@ category-helios = Helios
 setting-import-show-in-library =
     .description = Quand une importation que vous avez lancée se termine, la bibliothèque montre ses photos, toutes sélectionnées. Jamais pour les importations automatiques ; pendant que vous retouchez une photo, sa notification le propose plutôt.
     .label = Après une importation, la montrer dans la bibliothèque
+
+setting-interface-experimental-workshops =
+    .description = Expérimental : le panneau Ateliers et ses commandes, pour trouver, appliquer et régler des macros selon leur but. Peut changer ; ce qu’il enregistre reste une macro. Prend effet au prochain démarrage.
+    .label = Ateliers
+
+setting-interface-graph-zoom =
+    .description = Si la vue du graphe s’ouvre sur la vue d’ensemble ou sur tout le détail.
+    .label = La vue du graphe s’ouvre sur
+
+setting-interface-graph-zoom-choice-detail = le détail
+
+setting-interface-graph-zoom-choice-overview = la vue d’ensemble
+
+setting-interface-panels-queue-when-empty =
+    .description = Ce que fait le panneau File d’attente quand le nœud sélectionné n’a pas de file.
+    .label = Panneau File d’attente sans file

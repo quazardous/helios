@@ -41,3 +41,33 @@ settings window and dialogs) in English and French.
 Command categories (`View`, `Vault`) have no stable id of their own:
 their key is derived from their English (`category-vault`), so rewording
 one needs its translations moved too.
+
+## French terms
+
+French follows a classic French photo application: short, natural UI
+wording, typographic apostrophes (’), « » quotes, a space before `:` and
+`;`. Keep these terms:
+
+| English | French |
+|---|---|
+| Library / Darkroom / Compare / Culling | Bibliothèque / Chambre noire / Comparer / Tri |
+| workshop | atelier |
+| stops (exposure) | Diaphs |
+| No image | Aucune image |
+| photo, edit (noun), version | photo, retouche, version |
+| rating, flag, label, keyword | note, drapeau, étiquette, mot-clé |
+| thumbnail, filmstrip | vignette, pellicule |
+| camera (body), lens | boîtier, objectif |
+| sidecar | fichier annexe |
+| catalogue, snapshot | catalogue, instantané |
+| vault, image map | coffre, carte des images |
+| settings (window, pages) | Réglages |
+| storage, volume, backup, off-site | stockage, volume, sauvegarde, hors site |
+| import (noun), an import run | import, importation |
+| account, connect, sign out | compte, connecter, déconnecter |
+| panel, area, window | panneau, zone, fenêtre |
+| node, mask, slider, control | nœud, masque, curseur, contrôle |
+| move … to a new window / dock … back | Déplacer … dans une nouvelle fenêtre / Remettre … dans sa zone |
+
+Command titles start with an infinitive (« Lister… », « Déplacer… »);
+argument names in backticks stay in English (`` `node` : … ``).
