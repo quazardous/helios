@@ -23,6 +23,15 @@ A Cargo workspace (Rust):
 - `crates/helios-storage`: the volumes files live on (disks, cards,
   shares): identity, kind, roles, Linux detection, and the registry of
   those the vault knows.
+- `crates/helios-storage-ui`: storage as a feature of the desktop: the
+  Settings app's Storage and Backup pages and their commands, the link to
+  the node they read through, a backup's end and the cards safe to
+  format. helios-gui mounts it; the rest of the desktop hears it through
+  the bus.
+- `crates/helios-feature-host`: test support (a dev-dependency): runs one
+  feature crate without the desktop (egui-pop's application, the Settings
+  app, Helios's command registry and the feature's points), drawn
+  headless.
 - `crates/helios-connect`: import connectors: the trait every import
   source implements (paged listing with a cursor, items, access, fetch),
   their manifests and registry, the folder and card connectors, and the

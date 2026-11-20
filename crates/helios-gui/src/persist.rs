@@ -496,6 +496,8 @@ struct Editing {
     gesture: Option<(String, String)>,
     /// The last save failed: the head is not the edit shown.
     unsaved: bool,
+    /// Why the last save failed, while it is unsaved.
+    failed: Option<String>,
 }
 
 /// How many images one window of the library's cursor holds: the rows
@@ -2456,6 +2458,7 @@ impl<S: Store + 'static> Persist<S> {
             flushed_at: None,
             gesture: None,
             unsaved: false,
+            failed: None,
         });
         shell.app().handle().publish(
             "helios",
@@ -2733,6 +2736,46 @@ impl<S: Store + 'static> Persist<S> {
         self.editing.as_ref().is_some_and(|e| e.unsaved)
     }
 
+    /// Why the edit open is not saved (its last save's failure), while it
+    /// is not: what the quit's `helios.quit.unsaved` listener refuses
+    /// with ([`Shell::set_unsaved_edit`], said at each frame).
+    pub fn unsaved_reason(&self) -> Option<String> {
+        self.editing
+            .as_ref()
+            .filter(|e| e.unsaved)
+            .map(|e| e.failed.clone().unwrap_or_else(|| "its save failed".into()))
+    }
+
+    /// "Retry saving" chosen before quitting ([`Shell::take_save_retry`]):
+    /// the edit open saved now, its answer waited for, then the quit asked
+    /// again: saved, it goes; failed again, the question is asked again.
+    fn retry_save_on_quit(&mut self, shell: &mut Shell, now: f64) {
+        if !shell.take_save_retry() {
+            return;
+        }
+        self.settle_edits(shell);
+        let (values, node) = (shell.values().clone(), self.node.clone());
+        if let Some(e) = &mut self.editing {
+            match save_now(e, &values, &node, now) {
+                Ok(Some((image, edited))) => {
+                    let mut library = shell.library_mut();
+                    library.show_field(
+                        &image,
+                        helios_vault::edit::EDITED,
+                        Some(&Value::Bool(edited)),
+                    );
+                    library.edit_changed(&image);
+                }
+                Ok(None) => {}
+                Err(why) => {
+                    log::warn!(target: "helios::quit", "the edit's save failed again: {why}");
+                }
+            }
+        }
+        shell.set_unsaved_edit(self.unsaved_reason());
+        shell.quit_again();
+    }
+
     /// Reads the metadata templates once, writes them back each time they
     /// change (a library document through the node, outside the
     /// library's history), and reads the capture details the Metadata
@@ -2812,6 +2855,7 @@ impl<S: Store + 'static> Persist<S> {
         // outside a pass (a test, a command run between frames).
         self.listen_asks(shell);
         shell.app().handle().drain_asks();
+        self.retry_save_on_quit(shell, now);
         let changes = shell.take_library_changes();
         if !changes.is_empty() {
             held(&self.writes).push_back(Write::Fields(changes));
@@ -2860,6 +2904,8 @@ impl<S: Store + 'static> Persist<S> {
             self.searching.push((gallery, running));
         }
         self.hear(shell);
+        // What a quit asks about: an edit whose save failed.
+        shell.set_unsaved_edit(self.unsaved_reason());
     }
 
     /// Shows what the vault's events say changed: a field in place; what
@@ -2960,6 +3006,7 @@ impl<S: Store + 'static> Persist<S> {
                 if let Some(e) = editing {
                     e.session = e.confirmed.clone();
                     e.unsaved = true;
+                    e.failed = Some(err.message.clone());
                 }
                 held(&self.writes)
                     .retain(|w| !matches!(w, Write::Edit(s) if s.version.image == image));
@@ -3059,6 +3106,7 @@ fn next_step(
         e.session.step(current, &label, &origin, at)
     };
     e.unsaved = false;
+    e.failed = None;
     step.map(|version| EditStep {
         version,
         in_progress: e.session.in_progress(),
@@ -3172,6 +3220,7 @@ fn save_now(
         (Err(err), _) => {
             e.session = e.confirmed.clone();
             e.unsaved = true;
+            e.failed = Some(err.message.clone());
             Err(err.message)
         }
         (Ok(_), _) => Ok(None),

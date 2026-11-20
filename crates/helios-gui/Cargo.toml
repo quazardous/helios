@@ -52,6 +52,9 @@ helios-vault.workspace = true
 helios-connect.workspace = true
 # The machine's volumes: the import window's cards.
 helios-storage.workspace = true
+# The Storage feature: the Storage and Backup pages, their commands, a
+# backup's end and the cards safe to format, mounted by the shell.
+helios-storage-ui.workspace = true
 helios-health.workspace = true
 # The local node the desktop embeds (the vault, its volume watch, the
 # backups and the health check), shared with the headless helios-node.

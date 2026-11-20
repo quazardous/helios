@@ -375,6 +375,8 @@ gui-end-node = Demande d’arrêt au nœud de la bibliothèque
 
 gui-end-node-waiting = En attente de : { $what }
 
+gui-end-unsaved = Vérification des retouches non enregistrées
+
 gui-end-client = Déconnexion du nœud de la bibliothèque
 
 gui-end-host-step = { $step } (fenêtre)
@@ -2772,6 +2774,14 @@ gui-quit-title = Quitter Helios ?
 gui-quit-jobs-detail = { $count } tâches en cours ; quitter les annule
 
 gui-quit-verb = Quitter
+
+gui-quit-unsaved-detail = Quitter maintenant la perd : { $why }
+
+gui-quit-unsaved-discard = Quitter sans enregistrer
+
+gui-quit-unsaved-retry = Réessayer l’enregistrement
+
+gui-quit-unsaved-title = Une retouche n’a pas pu être enregistrée
 
 gui-consent-allow = Autoriser
 

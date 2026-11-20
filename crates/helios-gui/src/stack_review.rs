@@ -17,15 +17,18 @@
 
 use egui_pop::api::bus::bus_contract::PointId;
 use egui_pop::api::bus::bus_contract_defer::BusDefer as _;
-use egui_pop::core::ui::UiPop as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use std::sync::Arc;
 
 use egui::Ui;
 use egui_pop::api::bus::bus_contract::{self, Bus, Point, PointDecl, PointKind, Refused};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::widgets;
 use helios_core::Message;
 use helios_library::stacks::{Decision, Status};
+use helios_ui::{Action, Scroll};
 
 use crate::library::Library;
 
@@ -214,13 +217,16 @@ impl Review {
         let text = |m: Message| crate::i18n::text(&ctx, m);
         let mut show = None;
         let selection = library.selection();
-        if ui
-            .button(text(Message::new("gui-stacks-suggest", "Suggest stacks")))
-            .on_hover_text(text(Message::new(
-                "gui-stacks-suggest-hint",
-                "Over the images selected (two or more), else over every image",
-            )))
-            .clicked()
+        if helios_ui::action(
+            ui,
+            Action::Secondary,
+            &text(Message::new("gui-stacks-suggest", "Suggest stacks")),
+        )
+        .tip(text(Message::new(
+            "gui-stacks-suggest-hint",
+            "Over the images selected (two or more), else over every image",
+        )))
+        .clicked()
         {
             let images = if selection.len() >= 2 {
                 selection.clone()
@@ -230,7 +236,7 @@ impl Review {
             self.suggest(images);
         }
         if self.decisions.is_empty() {
-            ui.weak(text(Message::new(
+            ui.muted(text(Message::new(
                 "gui-stacks-none",
                 "No stack suggestion waiting",
             )));
@@ -244,111 +250,113 @@ impl Review {
                 .map_or_else(|| id.chars().take(12).collect(), |e| e.name.clone())
         };
         let decisions = self.decisions.clone();
-        ui.scroll_area(
-            egui::ScrollArea::vertical().id_salt("helios.stacks.scroll"),
-            |ui| {
-                for d in &decisions {
-                    ui.separator();
-                    ui.strong_text(text(
-                        Message::new(
-                            "gui-stacks-proposal",
-                            "{ $groups } stacks proposed by { $resolver }",
-                        )
-                        .with("groups", d.proposal.groups.len())
-                        .with("resolver", d.resolver.clone()),
-                    ));
-                    if !d.left_out.is_empty() {
-                        let why: Vec<String> = d
-                            .left_out
-                            .iter()
-                            .map(|(id, why)| format!("{}: {why}", name(id)))
-                            .collect();
-                        ui.weak(text(
-                            Message::new("gui-stacks-left-out", "{ $count } images left out")
-                                .with("count", d.left_out.len()),
-                        ))
-                        .on_hover_text(why.join("\n"));
-                    }
-                    for (g, group) in d.proposal.groups.iter().enumerate() {
-                        let mut on = self.checked(&d.id, g);
-                        ui.horizontal(|ui| {
-                            let title = match group.kind.as_str() {
-                                "bracket" => text(
-                                    Message::new("gui-stacks-bracket", "Bracket of { $count }")
-                                        .with("count", group.members.len()),
-                                ),
-                                _ => text(
-                                    Message::new("gui-stacks-burst", "Burst of { $count }")
-                                        .with("count", group.members.len()),
-                                ),
-                            };
-                            let r = ui.checkbox(&mut on, title).on_hover_text(&group.why);
-                            crate::name_rect(
-                                ui.ctx(),
-                                &format!("helios.stacks.{}.{g}", d.id),
-                                r.rect,
-                            );
-                            if ui
-                                .small_button(text(Message::new("gui-stacks-show", "Show")))
-                                .clicked()
-                            {
-                                show = Some(group.members.clone());
-                            }
-                        });
-                        if on != self.checked(&d.id, g) {
-                            self.check(&d.id, g, on);
-                        }
-                        ui.horizontal_wrapped(|ui| {
-                            for m in &group.members {
-                                let top = *m == group.best;
-                                let label = if top {
-                                    format!("★ {}", name(m))
-                                } else {
-                                    name(m)
-                                };
-                                let r = ui.selectable_label(selection.contains(m), label);
-                                let r = if top {
-                                    r.on_hover_text(text(top_hint(group)))
-                                } else {
-                                    r
-                                };
-                                if r.clicked() {
-                                    show = Some(vec![m.clone()]);
-                                }
-                            }
-                        });
-                    }
-                    let taken = self.taken(d);
+        helios_ui::scroll(ui, "helios.stacks.scroll", Scroll::Region, |ui| {
+            for d in &decisions {
+                ui.divider();
+                ui.strong_text(text(
+                    Message::new(
+                        "gui-stacks-proposal",
+                        "{ $groups } stacks proposed by { $resolver }",
+                    )
+                    .with("groups", d.proposal.groups.len())
+                    .with("resolver", d.resolver.clone()),
+                ));
+                if !d.left_out.is_empty() {
+                    let why: Vec<String> = d
+                        .left_out
+                        .iter()
+                        .map(|(id, why)| format!("{}: {why}", name(id)))
+                        .collect();
+                    ui.muted(text(
+                        Message::new("gui-stacks-left-out", "{ $count } images left out")
+                            .with("count", d.left_out.len()),
+                    ))
+                    .tip(why.join("\n"));
+                }
+                for (g, group) in d.proposal.groups.iter().enumerate() {
+                    let mut on = self.checked(&d.id, g);
                     ui.horizontal(|ui| {
-                        if ui
-                            .button(text(Message::new("gui-stacks-accept-all", "Accept all")))
-                            .clicked()
+                        let title = match group.kind.as_str() {
+                            "bracket" => text(
+                                Message::new("gui-stacks-bracket", "Bracket of { $count }")
+                                    .with("count", group.members.len()),
+                            ),
+                            _ => text(
+                                Message::new("gui-stacks-burst", "Burst of { $count }")
+                                    .with("count", group.members.len()),
+                            ),
+                        };
+                        let r = widgets::checkbox(ui, &mut on, title).tip(&group.why);
+                        crate::name_rect(ui.ctx(), &format!("helios.stacks.{}.{g}", d.id), r.rect);
+                        if helios_ui::row_action(
+                            ui,
+                            Action::Secondary,
+                            &text(Message::new("gui-stacks-show", "Show")),
+                        )
+                        .clicked()
                         {
-                            self.accept_all(&d.id);
+                            show = Some(group.members.clone());
                         }
-                        let partial = !taken.is_empty() && taken.len() < d.proposal.groups.len();
-                        if ui
-                            .add_enabled(
-                                partial,
-                                egui::Button::new(text(Message::new(
-                                    "gui-stacks-accept-checked",
-                                    "Accept the checked",
-                                ))),
-                            )
-                            .clicked()
-                        {
-                            let _ = self.accept_checked(&d.id);
-                        }
-                        if ui
-                            .button(text(Message::new("gui-stacks-decline", "Decline")))
-                            .clicked()
-                        {
-                            self.decline(&d.id);
+                    });
+                    if on != self.checked(&d.id, g) {
+                        self.check(&d.id, g, on);
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        for m in &group.members {
+                            let top = *m == group.best;
+                            let label = if top {
+                                format!("★ {}", name(m))
+                            } else {
+                                name(m)
+                            };
+                            let r = widgets::selectable_label(ui, selection.contains(m), label);
+                            let r = if top { r.tip(text(top_hint(group))) } else { r };
+                            if r.clicked() {
+                                show = Some(vec![m.clone()]);
+                            }
                         }
                     });
                 }
-            },
-        );
+                let taken = self.taken(d);
+                ui.horizontal(|ui| {
+                    if helios_ui::action(
+                        ui,
+                        Action::Secondary,
+                        &text(Message::new("gui-stacks-accept-all", "Accept all")),
+                    )
+                    .clicked()
+                    {
+                        self.accept_all(&d.id);
+                    }
+                    let partial = !taken.is_empty() && taken.len() < d.proposal.groups.len();
+                    if ui
+                        .add_enabled_ui(partial, |ui| {
+                            helios_ui::action(
+                                ui,
+                                Action::Secondary,
+                                &text(Message::new(
+                                    "gui-stacks-accept-checked",
+                                    "Accept the checked",
+                                )),
+                            )
+                        })
+                        .inner
+                        .clicked()
+                    {
+                        let _ = self.accept_checked(&d.id);
+                    }
+                    if helios_ui::action(
+                        ui,
+                        Action::Secondary,
+                        &text(Message::new("gui-stacks-decline", "Decline")),
+                    )
+                    .clicked()
+                    {
+                        self.decline(&d.id);
+                    }
+                });
+            }
+        });
         show
     }
 }

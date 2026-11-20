@@ -1,0 +1,38 @@
+[package]
+name = "helios-storage-ui"
+description = "Helios's Storage feature: the Storage and Backup pages of the Settings app, their commands, a backup's end and the cards safe to format, reaching the rest of the desktop through the bus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The Settings app's manifest and read kernel, the application's bus and
+# its handle; `i18n`: the texts its commands answer in.
+egui-pop = { workspace = true, features = ["i18n"] }
+helios-core.workspace = true
+helios-i18n.workspace = true
+helios-shell.workspace = true
+helios-storage.workspace = true
+helios-library.workspace = true
+helios-vault.workspace = true
+helios-connect.workspace = true
+# The desktop's node, which the link reads and writes through.
+helios-inspect.workspace = true
+# MIT OR Apache-2.0: the day a volume was last seen, in the system's time
+# zone (already in the tree through helios-gui).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde.workspace = true
+serde_json.workspace = true
+log = "0.4"
+
+[dev-dependencies]
+# The feature host its page tests run on: no desktop.
+helios-feature-host = { path = "../helios-feature-host" }
+egui_kittest = "0.37"
+helios-node-core.workspace = true
+helios-vault-sqlite.workspace = true
+
+[lints]
+workspace = true

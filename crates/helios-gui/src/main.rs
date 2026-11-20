@@ -1465,10 +1465,6 @@ fn last_quit(shell: &mut Shell) {
     );
 }
 
-/// How long the end may last before Helios quits anyway, as if "Quit
-/// now" was chosen: a step that never ends does not hold the window.
-const END_LIMIT: std::time::Duration = std::time::Duration::from_mins(1);
-
 /// How long the work after the window waits for the start's work to hand
 /// the library's node over (a window closed while the library opens,
 /// its migrations included): past it, the process ends without stopping
@@ -1483,7 +1479,6 @@ impl App {
         quit::requested();
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         let node = self.shell.node_link();
-        let mut end = splash::End::new(phases::end().clone()).give_up_after(END_LIMIT);
         // Every step in order, one per frame: the quit request's
         // listeners, each its own turn (`helios.app.quit`), and the two
         // host steps, which need the window's state, marked as such.
@@ -1492,6 +1487,19 @@ impl App {
                 .with("step", helios_gui::i18n::text(ctx, step))
         };
         let steps = self.shell.end_steps(&[END_CHANGES, END_INTERFACE]);
+        // How long the end may last before Helios quits anyway, as if
+        // "Quit now" was chosen: the steps' declared deadlines and the
+        // node's stop, under a ceiling (a step that never ends does not
+        // hold the window).
+        let limit = helios_gui::app_quit::end_limit(
+            &steps,
+            helios_gui::ending::WINDOW_SHARE,
+            node.as_ref().map_or(
+                std::time::Duration::ZERO,
+                helios_gui::node::Link::stop_deadline,
+            ),
+        );
+        let mut end = splash::End::new(phases::end().clone()).give_up_after(limit);
         self.end_steps = steps.iter().map(|s| s.id.clone()).collect();
         for (turn, step) in steps.into_iter().enumerate() {
             end = match (step.host, step.id.as_str()) {
@@ -2128,7 +2136,9 @@ fn main() -> Result<(), String> {
                     quit::mark("node left (quit now)");
                     drop(node);
                 } else {
-                    finisher.spawn("node stopped", quit::NODE_DEADLINE, move || node.stop());
+                    // Its listeners' declared deadlines, under a ceiling.
+                    let deadline = node.link().stop_deadline();
+                    finisher.spawn("node stopped", deadline, move || node.stop());
                 }
             }
             for left in finisher.finish() {

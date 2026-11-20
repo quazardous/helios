@@ -57,6 +57,10 @@ pub use health::{
     PAGE as HEALTH_PAGE, POINTS as HEALTH_POINTS, checks as health_checks,
     findings_answer as health_findings_answer, owner_key as health_owner_key,
 };
+pub use helios_storage_ui::{
+    BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, NodeStorage, StorageLink,
+    role_text,
+};
 pub use import_auto::Trigger as ImportTrigger;
 pub use import_choices::Choices;
 pub use import_profile_store::{EVERYDAY, ImportProfile};
@@ -65,10 +69,6 @@ pub use import_sources::{
     write_in_background as write_import_sources_in_background,
 };
 pub use macro_edit::{SELECTED as GRAPH_SELECTED, selected_nodes};
-pub use storage::{
-    BACKUP_NOW as BACKUP_NOW_COMMAND, COMMAND as STORAGE_COMMAND, NodeStorage, StorageLink,
-    role_text,
-};
 pub use workshop_generalise::{Generalised, choice_word};
 pub use workspace_edit::STATE as WORKSPACE_STATE;
 
@@ -126,14 +126,11 @@ pub use import_merge::MergeLibrary as MergeImportLibrary;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
-#[cfg(test)]
-mod feature_host;
 mod reads;
 mod said;
 mod storage;
-mod storage_admin;
 mod trace;
-pub use storage_admin::{
+pub use helios_storage_ui::admin::{
     MARK_VOLUME as MARK_VOLUME_COMMAND, SET_STRATEGY as SET_STRATEGY_COMMAND,
     SET_UP_STRATEGY as SET_UP_STRATEGY_COMMAND, STRATEGY as BACKUP_STRATEGY_COMMAND,
     VOLUME_ROLE as VOLUME_ROLE_COMMAND, VOLUME_SET as VOLUME_SET_COMMAND,
@@ -359,6 +356,8 @@ enum Action {
     Quit,
     /// Quit, the question about running jobs answered.
     QuitConfirmed,
+    /// The question about an edit not saved answered: retry or discard.
+    QuitUnsaved(String),
     /// A notice's details as an error dialog (`notice.details`).
     NoticeDetails(Option<usize>),
     /// Bring the main window forward, or back.
@@ -1250,7 +1249,8 @@ impl Shell {
             no_library: None,
             health: health::HealthPage::new(plugin_settings),
             init: init_wizard::InitState::default(),
-            storage: storage::StoragePage::default(),
+            storage: helios_storage_ui::StoragePage::default(),
+            reads: None,
             import_lines: std::sync::mpsc::channel(),
             import_ends: {
                 let (to, from) = std::sync::mpsc::channel();
@@ -3043,6 +3043,19 @@ impl Shell {
             Box::new(|_, _| Ok(Action::QuitConfirmed)),
         );
         add(
+            CommandSpec::new(
+                lifetime::QUIT_UNSAVED,
+                "Before quitting, an edit not saved: retry saving or quit without saving (`value`)",
+                "Window",
+            ),
+            Box::new(|a, _| {
+                a.get("value")
+                    .and_then(Value::as_str)
+                    .map(|v| Action::QuitUnsaved(v.to_owned()))
+                    .ok_or_else(|| "`value` is missing".to_string())
+            }),
+        );
+        add(
             CommandSpec::new(lifetime::MAIN_WINDOW, "Main window", "Window"),
             Box::new(|_, _| Ok(Action::MainWindow)),
         );
@@ -3799,7 +3812,7 @@ impl Shell {
         );
         add(
             CommandSpec::new(
-                storage::COMMAND,
+                helios_storage_ui::COMMAND,
                 "Storage… (`volume`: the volume to mark and scroll to)",
                 "Library",
             ),
@@ -4633,7 +4646,7 @@ impl Shell {
             // whether one runs or not.
             command(MENU_VIEW, "1_activity", 0, crate::activity::COMMAND),
             // File > Storage: the disks and what each is for.
-            command(MENU_FILE, "1_import", 3, storage::COMMAND),
+            command(MENU_FILE, "1_import", 3, helios_storage_ui::COMMAND),
             // Help > Health check.
             command(MENU_HELP, "1_health", 0, health::COMMAND),
             // An entry per importer plugin, the submenu shown only when
@@ -6866,6 +6879,7 @@ impl Shell {
             }
             Action::Quit => self.quit(),
             Action::QuitConfirmed => self.quit_confirmed(),
+            Action::QuitUnsaved(answer) => self.quit_unsaved(&answer)?,
             Action::NoticeDetails(i) => self.notice_details(i),
             Action::MainWindow => self.main_window(),
             Action::SystemMenu => {
@@ -8538,7 +8552,7 @@ fn suggests_stacks(source: Option<&helios_template::ImportDesc>) -> bool {
 #[derive(Clone)]
 pub(crate) struct LibraryParts {
     library: Rc<RefCell<crate::library::Library>>,
-    storage: Rc<RefCell<storage::StorageRead>>,
+    storage: Rc<RefCell<helios_storage_ui::StorageRead>>,
     /// The bus what storage reads passes through (`storage.read`).
     bus: std::sync::Weak<dyn egui_pop::api::bus::bus_contract::Bus>,
     stack_review: Rc<RefCell<crate::stack_review::Review>>,
@@ -8613,7 +8627,7 @@ impl LibraryParts {
     /// Library's volume names and badges).
     pub(crate) fn refresh_volumes(&self) {
         if let Some(bus) = self.bus.upgrade() {
-            storage::refresh_volumes(&self.storage, &*bus);
+            helios_storage_ui::refresh_volumes(&self.storage, &*bus);
         }
     }
 

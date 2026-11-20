@@ -54,6 +54,13 @@ use super::Shell;
 
 /// Quits once the question about running jobs is answered.
 pub(super) const QUIT_CONFIRMED: &str = "helios.quit.confirmed";
+/// The answer to "An edit could not be saved" before quitting: its
+/// `value` is [`RETRY_SAVE`] or [`DISCARD`].
+pub(super) const QUIT_UNSAVED: &str = "helios.quit.unsaved";
+/// "Retry saving": the save tried again, then the quit asked again.
+pub(super) const RETRY_SAVE: &str = "retry";
+/// "Quit without saving": the edit not saved is lost, Helios quits.
+pub(super) const DISCARD: &str = "discard";
 /// Brings the main window forward.
 pub(super) const MAIN_WINDOW: &str = "helios.window.main";
 
@@ -147,6 +154,15 @@ pub(crate) struct Quit {
     /// The question about the running jobs was answered Quit: the next
     /// quit's request does not ask it again.
     jobs_confirmed: Cell<bool>,
+    /// The edit whose save failed, in words, as the host's persistence
+    /// last said it ([`Shell::set_unsaved_edit`]).
+    unsaved: RefCell<Option<String>>,
+    /// "Quit without saving" was chosen: the next quit's request lets the
+    /// unsaved edit go.
+    unsaved_discarded: Cell<bool>,
+    /// "Retry saving" was chosen: the host's persistence tries the save
+    /// again, then quits again ([`Shell::take_save_retry`]).
+    retry_save: Cell<bool>,
     /// What the last quit's request did.
     report: RefCell<Option<crate::app_quit::QuitReport>>,
     /// Confirmations are answered yes by policy: nothing is asked.
@@ -178,6 +194,9 @@ impl Quit {
             quitting: Cell::new(false),
             cancel_jobs: Cell::new(false),
             jobs_confirmed: Cell::new(false),
+            unsaved: RefCell::new(None),
+            unsaved_discarded: Cell::new(false),
+            retry_save: Cell::new(false),
             report: RefCell::new(None),
             assume_yes: Cell::new(false),
             slots: Arc::default(),
@@ -239,6 +258,8 @@ impl Quit {
             stage: crate::app_quit::QuitStage::Ask,
             running_jobs: running,
             jobs_confirmed: self.jobs_confirmed.get() || self.assume_yes.get(),
+            unsaved: self.unsaved.borrow().clone(),
+            unsaved_discarded: self.unsaved_discarded.get(),
         };
         let report = app_quit::ask(&*app.bus(), ask);
         let refused = report.refused.clone();
@@ -248,6 +269,8 @@ impl Quit {
         };
         if listener == app_quit::JOBS {
             self.ask(app, running);
+        } else if listener == app_quit::UNSAVED {
+            self.ask_unsaved(app);
         } else {
             // Kept open for another reason: the jobs are asked about
             // again at the next quit.
@@ -271,6 +294,50 @@ impl Quit {
             return;
         }
         self.quitting(true);
+    }
+
+    /// The question before quitting with an edit whose save failed, the
+    /// classic three answers: "Retry saving", "Quit without saving", and
+    /// the dialog's Cancel, which keeps Helios open. egui-pop's choice
+    /// dialog ([`QUIT_UNSAVED`] runs with the answer's value).
+    fn ask_unsaved(&self, app: &AppHandle) {
+        use egui_pop::api::dialogs::{Choose, ChooseOption};
+        use egui_pop::model::ids::CommandId;
+        let text = |m: Message| helios_i18n::message(&self.i18n, &m);
+        let why = self.unsaved.borrow().clone().unwrap_or_default();
+        let Ok(command) = CommandId::new(QUIT_UNSAVED) else {
+            return;
+        };
+        let choose = Choose::with_options(
+            &text(Message::new(
+                "gui-quit-unsaved-title",
+                "An edit could not be saved",
+            )),
+            vec![
+                ChooseOption::new(
+                    &text(Message::new("gui-quit-unsaved-retry", "Retry saving")),
+                    Value::from(RETRY_SAVE),
+                ),
+                ChooseOption::new(
+                    &text(Message::new(
+                        "gui-quit-unsaved-discard",
+                        "Quit without saving",
+                    )),
+                    Value::from(DISCARD),
+                ),
+            ],
+            command,
+        )
+        .detail(&text(
+            Message::new("gui-quit-unsaved-detail", "Quitting now loses it: { $why }")
+                .with("why", why),
+        ));
+        match app.service(&egui_pop::api::dialogs::DIALOGS) {
+            Some(dialogs) => {
+                dialogs.open(choose);
+            }
+            None => log::warn!(target: "helios", "no dialogs to ask before quitting"),
+        }
     }
 
     /// The one question before quitting: what it would cancel.
@@ -408,6 +475,8 @@ impl Shell {
             },
             running_jobs: 0,
             jobs_confirmed: quit.cancel_jobs.get(),
+            unsaved: None,
+            unsaved_discarded: false,
         };
         let outcome = ask_turn(&*handle.bus(), || handle.drain_asks(), ask);
         quit.ended.borrow_mut().record(listener, &outcome);
@@ -478,6 +547,49 @@ impl Shell {
     pub(super) fn quit_confirmed(&mut self) {
         self.lifetime.quit.jobs_confirmed.set(true);
         self.core.app.handle().quit();
+    }
+
+    /// What the host's persistence says of the edit open: `Some(reason)`
+    /// while its last save failed, `None` once saved (or none open). The
+    /// quit's [`crate::app_quit::UNSAVED`] listener reads it.
+    pub fn set_unsaved_edit(&self, why: Option<String>) {
+        // Saved since (or no edit open): a later failure is asked again.
+        if why.is_none() {
+            self.lifetime.quit.unsaved_discarded.set(false);
+        }
+        *self.lifetime.quit.unsaved.borrow_mut() = why;
+    }
+
+    /// "Retry saving" was chosen before quitting: taken once by the host's
+    /// persistence, which tries the save again and quits again
+    /// ([`Shell::quit_again`]).
+    pub fn take_save_retry(&self) -> bool {
+        self.lifetime.quit.retry_save.replace(false)
+    }
+
+    /// Asks the quit again after "Retry saving": the edit saved, it goes
+    /// (the jobs' question may still be asked); its save failed again,
+    /// the question is asked again.
+    pub fn quit_again(&mut self) {
+        self.quit();
+    }
+
+    /// The answer to "An edit could not be saved" before quitting:
+    /// [`RETRY_SAVE`] or [`DISCARD`].
+    pub(super) fn quit_unsaved(&mut self, answer: &str) -> Result<(), String> {
+        match answer {
+            RETRY_SAVE => {
+                self.lifetime.quit.retry_save.set(true);
+                Ok(())
+            }
+            DISCARD => {
+                log::warn!(target: "helios::quit", "quitting without saving an edit");
+                self.lifetime.quit.unsaved_discarded.set(true);
+                self.quit();
+                Ok(())
+            }
+            other => Err(format!("`{other}`: neither `{RETRY_SAVE}` nor `{DISCARD}`")),
+        }
     }
 
     /// What the last quit's request did (`helios.app.quit`): each

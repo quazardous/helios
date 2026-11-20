@@ -220,6 +220,9 @@ command-helios-queue-moveTo =
 command-helios-quit-confirmed =
     .title = Quit Helios, cancelling the running jobs
 
+command-helios-quit-unsaved =
+    .title = Before quitting, an edit not saved: retry saving or quit without saving (`value`)
+
 command-helios-scopes-detach =
     .title = Move Scopes to a new window
 
