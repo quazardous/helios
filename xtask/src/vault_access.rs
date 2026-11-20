@@ -563,7 +563,9 @@ pub fn after() {}
         assert!(exempt_path("crates/helios-gui/src/tests/open.rs"));
         assert!(exempt_path("crates/helios-gui/src/tests.rs"));
         assert!(exempt_path("crates/helios-gui/src/shell/storage_tests.rs"));
-        assert!(!exempt_path("crates/helios-gui/src/shell/storage_test_data.rs"));
+        assert!(!exempt_path(
+            "crates/helios-gui/src/shell/storage_test_data.rs"
+        ));
         assert!(exempt_path("plugins/importers/x/src/fixture.rs"));
         assert!(!exempt_path("crates/helios-gui/src/platform.rs"));
         assert!(!exempt_path("crates/helios-node/src/main.rs"));
