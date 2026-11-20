@@ -1,7 +1,7 @@
 //! The Parameters panel: each node's parameters as a card of
 //! helios-rack (`crates/helios-rack`), which resolves them through the
 //! controls layer (`helios_controls`, `docs/design/controls.md`) and has
-//! egui_hud draw them with egui-pop's widgets; this panel draws none. It
+//! `egui_hud` draw them with egui-pop's widgets; this panel draws none. It
 //! mounts the rack and does the shell's part:
 //!
 //! - what only the shell knows, given to the rack as data: a mask group's
