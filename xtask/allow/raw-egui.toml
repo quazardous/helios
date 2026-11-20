@@ -5,7 +5,6 @@
 
 [files]
 "activity.rs" = 6
-"caption.rs" = 2
 "jobs.rs" = 10
 "params.rs" = 7
 "plugins.rs" = 2
