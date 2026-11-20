@@ -52,6 +52,104 @@ param-cameratone-tone =
     .description = les nœuds de la courbe de tons depuis le noir, luminance de la scène puis d’affichage, paire après paire ; vide pour aucune
     .label = tons
 
+param-channelmixerrgb-adaptation =
+    .description = l’adaptation chromatique
+    .label = adaptation
+
+param-channelmixerrgb-adaptation-choice-cat16 = cat16
+
+param-channelmixerrgb-clip =
+    .description = écrête le RVB négatif hors du gamut
+    .label = écrêtage
+
+param-channelmixerrgb-gamut =
+    .description = compression du gamut : 0 pour aucune
+    .label = gamut
+
+param-channelmixerrgb-illum-fluo =
+    .description = l’illuminant fluorescent (illuminant f)
+    .label = illuminant fluo
+
+param-channelmixerrgb-illum-fluo-choice-f1 = f1
+
+param-channelmixerrgb-illum-fluo-choice-f10 = f10
+
+param-channelmixerrgb-illum-fluo-choice-f11 = f11
+
+param-channelmixerrgb-illum-fluo-choice-f12 = f12
+
+param-channelmixerrgb-illum-fluo-choice-f2 = f2
+
+param-channelmixerrgb-illum-fluo-choice-f3 = f3
+
+param-channelmixerrgb-illum-fluo-choice-f4 = f4
+
+param-channelmixerrgb-illum-fluo-choice-f5 = f5
+
+param-channelmixerrgb-illum-fluo-choice-f6 = f6
+
+param-channelmixerrgb-illum-fluo-choice-f7 = f7
+
+param-channelmixerrgb-illum-fluo-choice-f8 = f8
+
+param-channelmixerrgb-illum-fluo-choice-f9 = f9
+
+param-channelmixerrgb-illum-led =
+    .description = l’illuminant LED (illuminant led)
+    .label = illuminant LED
+
+param-channelmixerrgb-illum-led-choice-b1 = b1
+
+param-channelmixerrgb-illum-led-choice-b2 = b2
+
+param-channelmixerrgb-illum-led-choice-b3 = b3
+
+param-channelmixerrgb-illum-led-choice-b4 = b4
+
+param-channelmixerrgb-illum-led-choice-b5 = b5
+
+param-channelmixerrgb-illum-led-choice-bh1 = bh1
+
+param-channelmixerrgb-illum-led-choice-rgb1 = rgb1
+
+param-channelmixerrgb-illum-led-choice-v1 = v1
+
+param-channelmixerrgb-illum-led-choice-v2 = v2
+
+param-channelmixerrgb-illuminant =
+    .description = l’illuminant de la scène : D50 (pipe), un illuminant standard, lumière du jour ou corps noir à une température, x et y personnalisés, ou tel que pris par le boîtier (camera)
+    .label = illuminant
+
+param-channelmixerrgb-illuminant-choice-a = a
+
+param-channelmixerrgb-illuminant-choice-bb = corps noir
+
+param-channelmixerrgb-illuminant-choice-camera = boîtier
+
+param-channelmixerrgb-illuminant-choice-custom = personnalisé
+
+param-channelmixerrgb-illuminant-choice-d = d
+
+param-channelmixerrgb-illuminant-choice-e = e
+
+param-channelmixerrgb-illuminant-choice-f = f
+
+param-channelmixerrgb-illuminant-choice-led = led
+
+param-channelmixerrgb-illuminant-choice-pipe = pipe
+
+param-channelmixerrgb-temperature =
+    .description = la température de l’illuminant en kelvins (lumière du jour et corps noir)
+    .label = température
+
+param-channelmixerrgb-x =
+    .description = le x CIE de l’illuminant (illuminant personnalisé)
+    .label = x
+
+param-channelmixerrgb-y =
+    .description = le y CIE de l’illuminant (illuminant personnalisé)
+    .label = y
+
 param-chartprofile-lut =
     .description = la table résiduelle du profil : son neutre, puis le décalage de teinte (degrés) et l’échelle de saturation de chaque nœud, 72 teintes x 5 saturations x 5 valeurs ; vide pour aucune
     .label = table

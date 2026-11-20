@@ -1048,6 +1048,24 @@ gui-profile-layout-error = profil { $name } : disposition : { $error }
 
 gui-profile-variants = profil { $name } : { $count } valeurs venant de variantes : { $variants }
 
+gui-promise-cancel = Annuler
+
+gui-promise-cancelled = Annulé
+
+gui-promise-cancelling = Annulation…
+
+gui-promise-counts = { $done } sur { $total }
+
+gui-promise-done = Terminé
+
+gui-promise-failed = Échec : { $reason }
+
+gui-promise-pending = En attente de démarrage
+
+gui-promise-retry = Réessayer
+
+gui-promise-so-far = { $done } jusqu’ici
+
 gui-quick-open-image = image
 
 gui-quick-open-module = module { $module }
@@ -1068,6 +1086,70 @@ gui-quick-open-workspace = espace de travail { $path }
 gui-recording-saved = enregistrement sauvé dans { $path }
 
 gui-recording-stopped = enregistrement arrêté : { $error }
+
+gui-reset-about = Réinitialiser Helios comme à son premier lancement : ses réglages, espaces de travail, catalogue, caches et journaux sont mis de côté dans un dossier de sauvegarde daté (les caches sont supprimés). Les photos et leurs fichiers annexes ne sont jamais touchés, où qu’ils soient.
+
+gui-reset-cancel = Abandonner la réinitialisation ?
+
+gui-reset-cancel-verb = Abandonner
+
+gui-reset-confirm-about = Prenez d’abord un instantané du catalogue si vous voulez pouvoir retrouver vos notes, étiquettes et retouches. Puis tapez le mot : Helios quitte et redémarre.
+
+gui-reset-dropped = Réinitialisation annulée : Helios n’a pas quitté, rien n’a donc été réinitialisé. Confirmez à nouveau pour réinitialiser.
+
+gui-reset-fate-backup = déplacé dans le dossier de sauvegarde
+
+gui-reset-fate-remove = supprimé
+
+gui-reset-goes = Ce qui part
+
+gui-reset-open = Réinitialiser Helios…
+
+gui-reset-refused = Une réinitialisation n’est pas possible ici : { $why }
+
+gui-reset-scope = Réinitialiser
+
+gui-reset-scope-caches = Les caches seulement : vignettes et aperçus sont refaits
+
+gui-reset-scope-everything = Tout : le prochain lancement est un premier lancement
+
+gui-reset-scope-settings = Les réglages seulement : la bibliothèque reste
+
+gui-reset-snapshot = Prendre d’abord un instantané du catalogue
+
+gui-reset-stays = Restent intacts : vos { $count } photos et leurs fichiers annexes (dossiers : { $folders }), et les disques de sauvegarde.
+
+gui-reset-stays-title = Ce qui reste
+
+gui-reset-step-confirm = Confirmer
+
+gui-reset-step-scope = Quoi réinitialiser
+
+gui-reset-summary = { $count } emplacements sont supprimés.
+
+gui-reset-summary-backup = { $count } emplacements partent : déplacés dans un dossier helios-reset daté à côté du dossier de données, pour qu’une réinitialisation puisse être défaite à la main ; les caches sont supprimés.
+
+gui-reset-type = Tapez { $word } pour confirmer
+
+gui-reset-verb = Réinitialiser et redémarrer
+
+gui-reset-what-cache = Caches
+
+gui-reset-what-config = Réglages et espaces de travail (dossier de configuration)
+
+gui-reset-what-data = Bibliothèque par défaut, ses instantanés et sa carte des images (dossier de données)
+
+gui-reset-what-library = Catalogue de la bibliothèque
+
+gui-reset-what-state = Journaux et rapports de plantage
+
+gui-reset-what-thumbnails = Vignettes
+
+gui-reset-wizard = Réinitialiser Helios
+
+gui-reset-wizard-about = Helios quitte, met ses propres dossiers de côté et redémarre. Les photos ne sont jamais touchées.
+
+gui-reset-word-wrong = Tapez { $word } exactement
 
 gui-scene-saved = viewport.scene sauvé dans { $path }
 
@@ -2553,9 +2635,17 @@ health-card-short-detail = Photos sans toutes leurs sauvegardes : { $count }. Ga
 
 health-cards = Cartes prêtes à formater
 
+health-changed-outside = Photos modifiées hors de Helios
+
+health-changed-outside-detail = Une autre application a réécrit leurs fichiers. Elles restent dans votre Bibliothèque avec leurs retouches ; leurs vignettes ont été refaites.
+
+health-changed-outside-some = { $count } photos modifiées hors de Helios
+
 health-check-crashed = La vérification { $check } a échoué
 
 health-check-crashed-detail = Elle s’est arrêtée avant de pouvoir dire quoi que ce soit.
+
+health-fix-acknowledge-changed = Pris en compte
 
 health-fix-verify = Sauvegarder maintenant, ce qui les vérifie
 
