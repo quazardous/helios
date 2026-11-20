@@ -347,12 +347,14 @@ pub fn section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
             .args(json!({ "id": WIZARD }))
             .danger(),
     );
-    s.action(
-        Action::command(egui_pop::api::admin::CMD_WIZARD_OPEN.as_str())
-            .title(&t(Message::new("gui-forget-open", "Forget accounts…")))
-            .args(json!({ "id": crate::forget::WIZARD }))
-            .danger(),
-    );
+    // An id of its own: an action's id is its command's by default, and
+    // a group keeps one item per id.
+    let mut forget = Action::command(egui_pop::api::admin::CMD_WIZARD_OPEN.as_str())
+        .title(&t(Message::new("gui-forget-open", "Forget accounts…")))
+        .args(json!({ "id": crate::forget::WIZARD }))
+        .danger();
+    forget.meta.id = "forgetAccounts".into();
+    s.action(forget);
 }
 
 /// The reset's wizard: what to reset, then the word typed; its finish
