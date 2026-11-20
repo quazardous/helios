@@ -2711,3 +2711,73 @@ fn accounts_snapshots() {
     h.run_steps(4);
     results.add(h.try_window_shot("accounts-connect-form-pop-dark-1x", "Import photos"));
 }
+
+/// Every Sources item drawn selected (accesskit's toggled state, which
+/// egui-pop's places panel sets from the same flag it paints the selected
+/// fill from), by label.
+pub fn selected_items(h: &Harness<'_, Shell>) -> Vec<String> {
+    h.query_all(egui_kittest::kittest::by().predicate(|n| {
+        n.toggled() == Some(egui::accesskit::Toggled::True) && n.description().is_some()
+    }))
+    .filter_map(|n| n.accesskit_node().label())
+    .collect()
+}
+
+/// An account clicked in Sources is drawn selected, with the keyboard on
+/// it as well: the selected fill under the focus outline, never the
+/// outline alone (the snapshot `accounts-choose` showed only a hover
+/// border).
+#[test]
+fn an_account_clicked_then_focused_is_drawn_selected() {
+    let (mut h, ..) = picking_world(None);
+    h.run_steps(4);
+    let row = h.get_by_role_and_label(egui::accesskit::Role::Button, "ann@example.org");
+    let all: Vec<_> = h
+        .query_all_by_label_contains("ann@example.org")
+        .map(|n| {
+            (
+                n.accesskit_node().label(),
+                n.accesskit_node().role(),
+                n.accesskit_node().toggled(),
+                n.is_focused(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        row.accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "the account clicked is selected: {all:?}; selected {:?}",
+        selected_items(&h)
+    );
+    row.focus();
+    h.run_steps(3);
+    let row = h.get_by_role_and_label(egui::accesskit::Role::Button, "ann@example.org");
+    assert!(row.is_focused());
+    assert_eq!(
+        row.accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "focused, still selected"
+    );
+    // Painted so: the row's inside (at its end, mid-height, clear of its
+    // border, its text and its pin) is the selected fill, not the
+    // column's background just left of the row.
+    let rect = row.rect();
+    let image = h.render().expect("a painted frame");
+    let ppp = h.ctx.pixels_per_point();
+    let px = |x: f32, y: f32| image.get_pixel((x * ppp) as u32, (y * ppp) as u32).0;
+    let (inside, outside) = (
+        px(rect.right() - 2.5, rect.center().y),
+        px(rect.left() - 3.0, rect.center().y),
+    );
+    let apart = inside
+        .iter()
+        .zip(outside.iter())
+        .take(3)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        apart > 24,
+        "the selected fill under the focus outline: inside {inside:?}, outside {outside:?}"
+    );
+}
