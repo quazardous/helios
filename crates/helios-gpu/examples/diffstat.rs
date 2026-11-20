@@ -133,7 +133,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--threshold" => a.options.threshold = value()?.parse().map_err(|e| format!("{e}"))?,
             "--tile" => a.options.tile = value()?.parse().map_err(|e| format!("{e}"))?,
             "--cpu" => a.cpu = true,
-            "all" => a.fixtures.extend(FIXTURES.iter().map(|s| s.to_string())),
+            "all" => a.fixtures.extend(FIXTURES.iter().map(ToString::to_string)),
             s if !s.starts_with("--") => a.fixtures.push(s.to_string()),
             s => return Err(format!("unknown option {s}")),
         }
@@ -204,7 +204,7 @@ fn main() -> ExitCode {
     } else {
         match helios_gpu::shared::gpu() {
             Ok(gpu) => {
-                let adapter = gpu.adapter.to_string();
+                let adapter = gpu.adapter.clone();
                 (Engine::new(bus).with_accelerator(gpu), adapter)
             }
             Err(e) => {
