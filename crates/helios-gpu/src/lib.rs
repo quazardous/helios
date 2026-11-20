@@ -21,8 +21,10 @@
 //! for tests.
 //!
 //! [`check`] runs a module on both backends and compares: a GPU variant is
-//! only trusted within its tolerance of the CPU reference.
+//! only trusted within its tolerance of the CPU reference. [`diffstat`]
+//! does it for a whole pipeline, module by module.
 
+pub mod diffstat;
 pub mod health;
 pub mod shared;
 

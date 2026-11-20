@@ -773,7 +773,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] [--shadow FILE] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-history report --shadow [--history DIR] [--days N] | ci-broker select [--base REF] [--history DIR] [--runs N] [--committed] [--explain TEST | --shadow FILE --run ID --commit SHA --junit FILE] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | bench-remote cancel <ext_job_id> | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] [--shadow FILE] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-history report --shadow [--history DIR] [--days N] | ci-broker select [--base REF] [--history DIR] [--runs N] [--committed] [--explain TEST | --shadow FILE --run ID --commit SHA --junit FILE] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | engine-diffstat <fixture|all> [--module NAME] [--dump-diff DIR] [--json FILE] [--cpu] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | bench-remote cancel <ext_job_id> | affected [BASE] [--filter | --critical] | i18n extract | i18n check | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -912,6 +912,11 @@ fn main() -> ExitCode {
             eprintln!("usage: cargo xtask {}", bench::USAGE);
             ExitCode::from(2)
         }),
+        ["engine-diffstat", rest @ ..] if !rest.is_empty() => bench::diffstat(&root, rest),
+        ["engine-diffstat"] => {
+            eprintln!("usage: cargo xtask {}", bench::DIFFSTAT_USAGE);
+            ExitCode::from(2)
+        }
         ["bench-remote", rest @ ..] => remote::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", remote::USAGE);
             ExitCode::from(2)

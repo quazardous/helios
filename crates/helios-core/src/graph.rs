@@ -400,6 +400,15 @@ impl Graph {
         })
     }
 
+    /// The module a module node runs; `None` for a source. Tools that run
+    /// one node apart (the GPU diffstat) rebuild it from this.
+    pub fn module(&self, id: NodeId) -> Result<Option<ModuleRef>, Error> {
+        Ok(match &self.node(id)?.kind {
+            Kind::Source { .. } => None,
+            Kind::Module { module, .. } => Some(module.clone()),
+        })
+    }
+
     /// The image a source node holds; `None` for a module node.
     pub fn source_image(&self, id: NodeId) -> Result<Option<&Image>, Error> {
         Ok(match &self.node(id)?.kind {

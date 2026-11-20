@@ -869,6 +869,20 @@ env = { CARGO_NET_OFFLINE = "true" }
 mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 timeout = "30m"
 
+# per module, how far the GPU output is from the CPU's (cargo xtask engine-diffstat)
+[jobs.diffstat]
+about = "per-module CPU vs GPU distance of the bench fixtures' pipelines, on the NVIDIA GPU"
+checkouts = ["helios", "vkdt", "egui-pop"]
+cores = 4
+memory = "4g"
+resources = ["gpu"]
+cwd = "/work/${src:-helios}"
+command = """trap 'sh /tmp/w/helios/tools/bench/trim-target.sh' EXIT; mkdir -p /tmp/w/helios && cp -r --preserve=mode . /tmp/w/helios/ && cd /tmp/w/helios && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/helios ] || { rm -rf /target/* && echo /tmp/w/helios > /target/.built-at; }; } && \
+cargo xtask engine-diffstat ${fixture:-all} --json /out/diffstat.jsonl ${module:+--module $module --dump-diff /out/diff} 2>&1 | tee /out/diffstat.txt; exit ${PIPESTATUS[0]}"""
+env = { CARGO_NET_OFFLINE = "true" }
+mounts = { "target/${branch:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+timeout = "30m"
+
 # the same tests on the Intel iGPU (Mesa ANV), the second real backend
 [jobs.gpu-intel]
 about = "the GPU backend's tests on the box's Intel iGPU (Mesa ANV)"

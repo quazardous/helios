@@ -102,3 +102,28 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     eprintln!("Recorded in {}.", file.display());
     Some(ExitCode::SUCCESS)
 }
+
+pub const DIFFSTAT_USAGE: &str = "engine-diffstat <fixture|all> [--module NAME] [--dump-diff DIR] \
+     [--threshold T] [--tile N] [--json FILE] [--cpu]";
+
+/// `cargo xtask engine-diffstat ARGS...`: the bench fixtures' pipelines
+/// run on the CPU and on the GPU, per module how far the GPU is from the
+/// CPU (`helios-gpu`'s `diffstat` example, after darktable's
+/// `--opencl-diffstat`). A release build: run it on the box (the `diffstat`
+/// job), where the GPU is.
+pub fn diffstat(root: &Path, args: &[&str]) -> ExitCode {
+    let status = Command::new("cargo")
+        .args(["run", "--quiet", "--release", "--locked", "--package"])
+        .args(["helios-gpu", "--example", "diffstat", "--"])
+        .args(args)
+        .current_dir(root)
+        .status();
+    match status {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(s) => ExitCode::from(u8::try_from(s.code().unwrap_or(1)).unwrap_or(1)),
+        Err(e) => {
+            eprintln!("xtask: cargo: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
