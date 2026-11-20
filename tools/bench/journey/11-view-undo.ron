@@ -1,5 +1,5 @@
 // The first-user journey, step 11: view state is never an undo step
-// (#5258 R1). On the photo still open in the darkroom, two real edits
+// (undo history, slice R1). On the photo still open in the darkroom, two real edits
 // (the exposure set twice); then panels opened, the Library sorted and
 // culling's auto-advance turned on, which are view state; Edit > Undo
 // (what Ctrl+Z runs) then undoes the last real edit, the exposure, and

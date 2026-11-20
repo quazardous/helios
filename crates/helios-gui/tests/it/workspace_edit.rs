@@ -223,7 +223,7 @@ fn the_library_opens_on_the_workspace_s_query_kept_as_view_state() {
         json!({ "source": "none", "query": "flag:pick rating:2", "auto_advance": true }),
     );
     assert_eq!(h.state().library().filter(), &typed);
-    // View state (#5258 R1): kept in the files, never an undo step.
+    // View state: kept in the files, never an undo step.
     assert_eq!(steps(&h), before, "the library's settings are no step");
     assert!(
         files
@@ -601,7 +601,7 @@ fn an_undo_made_outside_the_pass_or_on_another_thread_is_put_in_place_at_the_nex
 
 #[test]
 fn view_state_adds_no_undo_step_and_ctrl_z_undoes_the_last_real_edit() {
-    // #5258 R1: opening panels, zooming, sorting and changing the import
+    // Opening panels, zooming, sorting and changing the import
     // choices are view state: kept in the workspace's files, never an
     // undo step; Ctrl+Z after them undoes the last real edit, and leaves
     // the view as it is.
