@@ -6,20 +6,27 @@
 # share of pixels past the threshold (1/255): measured 0 everywhere, and the
 # budget keeps it at 0. Pixel values are linear, 1.0 = white.
 #
-# Measured 2026-11-20 on the bench box's NVIDIA GeForce RTX 3070 (Vulkan),
-# box job `diffstat` (fixtures tone and vkdt, 512x384 synthetic input, tiles
-# of 64 px). `measured_*` hold that run's values; `alone` = the module on the
-# CPU's input, `chain` = through the fixture's pipeline.
+# Budgets are per adapter: an `[[adapter]]` entry applies when the adapter
+# description diffstat prints ("GPU: ...") starts with its `name`. Fixtures
+# tone and vkdt, 512x384 synthetic input, tiles of 64 px. `measured` holds
+# the run's values; `alone` = the module on the CPU's input, `chain` =
+# through the fixture's pipeline.
 #
-# Not a CI gate yet: these numbers are for that GPU. A gate in CI would run
-# on lavapipe and needs its own measurement first.
+# CI's test job runs `cargo xtask engine-diffstat all --budgets` on lavapipe
+# (its software Vulkan): a module over its budget, one without a budget, or
+# a GPU kernel that fell back to the CPU fails it. A new adapter, or a
+# module added to a fixture, is measured first (`--json`), then added here
+# by the same rule.
 
-measured_on = "2026-11-20"
-adapter = "NVIDIA GeForce RTX 3070 (DiscreteGpu, Vulkan)"
 threshold = 0.00392156862745098
 tile = 64
 
-[[module]]
+# The bench box's GPU, box job `diffstat`.
+[[adapter]]
+name = "NVIDIA GeForce RTX 3070"
+measured_on = "2026-11-20"
+
+[[adapter.module]]
 fixture = "tone"
 node = "exposure"
 module = "exposure"
@@ -28,7 +35,7 @@ alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
 chain.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
 chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
 
-[[module]]
+[[adapter.module]]
 fixture = "tone"
 node = "blur"
 module = "blur"
@@ -37,7 +44,7 @@ alone.budget = { max_abs = 1.2e-05, mean_abs = 9.8e-07, over = 0.0 }
 chain.measured = { max_abs = 2.861e-06, mean_abs = 2.428e-07, over = 0, worst_tile = [448, 320, 64, 64] }
 chain.budget = { max_abs = 1.2e-05, mean_abs = 9.8e-07, over = 0.0 }
 
-[[module]]
+[[adapter.module]]
 fixture = "tone"
 node = "sigmoid"
 module = "sigmoid"
@@ -46,7 +53,7 @@ alone.budget = { max_abs = 2.4e-06, mean_abs = 2.1e-07, over = 0.0 }
 chain.measured = { max_abs = 7.153e-07, mean_abs = 1.523e-07, over = 0, worst_tile = [256, 320, 64, 64] }
 chain.budget = { max_abs = 2.9e-06, mean_abs = 6.1e-07, over = 0.0 }
 
-[[module]]
+[[adapter.module]]
 fixture = "vkdt"
 node = "exposure"
 module = "vkdt_exposure"
@@ -55,7 +62,7 @@ alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
 chain.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
 chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
 
-[[module]]
+[[adapter.module]]
 fixture = "vkdt"
 node = "grade"
 module = "vkdt_grade"
@@ -64,11 +71,71 @@ alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
 chain.measured = { max_abs = 2.384e-07, mean_abs = 2.146e-08, over = 0, worst_tile = [448, 320, 64, 64] }
 chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
 
-[[module]]
+[[adapter.module]]
 fixture = "vkdt"
 node = "filmcurv"
 module = "vkdt_filmcurv"
 alone.measured = { max_abs = 1.788e-07, mean_abs = 1.482e-08, over = 0, worst_tile = [0, 320, 64, 64] }
 alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
 chain.measured = { max_abs = 2.384e-07, mean_abs = 2.157e-08, over = 0, worst_tile = [0, 320, 64, 64] }
+chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+
+# CI's software Vulkan (lavapipe), measured by a CI run on ubuntu-26.04:
+# "llvmpipe (LLVM 21.1.8, 256 bits) (Cpu, Vulkan)", the dev profile.
+[[adapter]]
+name = "llvmpipe"
+measured_on = "2026-11-20"
+
+[[adapter.module]]
+fixture = "tone"
+node = "exposure"
+module = "exposure"
+alone.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+chain.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+
+[[adapter.module]]
+fixture = "tone"
+node = "blur"
+module = "blur"
+alone.measured = { max_abs = 2.861e-6, mean_abs = 2.429e-7, over = 0, worst_tile = [448, 320, 64, 64] }
+alone.budget = { max_abs = 1.2e-05, mean_abs = 9.8e-07, over = 0.0 }
+chain.measured = { max_abs = 2.861e-6, mean_abs = 2.429e-7, over = 0, worst_tile = [448, 320, 64, 64] }
+chain.budget = { max_abs = 1.2e-05, mean_abs = 9.8e-07, over = 0.0 }
+
+[[adapter.module]]
+fixture = "tone"
+node = "sigmoid"
+module = "sigmoid"
+alone.measured = { max_abs = 6.557e-7, mean_abs = 4.024e-8, over = 0, worst_tile = [192, 192, 64, 64] }
+alone.budget = { max_abs = 2.7e-06, mean_abs = 1.7e-07, over = 0.0 }
+chain.measured = { max_abs = 7.153e-7, mean_abs = 1.52e-7, over = 0, worst_tile = [256, 0, 64, 64] }
+chain.budget = { max_abs = 2.9e-06, mean_abs = 6.1e-07, over = 0.0 }
+
+[[adapter.module]]
+fixture = "vkdt"
+node = "exposure"
+module = "vkdt_exposure"
+alone.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+chain.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+
+[[adapter.module]]
+fixture = "vkdt"
+node = "grade"
+module = "vkdt_grade"
+alone.measured = { max_abs = 3.576e-7, mean_abs = 3.506e-8, over = 0, worst_tile = [384, 192, 64, 64] }
+alone.budget = { max_abs = 1.5e-06, mean_abs = 1.5e-07, over = 0.0 }
+chain.measured = { max_abs = 3.576e-7, mean_abs = 3.506e-8, over = 0, worst_tile = [384, 192, 64, 64] }
+chain.budget = { max_abs = 1.5e-06, mean_abs = 1.5e-07, over = 0.0 }
+
+[[adapter.module]]
+fixture = "vkdt"
+node = "filmcurv"
+module = "vkdt_filmcurv"
+alone.measured = { max_abs = 2.086e-7, mean_abs = 1.508e-8, over = 0, worst_tile = [0, 0, 64, 64] }
+alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+chain.measured = { max_abs = 2.384e-7, mean_abs = 1.998e-8, over = 0, worst_tile = [0, 192, 64, 64] }
 chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }

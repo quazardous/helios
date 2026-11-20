@@ -103,19 +103,55 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     Some(ExitCode::SUCCESS)
 }
 
+/// Cargo's arguments and the example's, from xtask's: `--dev` drops
+/// `--release`, a bare `--budgets` gets the committed file.
+fn diffstat_args(args: &[&str]) -> (Vec<&'static str>, Vec<String>) {
+    let mut cargo = vec!["run", "--quiet", "--release", "--locked", "--package"];
+    let mut example = Vec::new();
+    let mut it = args.iter().peekable();
+    while let Some(arg) = it.next() {
+        match *arg {
+            "--dev" => cargo.retain(|a| *a != "--release"),
+            "--budgets" => {
+                example.push("--budgets".to_string());
+                match it.peek() {
+                    Some(path)
+                        if Path::new(path)
+                            .extension()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("toml")) =>
+                    {
+                        example.push((*path).to_string());
+                        it.next();
+                    }
+                    _ => example.push(DIFFSTAT_BUDGETS.to_string()),
+                }
+            }
+            a => example.push(a.to_string()),
+        }
+    }
+    (cargo, example)
+}
+
 pub const DIFFSTAT_USAGE: &str = "engine-diffstat <fixture|all> [--module NAME] [--dump-diff DIR] \
-     [--threshold T] [--tile N] [--json FILE] [--cpu]";
+     [--threshold T] [--tile N] [--json FILE] [--budgets [FILE]] [--cpu] [--dev]";
+
+/// The budgets file `--budgets` reads when it is given no path.
+const DIFFSTAT_BUDGETS: &str = "crates/helios-gpu/diffstat-budgets.toml";
 
 /// `cargo xtask engine-diffstat ARGS...`: the bench fixtures' pipelines
 /// run on the CPU and on the GPU, per module how far the GPU is from the
 /// CPU (`helios-gpu`'s `diffstat` example, after darktable's
 /// `--opencl-diffstat`). A release build: run it on the box (the `diffstat`
-/// job), where the GPU is.
+/// job), where the GPU is. `--dev` builds it in the dev profile instead,
+/// which optimises the engine and the modules already (the workspace's
+/// `[profile.dev.package]`) and reuses what a test run built: CI's gate.
+/// `--budgets` with no path reads the committed budgets file.
 pub fn diffstat(root: &Path, args: &[&str]) -> ExitCode {
+    let (cargo, example) = diffstat_args(args);
     let status = Command::new("cargo")
-        .args(["run", "--quiet", "--release", "--locked", "--package"])
+        .args(cargo)
         .args(["helios-gpu", "--example", "diffstat", "--"])
-        .args(args)
+        .args(example)
         .current_dir(root)
         .status();
     match status {
@@ -125,5 +161,20 @@ pub fn diffstat(root: &Path, args: &[&str]) -> ExitCode {
             eprintln!("xtask: cargo: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diffstat_dev_drops_release_and_a_bare_budgets_reads_the_committed_file() {
+        let (cargo, example) = diffstat_args(&["all", "--budgets", "--dev"]);
+        assert!(!cargo.contains(&"--release"));
+        assert_eq!(example, ["all", "--budgets", DIFFSTAT_BUDGETS]);
+        let (cargo, example) = diffstat_args(&["tone", "--budgets", "b.toml"]);
+        assert!(cargo.contains(&"--release"));
+        assert_eq!(example, ["tone", "--budgets", "b.toml"]);
     }
 }

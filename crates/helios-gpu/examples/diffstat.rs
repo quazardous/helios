@@ -5,8 +5,13 @@
 //!
 //! ```text
 //! diffstat <fixture|all> [--module NAME] [--dump-diff DIR] [--threshold T]
-//!          [--tile N] [--json FILE] [--cpu]
+//!          [--tile N] [--json FILE] [--budgets FILE] [--cpu]
 //! ```
+//!
+//! `--budgets FILE` (`crates/helios-gpu/diffstat-budgets.toml`) checks each
+//! module against the budgets of the adapter it ran on: a distance over its
+//! budget fails the run, the module named, and so does an adapter or a
+//! module the file has no budget for. CI runs it on lavapipe.
 //!
 //! Each module's `kernel` column says where it ran: `gpu`, `cpu only` (it
 //! has no GPU kernel, both sides run its CPU code) or `FELL BACK` (its GPU
@@ -24,10 +29,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, Params, Region, Value};
-use helios_gpu::diffstat::{self, ModuleDiff, Options, Stats};
+use helios_gpu::diffstat::{self, Budget, ModuleDiff, Options, Stats};
 
 const USAGE: &str = "diffstat <fixture|all> [--module NAME] [--dump-diff DIR] [--threshold T] \
-                     [--tile N] [--json FILE] [--cpu]";
+                     [--tile N] [--json FILE] [--budgets FILE] [--cpu]";
 
 /// The fixtures: a pipeline over a synthetic linear image.
 const FIXTURES: [&str; 2] = ["tone", "vkdt"];
@@ -116,6 +121,7 @@ struct Args {
     module: Option<String>,
     dump: Option<PathBuf>,
     json: Option<PathBuf>,
+    budgets: Option<PathBuf>,
     cpu: bool,
     options: Options,
 }
@@ -126,6 +132,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         module: None,
         dump: None,
         json: None,
+        budgets: None,
         cpu: false,
         options: Options::default(),
     };
@@ -136,6 +143,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--module" => a.module = Some(value()?),
             "--dump-diff" => a.dump = Some(value()?.into()),
             "--json" => a.json = Some(value()?.into()),
+            "--budgets" => a.budgets = Some(value()?.into()),
             "--threshold" => a.options.threshold = value()?.parse().map_err(|e| format!("{e}"))?,
             "--tile" => a.options.tile = value()?.parse().map_err(|e| format!("{e}"))?,
             "--cpu" => a.cpu = true,
@@ -178,6 +186,103 @@ fn cell(s: &Result<Stats, String>) -> String {
             )
         ),
         Err(e) => format!("error: {e}"),
+    }
+}
+
+/// One adapter's budgets, from the budgets file: per fixture and node, the
+/// module alone and through the chain.
+struct Budgets {
+    /// The entry's `name`, which the adapter's description starts with.
+    adapter: String,
+    modules: Vec<(String, String, Budget, Budget)>,
+}
+
+impl Budgets {
+    /// The budgets of the entry whose `name` starts `adapter`.
+    fn load(path: &Path, adapter: &str) -> Result<Self, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file: toml::Table = text
+            .parse()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let entries = file
+            .get("adapter")
+            .and_then(toml::Value::as_array)
+            .ok_or(format!("{}: no [[adapter]]", path.display()))?;
+        let entry = entries
+            .iter()
+            .find(|e| {
+                e.get("name")
+                    .and_then(toml::Value::as_str)
+                    .is_some_and(|n| adapter.starts_with(n))
+            })
+            .ok_or(format!(
+                "{}: no budgets for the adapter \"{adapter}\": measure it first",
+                path.display()
+            ))?;
+        let str_of = |v: &toml::Value, k: &str| {
+            v.get(k)
+                .and_then(toml::Value::as_str)
+                .map(ToString::to_string)
+                .ok_or(format!("{}: a module without `{k}`", path.display()))
+        };
+        let budget = |v: &toml::Value, kind: &str| -> Result<Budget, String> {
+            let b = v.get(kind).and_then(|k| k.get("budget")).ok_or(format!(
+                "{}: a module without `{kind}.budget`",
+                path.display()
+            ))?;
+            let num = |k: &str| {
+                b.get(k)
+                    .and_then(|n| n.as_float().or_else(|| n.as_integer().map(|i| i as f64)))
+                    .ok_or(format!("{}: a budget without `{k}`", path.display()))
+            };
+            Ok(Budget {
+                max_abs: num("max_abs")? as f32,
+                mean_abs: num("mean_abs")?,
+                over: num("over")?,
+            })
+        };
+        let mut modules = Vec::new();
+        for m in entry
+            .get("module")
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            modules.push((
+                str_of(m, "fixture")?,
+                str_of(m, "node")?,
+                budget(m, "alone")?,
+                budget(m, "chain")?,
+            ));
+        }
+        Ok(Self {
+            adapter: str_of(entry, "name")?,
+            modules,
+        })
+    }
+
+    /// What of `fixture`'s modules passes its budget, or has none.
+    fn check(&self, fixture: &str, diffs: &[ModuleDiff]) -> Vec<String> {
+        let mut out = Vec::new();
+        for d in diffs {
+            let who = format!("{fixture}: {} ({})", d.name, d.module);
+            let Some((.., alone, chain)) = self
+                .modules
+                .iter()
+                .find(|(f, n, ..)| f == fixture && *n == d.name)
+            else {
+                out.push(format!("{who}: no budget for \"{}\"", self.adapter));
+                continue;
+            };
+            for (kind, stats, budget) in [("alone", &d.alone, alone), ("chain", &d.chain, chain)] {
+                if let Ok(s) = stats
+                    && let Some(e) = budget.exceeded(s)
+                {
+                    out.push(format!("{who}: {kind} over its budget: {e}"));
+                }
+            }
+        }
+        out
     }
 }
 
@@ -231,6 +336,19 @@ fn main() -> ExitCode {
         }
     };
     println!("GPU: {adapter}");
+    let budgets = match &args.budgets {
+        None => None,
+        Some(path) => match Budgets::load(path, &adapter) {
+            Ok(b) => {
+                println!("budgets: {} for \"{}\"", path.display(), b.adapter);
+                Some(b)
+            }
+            Err(e) => {
+                eprintln!("diffstat: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
     println!(
         "threshold {:.3e}, tiles of {} px; alone = the module on the CPU's input, chain = through the pipeline",
         args.options.threshold, args.options.tile
@@ -281,6 +399,9 @@ fn main() -> ExitCode {
                 .into_iter()
                 .map(|p| format!("{name}: {p}")),
         );
+        if let Some(b) = &budgets {
+            problems.extend(b.check(name, &diffs));
+        }
         for d in &diffs {
             println!(
                 "  {:<10} {:<14} {:<14} | {} | {}",

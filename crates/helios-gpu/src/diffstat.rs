@@ -241,6 +241,42 @@ pub fn run(
     Ok(out)
 }
 
+/// The largest distances a module may show on one adapter (see
+/// `crates/helios-gpu/diffstat-budgets.toml`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Budget {
+    pub max_abs: f32,
+    pub mean_abs: f64,
+    pub over: f64,
+}
+
+impl Budget {
+    /// What of `stats` passes this budget, `None` when nothing does.
+    pub fn exceeded(&self, stats: &Stats) -> Option<String> {
+        let mut out = Vec::new();
+        // A NaN distance never fits (`<=` is false), an infinite one
+        // neither.
+        let fits = |v: f64, budget: f64| v <= budget;
+        if !fits(f64::from(stats.max_abs), f64::from(self.max_abs)) {
+            out.push(format!("max {:.3e} > {:.3e}", stats.max_abs, self.max_abs));
+        }
+        if !fits(stats.mean_abs, self.mean_abs) {
+            out.push(format!(
+                "mean {:.3e} > {:.3e}",
+                stats.mean_abs, self.mean_abs
+            ));
+        }
+        if !fits(stats.over, self.over) {
+            out.push(format!(
+                "over {:.3}% > {:.3}%",
+                stats.over * 100.0,
+                self.over * 100.0
+            ));
+        }
+        (!out.is_empty()).then(|| out.join(", "))
+    }
+}
+
 /// What fails a run, one line per problem, each naming its node and
 /// module: a measure that could not be made, or a module with a GPU kernel
 /// that fell back to the CPU (its distance then says nothing about the

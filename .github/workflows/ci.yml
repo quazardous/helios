@@ -113,6 +113,12 @@ jobs:
       # Say which GPU adapter the backend tests ran on (or that they skipped).
       - name: GPU adapter
         run: cargo test -q -p helios-gpu --test backend -- --nocapture 2>&1 | grep -E "^(GPU|skipped):" | sort -u
+      # Each module's GPU output against its CPU path on lavapipe, against
+      # lavapipe's budgets in crates/helios-gpu/diffstat-budgets.toml: a
+      # module over its budget, or a GPU kernel that fell back to the CPU,
+      # fails the job, named. The dev profile reuses what the tests built.
+      - name: GPU against CPU, per module (diffstat)
+        run: cargo xtask engine-diffstat all --budgets --dev
       - name: changelog fragments, plugin ranges and Cargo.lock
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then

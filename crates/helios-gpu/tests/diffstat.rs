@@ -315,3 +315,28 @@ fn a_kernel_that_falls_back_fails_the_run_and_names_its_module() {
     assert!(diffstat::problems(&sane).is_empty());
     assert!(sane.iter().all(|d| d.fallbacks == 0 && d.accelerated == 0));
 }
+
+#[test]
+fn a_distance_over_its_budget_is_named_and_a_nan_never_fits() {
+    let budget = diffstat::Budget {
+        max_abs: 1e-6,
+        mean_abs: 1e-7,
+        over: 0.0,
+    };
+    let at = |max_abs: f32, mean_abs: f64, over: f64| diffstat::Stats {
+        max_abs,
+        mean_abs,
+        over,
+        worst_tile: Region::sized(1, 1),
+        worst_tile_mean: 0.0,
+    };
+    assert_eq!(budget.exceeded(&at(1e-6, 1e-7, 0.0)), None);
+    let e = budget.exceeded(&at(2e-6, 1e-8, 0.01)).unwrap();
+    assert!(
+        e.contains("max 2.000e-6") && e.contains("over 1.000%"),
+        "{e}"
+    );
+    assert!(!e.contains("mean"), "{e}");
+    assert!(budget.exceeded(&at(f32::NAN, 0.0, 0.0)).is_some());
+    assert!(budget.exceeded(&at(f32::INFINITY, 0.0, 0.0)).is_some());
+}
