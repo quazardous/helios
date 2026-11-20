@@ -85,8 +85,8 @@ impl Action {
         match self {
             Action::Cancel => Message::new("gui-queue-cancel", "Cancel"),
             Action::Retry => Message::new("gui-queue-retry", "Retry"),
-            Action::Top => Message::new("gui-queue-top", "Move to top"),
-            Action::Bottom => Message::new("gui-queue-bottom", "Move to bottom"),
+            Action::Top => Message::new("gui-queue-top", "Top"),
+            Action::Bottom => Message::new("gui-queue-bottom", "Bottom"),
         }
     }
 
@@ -366,7 +366,7 @@ impl QueuePanel {
         ui.separator();
         let mut asked = Vec::new();
         ui.scroll_area(
-            egui::ScrollArea::vertical().id_salt("helios.queue.scroll"),
+            egui::ScrollArea::both().id_salt("helios.queue.scroll"),
             |ui| {
                 egui::Grid::new("helios.queue.items")
                     .striped(true)

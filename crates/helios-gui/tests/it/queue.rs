@@ -49,7 +49,7 @@ fn harness(when_empty: bool) -> Harness<'static, Shell> {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_queue_when_empty(when_empty);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.run_steps(4);
     h
 }
 
@@ -65,7 +65,7 @@ fn select(h: &mut Harness<'_, Shell>, node: &str) {
             Origin::User,
         ))
         .unwrap();
-    h.run();
+    h.run_steps(4);
 }
 
 /// Brings the Queue panel to the front of its area.
@@ -73,7 +73,7 @@ fn show_queue(h: &mut Harness<'_, Shell>) {
     h.state_mut()
         .run("helios.queue.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.run_steps(4);
 }
 
 fn visible(h: &Harness<'_, Shell>) -> bool {
@@ -96,7 +96,7 @@ fn items(h: &Harness<'_, Shell>) -> Vec<(String, ItemState)> {
 fn until(h: &mut Harness<'_, Shell>, what: &str, done: impl Fn(&Harness<'_, Shell>) -> bool) {
     let deadline = Instant::now() + LONG;
     loop {
-        h.run();
+        h.run_steps(4);
         if done(h) {
             return;
         }
@@ -385,19 +385,21 @@ fn retry_move_and_cancel_reach_the_node_and_the_rows_follow() {
         items(h)[0] == ("a.jpg".to_string(), ItemState::Waiting)
     });
 
-    h.get_by_label("Move to top c.jpg").click();
-    until(&mut h, "c.jpg first", |h| items(h)[0].0 == "c.jpg");
+    // The panel shows the first rows; the ones below scroll.
+    h.get_by_label("Top b.jpg").click();
+    until(&mut h, "Move asked", |_| node.verbs().len() == 2);
+    until(&mut h, "b.jpg first", |h| items(h)[0].0 == "b.jpg");
 
     h.get_by_label("Cancel b.jpg").click();
     until(&mut h, "b.jpg cancelled", |h| {
-        items(h).contains(&("b.jpg".to_string(), ItemState::Cancelled))
+        items(h)[0] == ("b.jpg".to_string(), ItemState::Cancelled)
     });
     assert_eq!(
         items(&h),
         [
-            ("c.jpg".to_string(), ItemState::Waiting),
-            ("a.jpg".to_string(), ItemState::Waiting),
             ("b.jpg".to_string(), ItemState::Cancelled),
+            ("a.jpg".to_string(), ItemState::Waiting),
+            ("c.jpg".to_string(), ItemState::Waiting),
         ]
     );
 
@@ -412,7 +414,7 @@ fn retry_move_and_cancel_reach_the_node_and_the_rows_follow() {
             },
             ControlRequest::WorkflowPrioritize {
                 run: "run-1".into(),
-                items: one("c.jpg"),
+                items: one("b.jpg"),
                 to: MoveTo::Top,
             },
             ControlRequest::WorkflowCancel {
@@ -448,7 +450,7 @@ fn queue_snapshots() {
     let mut h = following(&node);
     h.run_steps(4);
     let title = h.get_by_label("Queue of export").rect();
-    let last = h.get_by_label("Cancel c.jpg").rect();
+    let last = h.get_by_label("Cancel b.jpg").rect();
     let area = Rect::from_min_max(
         pos2(title.min.x - 8.0, title.min.y - 8.0),
         pos2(last.max.x + 8.0, last.max.y + 8.0),
@@ -496,14 +498,14 @@ fn a_job_that_is_not_a_run_shows_as_its_promise_and_cancel_goes_through_the_jobs
         assert_eq!(queue.items[0].actions, [Action::Cancel]);
     }
     h.get_by_label("Cancel Export a.png").click();
-    h.run();
+    h.run_steps(4);
     assert!(asked.load(Ordering::SeqCst), "the job was asked to stop");
 
     let mut cancelled = promise("promise-1", "export-a", "Export a.png", State::Cancelled);
     cancelled.updated += 1;
     h.state_mut()
         .show_activity_at(vec![cancelled], 1_794_650_001);
-    h.run();
+    h.run_steps(4);
     assert_eq!(
         items(&h),
         [("Export a.png".to_string(), ItemState::Cancelled)]
@@ -565,7 +567,7 @@ fn an_empty_queue_closes_the_panel_when_the_setting_is_off() {
         vec![promise("promise-1", "export-a", "Export a.png", running())],
         1_794_650_000,
     );
-    h.run();
+    h.run_steps(4);
     assert!(visible(&h), "the node has work: shown");
     assert_eq!(items(&h).len(), 1);
     // Another node, without work: closed again.
@@ -599,7 +601,7 @@ fn a_node_selected_while_the_panels_draw_is_followed_in_the_same_pass() {
         }
     });
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.run_steps(4);
     show_queue(&mut h);
     let _job = h
         .state()
@@ -614,7 +616,7 @@ fn a_node_selected_while_the_panels_draw_is_followed_in_the_same_pass() {
         )],
         1_794_650_000,
     );
-    h.run();
+    h.run_steps(4);
     assert_eq!(h.state().queue_panel().node(), None);
     armed.set(Some("grade"));
     h.step();

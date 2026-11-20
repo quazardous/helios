@@ -1388,6 +1388,7 @@ gui-profile-keys-error 81148fc1d6828ea9
 gui-profile-keys-skipped f1cc88962bdc0e37
 gui-profile-layout-error 0920390b6dde7b73
 gui-profile-variants c6c2d7f979583206
+gui-queue-bottom 73008d178c37c666
 gui-queue-cancel e09b40fcf1e41cfb
 gui-queue-column-attempts b04dbbde4c82f25f
 gui-queue-column-item 2ec86d203d6111fc
@@ -1401,6 +1402,7 @@ gui-queue-minutes f1ff2535c97df24f
 gui-queue-no-selection ab83fa8ea400cec5
 gui-queue-oldest-wait 2e50f47d961b8c16
 gui-queue-on-node 2459cf2ab530b552
+gui-queue-retry 1da925989c6c1be1
 gui-queue-seconds f307af2609bac350
 gui-queue-state-cancelled b9fdf5919d7526fa
 gui-queue-state-cancelling db77224f64bad09b
@@ -1411,6 +1413,7 @@ gui-queue-state-running 1798b7652272f21a
 gui-queue-state-waiting a27bd7e042807abe
 gui-queue-summary c2d0c33967192a03
 gui-queue-title 4bf5bb4b41d5e877
+gui-queue-top d4c6d3dffef75154
 gui-quick-open-image 629f69163a374538
 gui-quick-open-module 94e6d2cc1b97242f
 gui-quick-open-source 0a91c26e765f385e

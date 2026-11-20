@@ -2239,8 +2239,8 @@ gui-promise-so-far = { $done } so far
 
 gui-queue-cancel = Cancel
 gui-queue-retry = Retry
-gui-queue-top = Move to top
-gui-queue-bottom = Move to bottom
+gui-queue-top = Top
+gui-queue-bottom = Bottom
 
 gui-queue-column-attempts = Attempts
 
