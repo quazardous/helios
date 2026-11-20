@@ -163,6 +163,7 @@ impl ImportWindow {
         key: SourceKey,
         icon: &str,
         name: String,
+        mark: Option<&str>,
         line: &[String],
         tip: Option<String>,
         words: &Words,
@@ -176,7 +177,12 @@ impl ImportWindow {
         let mut item = PlaceItem::new(item_id(&key), name)
             .icon(icon)
             .toggle(PlaceToggle::new(PIN, pinned, pin.clone()));
-        let line = line.join(" · ");
+        // A state mark leads the line, as a word's sign, not one of its
+        // parts.
+        let line = match mark {
+            Some(mark) => format!("{mark} {}", line.join(" · ")),
+            None => line.join(" · "),
+        };
         if !line.is_empty() {
             item = item.line(line);
         }
@@ -206,11 +212,6 @@ impl ImportWindow {
         let line = line.unwrap_or_else(|| vec![self.where_line(path)]);
         // Its own choices, marked.
         let own = self.sources.has_own(path);
-        let line: Vec<String> = if own {
-            std::iter::once("●".to_owned()).chain(line).collect()
-        } else {
-            line
-        };
         let tip = if own {
             format!("{}\n{}", path.display(), words.choices.own_choices)
         } else {
@@ -222,7 +223,8 @@ impl ImportWindow {
         } else {
             "phosphor:folder"
         };
-        self.placed(key, icon, name, &line, Some(tip), words)
+        let mark = own.then_some("●");
+        self.placed(key, icon, name, mark, &line, Some(tip), words)
     }
 
     /// A path source's line by default: its last import, else where it is.
@@ -268,12 +270,12 @@ impl ImportWindow {
             .unwrap_or_else(|| account.label.clone());
         // A connected account's mark is plain, another's muted; one to
         // reconnect is the warning badge leading the line.
+        let mark = match account.state {
+            _ if attention => None,
+            AccountState::Connected => Some("●"),
+            _ => Some("○"),
+        };
         let mut line = Vec::new();
-        match account.state {
-            _ if attention => {}
-            AccountState::Connected => line.push("●".to_owned()),
-            _ => line.push("○".to_owned()),
-        }
         if let Some(email) = account.email().filter(|e| !name.contains(e)) {
             line.push(email.to_owned());
         }
@@ -289,7 +291,7 @@ impl ImportWindow {
         if let Some(word) = word {
             line.push(t(word));
         }
-        if line.len() <= 1 {
+        if line.is_empty() {
             let connector = self.connectors.provider(&account.connector).map_or_else(
                 || account.connector.clone(),
                 |p| {
@@ -305,6 +307,7 @@ impl ImportWindow {
             SourceKey::Account(account.id.clone()),
             "phosphor:cloud",
             name,
+            mark,
             &line,
             account.email().map(str::to_owned),
             words,

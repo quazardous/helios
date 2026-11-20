@@ -63,8 +63,11 @@ fn shown(h: &Harness<'_, Shell>, label: &str) -> bool {
 /// joined by " · ") say `part`.
 fn said_in_lines(h: &Harness<'_, Shell>, part: &str) -> usize {
     h.query_all(egui_kittest::kittest::by().predicate(|n| {
-        n.description()
-            .is_some_and(|d| d.split(" · ").any(|p| p == part))
+        n.description().is_some_and(|d| {
+            // A state mark (● ○) leads the line.
+            let d = d.trim_start_matches(['●', '○']).trim_start();
+            d.split(" · ").any(|p| p == part)
+        })
     }))
     .count()
 }

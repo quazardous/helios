@@ -786,8 +786,11 @@ fn a_backup_ended_says_a_card_safe_everywhere_from_one_list() {
     // Each card's line, said as its row's description.
     let said = |part: &str| {
         h.query_all(egui_kittest::kittest::by().predicate(|n| {
-            n.description()
-                .is_some_and(|d| d.split(" · ").any(|p| p == part))
+            n.description().is_some_and(|d| {
+                // A state mark (● ○) leads the line.
+                let d = d.trim_start_matches(['●', '○']).trim_start();
+                d.split(" · ").any(|p| p == part)
+            })
         }))
         .count()
     };
