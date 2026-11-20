@@ -458,10 +458,27 @@ fn album_params(edit: &crate::library::AlbumEdit) -> Value {
             json!({ "op": "createSmart", "id": id, "name": name, "rules": rules.to_json() })
         }
         E::Rules { id, rules } => json!({ "op": "rules", "id": id, "rules": rules.to_json() }),
-        E::QuickToggle { images } => json!({ "op": "quickToggle", "images": images }),
-        E::QuickClear => json!({ "op": "quickClear" }),
-        E::QuickSave { id, name, clear } => {
-            json!({ "op": "quickSave", "id": id, "name": name, "clear": clear })
+        E::QuickToggle { id, images } => {
+            json!({ "op": "quickToggle", "id": id, "images": images })
+        }
+        E::QuickClear { id } => json!({ "op": "quickClear", "id": id }),
+        E::QuickSave {
+            from,
+            id,
+            name,
+            clear,
+        } => {
+            json!({ "op": "quickSave", "from": from, "id": id, "name": name, "clear": clear })
+        }
+        E::QuickCreate { id, name, images } => {
+            json!({ "op": "quickCreate", "id": id, "name": name, "images": images })
+        }
+        E::QuickRename { id, name } => json!({ "op": "quickRename", "id": id, "name": name }),
+        E::QuickDelete { id } => json!({ "op": "quickDelete", "id": id }),
+        E::QuickTarget { id } => json!({ "op": "quickTarget", "id": id }),
+        E::QuickAdd { id, images } => json!({ "op": "quickAdd", "id": id, "images": images }),
+        E::QuickRemove { id, images } => {
+            json!({ "op": "quickRemove", "id": id, "images": images })
         }
     }
 }
@@ -1131,7 +1148,16 @@ fn show_asked(shell: &mut Shell, asked: &Asked, answer: Result<Value, helios_ins
                 .filter_map(Value::as_str)
                 .map(String::from)
                 .collect();
+            // A node from before named quick collections answers none:
+            // the first one, holding `quick`, is the target.
+            let quicks: Vec<helios_vault::collections::QuickCollection> =
+                serde_json::from_value(answer["quicks"].clone()).unwrap_or_default();
+            let target = answer["target"]
+                .as_str()
+                .unwrap_or(helios_vault::collections::QUICK)
+                .to_string();
             shell.library_mut().set_quick(quick);
+            shell.library_mut().set_quick_collections(quicks, target);
             shell.library_mut().set_albums(albums);
         }
         Asked::TrashPlan(ask) => ask_trash(shell, ask, &answer),

@@ -938,9 +938,10 @@ fn a_nested_tree_is_built_in_the_rule_editor_each_edit_undone() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// The quick collection's row in the Albums section, by its count.
+/// The first quick collection's row in the Albums section, the target
+/// ("+"), by its count.
 fn quick_row(count: usize) -> String {
-    format!("⚡ Quick collection {count}")
+    format!("⚡ Quick collection + {count}")
 }
 
 /// The steps of the library's history, newest last.
@@ -1083,6 +1084,196 @@ fn b_toggles_the_quick_collection_which_scopes_the_grid_and_saves_as_an_album() 
     settle(&mut h, &mut persist, 24.0);
     assert_eq!(h.state().library().quick_count(), 0);
     assert_eq!(steps(&h).last().unwrap(), "Clear the quick collection");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Named quick collections with a target: an agent makes,
+/// renames, targets and deletes them through `library.quick.*`; B puts
+/// the selection in the target; photos dropped on a named one's row go
+/// in; each change is one step of the library's history, undone.
+#[test]
+fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone() {
+    use helios_gui::library::DropOn;
+    let root = temp("quicks");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let undo = |history: &helios_gui::library_history::LibraryHistory| {
+        let undone = history.undo(
+            &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+            &egui_pop::model::commands::Origin::User,
+        );
+        assert!(
+            matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+            "{undone:?}"
+        );
+    };
+    // An agent's command: queued for the shell's frame, its answer read
+    // from the history.
+    let agent = |h: &mut Harness<'static, Shell>, id: &str, args: Value| {
+        let out = h
+            .state_mut()
+            .run(id, args, Origin::Agent("mcp".into()))
+            .unwrap();
+        if out != json!({ "queued": true }) {
+            return out;
+        }
+        h.run();
+        h.state()
+            .history()
+            .into_iter()
+            .rev()
+            .find(|r| r.id == id)
+            .unwrap_or_else(|| panic!("{id} never ran"))
+            .result
+            .unwrap()
+    };
+    h.get_by_label("Albums").click();
+    settle(&mut h, &mut persist, 1.0);
+    h.get_by_label(&quick_row(0));
+
+    // An agent makes two, one the target at once.
+    let made = agent(
+        &mut h,
+        "library.quick.create",
+        json!({ "name": "Picks", "images": [id(1).hex()] }),
+    );
+    assert_eq!(made["id"], "picks", "{made}");
+    agent(
+        &mut h,
+        "library.quick.create",
+        json!({ "name": "Maybe", "target": true }),
+    );
+    settle(&mut h, &mut persist, 2.0);
+    let listed = agent(&mut h, "library.quick.list", json!({}));
+    let rows: Vec<(String, u64, bool)> = listed["quick"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|q| {
+            (
+                q["id"].as_str().unwrap().to_string(),
+                q["count"].as_u64().unwrap(),
+                q["target"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("quick".to_string(), 0, false),
+            ("maybe".to_string(), 0, true),
+            ("picks".to_string(), 1, false),
+        ],
+        "{listed}"
+    );
+    h.get_by_label("⚡ Quick collection 0");
+    h.get_by_label("⚡ Maybe + 0");
+    h.get_by_label("⚡ Picks 1");
+    assert!(answer_err(
+        &mut h,
+        "library.quick.create",
+        json!({ "name": "picks" })
+    ));
+
+    // B: the selection goes in the target, not the first one; one step.
+    h.state_mut()
+        .library_mut()
+        .select_ids(&[id(2).hex(), id(3).hex()]);
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
+    h.key_press(Key::B);
+    settle(&mut h, &mut persist, 3.0);
+    h.get_by_label("⚡ Maybe + 2");
+    h.get_by_label("⚡ Quick collection 0");
+    assert_eq!(
+        steps(&h).last().unwrap(),
+        "Add 2 photos to the quick collection “Maybe”"
+    );
+
+    // The selection dropped on a named quick collection (not the target)
+    // goes in.
+    let (from, to) = (
+        cell_at(&h, "c.nef"),
+        h.get_by_label("⚡ Picks 1").rect().center(),
+    );
+    drag_onto(&mut h, from, to, |h| {
+        assert_eq!(
+            h.state().library().drop_hover(),
+            Some((DropOn::Quick("picks".into()), true))
+        );
+    });
+    settle(&mut h, &mut persist, 4.0);
+    h.get_by_label("⚡ Picks 3");
+    assert_eq!(
+        steps(&h).last().unwrap(),
+        "Add 2 photos to the quick collection “Picks”"
+    );
+    undo(&history);
+    settle(&mut h, &mut persist, 5.0);
+    h.get_by_label("⚡ Picks 1");
+
+    // Renamed, targeted back to the first, removed from: one step each.
+    agent(
+        &mut h,
+        "library.quick.rename",
+        json!({ "id": "picks", "name": "Keepers" }),
+    );
+    settle(&mut h, &mut persist, 6.0);
+    h.get_by_label("⚡ Keepers 1");
+    agent(&mut h, "library.quick.target", json!({ "id": "quick" }));
+    settle(&mut h, &mut persist, 7.0);
+    h.get_by_label(&quick_row(0));
+    h.get_by_label("⚡ Maybe 2");
+    run(
+        &mut h,
+        "library.quick.remove",
+        json!({ "id": "maybe", "images": [id(2).hex()] }),
+    );
+    settle(&mut h, &mut persist, 8.0);
+    h.get_by_label("⚡ Maybe 1");
+    undo(&history);
+    settle(&mut h, &mut persist, 9.0);
+    h.get_by_label("⚡ Maybe 2");
+
+    // The target deleted: the first one is the target again; undone, it
+    // comes back as the target with its photos.
+    run(&mut h, "library.quick.target", json!({ "id": "maybe" }));
+    settle(&mut h, &mut persist, 10.0);
+    assert!(answer_err(
+        &mut h,
+        "library.quick.delete",
+        json!({ "id": "quick" })
+    ));
+    run(&mut h, "library.quick.delete", json!({ "id": "maybe" }));
+    settle(&mut h, &mut persist, 11.0);
+    assert!(h.query_by_label("⚡ Maybe + 2").is_none());
+    h.get_by_label(&quick_row(0));
+    assert_eq!(
+        steps(&h).last().unwrap(),
+        "Delete the quick collection “Maybe”"
+    );
+    undo(&history);
+    settle(&mut h, &mut persist, 12.0);
+    h.get_by_label("⚡ Maybe + 2");
+    assert_eq!(h.state().library().quick_target(), "maybe");
+
+    // A click on a named one scopes the grid to it.
+    h.get_by_label("⚡ Maybe + 2").click();
+    settle(&mut h, &mut persist, 13.0);
+    assert_eq!(h.state().library().collection().as_deref(), Some("maybe"));
+    assert_eq!(grid(&h), ["b.jpg", "c.nef"]);
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -1528,7 +1719,7 @@ fn photos_dragged_onto_an_album_or_the_quick_collection_go_in_a_smart_album_refu
     drag_onto(&mut h, from, to, |h| {
         assert_eq!(
             h.state().library().drop_hover(),
-            Some((DropOn::Quick, true))
+            Some((DropOn::Quick("quick".into()), true))
         );
     });
     settle(&mut h, &mut persist, 8.0);
@@ -1667,6 +1858,7 @@ fn a_vault_held_locked_does_not_delay_the_filter_history_the_folders_or_the_albu
     h.state_mut()
         .library_mut()
         .edit_album(helios_gui::library::AlbumEdit::QuickToggle {
+            id: "quick".into(),
             images: vec![id(1).hex()],
         });
     let mut slowest = std::time::Duration::ZERO;

@@ -603,7 +603,9 @@ built yet: a dock panel of its own for the tree.
 filter, stored as a rule tree: `{field, op, value}` rules and nested
 groups with their own match mode (all, any, none), operators per field
 kind (LightCraft's model, §2), compiled to one vault `Query` so a smart
-album pages and counts like L4; the quick collection is one album; B toggles it; Ctrl+K recent
+album pages and counts like L4; quick collections are albums of their own kind, named, the first one
+always there (an older vault's quick collection), one of them the target B toggles and its row marked
+"+" (Lightroom's target collection); Ctrl+K recent
 filters (darktable's collection history; Lightroom's Ctrl+K is keywords,
 so the profile decides). Undoable steps; agent commands
 `library.collection.*`. Test: vault documents, undo, a scenario that

@@ -1047,7 +1047,7 @@ themselves, so a key taken away in the shortcuts editor stays away.
 | library, culling | `P`, `U` | pick, take the flag off |
 | library, culling | `F2`–`F5`; `6`–`9` | yellow, green, blue, purple; red, yellow, green, blue |
 | library, culling | `Right`, `Left`, `S` | next, previous image (not in Compare); open or close a stack |
-| library, culling | `B` | the selected photos in or out of the quick collection (`library.quick.toggle`, Lightroom) |
+| library, culling | `B` | the selected photos in or out of the target quick collection (`library.quick.toggle`, Lightroom) |
 | library | `C` | compare the selected photos (`library.compare`); in Compare, leave it |
 | Compare | `Escape` | leave Compare, back to the grid (`compare.leave`); not while a pushed mode, an overlay, a field, zen mode, a tip or a mask path being drawn wants Escape |
 | library | `Ctrl+Shift+A`, `Ctrl+I` | select none, invert the selection (`library.select.none`, `library.select.invert`, darktable); not while a text field is typed in |

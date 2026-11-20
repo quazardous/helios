@@ -183,7 +183,32 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.collection.rename" => {
             object(&["id"], &[("id", any()), ("name", string_or_null())])
         }
-        "library.quick.saveAs" => object(&[], &[("name", string_or_null()), ("clear", boolean())]),
+        "library.quick.saveAs" => object(
+            &[],
+            &[
+                ("id", any()),
+                ("name", string_or_null()),
+                ("clear", boolean()),
+            ],
+        ),
+        "library.quick.create" => object(
+            &[],
+            &[
+                ("name", string_or_null()),
+                ("images", images()),
+                ("target", boolean()),
+            ],
+        ),
+        "library.quick.rename" => object(&["id"], &[("id", any()), ("name", string_or_null())]),
+        "library.quick.delete" | "library.quick.target" => object(&["id"], &[("id", any())]),
+        "library.quick.toggle" => object(
+            &[],
+            &[("id", any()), ("images", images()), ("add", boolean())],
+        ),
+        "library.quick.add" | "library.quick.remove" => {
+            object(&[], &[("id", any()), ("images", images())])
+        }
+        "library.quick.list" => object(&[], &[]),
         // Filters.
         "library.filter.apply" => object(&[], &[("query", any()), ("filter", any())]),
         "library.filter.pin" => object(
@@ -268,7 +293,7 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.fitCameraLook" => object(&[], &[("images", images()), ("default", any())]),
         "library.show" => object(&[], &[("ids", images())]),
         "library.sort" => object(&[], &[("by", string_or_null()), ("descending", boolean())]),
-        "library.collection" => object(&[], &[("id", any())]),
+        "library.collection" | "library.quick.clear" => object(&[], &[("id", any())]),
         "library.importSession" => object(&[], &[("id", any()), ("select", boolean())]),
         "library.importAutomatic.pause" => object(&[], &[("on", boolean())]),
         "library.select.similar" => object(&[], &[("by", any())]),
@@ -356,10 +381,6 @@ mod tests {
         (
             "library.collection.",
             "the rule editor and smart albums, later",
-        ),
-        (
-            "library.quick.",
-            "quick collection edits beyond saving, later",
         ),
         ("vault.", "marks on the selection, later"),
         ("import.", "import steps beyond accounts and sources, later"),

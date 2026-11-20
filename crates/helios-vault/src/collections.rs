@@ -13,13 +13,19 @@
 //! each store reads in the same query when [`crate::Query::album`] names
 //! it.
 //!
-//! The **quick collection** is one more document, under the key [`QUICK`]
-//! and of that kind, `{ "kind": "quick", "images": [...] }`: a set of
-//! photos the user gathers for a while (B toggles the selection in and
-//! out, as Lightroom's quick collection), always there (no document yet
-//! is an empty one), never listed with the albums nor renamed or deleted;
-//! [`crate::Query::album`] naming it selects its photos as an album's.
-//! "Save as album" turns it into a plain album, emptying it or not.
+//! **Quick collections** are documents of the kind [`QUICK`],
+//! `{ "kind": "quick", "name": "…", "images": [...] }`: sets of photos the
+//! user gathers for a while, never listed with the albums. The first one
+//! is under the key [`QUICK`]; it is always there (no document yet is an
+//! empty one), has no name until the user gives it one, and is never
+//! deleted. More are made, renamed and deleted by the user. One of them
+//! is the **target** ([`QUICK_TARGET`]): B toggles the selection in and
+//! out of it, as Lightroom's target collection. No target written (a vault
+//! from before named quick collections) means the first, so an older
+//! vault's quick collection is the first and the target as it is: nothing
+//! is rewritten. [`crate::Query::album`] naming one selects its photos as
+//! an album's. "Save as album" turns one into a plain album, emptying it
+//! or not.
 //!
 //! An **album set** groups collections, as Lightroom's collection sets:
 //! `{ "kind": "set", "name": "…" }`. A collection belongs to at most one
@@ -46,8 +52,39 @@ pub const COLLECTIONS: &str = "library/collections";
 pub const ALBUM: &str = "album";
 /// A smart album's `kind`.
 pub const SMART: &str = "smart";
-/// The quick collection's key and `kind`.
+/// The first quick collection's key, and every quick collection's `kind`.
 pub const QUICK: &str = "quick";
+/// The namespace of the quick collections' settings: the key [`TARGET`]
+/// holds `{ "id": "<key>" }`, the target quick collection.
+pub const QUICK_TARGET: &str = "library/quick";
+/// The target's key in [`QUICK_TARGET`].
+pub const TARGET: &str = "target";
+
+/// A quick collection: its key, the name the user gave it (none: the
+/// first one, never named) and its photos by id, in the order they were
+/// put in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct QuickCollection {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub images: Vec<String>,
+}
+
+impl QuickCollection {
+    fn of(id: &str, doc: Option<&Value>) -> QuickCollection {
+        QuickCollection {
+            id: id.to_string(),
+            name: doc
+                .and_then(|d| d.get("name"))
+                .and_then(Value::as_str)
+                .filter(|n| !n.trim().is_empty())
+                .map(String::from),
+            images: quick_of(doc),
+        }
+    }
+}
 /// An album set's `kind`.
 pub const SET: &str = "set";
 
@@ -515,19 +552,44 @@ impl<S: Store> Vault<S> {
         })
     }
 
-    /// The photos of the quick collection ([`QUICK`]), by id, in the
-    /// order they were put in it (none before it was ever filled).
-    pub fn quick_collection(&self) -> Result<Vec<String>, String> {
-        self.read(|store| Ok(quick_of(store.document(COLLECTIONS, QUICK)?.as_ref())))
+    /// Every quick collection: the first ([`QUICK`], there even before
+    /// it was ever filled), then the others by name.
+    pub fn quick_collections(&self) -> Result<Vec<QuickCollection>, String> {
+        self.read(|store| quicks_of(store))
     }
 
-    /// B: when the quick collection holds every photo of `images`, takes
-    /// them out; else puts in those it lacks. Whether they were put in,
-    /// and what changed.
+    /// The target quick collection's key: the one written, while it is
+    /// there, else the first.
+    pub fn quick_target(&self) -> Result<String, String> {
+        self.read(|store| target_of(store))
+    }
+
+    /// The photos of the target quick collection, by id, in the order
+    /// they were put in it (none before it was ever filled).
+    pub fn quick_collection(&self) -> Result<Vec<String>, String> {
+        self.read(|store| {
+            let target = target_of(store)?;
+            Ok(quick_of(store.document(COLLECTIONS, &target)?.as_ref()))
+        })
+    }
+
+    /// B: when the target quick collection holds every photo of `images`,
+    /// takes them out; else puts in those it lacks. Whether they were put
+    /// in, and what changed.
     pub fn toggle_quick(&self, images: &[ImageId]) -> Result<(bool, Changes), String> {
+        self.toggle_quick_in(None, images)
+    }
+
+    /// [`Vault::toggle_quick`] on the quick collection `id` (none: the
+    /// target).
+    pub fn toggle_quick_in(
+        &self,
+        id: Option<&str>,
+        images: &[ImageId],
+    ) -> Result<(bool, Changes), String> {
         let ids: Vec<String> = images.iter().map(ImageId::hex).collect();
         self.transaction(|store| {
-            let before = store.document(COLLECTIONS, QUICK)?;
+            let (key, before) = quick_doc_of(store, id)?;
             let mut quick = quick_of(before.as_ref());
             let all_in = !ids.is_empty() && ids.iter().all(|i| quick.contains(i));
             if all_in {
@@ -539,25 +601,164 @@ impl<S: Store> Vault<S> {
                     }
                 }
             }
-            let changes = put(store, QUICK, before, Some(quick_doc(&quick)))?;
+            let after = with_images(&key, before.as_ref(), &quick);
+            let changes = put(store, &key, before, Some(after))?;
             Ok((!all_in, changes))
         })
     }
 
-    /// Empties the quick collection (its photos stay in the Library).
-    pub fn clear_quick(&self) -> Result<Changes, String> {
+    /// Puts photos in the quick collection `id` (none: the target), after
+    /// those it holds; one it holds already stays where it is.
+    pub fn add_to_quick(&self, id: Option<&str>, images: &[ImageId]) -> Result<Changes, String> {
         self.transaction(|store| {
-            let before = store.document(COLLECTIONS, QUICK)?;
+            let (key, before) = quick_doc_of(store, id)?;
+            let mut quick = quick_of(before.as_ref());
+            for i in images {
+                let hex = i.hex();
+                if !quick.contains(&hex) {
+                    quick.push(hex);
+                }
+            }
+            let after = with_images(&key, before.as_ref(), &quick);
+            put(store, &key, before, Some(after))
+        })
+    }
+
+    /// Takes photos out of the quick collection `id` (none: the target);
+    /// they stay in the Library.
+    pub fn remove_from_quick(
+        &self,
+        id: Option<&str>,
+        images: &[ImageId],
+    ) -> Result<Changes, String> {
+        let gone: Vec<String> = images.iter().map(ImageId::hex).collect();
+        self.transaction(|store| {
+            let (key, before) = quick_doc_of(store, id)?;
+            let mut quick = quick_of(before.as_ref());
+            quick.retain(|i| !gone.contains(i));
+            let after = with_images(&key, before.as_ref(), &quick);
+            put(store, &key, before, Some(after))
+        })
+    }
+
+    /// Empties the target quick collection (its photos stay in the
+    /// Library).
+    pub fn clear_quick(&self) -> Result<Changes, String> {
+        self.clear_quick_in(None)
+    }
+
+    /// Empties the quick collection `id` (none: the target).
+    pub fn clear_quick_in(&self, id: Option<&str>) -> Result<Changes, String> {
+        self.transaction(|store| {
+            let (key, before) = quick_doc_of(store, id)?;
             if quick_of(before.as_ref()).is_empty() {
                 return Ok(Changes::default());
             }
-            put(store, QUICK, before, Some(quick_doc(&[])))
+            let after = with_images(&key, before.as_ref(), &[]);
+            put(store, &key, before, Some(after))
+        })
+    }
+
+    /// Makes a quick collection named `name` holding `images` (each
+    /// once), under `id` when given (refused when taken), else a key made
+    /// from the name ([`album_key`]). A name another quick collection has
+    /// is refused, whatever the case.
+    pub fn create_quick(
+        &self,
+        id: Option<&str>,
+        name: &str,
+        images: &[ImageId],
+    ) -> Result<(QuickCollection, Changes), String> {
+        let name = quick_name(name)?;
+        self.transaction(|store| {
+            check_quick_free(&*store, &name, "")?;
+            let key = match id {
+                Some(id) if id.trim().is_empty() => {
+                    return Err("a quick collection needs an id".into());
+                }
+                Some(id) => {
+                    if id == QUICK || store.document(COLLECTIONS, id)?.is_some() {
+                        return Err(format!("a collection `{id}` exists already"));
+                    }
+                    id.to_string()
+                }
+                None => {
+                    let keys: Vec<String> = store
+                        .documents(COLLECTIONS)?
+                        .into_iter()
+                        .map(|(k, _)| k)
+                        .collect();
+                    album_key(&name, |k| keys.iter().any(|t| t == k))
+                }
+            };
+            let mut held = Vec::new();
+            for i in images {
+                let hex = i.hex();
+                if !held.contains(&hex) {
+                    held.push(hex);
+                }
+            }
+            let doc = json!({ "kind": QUICK, "name": name, "images": held });
+            let changes = put(store, &key, None, Some(doc))?;
+            Ok((
+                QuickCollection {
+                    id: key,
+                    name: Some(name),
+                    images: held,
+                },
+                changes,
+            ))
+        })
+    }
+
+    /// Renames a quick collection (the first one too); the same name
+    /// again changes nothing.
+    pub fn rename_quick(&self, id: &str, name: &str) -> Result<Changes, String> {
+        let name = quick_name(name)?;
+        self.transaction(|store| {
+            let (key, before) = quick_doc_of(store, Some(id))?;
+            check_quick_free(&*store, &name, &key)?;
+            let mut after = with_images(&key, before.as_ref(), &quick_of(before.as_ref()));
+            after["name"] = json!(name);
+            put(store, &key, before, Some(after))
+        })
+    }
+
+    /// Forgets a quick collection (its photos stay in the Library); the
+    /// first one is refused. When it was the target, the first one is
+    /// the target again, in the same change.
+    pub fn delete_quick(&self, id: &str) -> Result<Changes, String> {
+        if id == QUICK {
+            return Err("the first quick collection stays: clear it or rename it".into());
+        }
+        self.transaction(|store| {
+            let (key, before) = quick_doc_of(store, Some(id))?;
+            let mut changes = Changes::default();
+            if target_of(&*store)? == key {
+                changes.documents.extend(put_target(store, None)?.documents);
+            }
+            changes
+                .documents
+                .extend(put(store, &key, before, None)?.documents);
+            Ok(changes)
+        })
+    }
+
+    /// Makes the quick collection `id` the target: where B and a drop on
+    /// "the quick collection" put photos. The same again changes nothing.
+    pub fn set_quick_target(&self, id: &str) -> Result<Changes, String> {
+        self.transaction(|store| {
+            let (key, _) = quick_doc_of(store, Some(id))?;
+            if target_of(&*store)? == key {
+                return Ok(Changes::default());
+            }
+            put_target(store, Some(&key))
         })
     }
 
     /// "Save as album": a plain album named `name` (under `id` or a key
-    /// made from it) holding the quick collection's photos, which is
-    /// emptied when `clear` says so; one change. An empty quick
+    /// made from it) holding the target quick collection's photos, which
+    /// is emptied when `clear` says so; one change. An empty quick
     /// collection is refused.
     pub fn save_quick(
         &self,
@@ -565,9 +766,21 @@ impl<S: Store> Vault<S> {
         name: &str,
         clear: bool,
     ) -> Result<(Album, Changes), String> {
+        self.save_quick_from(None, id, name, clear)
+    }
+
+    /// [`Vault::save_quick`] from the quick collection `from` (none: the
+    /// target).
+    pub fn save_quick_from(
+        &self,
+        from: Option<&str>,
+        id: Option<&str>,
+        name: &str,
+        clear: bool,
+    ) -> Result<(Album, Changes), String> {
         let name = album_name(name)?;
         self.transaction(|store| {
-            let before = store.document(COLLECTIONS, QUICK)?;
+            let (key, before) = quick_doc_of(store, from)?;
             let images = quick_of(before.as_ref());
             if images.is_empty() {
                 return Err("the quick collection is empty".into());
@@ -583,7 +796,8 @@ impl<S: Store> Vault<S> {
             };
             let (album, mut changes) = create_in(store, id, album)?;
             if clear {
-                let cleared = put(store, QUICK, before, Some(quick_doc(&[])))?;
+                let after = with_images(&key, before.as_ref(), &[]);
+                let cleared = put(store, &key, before, Some(after))?;
                 changes.documents.extend(cleared.documents);
             }
             Ok((album, changes))
@@ -720,9 +934,121 @@ fn quick_of(doc: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The quick collection's document holding `images`.
-fn quick_doc(images: &[String]) -> Value {
-    json!({ "kind": QUICK, "images": images })
+/// A quick collection's document `before` (none: the first one, never
+/// written) holding `images` instead, its name kept.
+fn with_images(key: &str, before: Option<&Value>, images: &[String]) -> Value {
+    let mut doc = json!({ "kind": QUICK, "images": images });
+    if let Some(name) = QuickCollection::of(key, before).name {
+        doc["name"] = json!(name);
+    }
+    doc
+}
+
+/// Whether a collection's document is a quick collection's.
+fn is_quick(doc: &Value) -> bool {
+    doc.get("kind").and_then(Value::as_str) == Some(QUICK)
+}
+
+/// The quick collections of a store: the first, then the others by
+/// name (whatever the case), then key.
+fn quicks_of<S: Store + ?Sized>(store: &S) -> Result<Vec<QuickCollection>, String> {
+    let docs = store.documents(COLLECTIONS)?;
+    let first = docs.iter().find(|(k, d)| k == QUICK && is_quick(d));
+    let mut out = vec![QuickCollection::of(QUICK, first.map(|(_, d)| d))];
+    let mut others: Vec<QuickCollection> = docs
+        .iter()
+        .filter(|(k, d)| k != QUICK && is_quick(d))
+        .map(|(k, d)| QuickCollection::of(k, Some(d)))
+        .collect();
+    others.sort_by(|a, b| {
+        let key =
+            |q: &QuickCollection| crate::fields::fold_case(q.name.as_deref().unwrap_or_default());
+        (key(a), &a.id).cmp(&(key(b), &b.id))
+    });
+    out.extend(others);
+    Ok(out)
+}
+
+/// The target's key in a store: the one written while it is a quick
+/// collection there, else the first.
+fn target_of<S: Store + ?Sized>(store: &S) -> Result<String, String> {
+    let written = store
+        .document(QUICK_TARGET, TARGET)?
+        .and_then(|d| d.get("id").and_then(Value::as_str).map(String::from));
+    if let Some(id) = written
+        && id != QUICK
+        && store
+            .document(COLLECTIONS, &id)?
+            .as_ref()
+            .is_some_and(is_quick)
+    {
+        return Ok(id);
+    }
+    Ok(QUICK.to_string())
+}
+
+/// The quick collection `id` (none: the target) and its document (none
+/// for the first one never written); refused when `id` is not one.
+fn quick_doc_of<S: Store + ?Sized>(
+    store: &S,
+    id: Option<&str>,
+) -> Result<(String, Option<Value>), String> {
+    let key = match id {
+        Some(id) => id.to_string(),
+        None => target_of(store)?,
+    };
+    let doc = store.document(COLLECTIONS, &key)?;
+    match &doc {
+        Some(d) if is_quick(d) => Ok((key, doc)),
+        None if key == QUICK => Ok((key, None)),
+        _ => Err(format!("no quick collection `{key}`")),
+    }
+}
+
+/// Writes the target (none: the first, its document dropped).
+fn put_target<S: Store>(store: &mut S, id: Option<&str>) -> Result<Changes, String> {
+    let before = store.document(QUICK_TARGET, TARGET)?;
+    let after = id.filter(|i| *i != QUICK).map(|i| json!({ "id": i }));
+    if before == after {
+        return Ok(Changes::default());
+    }
+    store.set_document(QUICK_TARGET, TARGET, after.as_ref())?;
+    Ok(Changes {
+        documents: vec![DocumentChange {
+            ns: QUICK_TARGET.into(),
+            key: TARGET.into(),
+            before,
+            after,
+        }],
+        ..Changes::default()
+    })
+}
+
+/// A name as a quick collection keeps it: trimmed, refused empty.
+fn quick_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a quick collection needs a name".into());
+    }
+    Ok(name.to_string())
+}
+
+/// Refuses a name another quick collection than `id` has, whatever the
+/// case.
+fn check_quick_free<S: Store + ?Sized>(store: &S, name: &str, id: &str) -> Result<(), String> {
+    let folded = crate::fields::fold_case(name);
+    match quicks_of(store)?.into_iter().find(|q| {
+        q.id != id
+            && q.name
+                .as_deref()
+                .is_some_and(|n| crate::fields::fold_case(n) == folded)
+    }) {
+        Some(q) => Err(format!(
+            "a quick collection is already named “{}”",
+            q.name.unwrap_or_default()
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Refuses to put photos in or take them out of a smart album or a set.

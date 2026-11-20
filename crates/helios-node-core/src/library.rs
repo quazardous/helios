@@ -628,10 +628,10 @@ pub fn specs() -> Vec<CommandSpec> {
         ])),
         library(
             "library.albums.list",
-            "List the albums and the quick collection",
+            "List the albums, the quick collections (`quicks`) and the target's key (`target`); `quick`: the target's photos",
         )
         .read_only(),
-        library("library.albums.edit", "Change an album or the quick collection").params(
+        library("library.albums.edit", "Change an album or a quick collection (quick ops: `id` names it, none: the target)").params(
             object(&[
                 (
                     "op",
@@ -644,6 +644,11 @@ pub fn specs() -> Vec<CommandSpec> {
                 ("set", json!({ "type": ["string", "null"] }), false),
                 ("members", json!({ "type": "boolean" }), false),
                 ("clear", json!({ "type": "boolean" }), false),
+                (
+                    "from",
+                    json!({ "type": "string", "description": "quickSave: the quick collection saved (none: the target)" }),
+                    false,
+                ),
                 (
                     "rules",
                     json!({ "type": "object", "description": "a smart album's rules (docs/protocol.md, Cursors)" }),
@@ -965,6 +970,12 @@ const ALBUM_OPS: &[&str] = &[
     "quickToggle",
     "quickClear",
     "quickSave",
+    "quickCreate",
+    "quickRename",
+    "quickDelete",
+    "quickTarget",
+    "quickAdd",
+    "quickRemove",
 ];
 
 /// Changes an album or the quick collection as `params` asks
@@ -1020,22 +1031,90 @@ fn edit_album<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, Strin
         "rules" => (before(), 0, vault.set_album_rules(id, rules()?)?),
         "quickToggle" => {
             // The photos it moved: those already in are not counted.
-            let held = vault.quick_collection().map_or(0, |q| q.len());
-            let (put, changes) = vault.toggle_quick(&named(vault, params, "images")?)?;
+            let quick = quick_id(params);
+            let held = quick_len(vault, quick);
+            let (put, changes) = vault.toggle_quick_in(quick, &named(vault, params, "images")?)?;
             added = put;
-            let now = vault.quick_collection().map_or(held, |q| q.len());
-            (String::new(), now.abs_diff(held), changes)
+            let now = quick_len(vault, quick);
+            (quick_name(vault, quick), now.abs_diff(held), changes)
+        }
+        "quickAdd" | "quickRemove" => {
+            let quick = quick_id(params);
+            let held = quick_len(vault, quick);
+            let images = named(vault, params, "images")?;
+            let changes = if text(params, "op") == "quickAdd" {
+                vault.add_to_quick(quick, &images)?
+            } else {
+                added = false;
+                vault.remove_from_quick(quick, &images)?
+            };
+            let now = quick_len(vault, quick);
+            (quick_name(vault, quick), now.abs_diff(held), changes)
         }
         "quickClear" => {
-            let count = vault.quick_collection().map_or(0, |q| q.len());
-            (String::new(), count, vault.clear_quick()?)
+            let quick = quick_id(params);
+            let count = quick_len(vault, quick);
+            (
+                quick_name(vault, quick),
+                count,
+                vault.clear_quick_in(quick)?,
+            )
         }
         "quickSave" => vault
-            .save_quick(Some(id), name, params["clear"].as_bool().unwrap_or(false))
+            .save_quick_from(
+                params["from"].as_str(),
+                Some(id),
+                name,
+                params["clear"].as_bool().unwrap_or(false),
+            )
             .map(|(a, c)| (a.name, a.images.len(), c))?,
+        "quickCreate" => vault
+            .create_quick(Some(id), name, &named(vault, params, "images")?)
+            .map(|(q, c)| (q.name.unwrap_or_default(), q.images.len(), c))?,
+        "quickRename" => {
+            let was = quick_name(vault, Some(id));
+            (was, 0, vault.rename_quick(id, name)?)
+        }
+        "quickDelete" => {
+            let was = quick_name(vault, Some(id));
+            (was, 0, vault.delete_quick(id)?)
+        }
+        "quickTarget" => (quick_name(vault, Some(id)), 0, vault.set_quick_target(id)?),
         other => return Err(format!("no album change `{other}`: one of {ALBUM_OPS:?}")),
     };
     Ok(json!({ "name": name, "count": count, "added": added, "changes": to_json(&changes) }))
+}
+
+/// The quick collection `library.albums.edit`'s quick ops name (`id`;
+/// none: the target).
+fn quick_id(params: &Value) -> Option<&str> {
+    params["id"].as_str().filter(|i| !i.is_empty())
+}
+
+/// How many photos the quick collection `id` (none: the target) holds.
+fn quick_len<S: Store>(vault: &Vault<S>, id: Option<&str>) -> usize {
+    quick_of(vault, id).map_or(0, |q| q.images.len())
+}
+
+/// The name of the quick collection `id` (none: the target); empty for
+/// the first one while it has none.
+fn quick_name<S: Store>(vault: &Vault<S>, id: Option<&str>) -> String {
+    quick_of(vault, id).and_then(|q| q.name).unwrap_or_default()
+}
+
+fn quick_of<S: Store>(
+    vault: &Vault<S>,
+    id: Option<&str>,
+) -> Option<helios_vault::collections::QuickCollection> {
+    let id = match id {
+        Some(id) => id.to_string(),
+        None => vault.quick_target().ok()?,
+    };
+    vault
+        .quick_collections()
+        .ok()?
+        .into_iter()
+        .find(|q| q.id == id)
 }
 
 /// An image named by its id, or by an absolute path the vault knows.
@@ -1583,10 +1662,14 @@ pub fn run<S: Store>(
                 .set_workshop_session(text(params, "id"), record)
                 .map(|()| json!({ "kept": record.is_some() }))
         }
-        "library.albums.list" => vault
-            .albums()
-            .and_then(|albums| Ok((albums, vault.quick_collection()?)))
-            .map(|(albums, quick)| json!({ "albums": to_json(&albums), "quick": quick })),
+        "library.albums.list" => vault.albums().and_then(|albums| {
+            Ok(json!({
+                "albums": to_json(&albums),
+                "quick": vault.quick_collection()?,
+                "quicks": to_json(&vault.quick_collections()?),
+                "target": vault.quick_target()?,
+            }))
+        }),
         "library.albums.edit" => edit_album(vault, params),
         "library.changes.apply" => {
             let changes: helios_vault::Changes = serde_json::from_value(params["changes"].clone())
@@ -1896,6 +1979,53 @@ mod tests {
         assert_eq!(
             call("library.snapshots.get", json!({ "image": hex }))["snapshots"],
             json!([])
+        );
+    }
+
+    #[test]
+    fn quick_collections_are_made_targeted_and_listed() {
+        let vault = Vault::new(helios_vault::MemoryStore::default());
+        let bus = Arc::new(Bus::new());
+        let call = |id: &str, params: Value| run(&vault, &bus, id, &params, "user").unwrap();
+        let made = call(
+            "library.albums.edit",
+            json!({ "op": "quickCreate", "id": "picks", "name": "Picks", "images": [] }),
+        );
+        assert_eq!(made["name"], "Picks");
+        call(
+            "library.albums.edit",
+            json!({ "op": "quickTarget", "id": "picks" }),
+        );
+        let listed = call("library.albums.list", json!({}));
+        assert_eq!(listed["target"], "picks");
+        let ids: Vec<&str> = listed["quicks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|q| q["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["quick", "picks"]);
+        assert!(listed["quicks"][0].get("name").is_none(), "{listed}");
+        let renamed = call(
+            "library.albums.edit",
+            json!({ "op": "quickRename", "id": "quick", "name": "First" }),
+        );
+        assert_eq!(renamed["name"], "", "the first had no name");
+        let gone = call(
+            "library.albums.edit",
+            json!({ "op": "quickDelete", "id": "picks" }),
+        );
+        assert_eq!(gone["name"], "Picks");
+        assert_eq!(call("library.albums.list", json!({}))["target"], "quick");
+        assert!(
+            run(
+                &vault,
+                &bus,
+                "library.albums.edit",
+                &json!({ "op": "quickDelete", "id": "quick" }),
+                "user"
+            )
+            .is_err()
         );
     }
 

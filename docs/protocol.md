@@ -476,14 +476,22 @@ entry per volume (`volume`, null for files on no known volume) with its
 `library.albums.list` reads the albums, smart albums and album sets
 (`albums`: `kind`, `id`, `name`, `images`, a smart album's `rules`, the
 `set` it is in, and for a smart album or a set the `count` of photos it
-selects) and the quick collection (`quick`, image ids).
+selects), the quick collections (`quicks`: `id`, `name`, none for the
+first one, `quick`, until it is renamed, `images`), the target's key
+(`target`: where B puts photos; the first one when none was set) and
+the target's photos (`quick`, image ids).
 `library.albums.edit` makes one change, named by `op`: `create` (`id`,
 `name`, `images`), `rename` (`id`, `name`), `delete` (`id`, `members`:
 a set's albums forgotten too), `createSet` (`id`, `name`, `set`),
 `move` (`id`, `set`, null for the top), `add` and `remove` (`id`,
 `images`), `createSmart` (`id`, `name`, `rules`), `rules` (`id`,
-`rules`), `quickToggle` (`images`), `quickClear` and `quickSave` (`id`,
-`name`, `clear`). It answers what the step changed, as an undo history
+`rules`), `quickToggle` (`id`, `images`), `quickClear` (`id`),
+`quickSave` (`from`, `id`, `name`, `clear`), `quickCreate` (`id`,
+`name`, `images`), `quickRename` (`id`, `name`), `quickDelete` (`id`,
+never `quick`; the target deleted, the first is the target again),
+`quickTarget` (`id`), `quickAdd` and `quickRemove` (`id`, `images`).
+On a quick collection, `id` names it, and without it the target (for
+`quickSave`, `from` names it and `id` is the new album's). It answers what the step changed, as an undo history
 keeps it (`changes`: the `images` with their rows `before` and `after`,
 and the `documents` with theirs), the album's `name` (the new one for a
 creation, the one it had otherwise), the `count` of photos the step put

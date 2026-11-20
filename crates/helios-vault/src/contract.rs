@@ -56,6 +56,8 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     albums_are_made_filled_renamed_and_forgotten(make());
     an_album_s_changes_are_undone_and_redone(make());
     the_quick_collection_toggles_clears_and_saves(make());
+    an_older_vault_s_quick_collection_is_the_first_and_the_target(make());
+    quick_collections_are_named_with_a_target(make());
     smart_album_rules_select_in_one_query(make());
     relative_dates_follow_the_query_s_clock(make());
     import_sessions_select_their_photos_in_one_query(make());
@@ -2749,6 +2751,139 @@ fn the_quick_collection_toggles_clears_and_saves<S: Store>(s: S) {
     assert!(v.clear_quick().unwrap().is_empty(), "empty: no change");
     v.revert(&cleared).unwrap();
     assert_eq!(in_album(&v, QUICK).len(), 2);
+}
+
+/// A vault from before named quick collections (one `quick` document,
+/// no name, no target written) reads as the first quick collection and
+/// the target, its photos intact; nothing is rewritten to get there.
+fn an_older_vault_s_quick_collection_is_the_first_and_the_target<S: Store>(s: S) {
+    use crate::collections::{COLLECTIONS, QUICK, QUICK_TARGET, TARGET};
+    let mut store = with_images(s, 3);
+    let id = |n: u8| image(n).id;
+    let legacy = serde_json::json!({ "kind": "quick", "images": [id(1).hex(), id(2).hex()] });
+    store
+        .set_document(COLLECTIONS, QUICK, Some(&legacy))
+        .unwrap();
+    let v = Vault::new(store);
+    let quicks = v.quick_collections().unwrap();
+    assert_eq!(quicks.len(), 1);
+    assert_eq!(quicks[0].id, QUICK);
+    assert_eq!(quicks[0].name, None, "the first one has no name yet");
+    assert_eq!(quicks[0].images, [id(1).hex(), id(2).hex()]);
+    assert_eq!(v.quick_target().unwrap(), QUICK);
+    assert_eq!(v.quick_collection().unwrap(), [id(1).hex(), id(2).hex()]);
+    assert_eq!(in_album(&v, QUICK), vec![id(1), id(2)]);
+    // Read only: the documents are as they were.
+    v.read(|store| {
+        assert_eq!(store.document(COLLECTIONS, QUICK)?, Some(legacy.clone()));
+        assert_eq!(store.document(QUICK_TARGET, TARGET)?, None);
+        Ok(())
+    })
+    .unwrap();
+    // B still goes to it; renaming keeps its photos.
+    v.toggle_quick(&[id(3)]).unwrap();
+    v.rename_quick(QUICK, "Keepers").unwrap();
+    let first = &v.quick_collections().unwrap()[0];
+    assert_eq!(first.name.as_deref(), Some("Keepers"));
+    assert_eq!(first.images.len(), 3);
+}
+
+/// Named quick collections: made, renamed and forgotten, one
+/// of them the target B puts photos in, each change one undoable step;
+/// the first is never forgotten; forgetting the target makes the first
+/// the target again in the same change.
+fn quick_collections_are_named_with_a_target<S: Store>(s: S) {
+    use crate::collections::QUICK;
+    let v = Vault::new(with_images(s, 3));
+    let id = |n: u8| image(n).id;
+    let (picks, made) = v.create_quick(None, "Picks", &[id(1), id(1)]).unwrap();
+    assert_eq!(picks.id, "picks");
+    assert_eq!(picks.images, [id(1).hex()], "each photo once");
+    assert!(v.create_quick(None, " picks ", &[]).is_err(), "name taken");
+    assert!(v.create_quick(None, "  ", &[]).is_err(), "no name");
+    assert!(
+        v.create_quick(Some(QUICK), "X", &[]).is_err(),
+        "the first's key"
+    );
+    let (maybe, _) = v.create_quick(Some("maybe"), "Maybe", &[]).unwrap();
+    // Listed: the first one first, the others by name; never albums.
+    let ids: Vec<String> = v
+        .quick_collections()
+        .unwrap()
+        .into_iter()
+        .map(|q| q.id)
+        .collect();
+    assert_eq!(ids, [QUICK, "maybe", "picks"]);
+    assert!(v.albums().unwrap().is_empty());
+    assert_eq!(in_album(&v, "picks"), vec![id(1)]);
+    // The target: B goes there, the first one untouched.
+    assert_eq!(v.quick_target().unwrap(), QUICK);
+    let targeted = v.set_quick_target(&maybe.id).unwrap();
+    assert!(
+        v.set_quick_target(&maybe.id).unwrap().is_empty(),
+        "same: no change"
+    );
+    assert!(v.set_quick_target("nope").is_err());
+    let (added, _) = v.toggle_quick(&[id(2), id(3)]).unwrap();
+    assert!(added);
+    assert_eq!(in_album(&v, "maybe"), vec![id(2), id(3)]);
+    assert!(in_album(&v, QUICK).is_empty());
+    assert_eq!(v.quick_collection().unwrap(), [id(2).hex(), id(3).hex()]);
+    // Add and remove on a named one; those in stay where they are.
+    let add = v.add_to_quick(Some("picks"), &[id(3), id(1)]).unwrap();
+    assert_eq!(in_album(&v, "picks"), vec![id(1), id(3)]);
+    v.revert(&add).unwrap();
+    assert_eq!(in_album(&v, "picks"), vec![id(1)]);
+    v.replay(&add).unwrap();
+    v.remove_from_quick(Some("picks"), &[id(1)]).unwrap();
+    assert_eq!(in_album(&v, "picks"), vec![id(3)]);
+    // Renamed: its photos and key kept; a name another has is refused.
+    let renamed = v.rename_quick("picks", "Best").unwrap();
+    assert!(v.rename_quick("maybe", "best").is_err());
+    let best = v
+        .quick_collections()
+        .unwrap()
+        .into_iter()
+        .find(|q| q.id == "picks")
+        .unwrap();
+    assert_eq!(best.name.as_deref(), Some("Best"));
+    assert_eq!(best.images, [id(3).hex()]);
+    v.revert(&renamed).unwrap();
+    // Forgotten: the target, so the first is the target again, in one
+    // change undone whole.
+    assert!(v.delete_quick(QUICK).is_err(), "the first stays");
+    let gone = v.delete_quick("maybe").unwrap();
+    assert_eq!(gone.documents.len(), 2);
+    assert_eq!(v.quick_target().unwrap(), QUICK);
+    assert!(in_album(&v, "maybe").is_empty());
+    v.revert(&gone).unwrap();
+    assert_eq!(v.quick_target().unwrap(), "maybe");
+    assert_eq!(in_album(&v, "maybe"), vec![id(2), id(3)]);
+    // Undo the target; a creation undone.
+    v.revert(&targeted).unwrap();
+    assert_eq!(v.quick_target().unwrap(), QUICK);
+    assert!(!made.is_empty());
+    let (_, later) = v.create_quick(None, "Later", &[]).unwrap();
+    v.revert(&later).unwrap();
+    assert!(
+        v.quick_collections()
+            .unwrap()
+            .iter()
+            .all(|q| q.id != "later")
+    );
+    // Saved as an album from a named one, emptied.
+    let (album, _) = v
+        .save_quick_from(Some("maybe"), None, "Kept", true)
+        .unwrap();
+    assert_eq!(album.images, [id(2).hex(), id(3).hex()]);
+    assert!(in_album(&v, "maybe").is_empty());
+    let named = v
+        .quick_collections()
+        .unwrap()
+        .into_iter()
+        .find(|q| q.id == "maybe")
+        .unwrap();
+    assert_eq!(named.name.as_deref(), Some("Maybe"), "its name kept");
 }
 
 /// A smart album's rule tree (`docs/design/library.md`, L6) compiles into
