@@ -7,7 +7,7 @@
 //! the bus and its commands, which is what it needs to leave this crate.
 //!
 //! A feature implements [`Feature`] (its registrations, its points, its
-//! frame); [`harness`] draws it with egui_kittest the way
+//! frame); [`harness`] draws it with `egui_kittest` the way
 //! `super::headless::harness` draws a shell.
 
 use std::cell::RefCell;
