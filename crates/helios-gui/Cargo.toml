@@ -144,6 +144,9 @@ winresource = "0.1"
 egui-pop-test.workspace = true
 # bus-kernel's conformance suite, run on the desktop's application bus.
 bus-kernel = { workspace = true, features = ["conformance"] }
+# The node link's baseline (tests/it/node_link_baseline.rs): today's link
+# and bus-bridge's Unix socket, measured side by side.
+bus-bridge = { workspace = true, features = ["unix"] }
 # The import window's snapshots (tests/snapshots, thresholds in the
 # workspace's kittest.toml).
 egui_kittest = { version = "0.37", features = ["snapshot"] }
