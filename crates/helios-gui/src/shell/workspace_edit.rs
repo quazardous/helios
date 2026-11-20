@@ -5,6 +5,12 @@
 //! parts is one step of Edit > Undo. Each step is written to the
 //! workspace's own files at once (`helios_template::workspace::Files`).
 //!
+//! The library section (each Library view's zoom, sort, auto-advance,
+//! folder and album, the import and export choices) is view state, like
+//! the layout: kept in the workspace's files, never an undo step. It is
+//! held beside the store ([`Edited`]'s `view`), so no step carries it
+//! and no undo or redo puts an older one back.
+//!
 //! "Save as template…" reviews what goes in, what is stripped and what
 //! is asked on create, then writes a bundle among the user's templates;
 //! "Add from workspace or template…" picks parts, shows the changes and
@@ -120,6 +126,10 @@ pub(super) struct Edited {
     /// The user's library of composites (`<config>/composites/`) as last
     /// read: when the workspace opened, and after a macro published.
     pub(super) library: Vec<helios_template::CompositeFile>,
+    /// The library section in force: view state, outside the value
+    /// store, so it is never an undo step (see the module's
+    /// documentation).
+    view: Option<LibraryDesc>,
 }
 
 impl Edited {
@@ -197,6 +207,7 @@ impl Shell {
             known,
             live: Some(live),
             library: Vec::new(),
+            view: state.bundle.template.library.clone(),
         });
         self.know_workspace_files(true, true);
         // The copy of the layout written with the state is the one shown
@@ -297,14 +308,36 @@ impl Shell {
 
     /// The open workspace as it stands, the layout shown included.
     pub fn workspace_state(&self) -> Option<State> {
-        self.focus.edit.as_ref()?;
+        let edit = self.focus.edit.as_ref()?;
         let value = lock(&self.core.values).get(STATE)?.value.clone();
         let helios_core::Value::Text(text) = value else {
             return None;
         };
         let mut state = parse(&text).ok()?;
         state.bundle.layout = self.own_layout();
+        state.bundle.template.library.clone_from(&edit.view);
         Some(state)
+    }
+
+    /// Keeps the library section (view state): put in place, written to
+    /// the workspace's files and said through `workspace.applied`, never
+    /// an undo step.
+    fn keep_workspace_view(&mut self, view: Option<LibraryDesc>) {
+        let Some(before) = self.workspace_state() else {
+            return;
+        };
+        if before.bundle.template.library == view {
+            return;
+        }
+        if let Some(edit) = &mut self.focus.edit {
+            edit.view = view;
+        }
+        let Some(next) = self.workspace_state() else {
+            return;
+        };
+        self.apply_workspace(Some(&before), &next);
+        self.write_workspace(&next);
+        self.workspace_applied(Changed::between(&before, &next), &next);
     }
 
     /// The layout shown, Helios's panels only: egui-pop's own (the jobs
@@ -512,7 +545,13 @@ impl Shell {
             return;
         }
         let (before, next) = match (parse(&edit.applied), parse(&text)) {
-            (Ok(b), Ok(n)) => (b, n),
+            (Ok(mut b), Ok(mut n)) => {
+                // The library section is view state: an undo or a redo
+                // never puts an older one back.
+                b.bundle.template.library.clone_from(&edit.view);
+                n.bundle.template.library.clone_from(&edit.view);
+                (b, n)
+            }
             (Err(e), _) | (_, Err(e)) => {
                 return self.warn(e);
             }
@@ -825,7 +864,21 @@ impl Shell {
         make: impl FnOnce(&State) -> Result<(State, Moves), String>,
     ) -> Result<State, String> {
         let now = self.workspace_state().ok_or_else(no_workspace)?;
-        let (next, moves) = make(&now)?;
+        let (mut next, moves) = make(&now)?;
+        // What the step does to the library section is view state: kept
+        // at once, outside the step; a step that does nothing else is
+        // none.
+        let view = std::mem::replace(
+            &mut next.bundle.template.library,
+            now.bundle.template.library.clone(),
+        );
+        if view != now.bundle.template.library {
+            self.keep_workspace_view(view.clone());
+        }
+        if next == now && moves.is_empty() {
+            next.bundle.template.library = view;
+            return Ok(next);
+        }
         let set: Vec<(String, helios_core::Value)> = moves
             .into_iter()
             .filter_map(|(p, v)| v.map(|v| (p, v)))
@@ -885,6 +938,7 @@ impl Shell {
             edit.kept.extend(set.into_iter().map(|(p, _)| p));
         }
         self.sync_workspace();
+        next.bundle.template.library = view;
         Ok(next)
     }
 
@@ -915,7 +969,9 @@ impl Shell {
     }
 
     /// Edits the workspace (`name`, `description`, `icon`, `network`,
-    /// `tools`, `library`, `layout`), checked first, as one undo step.
+    /// `tools`, `library`, `layout`), checked first, as one undo step;
+    /// its `library` section is view state, kept outside the step (an
+    /// edit of it alone is no step).
     pub fn edit_workspace(&mut self, changes: &Value, origin: &Origin) -> Result<Value, String> {
         let catalogue = self.workspace_catalogue();
         let next = self.workspace_step("edit the workspace", origin, |now| {

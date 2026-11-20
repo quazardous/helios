@@ -362,7 +362,7 @@ impl Shell {
     }
 
     /// Makes the import dialog's answer the workspace's import source:
-    /// a folder, placed as answered, duplicates skipped (one undo step).
+    /// a folder, placed as answered, duplicates skipped (view state, never an undo step).
     fn remember_import(
         &mut self,
         copy: bool,

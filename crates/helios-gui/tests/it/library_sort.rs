@@ -138,6 +138,8 @@ fn the_sort_orders_the_grid_in_the_vault_and_is_the_workspace_s() {
     assert_eq!(h.state().library().sort(), Order::asc(Sort::Captured));
     assert_eq!(grid(&h), ["c.jpg", "b.jpg", "a.jpg"]);
     assert_eq!(kept(&config, &ws), None, "the default is not written");
+    let steps = |h: &Harness<'static, Shell>| h.state().values().lock().unwrap().undo_steps().len();
+    let before = steps(&h);
 
     // The toolbar's menu, as a user picks in it, in the library.
     h.state_mut()
@@ -180,21 +182,15 @@ fn the_sort_orders_the_grid_in_the_vault_and_is_the_workspace_s() {
     settle(&mut h, &mut persist, 25.0);
     assert_eq!(h.state().library().sort(), Order::desc(Sort::Rating));
 
-    // Each sort is one undo step of the workspace.
-    h.state()
-        .values()
-        .lock()
-        .unwrap()
-        .undo(&Origin::User)
-        .unwrap();
-    settle(&mut h, &mut persist, 30.0);
-    assert_eq!(h.state().library().sort(), Order::desc(Sort::Name));
-    assert_eq!(grid(&h), ["c.jpg", "b.jpg", "a.jpg"]);
-    assert_eq!(kept(&config, &ws), Some(by_name));
-    h.state_mut()
-        .run("library.sort", json!({ "by": "rating" }), Origin::User)
-        .unwrap();
-    settle(&mut h, &mut persist, 40.0);
+    // A sort is view state: kept with the workspace, never an undo step.
+    assert_eq!(steps(&h), before, "no sort is an undo step");
+    assert_eq!(
+        kept(&config, &ws),
+        Some(SortDesc {
+            by: "rating".into(),
+            ..by_name
+        })
+    );
     drop((h, persist));
 
     // The window opened again on the workspace sorts as it was left.

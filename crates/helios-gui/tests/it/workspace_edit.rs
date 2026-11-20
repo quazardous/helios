@@ -1,6 +1,7 @@
 //! A workspace edited on the desktop after it was made from a template:
-//! its name, description and icon, its library settings, its keys and
-//! tools, each an undo step written to its files at once; saved as a
+//! its name, description and icon, its keys and tools, each an undo step
+//! written to its files at once; its library settings and every Library
+//! view's (zoom, sort, auto-advance) written there too, never a step; saved as a
 //! template after a review; reset to its template as one undo step; parts
 //! of a template added through their review, a side picked for each
 //! conflict; nodes delegated to sub-workspaces and deleted again; and
@@ -170,7 +171,7 @@ fn the_library_settings_are_edited_after_creation() {
 }
 
 #[test]
-fn the_library_opens_on_the_workspace_s_query_and_an_undo_takes_it_back() {
+fn the_library_opens_on_the_workspace_s_query_kept_as_view_state() {
     use egui_pop::views::library::{Flag, filter::Filter};
     let root = temp("query");
     let (mut h, _, files) = window(&root, "helios.portrait-retouch");
@@ -222,13 +223,18 @@ fn the_library_opens_on_the_workspace_s_query_and_an_undo_takes_it_back() {
         json!({ "source": "none", "query": "flag:pick rating:2", "auto_advance": true }),
     );
     assert_eq!(h.state().library().filter(), &typed);
-    // Undone twice: no query, every image shown again.
-    undo(&mut h);
-    undo(&mut h);
-    assert!(h.state().library().filter().is_empty());
+    // View state: kept in the files, never an undo step.
+    assert_eq!(steps(&h), before, "the library's settings are no step");
     assert!(
-        files.load().unwrap().bundle.template.library.is_none(),
-        "the template's library came back"
+        files
+            .load()
+            .unwrap()
+            .bundle
+            .template
+            .library
+            .unwrap()
+            .auto_advance,
+        "kept in the files"
     );
     std::fs::remove_dir_all(&root).unwrap();
 }
@@ -590,5 +596,76 @@ fn an_undo_made_outside_the_pass_or_on_another_thread_is_put_in_place_at_the_nex
     assert_eq!(h.state().window_title(), "work — Helios");
     h.step();
     assert_eq!(h.state().window_title(), "Faces — Helios");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn view_state_adds_no_undo_step_and_ctrl_z_undoes_the_last_real_edit() {
+    // Opening panels, zooming, sorting and changing the import
+    // choices are view state: kept in the workspace's files, never an
+    // undo step; Ctrl+Z after them undoes the last real edit, and leaves
+    // the view as it is.
+    use egui::{Key, Modifiers};
+    let root = temp("view-state");
+    let (mut h, _, files) = window(&root, "helios.portrait-retouch");
+    // The last real edit: the workspace renamed.
+    h.state_mut()
+        .edit_workspace(&json!({ "name": "Faces" }), &Origin::User)
+        .unwrap();
+    h.run();
+    let before = steps(&h);
+    // Panels opened and moved.
+    run(&mut h, "egui_pop.history.focus", json!(null));
+    run(&mut h, "helios.masks.moveTo", json!({ "area": "end_side" }));
+    // A zoom of the main Library view.
+    h.state_mut()
+        .keep_library_results(
+            helios_gui::library::MAIN_GALLERY,
+            helios_template::ResultsDesc {
+                size: Some(200),
+                ..helios_template::ResultsDesc::default()
+            },
+        )
+        .unwrap();
+    // The import choices (the form sets the whole section), a sort,
+    // culling's auto-advance.
+    run(
+        &mut h,
+        "workspace.library",
+        json!({ "source": "folder", "placement": "copy", "duplicates": "skip" }),
+    );
+    run(&mut h, "library.sort", json!({ "by": "name" }));
+    run(&mut h, "vault.autoAdvance", json!({ "on": true }));
+    assert_eq!(steps(&h), before, "view state added no undo step");
+    // Kept in the files all the same.
+    let kept = files.load().unwrap().bundle.template.library.unwrap();
+    assert_eq!(kept.sort.as_ref().map(|s| s.by.as_str()), Some("name"));
+    assert!(kept.auto_advance);
+    assert_eq!(
+        kept.import.as_ref().map(|i| i.placement.as_str()),
+        Some("copy")
+    );
+    // Ctrl+Z undoes the rename, the last real edit.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    for _ in 0..3 {
+        h.run();
+    }
+    assert_eq!(h.state().workspace_state().unwrap().meta.name, "work");
+    assert_eq!(steps(&h), before - 1);
+    // The view stays as it was left.
+    let state = h.state().workspace_state().unwrap();
+    let library = state.bundle.template.library.unwrap();
+    assert_eq!(library.sort.as_ref().map(|s| s.by.as_str()), Some("name"));
+    assert!(library.auto_advance && h.state().library().auto_advance());
+    assert_eq!(
+        h.state()
+            .import_source()
+            .map(|s| s.placement.clone())
+            .as_deref(),
+        Some("copy")
+    );
+    let written = files.load().unwrap();
+    assert_eq!(written.meta.name, "work");
+    assert!(written.bundle.template.library.unwrap().auto_advance);
     std::fs::remove_dir_all(&root).unwrap();
 }
