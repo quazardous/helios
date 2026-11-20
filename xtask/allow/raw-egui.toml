@@ -19,7 +19,6 @@
 "scopes.rs" = 4
 "shell.rs" = 5
 "shell/import_browsers.rs" = 7
-"shell/import_history.rs" = 8
 "shell/import_window.rs" = 1
 "shell/library_focus.rs" = 2
 "viewport.rs" = 2
