@@ -113,10 +113,11 @@ pub fn show_as(
                 // What a lasting step says lines up under its label.
                 ui.vertical(|ui| {
                     let label = text(step.label.clone());
+                    // The running step stands out, the others recede.
                     if step.running() {
                         ui.strong_text(label);
                     } else {
-                        ui.text_role(TextRole::Body, label);
+                        ui.muted(label);
                     }
                     if step.running() && step.running_for(now) >= stuck_after {
                         ui.horizontal(|ui| {
