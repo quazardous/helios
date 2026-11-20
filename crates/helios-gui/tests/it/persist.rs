@@ -570,7 +570,7 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
         let store = shell.values().lock().unwrap();
         assert_eq!(mask_tree::label_of(&store, "spot").as_deref(), Some("Face"));
         assert!(mask_tree::is_locked(&store, "spot"));
-        assert!(store.undo_steps().is_empty());
+        assert!(store.all_undo_steps().is_empty());
     }
     // Another image opened in this shell does not take them.
     let (graph, blend) = masked_network();
@@ -634,7 +634,7 @@ fn opening_another_image_leaves_the_undo_steps_of_the_first_behind() {
     assert!((shown(&shell) - start).abs() < 1e-9);
     {
         let mut store = shell.values().lock().unwrap();
-        assert!(store.undo_steps().is_empty(), "the first image's steps");
+        assert!(store.all_undo_steps().is_empty(), "the first image's steps");
         assert_eq!(store.undo(&Origin::User).unwrap(), None, "nothing to undo");
     }
     assert!(

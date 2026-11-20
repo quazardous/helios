@@ -138,7 +138,8 @@ fn the_sort_orders_the_grid_in_the_vault_and_is_the_workspace_s() {
     assert_eq!(h.state().library().sort(), Order::asc(Sort::Captured));
     assert_eq!(grid(&h), ["c.jpg", "b.jpg", "a.jpg"]);
     assert_eq!(kept(&config, &ws), None, "the default is not written");
-    let steps = |h: &Harness<'static, Shell>| h.state().values().lock().unwrap().undo_steps().len();
+    let steps =
+        |h: &Harness<'static, Shell>| h.state().values().lock().unwrap().all_undo_steps().len();
     let before = steps(&h);
 
     // The toolbar's menu, as a user picks in it, in the library.

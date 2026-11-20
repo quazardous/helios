@@ -101,7 +101,7 @@ fn args(dir: &Path, config: &Path, extra: &Value) -> Value {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values().lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().all_undo_steps().len()
 }
 
 fn undo(h: &mut Harness<'static, Shell>) {
@@ -109,7 +109,7 @@ fn undo(h: &mut Harness<'static, Shell>) {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap();
     h.run();
 }
@@ -663,7 +663,7 @@ fn an_agent_reads_and_walks_the_desktop_s_history_each_step_with_its_place() {
     let (failed, read) = through(
         &mut h,
         "helios_history_read",
-        args(&dir, &config, &json!({ "scope": "edit" })),
+        args(&dir, &config, &json!({ "scope": "workspace" })),
     );
     assert!(!failed, "{read}");
     let last = read["undo"].as_array().unwrap().last().unwrap().clone();
@@ -682,7 +682,11 @@ fn an_agent_reads_and_walks_the_desktop_s_history_each_step_with_its_place() {
     let (failed, done) = through(
         &mut h,
         "helios_history_undo",
-        args(&dir, &config, &json!({ "scope": "edit", "if_rev": rev })),
+        args(
+            &dir,
+            &config,
+            &json!({ "scope": "workspace", "if_rev": rev }),
+        ),
     );
     assert!(!failed, "{done}");
     assert_eq!(done["steps"][0]["place"][0]["frame"], "helios.library");
@@ -691,7 +695,11 @@ fn an_agent_reads_and_walks_the_desktop_s_history_each_step_with_its_place() {
     let (failed, stale) = through(
         &mut h,
         "helios_history_redo",
-        args(&dir, &config, &json!({ "scope": "edit", "if_rev": rev })),
+        args(
+            &dir,
+            &config,
+            &json!({ "scope": "workspace", "if_rev": rev }),
+        ),
     );
     assert!(failed, "{stale}");
     let _ = std::fs::remove_dir_all(&root);
@@ -702,9 +710,9 @@ fn last_step(h: &Harness<'static, Shell>) -> helios_values::Step {
         .values()
         .lock()
         .unwrap()
-        .undo_steps()
+        .all_undo_steps()
         .last()
-        .cloned()
+        .map(|s| (*s).clone())
         .unwrap()
 }
 
@@ -762,7 +770,7 @@ fn an_agent_s_requests_are_its_steps_grouped_by_the_name_it_gives() {
     let (failed, read) = through(
         &mut h,
         "helios_history_read",
-        args(&dir, &config, &json!({ "scope": "edit" })),
+        args(&dir, &config, &json!({ "scope": "workspace" })),
     );
     assert!(!failed, "{read}");
     let line = read["undo"].as_array().unwrap();

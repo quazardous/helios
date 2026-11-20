@@ -50,7 +50,7 @@ fn steps(h: &egui_kittest::Harness<'_, Shell>) -> Vec<String> {
         .values()
         .lock()
         .unwrap()
-        .undo_steps()
+        .all_undo_steps()
         .iter()
         .map(|s| s.label.clone())
         .collect()

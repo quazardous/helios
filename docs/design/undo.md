@@ -273,6 +273,15 @@ redo list; the cap stays 20 states or grows (they are small). The
 template is not a step (it writes a file elsewhere). Panel moves stay
 view state, restored by the context stack, not undone.
 
+Status (2026-11-20, #5258 R2): the split is done in memory. The value
+store keeps two lines, the image's and the workspace's
+(`helios_values::HistoryScope`, `Store::in_history`), and the desktop
+shows them as the `edit` and `workspace` scopes. A photo switch drops
+the image's line only. Both scopes stay always active, so Ctrl+Z walks
+the newest step of the two, as the one line did, until it follows the
+focused view (R3). Writing the workspace's line to the undo records is
+still to do.
+
 ## Agents
 
 - **Groups.** Each control or MCP request is one group; an agent may

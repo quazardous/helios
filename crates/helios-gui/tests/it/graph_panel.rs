@@ -75,7 +75,7 @@ fn node<'a>(graph: &'a Value, id: &str) -> &'a Value {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values().lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().all_undo_steps().len()
 }
 
 fn undo(h: &mut Harness<'static, Shell>) {
@@ -83,7 +83,9 @@ fn undo(h: &mut Harness<'static, Shell>) {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.undo(&Origin::User)
+        })
         .unwrap();
     frames(h);
 }
@@ -799,5 +801,151 @@ fn the_graph_overview_lies_under_the_windows_over_the_canvas() {
     under_a_popup(&mut h, &found);
     under_the_import_window(&mut h, &found);
     under_a_dialog(&mut h, &found);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A photo for the viewport: a grey source through an exposure.
+fn photo() -> (Graph, helios_core::NodeId) {
+    let mut g = Graph::new();
+    let src = g.add_source(
+        "source",
+        Image::from_fn(
+            Region::sized(32, 24),
+            4,
+            |_, _, c| {
+                if c == 3 { 1.0 } else { 0.25 }
+            },
+        ),
+    );
+    let exp = g
+        .add_module(
+            "exposure",
+            ModuleRef::new(helios_module_exposure::Exposure),
+            &Params::new(),
+        )
+        .unwrap();
+    g.connect(src, "image", exp, "input").unwrap();
+    (g, exp)
+}
+
+#[test]
+fn a_graph_edit_undoes_in_the_workspace_s_history_and_an_exposure_in_the_edit_s() {
+    // #5258 R2: the workspace's edits are a history of their own, apart
+    // from the photo's: each undone alone, whatever the order they were
+    // made in, and a photo switch drops only the photo's.
+    use egui_pop::api::history::{Answer, History, Request};
+    use egui_pop::model::commands::Origin as PopOrigin;
+    use helios_gui::history::{EDIT, HeliosHistory, WORKSPACE};
+    const EV: &str = "node/exposure/exposure";
+    let root = temp("scopes");
+    let (mut h, _) = window(&root);
+    let (g, exp) = photo();
+    h.state_mut().set_view_source(g, exp, "output").unwrap();
+    frames(&mut h);
+    let set_ev = |h: &Harness<'static, Shell>, v: f64| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .set(helios_values::Set::new(
+                EV,
+                helios_values::Change::To(helios_core::Value::Float(v)),
+                Origin::User,
+            ))
+            .unwrap();
+    };
+    let ev = |h: &Harness<'static, Shell>| {
+        h.state()
+            .values()
+            .lock()
+            .unwrap()
+            .get(EV)
+            .unwrap()
+            .value
+            .as_f64()
+    };
+    let moved = |h: &Harness<'static, Shell>| {
+        h.state()
+            .workspace_state()
+            .unwrap()
+            .bundle
+            .template
+            .positions
+            .contains_key("exposure")
+    };
+    let mv = |h: &mut Harness<'static, Shell>| {
+        run(
+            h,
+            "graph.edit",
+            json!({
+                "graph": GRAPH,
+                "edit": "move",
+                "moves": [{ "node": "exposure", "from": [260.0, 0.0], "to": [400.0, 300.0] }],
+            }),
+        );
+    };
+    let ev0 = ev(&h);
+    assert_ne!(ev0, Some(0.5));
+    // A graph edit, then an exposure change.
+    mv(&mut h);
+    set_ev(&h, 0.5);
+    frames(&mut h);
+    let mut history = HeliosHistory::new(h.state().values().clone());
+    let lens = |history: &HeliosHistory| {
+        (
+            history.line(&EDIT).unwrap().undo.len(),
+            history.line(&WORKSPACE).unwrap().undo.len(),
+        )
+    };
+    assert_eq!(lens(&history), (1, 1), "one step in each history");
+    // The workspace's undo takes the move back, under the exposure made
+    // after it, which stays.
+    let Answer::Done(Ok(w)) = history.undo(&Request::new(WORKSPACE), &PopOrigin::User) else {
+        panic!("the move undone");
+    };
+    assert_eq!(w.scope, WORKSPACE);
+    frames(&mut h);
+    assert!(!moved(&h), "the move undone");
+    assert_eq!(ev(&h), Some(0.5), "the exposure kept");
+    // The edit's undo takes the exposure back; the move stays undone, on
+    // the workspace's redo list.
+    let Answer::Done(Ok(w)) = history.undo(&Request::new(EDIT), &PopOrigin::User) else {
+        panic!("the exposure undone");
+    };
+    assert_eq!(w.scope, EDIT);
+    frames(&mut h);
+    assert_eq!(ev(&h), ev0);
+    assert!(!moved(&h));
+    assert_eq!(history.line(&WORKSPACE).unwrap().redo.len(), 1);
+    // In the other order: an exposure change, then a graph edit.
+    let Answer::Done(Ok(_)) = history.redo(&Request::new(EDIT), &PopOrigin::User) else {
+        panic!("the exposure redone");
+    };
+    mv(&mut h);
+    assert!(moved(&h));
+    let Answer::Done(Ok(_)) = history.undo(&Request::new(EDIT), &PopOrigin::User) else {
+        panic!("the exposure undone");
+    };
+    frames(&mut h);
+    assert_eq!(ev(&h), ev0, "the exposure undone");
+    assert!(moved(&h), "under the move, which stays");
+    // A photo switch drops the photo's steps, and keeps the workspace's.
+    let Answer::Done(Ok(_)) = history.redo(&Request::new(EDIT), &PopOrigin::User) else {
+        panic!("the exposure redone");
+    };
+    let (g, exp) = photo();
+    h.state_mut().set_view_source(g, exp, "output").unwrap();
+    frames(&mut h);
+    assert_eq!(
+        lens(&history),
+        (0, 1),
+        "the photo's steps went, not the move"
+    );
+    let Answer::Done(Ok(w)) = history.undo(&Request::new(WORKSPACE), &PopOrigin::User) else {
+        panic!("the move undone");
+    };
+    assert_eq!(w.steps.len(), 1);
+    frames(&mut h);
+    assert!(!moved(&h), "the move undone on the next photo");
     std::fs::remove_dir_all(&root).unwrap();
 }

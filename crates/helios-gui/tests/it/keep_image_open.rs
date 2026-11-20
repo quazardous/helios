@@ -93,14 +93,14 @@ fn undo(h: &mut Harness<'static, Shell>) {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
     follow(h);
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values().lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().all_undo_steps().len()
 }
 
 /// A parameter of a node of the graph shown; `None` without that node.
@@ -231,7 +231,9 @@ fn a_step_moving_values_is_one_undo_with_its_network() {
         .values()
         .lock()
         .unwrap()
-        .redo(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.redo(&Origin::User)
+        })
         .unwrap();
     follow(&mut h);
     assert_eq!(shown(&h, "lift", "exposure"), Some(1.25));

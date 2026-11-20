@@ -750,8 +750,8 @@ impl Shell {
     }
 
     /// `history.undo` with a `group`: that batch of the agent's undone
-    /// alone, in the value store's history (`edit`, the only scope
-    /// holding agents' steps).
+    /// alone, in the value store's history named by `scope` (`edit` or
+    /// `workspace`; by default the one holding the batch).
     fn agent_undo_group(
         &mut self,
         request: &Value,
@@ -759,11 +759,20 @@ impl Shell {
         origin: &egui_pop::model::commands::Origin,
     ) -> Result<Value, String> {
         use egui_pop::api::history::Request;
-        let scope = match request["scope"].as_str() {
-            Some(s) => {
-                egui_pop::api::history::ScopeId::new(s).map_err(|e| format!("`scope`: {e}"))?
+        let scope = if let Some(s) = request["scope"].as_str() {
+            egui_pop::api::history::ScopeId::new(s).map_err(|e| format!("`scope`: {e}"))?
+        } else {
+            // None named: the history holding the batch.
+            let store = lock(&self.core.values);
+            let workspace = store
+                .undo_steps_of(helios_values::HistoryScope::Workspace)
+                .iter()
+                .any(|s| s.group == Some(group));
+            if workspace {
+                crate::history::WORKSPACE
+            } else {
+                crate::history::EDIT
             }
-            None => crate::history::EDIT,
         };
         let mut ask = Request::new(scope);
         if let Some(rev) = request["if_rev"].as_u64() {
@@ -781,12 +790,13 @@ impl Shell {
         serde_json::to_value(&walked).map_err(|e| e.to_string())
     }
 
-    /// An agent's undo on the desktop: the last step, when it is a
-    /// workspace step an agent made; never the user's.
+    /// An agent's undo on the desktop: the workspace history's last step,
+    /// when an agent made it; never the user's.
     fn agent_undo(&mut self, origin: &Origin) -> Result<Value, String> {
+        use helios_values::HistoryScope;
         let mut store = lock(&self.core.values);
         let last = store
-            .undo_steps()
+            .undo_steps_of(HistoryScope::Workspace)
             .last()
             .ok_or("nothing to undo in this workspace")?;
         let agents = matches!(last.origin, Origin::Agent(_));
@@ -801,7 +811,7 @@ impl Shell {
             ));
         }
         let label = store
-            .undo(origin)
+            .in_history(HistoryScope::Workspace, |s| s.undo(origin))
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
         drop(store);
