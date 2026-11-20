@@ -74,7 +74,7 @@ const BUMP: Region = Region::new(130, 70, 8, 8);
 struct Broken;
 
 impl Accelerator for Broken {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "broken"
     }
 
