@@ -27,6 +27,8 @@ serde_json.workspace = true
 # MIT OR Apache-2.0; the shader compiler wgpu 30 uses, to validate every
 # WGSL file in a test that needs no GPU.
 naga = { version = "30", features = ["wgsl-in"] }
+# MIT OR Apache-2.0; the diffstat example reads its budgets file.
+toml = "1"
 
 [lints]
 workspace = true
