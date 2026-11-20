@@ -22,6 +22,7 @@ use egui_pop::api::menus::popup_at;
 use egui_pop::core::icon::Icon;
 use egui_pop::core::indicator::{Anchor, Indicator, IndicatorExt as _, Pip};
 use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::widgets;
 use egui_pop::model::ids::{BlockId, PanelId};
 use helios_core::Message;
 
@@ -57,15 +58,11 @@ fn profile_item(ui: &mut Ui, app: &AppHandle, profile: &str) {
         return;
     }
     let ctx = ui.ctx().clone();
-    let r = ui
-        // Raw until egui-pop has a quiet text button for a bar (its own
-        // breadcrumbs draw the same frameless button).
-        .add(egui::Button::new(egui::RichText::new(profile).small()).frame(false))
-        .tip(text(
-            &ctx,
-            Message::new("gui-caption-profile", "Profile in use: { $name }")
-                .with("name", profile.to_string()),
-        ));
+    let r = widgets::bar_text_button(ui, profile).tip(text(
+        &ctx,
+        Message::new("gui-caption-profile", "Profile in use: { $name }")
+            .with("name", profile.to_string()),
+    ));
     crate::name_rect(&ctx, PROFILE, r.rect);
     if r.clicked() {
         popup_at(app, &crate::plugins::SYSTEM_PROFILES, r.rect);
