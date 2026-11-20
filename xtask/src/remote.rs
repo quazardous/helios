@@ -2826,6 +2826,118 @@ mod tests {
         assert!(parse_args(&["test-crate", "filter=a;b"]).is_none());
     }
 
+    /// A job's section of the Benchfile, up to the next table.
+    fn job_section<'a>(bf: &'a str, job: &str) -> &'a str {
+        let head = format!("[jobs.{job}]");
+        let start = bf.find(&head).unwrap() + head.len();
+        let section = &bf[start..];
+        &section[..section.find("\n[").unwrap_or(section.len())]
+    }
+
+    #[test]
+    fn check_crate_selects_that_crate_alone() {
+        // `${c:+-p $c} ${c:---workspace}` rendered `-p X X` with a crate:
+        // the check ran on the workspace, never on the crate alone
+        let bf = include_str!("../../tools/bench/Benchfile");
+        let pick = r#"if [ -n "$c" ]; then sel="-p $c"; else sel=--workspace; fi;"#;
+        for job in ["check", "egui-pop-check"] {
+            let section = job_section(bf, job);
+            assert!(section.contains(pick), "{job} picks -p or --workspace");
+            assert!(section.contains("--message-format short $sel"), "{job}");
+            assert!(
+                !section.contains("${c:-"),
+                "{job}: the crate never stands in as a default"
+            );
+        }
+        let render = |c: &str| {
+            let out = Command::new("sh")
+                .arg("-c")
+                .arg(format!(r#"c="$1"; {pick} printf '%s|' $sel"#))
+                .args(["sh", c])
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert_eq!(render("helios-storage-ui"), "-p|helios-storage-ui|");
+        assert_eq!(render(""), "--workspace|");
+    }
+
+    #[test]
+    fn every_helios_job_keeps_the_times_of_unchanged_files() {
+        // the box clones each job's source afresh: without the old times
+        // back, cargo rebuilds every workspace crate on every job
+        let bf = include_str!("../../tools/bench/Benchfile");
+        let mut seen = 0;
+        for job in benchfile_jobs(bf) {
+            let section = job_section(bf, &job);
+            if !section.contains("cp -r --preserve=mode . /tmp/w/helios/") {
+                continue;
+            }
+            seen += 1;
+            let copy = section.find("/target/.built-at; }; } && ").unwrap();
+            let keep = section
+                .find("python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && ")
+                .unwrap_or_else(|| panic!("{job} runs keep-mtimes"));
+            assert!(copy < keep, "{job}: after the copy");
+            assert!(section[keep..].contains("cargo "), "{job}: before cargo");
+        }
+        assert!(seen > 10);
+    }
+
+    #[test]
+    fn keep_mtimes_gives_unchanged_files_their_old_time() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/bench/keep-mtimes.py");
+        let dir = std::env::temp_dir().join(format!("keep-mtimes-{}", std::process::id()));
+        let tree = dir.join("src");
+        std::fs::create_dir_all(&tree).unwrap();
+        let manifest = dir.join("manifest");
+        let run = || {
+            Command::new("python3")
+                .arg("-I")
+                .arg(&script)
+                .arg(&manifest)
+                .arg(&tree)
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        let mtime = |name: &str| {
+            std::fs::metadata(tree.join(name))
+                .unwrap()
+                .modified()
+                .unwrap()
+        };
+        let old = UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        for (name, text) in [("same.rs", "a"), ("edited.rs", "b")] {
+            std::fs::write(tree.join(name), text).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(tree.join(name))
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        if !run() {
+            eprintln!("python3 missing: keep-mtimes not run");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        // the next job: a fresh copy, every file at the copy's time
+        let recent = SystemTime::now() - Duration::from_secs(5);
+        std::fs::write(tree.join("same.rs"), "a").unwrap();
+        std::fs::write(tree.join("edited.rs"), "b2").unwrap();
+        std::fs::write(tree.join("new.rs"), "c").unwrap();
+        assert!(run());
+        assert_eq!(mtime("same.rs"), old);
+        assert!(mtime("edited.rs") >= recent);
+        assert!(mtime("new.rs") >= recent);
+        // edited back: not what the last job built, so changed again
+        std::fs::write(tree.join("edited.rs"), "b").unwrap();
+        assert!(run());
+        assert!(mtime("edited.rs") >= recent);
+        assert_eq!(mtime("same.rs"), old);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_test_jobs_turn_the_filter_back_and_run_lib_tests() {
         let bf = include_str!("../../tools/bench/Benchfile");
