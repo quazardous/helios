@@ -167,14 +167,27 @@ impl Module for WhiteBalance {
         output: Region,
     ) -> Result<Vec<Image>, String> {
         let input = inputs[0];
-        Ok(vec![Image::from_fn(output, 1, |x, y, _| {
-            let c = match plan.cfa.color_at(x, y) {
-                Channel::Red => 0,
-                Channel::Green => 1,
-                Channel::Blue => 2,
-            };
-            input.pixel(x, y)[0] * plan.coeffs[c]
-        })])
+        let index = |c: Channel| match c {
+            Channel::Red => 0,
+            Channel::Green => 1,
+            Channel::Blue => 2,
+        };
+        // Row by row over slices, each row's coefficients repeating with
+        // the pattern's period (a pixel at a time cost ~9 ns each on a
+        // 25 MP mosaic).
+        let period = plan.cfa.period();
+        let from = (output.x - input.region().x) as usize;
+        let mut data = Vec::with_capacity(output.area());
+        let mut coeffs = Vec::with_capacity(period as usize);
+        for y in output.y..output.bottom() {
+            coeffs.clear();
+            coeffs.extend(
+                (0..period).map(|k| plan.coeffs[index(plan.cfa.color_at(output.x + k, y))]),
+            );
+            let row = &input.row(y)[from..from + output.width as usize];
+            data.extend(row.iter().zip(coeffs.iter().cycle()).map(|(v, k)| v * k));
+        }
+        Ok(vec![Image::new(output, 1, data)])
     }
 }
 

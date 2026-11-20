@@ -404,6 +404,10 @@ struct Planning<'g> {
     /// Inner units by composite unit and slot.
     inner_ids: HashMap<(Unit, usize), u32>,
     inners: HashMap<u32, InnerUnit>,
+    /// Whether a module declaring [`crate::Needs::direct_reduction`] may
+    /// compute a small render straight from full resolution: not for a
+    /// render holding its full-size steps, which wants them computed.
+    direct: bool,
 }
 
 impl Planning<'_> {
@@ -470,7 +474,20 @@ enum ShapeKind {
         accelerated: bool,
         /// Where its outputs depend on anything (see [`crate::Extent`]).
         extent: Option<Extent>,
+        /// Computed straight at the unit's scale from its inputs at full
+        /// resolution ([`crate::Needs::direct_reduction`]), with its
+        /// node's extent at full resolution: it reads the full-resolution
+        /// region its output covers, aligned as a reduce's ask is.
+        direct: Option<Direct>,
     },
+}
+
+/// A module computed straight at its unit's scale from inputs at full
+/// resolution ([`crate::Needs::direct_reduction`]).
+#[derive(Clone, Copy)]
+struct Direct {
+    /// Its node's extent at full resolution, to align what it reads.
+    extent: Option<Region>,
 }
 
 /// The regions a node is computed over, from the regions its consumers
@@ -1174,7 +1191,9 @@ impl Engine {
         region: Region,
         scale: f64,
     ) -> Result<Vec<ContentHash>, Error> {
-        Ok(full_size_keys(&self.plan(graph, node, 0, region, scale)?))
+        Ok(full_size_keys(
+            &self.plan_with(graph, node, 0, region, scale, false)?,
+        ))
     }
 
     /// Renders like [`Engine::render_at`] and keeps the full-size steps
@@ -1279,7 +1298,9 @@ impl Engine {
         // on the CPU.
         let mut replays = 0;
         loop {
-            let planned = self.plan(graph, node, index, region, scale)?;
+            // A render holding its full-size steps has them computed.
+            let direct = !matches!(hold, Some((_, Keep::FullSize)));
+            let planned = self.plan_with(graph, node, index, region, scale, direct)?;
             if let Some((hold, keep)) = hold.as_mut() {
                 // A replay plans again: the hold follows the last plan.
                 let keys = match keep {
@@ -1581,12 +1602,29 @@ impl Engine {
         region: Region,
         scale: f64,
     ) -> Result<Planned, Error> {
+        self.plan_with(graph, id, port, region, scale, true)
+    }
+
+    /// [`Engine::plan`], `direct` saying whether a module may compute a
+    /// small render straight from full resolution
+    /// ([`crate::Needs::direct_reduction`]): not when the render holds
+    /// its full-size steps.
+    fn plan_with(
+        &self,
+        graph: &Graph,
+        id: NodeId,
+        port: usize,
+        region: Region,
+        scale: f64,
+        direct: bool,
+    ) -> Result<Planned, Error> {
         let mut p = Planning {
             graph,
             shapes: HashMap::new(),
             order: Vec::new(),
             inner_ids: HashMap::new(),
             inners: HashMap::new(),
+            direct,
         };
         let top = Unit::of(id, scale.to_bits());
         self.shape(&mut p, top)?;
@@ -1639,9 +1677,10 @@ impl Engine {
                         module,
                         plan,
                         inputs,
+                        direct,
                         ..
                     } => {
-                        let need = module.input_region(plan, *r);
+                        let need = module.input_region(plan, direct_full(*direct, *r, unit));
                         for (src, _) in inputs {
                             asked.entry(*src).or_default().push(need);
                         }
@@ -1687,8 +1726,9 @@ impl Engine {
                         absent,
                         accelerated,
                         extent,
+                        direct,
                     } => {
-                        let input_region = module.input_region(plan, r);
+                        let input_region = module.input_region(plan, direct_full(*direct, r, unit));
                         let fill = extent.filter(|e| !e.region.overlaps(&r)).map(|e| e.fill);
                         Work::Module {
                             module: module.clone(),
@@ -1844,7 +1884,9 @@ impl Engine {
                 (name, ShapeKind::Pending { inputs: resolved })
             }
             Desc::Module { name, module, .. }
-                if scale < 1.0 && module.manifest().needs.full_resolution =>
+                if scale < 1.0
+                    && module.manifest().needs.full_resolution
+                    && !Self::direct(p, unit, &module, scale) =>
             {
                 if unit.inner != 0 {
                     return Err(Error::Contract {
@@ -1889,6 +1931,13 @@ impl Engine {
                 h.update(manifest.name.as_bytes());
                 h.update(&manifest.version.to_le_bytes());
                 h.update(&params.canonical_bytes());
+                // Straight from full resolution: its inputs read there.
+                let direct = (scale < 1.0 && manifest.needs.full_resolution).then(|| {
+                    h.update(b"helios.step.direct.v1");
+                    Direct {
+                        extent: p.graph.extent(unit.node).ok().flatten(),
+                    }
+                });
                 let plan = module.prepare(&params, &context, scale)?;
                 h.update(&context.restricted_to(&manifest.context).canonical_bytes());
                 let accelerated = match self.active() {
@@ -1915,6 +1964,17 @@ impl Engine {
                             port: spec.name.clone(),
                         });
                     };
+                    let input = if direct.is_some() {
+                        (
+                            Unit {
+                                scale: 1.0f64.to_bits(),
+                                ..input.0
+                            },
+                            input.1,
+                        )
+                    } else {
+                        input
+                    };
                     let (src, port) = self.input(p, input)?;
                     h.update(&p.shapes[&src].lineage.0);
                     h.update(&(port as u64).to_le_bytes());
@@ -1930,6 +1990,7 @@ impl Engine {
                         absent,
                         accelerated,
                         extent,
+                        direct,
                     },
                 )
             }
@@ -1944,6 +2005,21 @@ impl Engine {
         );
         p.order.push(unit);
         Ok(())
+    }
+
+    /// Whether `module`, needing full resolution, computes `unit` at
+    /// `scale` straight from full resolution
+    /// ([`crate::Needs::direct_reduction`]): a node of the graph itself
+    /// (not a composite's inner node), the scale small enough, and the
+    /// planning allowing it.
+    fn direct(p: &Planning, unit: Unit, module: &ModuleRef, scale: f64) -> bool {
+        p.direct
+            && unit.inner == 0
+            && module
+                .manifest()
+                .needs
+                .direct_reduction
+                .is_some_and(|n| n > 0 && scale * f64::from(n) <= 1.0)
     }
 
     /// A bypassed node: each output resolved to the input it passes
@@ -2418,6 +2494,21 @@ fn whole_image_ask(full: Region, extent: Option<Region>) -> Region {
         e.bottom() + round(full.bottom() - e.bottom()).max(M),
     );
     Region::new(x, y, (right - x) as u32, (bottom - y) as u32)
+}
+
+/// The region a module's `input_region` is asked for, for its output `r`
+/// of `unit`: `r` itself, or for a module computed straight from full
+/// resolution (`direct`, with its node's extent), the full-resolution
+/// region `r` covers, aligned as a reduce's ask of the whole image is
+/// ([`whole_image_ask`]), so the steps it reads are the ones a full-size
+/// computation of the same image reads.
+fn direct_full(direct: Option<Direct>, r: Region, unit: &Unit) -> Region {
+    match direct {
+        Some(Direct { extent }) => {
+            whole_image_ask(r.full_resolution(f64::from_bits(unit.scale)), extent)
+        }
+        None => r,
+    }
 }
 
 /// A copy to or from the accelerator failed, for `step`: a lost or hung
