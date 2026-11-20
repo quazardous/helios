@@ -167,8 +167,9 @@ struct Life {
     jobs: Mutex<Vec<Arc<dyn NodeJobs>>>,
     /// The volume watches the node runs, stopped as it stops.
     watches: Mutex<Vec<VolumeWatch>>,
-    /// The bus the node's own quit is asked on (`helios.node.quit`).
-    quit_bus: crate::node_quit::QuitBus,
+    /// The application's bus, which the node's own quit is asked on
+    /// (`helios.node.quit`).
+    quit_bus: std::sync::OnceLock<Arc<dyn bus_contract::Bus>>,
     /// What the node's quit did, once it ended.
     quit_ended: crate::node_quit::Kept,
     /// The node's fact bus, where its quit says how it goes.
@@ -305,10 +306,10 @@ impl Link {
         ))
     }
 
-    /// The bus the node's quit is asked on: its listeners, for
-    /// introspection.
-    pub fn quit_bus(&self) -> Arc<dyn bus_contract::Bus> {
-        self.0.quit_bus.0.clone()
+    /// The bus the node's quit is asked on, once handed
+    /// ([`LocalNode::quit_on`]): its listeners, for introspection.
+    pub fn quit_bus(&self) -> Option<Arc<dyn bus_contract::Bus>> {
+        self.0.quit_bus.get().cloned()
     }
 
     /// Whether the node was asked to quit.
@@ -454,6 +455,16 @@ impl<S: Store + 'static> LocalNode<S> {
         watch
     }
 
+    /// The node's quit is asked on `bus`, the application's
+    /// (`helios.node.quit`, [`crate::node_quit`]): its jobs' listeners
+    /// and the library's close run there, each within its deadline. Set
+    /// once; without it, the node's stop leaves its jobs and closes the
+    /// library alone.
+    pub fn quit_on(&self, bus: Arc<dyn bus_contract::Bus>) {
+        crate::node_quit::declare(&*bus);
+        let _ = self.link.0.quit_bus.set(bus);
+    }
+
     /// The vault the node owns, for the clients in its process.
     pub fn vault(&self) -> &Arc<Vault<S>> {
         &self.vault
@@ -539,10 +550,18 @@ fn close<S: Store + 'static>(vault: &Arc<Vault<S>>, life: &Life, facts: &Arc<Bus
     }
     life.wait_for_jobs();
     let cancelling = life.read(|s| s.quit != Some(AtQuit::Wait) || s.force);
+    let Some(bus) = life.quit_bus.get().cloned() else {
+        // No application bus handed: no request to settle the jobs with
+        // deadlines; they are left (what they wrote is in the vault, a
+        // later write is refused) and the library closes.
+        log::warn!(target: "helios::node", "no bus for the node's quit: its jobs are left");
+        let done = vault.shut_down();
+        finish(life, &done);
+        return;
+    };
     // The vault's close says how it went here: the request keeps only
     // whether its listener did its part.
     let closed: Arc<Mutex<Option<Result<(), String>>>> = Arc::default();
-    let bus = life.quit_bus.0.clone();
     {
         let (vault, closed) = (vault.clone(), closed.clone());
         // Its row on the end splash is the client's, from the node's
@@ -562,7 +581,12 @@ fn close<S: Store + 'static>(vault: &Arc<Vault<S>>, life: &Life, facts: &Arc<Bus
         .take()
         .unwrap_or_else(|| vault.shut_down());
     life.quit_ended.set(ended);
-    if let Err(e) = &done {
+    finish(life, &done);
+}
+
+/// The node stopped: whether its library closed cleanly.
+fn finish(life: &Life, done: &Result<(), String>) {
+    if let Err(e) = done {
         log::warn!(target: "helios::node", "cannot close the vault cleanly: {e}");
     }
     life.update(|s| {
@@ -709,6 +733,7 @@ mod tests {
         let dir = scratch("stuck-cancel");
         let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
         let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        node.quit_on(Arc::new(egui_pop_hooks::Kernel::new()));
         let link = node.link();
         let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
         link.adopt(Arc::new(Stuck {
@@ -734,6 +759,7 @@ mod tests {
         let dir = scratch("stuck-stop");
         let store = SqliteStore::open(&dir.join("vault.db")).unwrap();
         let node = LocalNode::open(store, Arc::new(Bus::new()), Duration::from_hours(1));
+        node.quit_on(Arc::new(egui_pop_hooks::Kernel::new()));
         let link = node.link();
         let released: Arc<(Mutex<bool>, Condvar)> = Arc::default();
         link.adopt(Arc::new(Stuck {

@@ -639,6 +639,7 @@ fn the_end_splash_shows_the_node_s_listener_running() {
         Arc::new(helios_core::Bus::new()),
         Duration::from_hours(1),
     );
+    node.quit_on(Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new()));
     let link = node.link();
     let (began, begun) = std::sync::mpsc::channel();
     let gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)> = Arc::default();

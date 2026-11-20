@@ -1,8 +1,8 @@
 //! The node's own quit, as one request on its bus: `helios.node.quit`.
 //!
 //! When the node stops (asked to quit and its last client gone, or the
-//! host's last word), it asks [`NodeQuit`] once on a bus of its own
-//! ([`QuitBus`]). Its listeners are what the node must settle before the
+//! host's last word), it asks [`NodeQuit`] once on the application's
+//! bus, handed to it as it starts (`LocalNode::quit_on`). Its listeners are what the node must settle before the
 //! process may end, named, in a declared order ([`ORDER`]), each with its
 //! own deadline:
 //!
@@ -93,25 +93,6 @@ pub fn declare(bus: &dyn HookBus) {
         if !matches!(refused, Refused::AlreadyDeclared { .. }) {
             log::error!(target: "helios::node", "quit: {refused}");
         }
-    }
-}
-
-/// The node's own bus for its quit request: a kernel of its own, whether
-/// the node runs in the desktop or headless.
-#[derive(Clone)]
-pub struct QuitBus(pub Arc<dyn HookBus>);
-
-impl Default for QuitBus {
-    fn default() -> Self {
-        let bus: Arc<dyn HookBus> = Arc::new(egui_pop_hooks::Kernel::new());
-        declare(&*bus);
-        Self(bus)
-    }
-}
-
-impl std::fmt::Debug for QuitBus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("QuitBus")
     }
 }
 
@@ -422,6 +403,7 @@ mod tests {
         let facts = Arc::new(Bus::new());
         let began = facts.subscribe_kinds(&[ListenerBegan::KIND], None);
         let node = LocalNode::open(store, facts, Duration::from_hours(1));
+        node.quit_on(Arc::new(egui_pop_hooks::Kernel::new()));
         let link = node.link();
         for j in jobs {
             link.adopt(j);

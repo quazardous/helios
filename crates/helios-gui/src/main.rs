@@ -2813,6 +2813,11 @@ fn boot(from: BootFrom) -> Booted {
         }
         None => (None, None),
     };
+    // The node's stop is a request on the application's bus
+    // (`helios.node.quit`): its jobs and the library's close as listeners.
+    if let Some(node) = &node {
+        node.quit_on(hooks.clone());
+    }
     let library = node.as_ref().map(LocalNode::library);
     // The node watches the machine's cards and disks, with or without a
     // window; without a library, a watch of the desktop's own still lists
