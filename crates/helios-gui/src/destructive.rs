@@ -164,6 +164,10 @@ mod tests {
         ),
         ("library.show", "clears the filter, a view"),
         (
+            "helios.app.reimport.folders",
+            "read-only: lists the photo folders a reset kept",
+        ),
+        (
             "library.quick.saveAs",
             "saves an album; emptying the quick collection after is asked by `clear`",
         ),

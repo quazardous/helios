@@ -177,7 +177,9 @@ fn after_a_reset_the_setup_adds_the_photos_back_where_they_are() {
     shell.offer_reimport(Some(offer));
     super::import::host_import(&mut shell, &vault, &done);
     let mut h = headless::harness(shell, vec2(1280.0, 900.0));
-    until(&mut h, "the setup open", |h| wizard(h, "init.setup").is_some());
+    until(&mut h, "the setup open", |h| {
+        wizard(h, "init.setup").is_some()
+    });
     run(
         &mut h,
         "admin.wizard.set",
@@ -230,7 +232,11 @@ fn after_a_reset_the_setup_adds_the_photos_back_where_they_are() {
     assert_eq!(images.len(), 2, "both photos added");
     assert_eq!(hashes(&photos), before, "a photo changed");
     assert!(
-        !home.0.join("Library").read_dir().is_ok_and(|mut d| d.next().is_some()),
+        !home
+            .0
+            .join("Library")
+            .read_dir()
+            .is_ok_and(|mut d| d.next().is_some()),
         "nothing copied into the library folder"
     );
     // Offered once.
@@ -264,7 +270,10 @@ fn forget_accounts_removes_helios_entries_only_and_never_for_an_agent() {
             .state_mut()
             .run(command, args, Origin::Agent("helper".into()))
             .unwrap_err();
-        assert!(refused.contains("not offered to agents"), "{command}: {refused}");
+        assert!(
+            refused.contains("not offered to agents"),
+            "{command}: {refused}"
+        );
     }
     // Without the word: refused.
     assert!(run(&mut h, forget::COMMAND, json!({})).is_err());
