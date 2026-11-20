@@ -1066,6 +1066,10 @@ impl Shell {
             // The jobs centre, its status bar item and each job's log
             // console as a terminal.
             .plugin(crate::jobs::plugin(jobs.clone(), relays.clone()))
+            // The workflow queues' verbs, sent to the node running each.
+            .plugin(crate::workflow_queue::Commands {
+                relays: relays.clone(),
+            })
             .plugin(egui_pop::editors::JobConsolesPlugin)
             .plugin({
                 let i18n = i18n.clone();
@@ -1439,6 +1443,15 @@ impl Shell {
             });
         }
         if has(&shell, crate::queue::PANEL) {
+            // The workflow level's queues, on the connected nodes, and the
+            // long jobs as promises.
+            shell.focus.queue_panel.borrow_mut().set_source(Box::new(
+                crate::workflow_queue::WorkflowQueue::new(
+                    &shell.core.node_events,
+                    shell.core.relays.clone(),
+                    shell.core.activity.followed(),
+                ),
+            ));
             let (panel, app) = (
                 shell.focus.queue_panel.clone(),
                 shell.core.app.handle().clone(),
@@ -8056,6 +8069,16 @@ impl Shell {
         }
         self.storage_frame();
         self.core.forgotten.take(self.core.app.handle());
+        // The workflow queues' facts and reads, taken in each frame: the
+        // Queue panel read again when they changed.
+        let queue_due = self
+            .focus
+            .queue_panel
+            .borrow_mut()
+            .source_due(self.core.app.handle());
+        if queue_due {
+            self.follow_queue();
+        }
     }
 
     /// The Queue panel follows the selected node: its queue read again,

@@ -81,6 +81,7 @@ pub mod preview;
 pub mod privacy;
 pub mod promise_line;
 pub mod queue;
+pub mod workflow_queue;
 pub mod quick_open;
 pub mod quit;
 pub mod recent_filters;

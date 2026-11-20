@@ -96,12 +96,38 @@ pub const FACTS: &[helios_core::FactDecl] = &[
         "A node's events have a hole: read its state again",
     ),
 ];
-/// How long a cancel waits for the node's answer.
+/// How long a request to a node's control endpoint waits for its answer.
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// A node's job id on the desktop: `node:<node>/<id>`.
 pub fn node_job(node: &str, id: &str) -> String {
     format!("{PREFIX}{node}/{id}")
+}
+
+/// Sends `request` to `link`'s control endpoint, off any relay: what
+/// the node answered when it accepted, its error when it refused.
+pub fn request_at(link: &NodeLink, request: &ControlRequest) -> Result<Value, String> {
+    let name = &link.name;
+    let control = link.control.as_ref().ok_or_else(|| {
+        format!("node `{name}` was given no control endpoint: its work is controlled there")
+    })?;
+    let unreachable = |e: std::io::Error| format!("cannot reach node `{name}`: {e}");
+    let mut client = Client::connect(control).map_err(unreachable)?;
+    client
+        .set_read_timeout(Some(CANCEL_TIMEOUT))
+        .map_err(unreachable)?;
+    let answer = client.request(request).map_err(unreachable)?;
+    if answer["ok"] == true {
+        Ok(answer)
+    } else {
+        Err(match &answer["error"] {
+            Value::String(e) => e.clone(),
+            Value::Null => "the node refused".to_string(),
+            other => other["text"]
+                .as_str()
+                .map_or_else(|| other.to_string(), str::to_string),
+        })
+    }
 }
 
 /// The node and its own id of a desktop job id, when it is a node's.
@@ -399,26 +425,14 @@ impl Relay {
     /// Asks the node to cancel its job `id` (its own id, without the
     /// `node:` prefix): `job.cancel` on its control endpoint.
     pub fn cancel(&self, id: &str) -> Result<Value, String> {
-        let name = &self.link.name;
-        let control = self.link.control.as_ref().ok_or_else(|| {
-            format!("node `{name}` was given no control endpoint: its jobs are cancelled there")
-        })?;
-        let unreachable = |e: std::io::Error| format!("cannot reach node `{name}`: {e}");
-        let mut client = Client::connect(control).map_err(unreachable)?;
-        client
-            .set_read_timeout(Some(CANCEL_TIMEOUT))
-            .map_err(unreachable)?;
-        let answer = client
-            .request(&ControlRequest::JobCancel { id: id.into() })
-            .map_err(unreachable)?;
-        if answer["ok"] == true {
-            Ok(json!({ "cancelling": node_job(name, id) }))
-        } else {
-            Err(answer["error"]
-                .as_str()
-                .unwrap_or("the node refused")
-                .to_string())
-        }
+        self.request(&ControlRequest::JobCancel { id: id.into() })
+            .map(|_| json!({ "cancelling": node_job(&self.link.name, id) }))
+    }
+
+    /// Sends `request` to the node's control endpoint (`workflow.retry`,
+    /// `job.cancel`...) and answers what it answered, when it accepted.
+    pub fn request(&self, request: &ControlRequest) -> Result<Value, String> {
+        request_at(&self.link, request)
     }
 
     /// Drops the current link, as a network failure would: the relay

@@ -1969,6 +1969,9 @@ gui-library-read = { $count } images dans la bibliothèque
 gui-library-reading = Lecture de la bibliothèque…
 
 gui-queue-cancel = Annuler
+gui-queue-retry = Réessayer
+gui-queue-top = Placer en tête
+gui-queue-bottom = Placer en fin
 
 gui-queue-column-attempts = Tentatives
 

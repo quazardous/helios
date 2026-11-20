@@ -411,24 +411,32 @@ node:
 For a node without a queue the panel stays in place with an empty state by
 default; hiding it is a user setting.
 
-Built (interim, until the workflow level runs): the Queue panel
+Built (2026-11-20, on the workflow level): the Queue panel
 (`helios.queue`, `helios_gui::queue`) follows the selected node
 (`view/graph/selection`, the value the graph editor, the Masks panel and
-the Parameters panel share) and lists the jobs that name it: a job may
-name the graph node it works for (`node` in `helios.job.started`, see
-[jobs.md](jobs.md)), and an export names the node it renders, a connected
-node's exports included. Per item: its state (waiting until its first
-progress, running, paused, cancelling, done, failed, cancelled), since
-when, its attempts, and where it runs (this desktop, or the node's name).
-The summary counts them and gives the oldest wait.
+the Parameters panel share) and lists what is queued at it. Its source,
+`WorkflowQueue` (`helios_gui::workflow_queue`), reads the workflow level
+of each connected node (`helios_node::workflow::runs`): a queue is a run's
+rows at a queueing graph node. Each node's runs are read once
+(`workflow.runs`, then `workflow.items` per queueing node, off the
+interface's thread), then followed on the bus: the rows changed
+(`helios.workflow.rows`) and the runs' lives (`helios.workflow.run`); a node
+whose events had a hole is read again. A long job that is not a run (an
+export started here, the trash, a backup) shows as its promise
+(`helios_node_core::job_promises`) at the graph node its job named (`node`
+in `helios.job.started`, see [jobs.md](jobs.md)). Per item: its state
+(waiting, running, paused, cancelling, done, failed, cancelled), since
+when, its attempts, its error, and where it runs (this desktop, or the
+node's name). The summary counts them and gives the oldest wait.
 
-- Its data comes through a small trait (`QueueSource`): the interim source
-  (`JobsQueue`) reads egui-pop's jobs model; the workflow's own queue
-  (claims, leases, retries, the mode and the concurrency limit) replaces it
-  without touching the panel.
-- Cancel is `job.cancel`, as in the jobs centre: run in the desktop, or
-  sent to the node that runs the job. Retry and reprioritise are not
-  offered yet: no Helios job can be retried or moved in its queue.
+- The actions are bus commands, so an agent has the same verbs: Retry
+  (failed or cancelled) runs `helios.workflow.retry`, Move to top and Move
+  to bottom (waiting) `helios.workflow.prioritize`, Cancel
+  `helios.workflow.cancel`; `helios.workflow.pause` and
+  `helios.workflow.resume` stand beside them. Each takes the connected
+  node (`node`) and the run, and sends the node's `workflow.*` request; the
+  rows change when the node's facts say so. A promise item's Cancel is
+  `job.cancel`, as in the jobs centre.
 - With `interface.panels.queue_when_empty` off (the user's settings layer
   in the vault), the panel closes while the selected node has nothing
   queued, and opens again once it has work. On, the default, it shows
