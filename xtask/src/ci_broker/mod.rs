@@ -11,6 +11,7 @@
 //! (`ci_history.rs`) reads the JUnit files and the git branch. It can move
 //! to a shared crate as it is, when egui-pop needs it.
 
+pub mod contract;
 pub mod history;
 pub mod report;
 pub mod select;

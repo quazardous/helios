@@ -17,6 +17,12 @@
 //!      exercise it ([`gui_modules`]): by name, by the paths they `use`,
 //!      and by [`OVERRIDES`]. When none is found, the whole `it` runs:
 //!      the map may select too much, never knowingly too little.
+//!    - A feature crate cut out of helios-gui ([`FEATURES`]) stops at the
+//!      app crate: an edit inside it that leaves its contract alone (its
+//!      public API, its bus points: `ci_broker/contract.rs`) selects the
+//!      crate and the helios-gui tests exercising it, not all of
+//!      helios-gui and its dependents. A contract edit, its manifest, data
+//!      or a crate depending on it beside helios-gui select as before.
 //! 2. **changed tests**: the `#[test]` functions the diff adds or edits.
 //! 3. **recent failures**: the tests that failed or flaked in the last N
 //!    runs of the `ci-history` summary; skipped, and said, while there is
@@ -43,12 +49,15 @@ use crate::ci_broker::select::{
 };
 use crate::ci_broker::shadow::artifact_json;
 
-pub const USAGE: &str = "ci-broker select [--base REF] [--history DIR] [--runs N] [--committed] [--explain '<binary id> <test>' | --shadow FILE --run ID --commit SHA --junit FILE]";
+pub const USAGE: &str = "ci-broker select [--base REF] [--history DIR] [--runs N] [--committed | --head REF] [--explain '<binary id> <test>' | --shadow FILE --run ID --commit SHA --junit FILE]";
 
 /// The base a change is computed against: pull requests go into `next`.
 pub const DEFAULT_BASE: &str = "origin/next";
 /// How many of the last runs the history source reads.
 pub const DEFAULT_RUNS: usize = 20;
+/// A test of the history is current when one of its last N runs listed
+/// it: the measure of a set counts those.
+pub const CURRENT_RUNS: u64 = 10;
 /// The smoke list, from the workspace root.
 pub const SMOKE: &str = "ci/smoke.txt";
 
@@ -73,12 +82,40 @@ pub const OVERRIDES: &[(&[&str], &[&str])] = &[
     ),
 ];
 
-/// One changed file: its path, its content now (`None`: deleted) and the
-/// lines the diff touched in it (`None`: the whole file is new).
+/// A feature crate: cut out of helios-gui, it reaches the desktop
+/// through the bus and its contract tables alone (docs/crates.md), and
+/// helios-gui mounts it.
+pub struct Feature {
+    /// The crate.
+    pub name: &'static str,
+    /// The helios-gui sources that mount it: the `it` modules exercising
+    /// them ([`gui_modules`]) exercise the feature, and their unit tests
+    /// run too.
+    pub mounts: &'static [&'static str],
+    /// `it` modules exercising it that neither the mounts nor the crate's
+    /// name find (an override line, as in [`OVERRIDES`]).
+    pub modules: &'static [&'static str],
+}
+
+/// The feature crates. An edit inside one that leaves its contract alone
+/// selects the crate, the `it` modules exercising it and its mounts' unit
+/// tests: it stops at the app crate. Add a line when a feature leaves
+/// helios-gui; a crate missing here selects helios-gui and every crate
+/// depending on it, as any crate does.
+pub const FEATURES: &[Feature] = &[Feature {
+    name: "helios-storage-ui",
+    mounts: &["crates/helios-gui/src/shell/storage.rs"],
+    modules: &[],
+}];
+
+/// One changed file: its path, its content now (`None`: deleted), its
+/// content at the base (`None`: new, or not read) and the lines the diff
+/// touched in it (`None`: the whole file is new).
 #[derive(Clone, Debug, Default)]
 pub struct Change {
     pub path: String,
     pub content: Option<String>,
+    pub old: Option<String>,
     pub lines: Option<Vec<(usize, usize)>>,
 }
 
@@ -99,6 +136,13 @@ pub struct Input {
     pub changes: Vec<Change>,
     /// helios-gui's `it` modules and their source.
     pub gui_suites: BTreeMap<String, String>,
+    /// Per feature crate, the names helios-gui re-exports from it
+    /// ([`reexports`]): an `it` module naming one uses the feature.
+    pub reexported: BTreeMap<String, BTreeSet<String>>,
+    /// Per feature crate, its public string ids ([`string_ids`]): its
+    /// commands and bus points. An `it` module quoting one uses the
+    /// feature through the bus.
+    pub ids: BTreeMap<String, BTreeSet<String>>,
     pub history: History,
     pub runs: usize,
     pub smoke: Vec<Scope>,
@@ -201,8 +245,148 @@ fn suites_using(m: &str, suites: &BTreeMap<String, String>) -> Vec<String> {
         .collect()
 }
 
+/// The names a source re-exports from the crate `ident` (`pub use
+/// ident::…;`), as the importer sees them: an alias when there is one,
+/// else the path's last segment.
+pub fn reexports(source: &str, ident: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for span in source.split("pub use ").skip(1) {
+        let span = span.split(';').next().unwrap_or("");
+        let Some(rest) = span.trim_start().strip_prefix(ident) else {
+            continue;
+        };
+        let Some(rest) = rest.strip_prefix("::") else {
+            continue;
+        };
+        for piece in rest.split(['{', '}', ',']) {
+            let piece = piece.trim();
+            let name = match piece.split_once(" as ") {
+                Some((_, alias)) => alias.trim(),
+                None => piece.rsplit("::").next().unwrap_or("").trim(),
+            };
+            if !name.is_empty() && name != "self" && name != "_" {
+                out.insert(name.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// The values of a source's public string constants (`pub const X:
+/// &str = "…";`): a feature's command names and bus point ids.
+pub fn string_ids(source: &str) -> BTreeSet<String> {
+    source
+        .lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("pub const ")?;
+            let (_, value) = rest.split_once(": &str = \"")?;
+            let value = value.strip_suffix("\";")?;
+            (!value.is_empty()).then(|| value.to_string())
+        })
+        .collect()
+}
+
+/// The tests an edit inside a feature crate selects when it leaves the
+/// crate's contract alone; `Err(why)` when it may not stop there.
+fn feature_edit(
+    input: &Input,
+    feature: &Feature,
+    change: &Change,
+    rest: &str,
+) -> Result<Vec<(Scope, String)>, String> {
+    let path = change.path.as_str();
+    if !(rest.starts_with("src/") && is_rust(path)) {
+        return Err("not a source file of the crate".into());
+    }
+    let others: Vec<&str> = input
+        .graph
+        .crates
+        .iter()
+        .filter(|c| c.name != GUI && c.deps.iter().any(|d| d == feature.name))
+        .map(|c| c.name.as_str())
+        .collect();
+    if !others.is_empty() {
+        return Err(format!("{} depend on it too", others.join(", ")));
+    }
+    if change.old.is_none() && change.content.is_none() {
+        return Err("neither side of the file reads".into());
+    }
+    if crate::ci_broker::contract::changed(change.old.as_deref(), change.content.as_deref()) {
+        return Err("its contract (public API or bus points) changed".into());
+    }
+    let mut out = vec![(
+        Scope::Package(feature.name.into()),
+        format!("{path} changed (contract unchanged)"),
+    )];
+    let mut modules: BTreeMap<String, String> = BTreeMap::new();
+    for mount in feature.mounts {
+        for (m, why) in gui_modules(mount, &input.gui_suites) {
+            modules
+                .entry(m)
+                .or_insert_with(|| format!("exercises its mount {mount}: {why}"));
+        }
+        if let Some((unit, _)) = gui_unit(mount) {
+            out.push((
+                Scope::Module {
+                    binary: GUI.into(),
+                    module: unit,
+                },
+                format!("{path} changed: the unit tests of its mount {mount}"),
+            ));
+        }
+    }
+    let ident = feature.name.replace('-', "_");
+    for (m, source) in &input.gui_suites {
+        if idents(source).any(|w| w == ident) {
+            modules
+                .entry(m.clone())
+                .or_insert_with(|| format!("names {ident}"));
+        }
+    }
+    let names = input.reexported.get(feature.name);
+    for (m, source) in &input.gui_suites {
+        if let Some(name) = idents(source).find(|w| names.is_some_and(|n| n.contains(*w))) {
+            modules
+                .entry(m.clone())
+                .or_insert_with(|| format!("uses {name}, re-exported from {ident}"));
+        }
+    }
+    let ids = input.ids.get(feature.name);
+    for (m, source) in &input.gui_suites {
+        if let Some(id) =
+            ids.and_then(|ids| ids.iter().find(|id| source.contains(&format!("\"{id}\""))))
+        {
+            modules
+                .entry(m.clone())
+                .or_insert_with(|| format!("quotes `{id}`, an id of {}", feature.name));
+        }
+    }
+    for m in feature.modules {
+        modules
+            .entry((*m).to_string())
+            .or_insert_with(|| "override for the feature".into());
+    }
+    if modules.is_empty() {
+        out.push((
+            Scope::Binary(GUI_IT.into()),
+            format!("{path} changed: no it module known for {}", feature.name),
+        ));
+    }
+    for (module, why) in modules {
+        out.push((
+            Scope::Module {
+                binary: GUI_IT.into(),
+                module,
+            },
+            format!("{path} changed: {why}"),
+        ));
+    }
+    Ok(out)
+}
+
 /// Source 1, for one file.
-fn affected_file(input: &Input, path: &str, s: &mut Selection) {
+fn affected_file(input: &Input, change: &Change, s: &mut Selection) {
+    let path = change.path.as_str();
     let src = Source::Affected;
     let whole = |s: &mut Selection, seeds: &[&str], why: &str| {
         let seeds: BTreeSet<String> = seeds.iter().map(|c| (*c).to_string()).collect();
@@ -310,7 +494,22 @@ fn affected_file(input: &Input, path: &str, s: &mut Selection) {
         }
         return;
     }
-    whole(s, &[name], &format!("{path} changed"));
+    let mut why = format!("{path} changed");
+    if let Some(feature) = FEATURES.iter().find(|f| f.name == name) {
+        match feature_edit(input, feature, change, rest) {
+            Ok(picks) => {
+                for (scope, why) in picks {
+                    s.add(src, scope, why);
+                }
+                return;
+            }
+            Err(e) => {
+                why =
+                    format!("{path} changed, a feature crate whose edit may reach helios-gui: {e}");
+            }
+        }
+    }
+    whole(s, &[name], &why);
 }
 
 /// Source 2, for one file.
@@ -373,7 +572,7 @@ fn changed_tests(input: &Input, change: &Change, s: &mut Selection) {
 pub fn select(input: &Input) -> Selection {
     let mut s = Selection::default();
     for change in &input.changes {
-        affected_file(input, &change.path, &mut s);
+        affected_file(input, change, &mut s);
         changed_tests(input, change, &mut s);
     }
     if input.changes.is_empty() {
@@ -411,25 +610,32 @@ pub fn select(input: &Input) -> Selection {
     s
 }
 
-/// The input from git, the working tree and the history.
+/// The input from git, the working tree and the history. `at`: the
+/// commits up to that ref alone, read from git, not the working tree (a
+/// past commit measured); `committed`: the commits up to `HEAD`, the
+/// files read from the working tree.
 pub fn gather(
     root: &Path,
     base: &str,
     history: Option<&Path>,
     runs: usize,
     committed: bool,
+    at: Option<&str>,
 ) -> Result<Input, String> {
-    let merge_base = affected::git(root, &["merge-base", base, "HEAD"])?
+    let tip = at.unwrap_or("HEAD");
+    let committed = committed || at.is_some();
+    let merge_base = affected::git(root, &["merge-base", base, tip])?
         .into_iter()
         .next()
-        .ok_or_else(|| format!("no merge base between {base} and HEAD"))?;
+        .ok_or_else(|| format!("no merge base between {base} and {tip}"))?;
     // `--committed`: the commits alone, not the working tree nor the
     // untracked files (CI's checkout holds a few: vkdt, reports).
-    let head: &[&str] = if committed { &["HEAD"] } else { &[] };
+    let head_arg = [tip];
+    let head: &[&str] = if committed { &head_arg } else { &[] };
     let paths = if committed {
         affected::git(
             root,
-            &["diff", "--name-only", "--no-renames", &merge_base, "HEAD"],
+            &["diff", "--name-only", "--no-renames", &merge_base, tip],
         )?
     } else {
         affected::changed_paths(root, base)?
@@ -445,15 +651,38 @@ pub fn gather(
         hunks(&String::from_utf8_lossy(&diff.stdout))
             .into_iter()
             .collect();
+    let graph = affected::workspace(root)?;
+    let show = |rev: &str, path: &str| {
+        std::process::Command::new("git")
+            .args(["show", &format!("{rev}:{path}")])
+            .current_dir(root)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
     let changes = paths
         .into_iter()
         .map(|path| {
-            let content = std::fs::read_to_string(root.join(&path)).ok();
+            let content = match at {
+                Some(at) => show(at, &path),
+                None => std::fs::read_to_string(root.join(&path)).ok(),
+            };
+            // the base side, for the contract of a feature crate's file
+            let in_feature = graph
+                .owner(&path)
+                .is_some_and(|c| FEATURES.iter().any(|f| f.name == c.name));
+            let old = if in_feature && is_rust(&path) {
+                show(&merge_base, &path)
+            } else {
+                None
+            };
             // an untracked file is not in the diff: all of it is new
             let lines = touched.get(&path).cloned();
             Change {
                 path,
                 content,
+                old,
                 lines,
             }
         })
@@ -471,19 +700,60 @@ pub fn gather(
             gui_suites.insert(stem.to_string(), text);
         }
     }
+    let mut reexported: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for path in rust_files(&root.join(GUI_DIR).join("src"))? {
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        for f in FEATURES {
+            let names = reexports(&text, &f.name.replace('-', "_"));
+            reexported.entry(f.name.into()).or_default().extend(names);
+        }
+    }
+    let mut ids: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for f in FEATURES {
+        let Some(c) = graph.crates.iter().find(|c| c.name == f.name) else {
+            continue;
+        };
+        for path in rust_files(&root.join(&c.dir).join("src"))? {
+            let text =
+                std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            ids.entry(f.name.into())
+                .or_default()
+                .extend(string_ids(&text));
+        }
+    }
     let history = read_history(root, history);
     let smoke_path = root.join(SMOKE);
     let smoke = std::fs::read_to_string(&smoke_path)
         .map_err(|e| format!("{SMOKE}: {e}"))
         .and_then(|t| parse_smoke(&t).map_err(|e| format!("{SMOKE}: {e}")))?;
     Ok(Input {
-        graph: affected::workspace(root)?,
+        graph,
         changes,
         gui_suites,
+        reexported,
+        ids,
         history,
         runs,
         smoke,
     })
+}
+
+/// The `.rs` files under `dir`, at any depth.
+fn rust_files(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut out = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for entry in std::fs::read_dir(&d).map_err(|e| format!("{}: {e}", d.display()))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.is_dir() {
+                todo.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn read_history(root: &Path, dir: Option<&Path>) -> History {
@@ -517,6 +787,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     let (mut base, mut history, mut runs, mut explain) = (DEFAULT_BASE, None, DEFAULT_RUNS, None);
     let (mut committed, mut shadow, mut run_id, mut commit, mut junit) =
         (false, None, None, None, None);
+    let mut at = None;
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         match *a {
@@ -525,6 +796,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
             "--runs" => runs = it.next()?.parse().ok()?,
             "--explain" => explain = Some(*it.next()?),
             "--committed" => committed = true,
+            "--head" => at = Some(*it.next()?),
             "--shadow" => shadow = Some(Path::new(*it.next()?)),
             "--run" => run_id = Some(*it.next()?),
             "--commit" => commit = Some(*it.next()?),
@@ -537,7 +809,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         Some(file) => Some((file, run_id?, commit?, junit?)),
         None => None,
     };
-    let input = match gather(root, base, history, runs, committed) {
+    let input = match gather(root, base, history, runs, committed, at) {
         Ok(i) => i,
         Err(e) => return Some(crate::fail(&[format!("ci-broker select: {e}")])),
     };
@@ -563,6 +835,12 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         input.changes.len()
     );
     eprint!("{}", selection.summary());
+    if let History::Read(summary) = &input.history {
+        let (held, current) = selection.held_of(summary, CURRENT_RUNS);
+        eprintln!(
+            "measured: {held} of the {current} tests of a full run (listed in the history's last {CURRENT_RUNS} runs)"
+        );
+    }
     println!("{}", selection.filter());
     if let Some((file, run_id, commit, junit)) = shadow {
         let changed: Vec<String> = input.changes.iter().map(|c| c.path.clone()).collect();
@@ -603,7 +881,11 @@ mod tests {
             crates: vec![
                 c("helios-core", &[]),
                 c("helios-library", &["helios-core"]),
-                c("helios-gui", &["helios-core", "helios-library"]),
+                c("helios-storage-ui", &["helios-core", "helios-library"]),
+                c(
+                    "helios-gui",
+                    &["helios-core", "helios-library", "helios-storage-ui"],
+                ),
                 c("helios-gui-agent", &["helios-gui"]),
             ],
         }
@@ -627,6 +909,12 @@ mod tests {
             ),
             s("support", "pub fn x() {}\n"),
             s("culling", "use helios_gui::library::Cull;\n"),
+            s("health", "use helios_storage_ui::backup_end::HEALTH;\n"),
+            s("volumes", "let c = helios_gui::shell::STORAGE_COMMAND;\n"),
+            s(
+                "import_menu",
+                "shell.run(\"library.storage\", Value::Null);\n",
+            ),
             s("undo", "use helios_gui::shell::App;\n"),
         ])
     }
@@ -636,6 +924,20 @@ mod tests {
             graph: graph(),
             changes,
             gui_suites: suites(),
+            reexported: BTreeMap::from([(
+                "helios-storage-ui".to_string(),
+                reexports(
+                    "pub use helios_storage_ui::{COMMAND as STORAGE_COMMAND, NodeStorage};\n\
+                     pub use helios_storage_ui::read as storage_read;\n",
+                    "helios_storage_ui",
+                ),
+            )]),
+            ids: BTreeMap::from([(
+                "helios-storage-ui".to_string(),
+                string_ids(
+                    "pub const COMMAND: &str = \"library.storage\";\nconst NOT: &str = \"x\";\n",
+                ),
+            )]),
             history,
             runs: DEFAULT_RUNS,
             smoke: parse_smoke("helios-core::engine renders_a_chain\n").unwrap(),
@@ -646,6 +948,7 @@ mod tests {
         Change {
             path: path.into(),
             content: Some(String::new()),
+            old: Some(String::new()),
             lines: Some(vec![]),
         }
     }
@@ -724,17 +1027,166 @@ mod tests {
         assert!(scopes(&s, Source::Affected).contains(&module("persist")));
     }
 
+    fn edited(path: &str, old: &str, new: &str) -> Change {
+        Change {
+            path: path.into(),
+            content: Some(new.into()),
+            old: Some(old.into()),
+            lines: Some(vec![(2, 2)]),
+        }
+    }
+
+    const PAGE: &str = "pub fn rows(n: u32) -> u32 {\n    n + 1\n}\n";
+
+    #[test]
+    fn an_internal_edit_in_a_feature_crate_stops_at_the_app_crate() {
+        let path = "crates/helios-storage-ui/src/page.rs";
+        let body = PAGE.replace("n + 1", "n + 2");
+        let s = select(&input(vec![edited(path, PAGE, &body)], missing()));
+        let got = scopes(&s, Source::Affected);
+        // the crate's own tests
+        assert!(got.contains(&Scope::Package("helios-storage-ui".into())));
+        // the `it` modules exercising it: its mount by name, its name
+        assert!(got.contains(&module("storage")), "{got:?}");
+        assert!(got.contains(&module("health")), "{got:?}");
+        // and through what helios-gui re-exports from it
+        assert!(got.contains(&module("volumes")), "{got:?}");
+        // and through its ids on the bus
+        assert!(got.contains(&module("import_menu")), "{got:?}");
+        // the unit tests of its mount in helios-gui
+        assert!(got.contains(&Scope::Module {
+            binary: GUI.into(),
+            module: "shell::storage".into(),
+        }));
+        // not all of helios-gui, nor what depends on it
+        for wide in [
+            Scope::Package(GUI.into()),
+            Scope::Binary(GUI_IT.into()),
+            Scope::Package("helios-gui-agent".into()),
+        ] {
+            assert!(!got.contains(&wide), "{wide:?}");
+        }
+        assert!(!got.contains(&module("undo")));
+        assert!(
+            !s.filter().contains("package(=helios-gui)"),
+            "{}",
+            s.filter()
+        );
+        assert!(
+            s.explain("helios-gui::it storage::a_volume")
+                .unwrap()
+                .iter()
+                .any(|p| p.why.contains("contract unchanged") || p.why.contains("mount"))
+        );
+    }
+
+    #[test]
+    fn a_contract_edit_in_a_feature_crate_selects_helios_gui() {
+        let points =
+            "pub const POINTS: &[PointDecl] = &[\n    PointDecl::of::<Read>(\"a read\"),\n];\n";
+        let wide = |c: Change| {
+            let s = select(&input(vec![c], missing()));
+            let got = scopes(&s, Source::Affected);
+            for c in ["helios-storage-ui", "helios-gui", "helios-gui-agent"] {
+                assert!(got.contains(&Scope::Package(c.into())), "{c}: {got:?}");
+            }
+            s
+        };
+        // a bus point declared in its contract table
+        let s = wide(edited(
+            "crates/helios-storage-ui/src/read.rs",
+            points,
+            &points.replace("),\n", "),\n    PointDecl::of::<Other>(\"b\"),\n"),
+        ));
+        assert!(
+            s.picks.iter().any(|p| p
+                .why
+                .contains("contract (public API or bus points) changed")),
+            "{}",
+            s.summary()
+        );
+        // its public API
+        wide(edited(
+            "crates/helios-storage-ui/src/page.rs",
+            PAGE,
+            &PAGE.replace("n: u32", "n: u64"),
+        ));
+        // a new file, its manifest, its data: unsure, so wide
+        wide(Change {
+            old: None,
+            content: Some(PAGE.into()),
+            ..edited("crates/helios-storage-ui/src/more.rs", "", "")
+        });
+        wide(change("crates/helios-storage-ui/Cargo.toml"));
+        // another crate depending on it: not a feature of helios-gui alone
+        let mut i = input(
+            vec![edited(
+                "crates/helios-storage-ui/src/page.rs",
+                PAGE,
+                &PAGE.replace("n + 1", "n + 2"),
+            )],
+            missing(),
+        );
+        i.graph.crates.push(Crate {
+            name: "helios-node".into(),
+            dir: "crates/helios-node".into(),
+            deps: vec!["helios-storage-ui".into()],
+        });
+        let s = select(&i);
+        assert!(scopes(&s, Source::Affected).contains(&Scope::Package(GUI.into())));
+    }
+
+    #[test]
+    fn re_exports_are_read_by_the_names_the_importer_sees() {
+        let src = "pub use helios_storage_ui::backup_end;\n\
+                   pub use helios_storage_ui::admin::{\n    MARK as MARK_COMMAND, rows,\n};\n\
+                   pub use helios_storage_ui::{a::{b, c as d}, self};\n\
+                   pub use helios_storage::Other;\nuse helios_storage_ui::Private;\n";
+        let got: Vec<String> = reexports(src, "helios_storage_ui").into_iter().collect();
+        assert_eq!(got, ["MARK_COMMAND", "b", "backup_end", "d", "rows"]);
+    }
+
+    /// Each feature crate exists, helios-gui alone depends on it, and its
+    /// mounts and override modules exist.
+    #[test]
+    fn the_feature_table_names_what_exists() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let graph = affected::workspace(&root).unwrap();
+        for f in FEATURES {
+            assert!(graph.crates.iter().any(|c| c.name == f.name), "{}", f.name);
+            let users: Vec<&str> = graph
+                .crates
+                .iter()
+                .filter(|c| c.deps.iter().any(|d| d == f.name))
+                .map(|c| c.name.as_str())
+                .collect();
+            assert_eq!(users, [GUI], "{}", f.name);
+            for m in f.mounts {
+                assert!(root.join(m).exists(), "{m}");
+                assert!(gui_unit(m).is_some(), "{m}");
+            }
+            for m in f.modules {
+                assert!(
+                    root.join(GUI_IT_DIR).join(format!("{m}.rs")).exists(),
+                    "{m}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_new_test_is_selected() {
         let source = "use x;\n\n#[test]\nfn old() {}\n\n#[test]\nfn brand_new() {\n    y();\n}\n";
         let edited = Change {
             path: "crates/helios-gui/tests/it/import.rs".into(),
             content: Some(source.into()),
+            old: None,
             lines: Some(vec![(6, 9)]),
         };
         let added = Change {
             path: "crates/helios-library/tests/cull.rs".into(),
             content: Some(source.into()),
+            old: None,
             lines: None,
         };
         let s = select(&input(vec![edited, added], missing()));
