@@ -447,3 +447,21 @@ fn a_reset_whose_quit_is_cancelled_never_runs_at_a_later_quit() {
         "every byte of the home is the same"
     );
 }
+
+/// The kernel's folders (`Places::from_env`, read by `helios --reset`)
+/// are the desktop owners' own: the workspaces' configuration folder,
+/// the data folder, egui-pop's state folder, the user cache folder.
+#[test]
+fn the_kernels_places_are_the_desktops_folders() {
+    let env = |name: &str| std::env::var(name).ok();
+    let Some(places) = reset::places(None) else {
+        return;
+    };
+    assert_eq!(places.config, helios_gui::shell::config_dir());
+    assert_eq!(Some(places.data), helios_gui::platform::data_dir_with(env));
+    assert_eq!(
+        Some(places.state),
+        egui_pop::platform::dirs::state_dir_with(helios_gui::platform::STATE_NAME, env)
+    );
+    assert_eq!(Some(places.cache), helios_cache::user_cache_dir());
+}

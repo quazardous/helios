@@ -130,6 +130,119 @@ impl std::fmt::Display for Refused {
     }
 }
 
+impl Places {
+    /// Where Helios keeps its things on this machine, read from `env`
+    /// (`HOME`, the `XDG_*` folders, `LOCALAPPDATA`), with `library` the
+    /// library file in use: the same folders as the desktop's owners of
+    /// each (the workspaces' configuration folder, the data folder, the
+    /// state folder, the user cache folder). `None` when one cannot be
+    /// told. The desktop's Danger zone and `helios --reset` both read it.
+    pub fn from_env(
+        env: impl Fn(&str) -> Option<String>,
+        library: Option<PathBuf>,
+    ) -> Option<Self> {
+        let absolute = |name: &str| env(name).map(PathBuf::from).filter(|p| p.is_absolute());
+        let any = |name: &str| env(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+        let home = absolute("HOME");
+        // `helios_template::workspace::config_dir`.
+        let config = any("XDG_CONFIG_HOME")
+            .or_else(|| any("HOME").map(|h| h.join(".config")))
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(FOLDER_NAME);
+        // The desktop's data folder and egui-pop's state folder.
+        let (data, state) = if cfg!(windows) {
+            let local = absolute("LOCALAPPDATA")?;
+            (local.clone(), local)
+        } else if cfg!(target_os = "macos") {
+            let support = home.clone()?.join("Library/Application Support");
+            (support.clone(), support)
+        } else {
+            (
+                absolute("XDG_DATA_HOME")
+                    .or_else(|| home.clone().map(|h| h.join(".local/share")))?,
+                absolute("XDG_STATE_HOME")
+                    .or_else(|| home.clone().map(|h| h.join(".local/state")))?,
+            )
+        };
+        // `helios_cache::user_cache_dir`.
+        let cache = any("XDG_CACHE_HOME")
+            .or_else(|| any("HOME").map(|h| h.join(".cache")))
+            .or_else(|| any("LOCALAPPDATA"))?
+            .join(FOLDER_NAME);
+        Some(Places {
+            config,
+            data: data.join(FOLDER_NAME),
+            state: state.join(FOLDER_NAME),
+            cache,
+            library,
+        })
+    }
+}
+
+/// The photos a reset keeps: the folders they are in, and how many.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Photos {
+    /// The library's folders and its library folder.
+    pub roots: Vec<PathBuf>,
+    /// The photos of the library.
+    pub count: u64,
+}
+
+/// The photos of `library.folders`'s answer (`{"folders": [{"volume",
+/// "folders": {path: count}}]}`): the top folders of each volume (none
+/// above them counted) and the photos of every volume; `library_folder`
+/// (where imports copy to) is a root too.
+pub fn photos_of(answer: &serde_json::Value, library_folder: Option<PathBuf>) -> Photos {
+    let mut photos = Photos::default();
+    for volume in answer["folders"].as_array().into_iter().flatten() {
+        let Some(counts) = volume["folders"].as_object() else {
+            continue;
+        };
+        // A volume's top folder counts every photo on it.
+        photos.count += counts
+            .values()
+            .filter_map(serde_json::Value::as_u64)
+            .max()
+            .unwrap_or(0);
+        for path in counts.keys() {
+            let counted_above = Path::new(path)
+                .ancestors()
+                .skip(1)
+                .any(|a| counts.contains_key(a.to_string_lossy().as_ref()));
+            if !counted_above {
+                photos.roots.push(PathBuf::from(path));
+            }
+        }
+    }
+    photos.roots.extend(library_folder);
+    photos.roots.sort();
+    photos.roots.dedup();
+    photos
+}
+
+/// The photos of the library file at `file`, read from it directly (no
+/// node: Helios is not running): its folders and its library folder,
+/// as [`photos_of`] reads them. No file, no photos.
+///
+/// # Errors
+/// The library cannot be opened or read.
+pub fn library_photos(file: &Path) -> Result<Photos, String> {
+    if !file.exists() {
+        return Ok(Photos::default());
+    }
+    let store = helios_vault_sqlite::SqliteStore::open(file)
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    let vault = helios_vault::Vault::new(store);
+    let folders = vault.folders(&helios_vault::Query::default())?;
+    let answer = serde_json::json!({
+        "folders": folders
+            .into_iter()
+            .map(|(volume, folders)| serde_json::json!({ "volume": volume.map(|v| v.0), "folders": folders }))
+            .collect::<Vec<_>>(),
+    });
+    Ok(photos_of(&answer, vault.library_folder()?))
+}
+
 /// The files Helios keeps beside a library file, by suffix of its name.
 const LIBRARY_SUFFIXES: &[&str] = &["", "-wal", "-shm", "-journal", ".snapshots", ".restore"];
 

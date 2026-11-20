@@ -63,42 +63,7 @@ pub const CHECK_WORD: &str = "helios.reset.word";
 /// The Settings page the Danger zone is on.
 pub const SECTION: &str = "danger/reset";
 
-/// The photos a reset keeps: the folders they are in, and how many.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Photos {
-    /// The library's folders and its library folder.
-    pub roots: Vec<PathBuf>,
-    /// The photos of the library.
-    pub count: u64,
-}
-
-/// The photos of `library.folders`'s answer (`{"folders": [{"volume",
-/// "folders": {path: count}}]}`): the top folders of each volume (none
-/// above them counted) and the photos of every volume; `library_folder`
-/// (where imports copy to) is a root too.
-pub fn photos_of(answer: &Value, library_folder: Option<PathBuf>) -> Photos {
-    let mut photos = Photos::default();
-    for volume in answer["folders"].as_array().into_iter().flatten() {
-        let Some(counts) = volume["folders"].as_object() else {
-            continue;
-        };
-        // A volume's top folder counts every photo on it.
-        photos.count += counts.values().filter_map(Value::as_u64).max().unwrap_or(0);
-        for path in counts.keys() {
-            let counted_above = std::path::Path::new(path)
-                .ancestors()
-                .skip(1)
-                .any(|a| counts.contains_key(a.to_string_lossy().as_ref()));
-            if !counted_above {
-                photos.roots.push(PathBuf::from(path));
-            }
-        }
-    }
-    photos.roots.extend(library_folder);
-    photos.roots.sort();
-    photos.roots.dedup();
-    photos
-}
+pub use helios_node_core::reset::{Photos, photos_of};
 
 /// A confirmed plan, waiting for the quit it was confirmed for: the
 /// desktop takes it once the library is closed ([`Pending::take`]); an
@@ -143,17 +108,11 @@ pub struct Reset {
 }
 
 /// Where Helios keeps its things on this machine: its configuration,
-/// data, state and cache folders, and `library` (the library file in
-/// use). `None` when one of the folders cannot be told.
+/// data, state and cache folders ([`Places::from_env`], read by
+/// `helios --reset` too), and `library` (the library file in use).
+/// `None` when one of the folders cannot be told.
 pub fn places(library: Option<PathBuf>) -> Option<Places> {
-    let env = |name: &str| std::env::var(name).ok();
-    Some(Places {
-        config: crate::shell::config_dir(),
-        data: crate::platform::data_dir_with(env)?,
-        state: egui_pop::platform::dirs::state_dir_with(crate::platform::STATE_NAME, env)?,
-        cache: helios_cache::user_cache_dir()?,
-        library,
-    })
+    Places::from_env(|name| std::env::var(name).ok(), library)
 }
 
 /// The scope a call names; `everything` when it names none.

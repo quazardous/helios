@@ -59,6 +59,7 @@ pub use helios_node_core::library;
 pub use helios_node_core::promises;
 pub mod caps;
 pub mod mcp;
+pub mod reset_cli;
 pub mod roots;
 pub mod sandbox;
 pub mod vault_node;
