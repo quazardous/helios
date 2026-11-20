@@ -2863,79 +2863,50 @@ mod tests {
     }
 
     #[test]
-    fn every_helios_job_keeps_the_times_of_unchanged_files() {
-        // the box clones each job's source afresh: without the old times
-        // back, cargo rebuilds every workspace crate on every job
+    fn every_building_job_keeps_the_times_of_unchanged_files() {
+        // the box clones each job's source afresh: the runner gives the
+        // unchanged files their old times back (`source_times`), and the
+        // copy keeps them, else cargo rebuilds every workspace crate
         let bf = include_str!("../../tools/bench/Benchfile");
+        let storage = bf.split("\n[storage]\n").nth(1).unwrap();
         let mut seen = 0;
         for job in benchfile_jobs(bf) {
             let section = job_section(bf, &job);
-            if !section.contains("cp -r --preserve=mode . /tmp/w/helios/") {
+            if !section.contains(" . /tmp/w/helios/") && !section.contains(" . /tmp/w/egui-pop/") {
                 continue;
             }
+            let Some(mounts) = section
+                .lines()
+                .find(|l| l.starts_with("mounts = "))
+                .map(|l| l.replace(' ', ""))
+            else {
+                continue;
+            };
+            let Some(at) = mounts.find(r#"="/target""#) else {
+                continue;
+            };
             seen += 1;
-            let copy = section.find("/target/.built-at; }; } && ").unwrap();
-            let keep = section
-                .find("python3 -I tools/bench/keep-mtimes.py /target/.src-mtimes && ")
-                .unwrap_or_else(|| panic!("{job} runs keep-mtimes"));
-            assert!(copy < keep, "{job}: after the copy");
-            assert!(section[keep..].contains("cargo "), "{job}: before cargo");
-        }
-        assert!(seen > 10);
-    }
-
-    #[test]
-    fn keep_mtimes_gives_unchanged_files_their_old_time() {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/bench/keep-mtimes.py");
-        let dir = std::env::temp_dir().join(format!("keep-mtimes-{}", std::process::id()));
-        let tree = dir.join("src");
-        std::fs::create_dir_all(&tree).unwrap();
-        let manifest = dir.join("manifest");
-        let run = || {
-            Command::new("python3")
-                .arg("-I")
-                .arg(&script)
-                .arg(&manifest)
-                .arg(&tree)
-                .status()
-                .is_ok_and(|s| s.success())
-        };
-        let mtime = |name: &str| {
-            std::fs::metadata(tree.join(name))
-                .unwrap()
-                .modified()
-                .unwrap()
-        };
-        let old = UNIX_EPOCH + Duration::from_secs(1_000_000_000);
-        for (name, text) in [("same.rs", "a"), ("edited.rs", "b")] {
-            std::fs::write(tree.join(name), text).unwrap();
-            std::fs::File::options()
-                .write(true)
-                .open(tree.join(name))
-                .unwrap()
-                .set_modified(old)
+            assert!(
+                section.contains("cp -r --preserve=mode,timestamps . /tmp/w/"),
+                "{job}: the copy keeps the times"
+            );
+            assert!(
+                section.contains("\nsource_times = \"/target\"\n"),
+                "{job}: source_times on /target"
+            );
+            // the quoted mount before `= "/target"`: `"<storage>/<sub>"`
+            let name = mounts[..at]
+                .strip_suffix('"')
+                .and_then(|m| m.rsplit_once('"'))
+                .and_then(|(_, m)| m.split('/').next())
                 .unwrap();
+            let line = storage
+                .lines()
+                .find(|l| l.starts_with(&format!("{name} = ")))
+                .unwrap_or_else(|| panic!("{job}: storage {name}"));
+            assert!(line.contains("lock = true"), "{job}: {name} is lock = true");
         }
-        if !run() {
-            eprintln!("python3 missing: keep-mtimes not run");
-            let _ = std::fs::remove_dir_all(&dir);
-            return;
-        }
-        // the next job: a fresh copy, every file at the copy's time
-        let recent = SystemTime::now() - Duration::from_secs(5);
-        std::fs::write(tree.join("same.rs"), "a").unwrap();
-        std::fs::write(tree.join("edited.rs"), "b2").unwrap();
-        std::fs::write(tree.join("new.rs"), "c").unwrap();
-        assert!(run());
-        assert_eq!(mtime("same.rs"), old);
-        assert!(mtime("edited.rs") >= recent);
-        assert!(mtime("new.rs") >= recent);
-        // edited back: not what the last job built, so changed again
-        std::fs::write(tree.join("edited.rs"), "b").unwrap();
-        assert!(run());
-        assert!(mtime("edited.rs") >= recent);
-        assert_eq!(mtime("same.rs"), old);
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(seen > 40);
     }
 
     #[test]
