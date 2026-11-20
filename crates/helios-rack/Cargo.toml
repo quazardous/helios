@@ -1,0 +1,27 @@
+[package]
+name = "helios-rack"
+description = "Helios's visual-module frame: a module's declarations (its parameters as controls) laid out by egui_hud and drawn by egui-pop, bound to the value store; it draws nothing of its own"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+helios-core.workspace = true
+helios-shell.workspace = true
+helios-values.workspace = true
+helios-i18n.workspace = true
+# The controls catalogue and the implicit controls of parameters.
+helios-controls = { workspace = true, features = ["render"] }
+# The renderers (cards, managed parts) and the face library.
+egui_hud = { workspace = true, features = ["render"] }
+# The application handle (the bus, context menus), the slider and tool
+# steps (`imaging`), translations.
+egui-pop = { workspace = true, features = ["viewport", "imaging", "i18n"] }
+# A path's and a brush's points: how many values a point holds.
+helios-module-masks = { path = "../../modules/masks" }
+serde_json.workspace = true
+
+[lints]
+workspace = true
