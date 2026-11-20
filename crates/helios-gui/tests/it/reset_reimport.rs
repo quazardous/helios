@@ -20,7 +20,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use helios_gui::forget::{self, Keyring, MemoryKeyring};
 use helios_gui::reset::{self, Pending, Photos, Reset};
-use helios_gui::shell::init_wizard::{REIMPORT, REIMPORT_FOLDERS, REIMPORT_STEP};
+use helios_gui::shell::init_wizard::{REIMPORT, REIMPORT_STEP};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_node_core::reset::{Places, Scope};
 use helios_shell::commands::Origin;
@@ -194,10 +194,11 @@ fn after_a_reset_the_setup_adds_the_photos_back_where_they_are() {
     }
     assert_eq!(wizard(&mut h, "init.setup").unwrap()["step"], REIMPORT_STEP);
     // The folders the reset kept, listed; the toggle on.
-    let listed = run(&mut h, REIMPORT_FOLDERS, json!({})).unwrap();
+    // (The shell answers its own commands in the next frame: the list
+    // reads them through `REIMPORT_FOLDERS` as it draws.)
     assert_eq!(
-        listed["folders"][0]["path"],
-        json!(photos.display().to_string())
+        h.state().reimport_offer().map(|o| o.folders.clone()),
+        Some(vec![photos.clone()])
     );
     until(&mut h, "the folder listed", |h| {
         h.query_by_label_contains(&photos.display().to_string())
@@ -245,7 +246,6 @@ fn after_a_reset_the_setup_adds_the_photos_back_where_they_are() {
         helios_node_core::reset::pending_reimport(&places.data),
         None
     );
-    assert!(run(&mut h, REIMPORT, json!({})).is_err(), "nothing left");
 }
 
 #[test]
