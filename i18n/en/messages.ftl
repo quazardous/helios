@@ -2347,7 +2347,7 @@ gui-reset-scope-settings = Settings only: the library stays
 
 gui-reset-snapshot = Snapshot the catalogue first
 
-gui-reset-stays = Stay untouched: your { $count } photos and their sidecars, in { $folders } folders, and the backup disks.
+gui-reset-stays = Stay untouched: your { $count } photos and their sidecars (folders: { $folders }), and the backup disks.
 
 gui-reset-stays-title = What stays
 

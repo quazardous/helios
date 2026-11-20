@@ -163,7 +163,7 @@ pub fn plan_answer(
     let plan = reset::plan(&reset.places, scope, &photos.roots, &stamp());
     let stays = t(Message::new(
         "gui-reset-stays",
-        "Stay untouched: your { $count } photos and their sidecars, in { $folders } folders, and the backup disks.",
+        "Stay untouched: your { $count } photos and their sidecars (folders: { $folders }), and the backup disks.",
     )
     .with("count", photos.count.to_string())
     .with("folders", photos.roots.len().to_string()));
