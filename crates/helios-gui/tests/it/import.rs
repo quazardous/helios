@@ -2655,6 +2655,16 @@ fn close_main_window(h: &mut Harness<'static, Shell>) -> helios_gui::shell::Clos
     closing
 }
 
+/// The end splash's listener turns after a quit, one per step as the
+/// host (`main.rs`) runs them: the node told to quit, the GUI client
+/// detached. The host's own steps (they need its window) are skipped.
+fn run_the_end_turns(h: &mut Harness<'static, Shell>) {
+    let steps = h.state().end_steps(&[]);
+    for (turn, step) in steps.iter().enumerate().filter(|(_, s)| !s.host) {
+        h.state().quit_turn(turn, &step.id);
+    }
+}
+
 /// Ctrl+Q pressed in the import window quits Helios, not that window
 /// alone (docs/design/windows.md, section 7, D1): the main window is asked
 /// to close, and its close then ends the process.
@@ -3050,8 +3060,12 @@ fn a_window_closing_while_another_remains_leaves_the_vault_open() {
     node.vault()
         .set_config_layer("user", Some("kept = 1"))
         .expect("the vault is open to writes");
-    // The last window closed: Helios quits, the node is asked to.
+    // The last window closed: Helios quits, the node is asked to. The
+    // node is told at its turn of the end splash (`helios.quit.node`),
+    // which the host runs after the close: run its turns as `main.rs`
+    // does (the host's own steps need its window, they are left out).
     assert_eq!(close_main_window(&mut h), helios_gui::shell::Closing::Quit);
+    run_the_end_turns(&mut h);
     assert!(link.quitting());
     assert!(!link.stopped(), "the GUI is still connected");
     drop(client);
