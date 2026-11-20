@@ -209,12 +209,23 @@ fn after_a_reset_the_setup_adds_the_photos_back_where_they_are() {
             .is_some()
     );
 
+    // Ticked when offered.
+    let draft = wizard(&mut h, "init.setup").unwrap();
+    assert_eq!(draft["values"]["init.reimport"], json!(true), "{draft}");
+
     run(&mut h, "admin.wizard.finish", json!({})).unwrap();
+    // The setup's finish (`init.apply`) runs in a frame of its own.
+    let mut imports = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while imports.is_empty() && Instant::now() < deadline {
+        h.step();
+        imports = h.state_mut().take_imports();
+        std::thread::sleep(Duration::from_millis(10));
+    }
     until(&mut h, "the setup closed", |h| {
         wizard(h, "init.setup").is_none()
     });
     // Added in place: the import asked for the folder, nothing copied.
-    let imports = h.state_mut().take_imports();
     assert_eq!(imports.len(), 1, "{imports:?}");
     assert_eq!(imports[0]["paths"], json!([photos]));
     assert_eq!(imports[0]["copy"], json!(false));
