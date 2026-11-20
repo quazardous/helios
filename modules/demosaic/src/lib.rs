@@ -285,6 +285,7 @@ fn direct(
             (f.x, f.right())
         })
         .collect();
+    let period = plan.cfa.period() as usize;
     let pixel = |x: i64, y: i64, out: &mut [f32]| {
         let f = Region::new(x, y, 1, 1).full_resolution(plan.scale);
         let (mut x0, mut x1) = columns[(x - output.x) as usize];
@@ -295,15 +296,43 @@ fn direct(
             }
             let mut sum = [0.0f32; 3];
             let mut n = [0u32; 3];
-            for fy in y0..y1 {
-                let cy = fy.clamp(bounds.y, bounds.bottom() - 1);
-                for fx in x0..x1 {
-                    let cx = fx.clamp(bounds.x, bounds.right() - 1);
-                    // The pattern at the photosite read (an edge one
-                    // replicated keeps its own colour).
-                    let c = index(plan.cfa.color_at(cx, cy));
-                    sum[c] += input.pixel(cx, cy)[0];
-                    n[c] += 1;
+            let inside =
+                x0 >= bounds.x && x1 <= bounds.right() && y0 >= bounds.y && y1 <= bounds.bottom();
+            if inside {
+                // No edge to replicate: each row's slice read straight,
+                // the pattern's colours of the row taken once. The same
+                // photosites in the same order as below, so the same sums
+                // bit for bit, without a clamp, a bounds check and a
+                // pattern lookup per photosite.
+                let from = (x0 - bounds.x) as usize;
+                let to = (x1 - bounds.x) as usize;
+                for fy in y0..y1 {
+                    let mut colours = [0usize; 6];
+                    for (k, c) in colours.iter_mut().enumerate().take(period) {
+                        *c = index(plan.cfa.color_at(x0 + k as i64, fy));
+                    }
+                    let mut k = 0;
+                    for v in &input.row(fy)[from..to] {
+                        let c = colours[k];
+                        sum[c] += v;
+                        n[c] += 1;
+                        k += 1;
+                        if k == period {
+                            k = 0;
+                        }
+                    }
+                }
+            } else {
+                for fy in y0..y1 {
+                    let cy = fy.clamp(bounds.y, bounds.bottom() - 1);
+                    for fx in x0..x1 {
+                        let cx = fx.clamp(bounds.x, bounds.right() - 1);
+                        // The pattern at the photosite read (an edge one
+                        // replicated keeps its own colour).
+                        let c = index(plan.cfa.color_at(cx, cy));
+                        sum[c] += input.pixel(cx, cy)[0];
+                        n[c] += 1;
+                    }
                 }
             }
             if n.iter().all(|&k| k > 0) || grow == 2 {
@@ -522,6 +551,65 @@ mod tests {
 
     fn close(a: &[f32], b: &[f32]) -> bool {
         a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4)
+    }
+
+    #[test]
+    fn the_direct_path_inside_is_the_clamped_mean_bit_for_bit() {
+        // The fast path inside the mosaic against the clamped reading of
+        // every photosite, on Bayer and X-Trans, at odd scales and
+        // origins, edges included.
+        for cfa in ["RGGB", XTRANS] {
+            for scale in [0.25, 0.0423, 0.13] {
+                let plan = Plan {
+                    cfa: Cfa::parse(cfa).unwrap(),
+                    method: Method::Bilinear,
+                    maximum: 1.0,
+                    scale,
+                };
+                let bounds = Region::new(-3, 1, 403, 299);
+                let input = Image::from_fn(bounds, 1, |x, y, _| {
+                    ((x * 37 + y * 101) % 211) as f32 / 211.0
+                });
+                // One column and row past each edge.
+                let out = Region::new(
+                    -1,
+                    0,
+                    (403.0 * scale) as u32 + 2,
+                    (300.0 * scale) as u32 + 2,
+                );
+                let got =
+                    direct(&plan, &input, out, 4, &helios_core::cancel::Token::new()).unwrap();
+                let want = Image::from_fn(out, 4, |x, y, c| {
+                    if c == 3 {
+                        return 1.0;
+                    }
+                    let f = Region::new(x, y, 1, 1).full_resolution(scale);
+                    let (mut x0, mut x1, mut y0, mut y1) = (f.x, f.right(), f.y, f.bottom());
+                    for grow in 0..3 {
+                        if grow > 0 {
+                            (x0, x1, y0, y1) = (x0 - 1, x1 + 1, y0 - 1, y1 + 1);
+                        }
+                        let mut sum = [0.0f32; 3];
+                        let mut n = [0u32; 3];
+                        for fy in y0..y1 {
+                            let cy = fy.clamp(bounds.y, bounds.bottom() - 1);
+                            for fx in x0..x1 {
+                                let cx = fx.clamp(bounds.x, bounds.right() - 1);
+                                let k = index(plan.cfa.color_at(cx, cy));
+                                sum[k] += input.pixel(cx, cy)[0];
+                                n[k] += 1;
+                            }
+                        }
+                        if n.iter().all(|&k| k > 0) || grow == 2 {
+                            let c = c as usize;
+                            return if n[c] > 0 { sum[c] / n[c] as f32 } else { 0.0 };
+                        }
+                    }
+                    unreachable!()
+                });
+                assert_eq!(got.data(), want.data(), "{cfa} at {scale}");
+            }
+        }
     }
 
     #[test]
