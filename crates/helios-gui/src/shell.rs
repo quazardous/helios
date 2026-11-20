@@ -5353,7 +5353,8 @@ impl Shell {
 
     /// Culling's auto-advance on or off in the Library view the user
     /// works in (`vault.autoAdvance`): the other views keep theirs. Kept
-    /// with that view in the workspace (one undo step) when one is open.
+    /// with that view in the workspace (view state, never an undo step)
+    /// when one is open.
     fn auto_advance_library(&mut self, on: bool, origin: &Origin) -> Result<(), String> {
         let gallery = self.focus.library.borrow().gallery_id().to_string();
         if let Some(state) = self.workspace_state() {
@@ -5400,7 +5401,8 @@ impl Shell {
     }
 
     /// `library.sort`: sorts this window's library, and keeps the sort
-    /// with the workspace (one undo step) when one is open; answers the
+    /// with the workspace (view state, never an undo step) when one is
+    /// open; answers the
     /// sort in force.
     fn sort_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         let current = self.focus.library.borrow().sort();
@@ -5441,7 +5443,8 @@ impl Shell {
     }
 
     /// `library.folder`: scopes the Library view the user works in to a
-    /// folder, and keeps it with that view in the workspace (one undo step) when one is open;
+    /// folder, and keeps it with that view in the workspace (view state,
+    /// never an undo step) when one is open;
     /// answers the folder in force.
     fn folder_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         if let Some(path) = args.get("path") {
@@ -5477,7 +5480,8 @@ impl Shell {
     }
 
     /// `library.collection`: scopes the Library view the user works in to
-    /// an album, and keeps it with that view in the workspace (one undo step) when one is open;
+    /// an album, and keeps it with that view in the workspace (view state,
+    /// never an undo step) when one is open;
     /// answers the album in force.
     fn collection_library(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
         if let Some(id) = args.get("id") {

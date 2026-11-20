@@ -6,7 +6,7 @@
 //!   the workspace's query). Without a folder the export dialog asks for
 //!   the settings, starting from the workspace's (`library.export` in its
 //!   template), and "Remember for this workspace" makes the answer the
-//!   workspace's (one undo step).
+//!   workspace's (view state, never an undo step).
 //! - **What runs.** The shell queues an [`ExportAsk`] (the images and the
 //!   settings); the host plans it over the library into a serialisable
 //!   batch request and runs it on its scheduler
@@ -426,7 +426,7 @@ impl Shell {
         self.form_with(form, kept)
     }
 
-    /// Makes `desc` the workspace's export settings (one undo step).
+    /// Makes `desc` the workspace's export settings (view state, never an undo step).
     fn remember_export(&mut self, desc: &ExportDesc, origin: &Origin) -> Result<(), String> {
         let state = self
             .workspace_state()

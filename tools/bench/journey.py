@@ -718,6 +718,18 @@ class Journey:
         elif png_is_flat(picture):
             entry["why"] = "the viewport's image is one flat colour"
 
+    def view_kept(self, entry: dict) -> None:
+        """After the undo of `view-undo`: the view left as it was (the
+        sort still by name), the undo having taken the exposure only."""
+        try:
+            sort = self.command("library.sort") or {}
+        except (OSError, RuntimeError, ValueError) as exc:
+            entry["why"] = f"library.sort: {exc}"
+            return
+        entry["sort"] = sort
+        if sort.get("by") != "name":
+            entry["why"] = f"the undo changed the Library's sort (view state): {sort}"
+
     def exported(self, entry: dict) -> None:
         """The export's file: written, decoded, at the raw's size."""
         end = time.monotonic() + 180
@@ -762,6 +774,7 @@ class Journey:
             ("restart", "8-restart.ron"),
             ("workshop", "9-workshop.ron"),
             ("export", "10-export.ron"),
+            ("view-undo", "11-view-undo.ron"),
             ("quit-again", None),
         ]
         for step, file in plan:
@@ -811,6 +824,8 @@ class Journey:
                     self.darkroom(entry)
                 if "why" not in entry and step == "export":
                     self.exported(entry)
+                if "why" not in entry and step == "view-undo":
+                    self.view_kept(entry)
             else:
                 timings = {"step": step}
                 self.bus_timings(timings)
