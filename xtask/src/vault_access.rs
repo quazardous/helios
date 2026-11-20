@@ -255,10 +255,11 @@ pub fn exempt_path(rel: &str) -> bool {
     if dirs.iter().any(|d| *d == "tests" || *d == "fixtures") {
         return true;
     }
-    matches!(
-        parts.last().copied(),
-        Some("tests.rs" | "fixture.rs" | "fixtures.rs")
-    )
+    // A `foo_tests.rs` file is a test module pulled in with
+    // `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;`, as `tests.rs` is.
+    parts.last().is_some_and(|f| {
+        matches!(*f, "tests.rs" | "fixture.rs" | "fixtures.rs") || f.ends_with("_tests.rs")
+    })
 }
 
 /// The forbidden uses in one file, test code excepted.
@@ -561,6 +562,8 @@ pub fn after() {}
         assert!(exempt_path("crates/helios-node-core/src/node.rs"));
         assert!(exempt_path("crates/helios-gui/src/tests/open.rs"));
         assert!(exempt_path("crates/helios-gui/src/tests.rs"));
+        assert!(exempt_path("crates/helios-gui/src/shell/storage_tests.rs"));
+        assert!(!exempt_path("crates/helios-gui/src/shell/storage_test_data.rs"));
         assert!(exempt_path("plugins/importers/x/src/fixture.rs"));
         assert!(!exempt_path("crates/helios-gui/src/platform.rs"));
         assert!(!exempt_path("crates/helios-node/src/main.rs"));

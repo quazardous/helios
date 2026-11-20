@@ -126,6 +126,8 @@ pub use import_merge::MergeLibrary as MergeImportLibrary;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
 pub use lifetime::{Closing, LastWindow};
+#[cfg(test)]
+mod feature_host;
 mod reads;
 mod said;
 mod storage;

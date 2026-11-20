@@ -30,7 +30,7 @@ use std::sync::{Arc, PoisonError};
 use helios_connect::account::Account;
 
 use helios_core::Message;
-use helios_shell::commands::CommandSpec;
+use helios_shell::commands::{CommandSpec, Origin};
 use helios_storage::strategy::{self, Destination, Strategy, Trigger};
 use helios_storage::{Identity, Role, Volume, VolumeId};
 use serde_json::{Value, json};
@@ -601,126 +601,157 @@ fn with_role(volumes: &[Volume], args: &Value) -> Result<Volume, String> {
     Ok(v)
 }
 
+/// A command's handler, as Helios's registry runs it.
+pub(crate) type Handler = Box<dyn Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync>;
+
+/// Where a feature registers its commands: the shell's
+/// [`Shell::register`], or a test's feature host
+/// (`crate::feature_host`), which has no shell.
+pub(crate) type Register<'a> = dyn FnMut(CommandSpec, Handler) -> Result<(), String> + 'a;
+
 impl Shell {
     /// Registers the Storage page's commands over `link`, once.
     pub(super) fn register_storage_commands(&mut self, link: &Arc<dyn StorageLink>) {
         if self.has_command(VOLUMES) {
             return;
         }
-        let (l, i18n) = (link.clone(), self.core.i18n.clone());
-        let owned = self.core.storage.owners.clone();
-        let cards = self.core.storage.cards.clone();
-        let volumes = self.register(
-            CommandSpec::new(
-                VOLUMES,
-                "List the volumes known, online ones first: state, roles, space, photos, backup",
-                "Library",
+        let i18n = self.core.i18n.clone();
+        let (owners, cards) = (
+            self.core.storage.owners.clone(),
+            self.core.storage.cards.clone(),
+        );
+        register_commands(
+            &mut |spec, handler| self.register(spec, handler),
+            link,
+            &i18n,
+            (&owners, &cards),
+        );
+    }
+}
+
+/// Registers the Storage page's commands over `link` through `register`:
+/// they read the owners of remote volumes and the card list, and say
+/// their texts through `texts`. Knows no shell.
+pub(crate) fn register_commands(
+    register: &mut Register<'_>,
+    link: &Arc<dyn StorageLink>,
+    texts: &egui_pop::i18n::I18n,
+    (owners, cards): (&super::storage::Owners, &CardList),
+) {
+    let (l, i18n) = (link.clone(), texts.clone());
+    let owned = owners.clone();
+    let cards = cards.clone();
+    let volumes = register(
+        CommandSpec::new(
+            VOLUMES,
+            "List the volumes known, online ones first: state, roles, space, photos, backup",
+            "Library",
+        )
+        .read_only(),
+        Box::new(move |_, _| {
+            let t = |m: Message| helios_i18n::message(&i18n, &m);
+            let owners = match &*owned.lock().unwrap_or_else(PoisonError::into_inner) {
+                Some((book, saved)) => owners_of(
+                    &book.accounts()?,
+                    &saved.lock().unwrap_or_else(PoisonError::into_inner),
+                ),
+                None => Vec::new(),
+            };
+            let grouped = by_account(l.volumes()?, l.photos()?, &owners);
+            let strategy = l.strategy()?;
+            let mut rows = volume_rows(&t, &grouped.volumes, &grouped.photos, strategy.as_ref());
+            with_sources(&mut rows, &grouped.sources);
+            with_cards(&t, &mut rows, &cards);
+            Ok(rows)
+        }),
+    );
+    let (l, i18n) = (link.clone(), texts.clone());
+    let strategy = register(
+        CommandSpec::new(
+            STRATEGY,
+            "Show the library's backup strategy: copies, destinations, triggers, its disks plugged in",
+            "Library",
+        )
+        .read_only(),
+        Box::new(move |_, _| {
+            let t = |m: Message| helios_i18n::message(&i18n, &m);
+            let volumes = l.volumes()?;
+            Ok(strategy_answer(&t, l.strategy()?.as_ref(), &volumes))
+        }),
+    );
+    let l = link.clone();
+    let role = register(
+        CommandSpec::new(
+            VOLUME_ROLE,
+            "Give a volume a role or take it back (`volume`, `role`, `on`; without `on`, toggled)",
+            "Library",
+        ),
+        Box::new(move |args, _| {
+            let v = with_role(&l.volumes()?, args)?;
+            let saved = l.save(&v)?;
+            let roles: Vec<String> = saved.roles.iter().map(|r| role_name(*r)).collect();
+            Ok(json!({ "volume": saved.id.as_str(), "roles": roles }))
+        }),
+    );
+    let l = link.clone();
+    let set = register(
+        CommandSpec::new(
+            VOLUME_SET,
+            "Rename a volume or set its flags (`volume`, and `name`, `offSite`, `raid`)",
+            "Library",
+        ),
+        Box::new(move |args, _| {
+            let saved = l.save(&with_set(&l.volumes()?, args)?)?;
+            Ok(
+                json!({ "volume": saved.id.as_str(), "name": saved.name, "offSite": saved.off_site, "raid": saved.raid }),
             )
-            .read_only(),
-            move |_, _| {
-                let t = |m: Message| helios_i18n::message(&i18n, &m);
-                let owners = match &*owned.lock().unwrap_or_else(PoisonError::into_inner) {
-                    Some((book, saved)) => owners_of(
-                        &book.accounts()?,
-                        &saved.lock().unwrap_or_else(PoisonError::into_inner),
-                    ),
-                    None => Vec::new(),
-                };
-                let grouped = by_account(l.volumes()?, l.photos()?, &owners);
-                let strategy = l.strategy()?;
-                let mut rows =
-                    volume_rows(&t, &grouped.volumes, &grouped.photos, strategy.as_ref());
-                with_sources(&mut rows, &grouped.sources);
-                with_cards(&t, &mut rows, &cards);
-                Ok(rows)
-            },
-        );
-        let (l, i18n) = (link.clone(), self.core.i18n.clone());
-        let strategy = self.register(
-            CommandSpec::new(
-                STRATEGY,
-                "Show the library's backup strategy: copies, destinations, triggers, its disks plugged in",
-                "Library",
-            )
-            .read_only(),
-            move |_, _| {
-                let t = |m: Message| helios_i18n::message(&i18n, &m);
-                let volumes = l.volumes()?;
-                Ok(strategy_answer(&t, l.strategy()?.as_ref(), &volumes))
-            },
-        );
-        let l = link.clone();
-        let role = self.register(
-            CommandSpec::new(
-                VOLUME_ROLE,
-                "Give a volume a role or take it back (`volume`, `role`, `on`; without `on`, toggled)",
-                "Library",
-            ),
-            move |args, _| {
-                let v = with_role(&l.volumes()?, args)?;
-                let saved = l.save(&v)?;
-                let roles: Vec<String> = saved.roles.iter().map(|r| role_name(*r)).collect();
-                Ok(json!({ "volume": saved.id.as_str(), "roles": roles }))
-            },
-        );
-        let l = link.clone();
-        let set = self.register(
-            CommandSpec::new(
-                VOLUME_SET,
-                "Rename a volume or set its flags (`volume`, and `name`, `offSite`, `raid`)",
-                "Library",
-            ),
-            move |args, _| {
-                let saved = l.save(&with_set(&l.volumes()?, args)?)?;
-                Ok(json!({ "volume": saved.id.as_str(), "name": saved.name, "offSite": saved.off_site, "raid": saved.raid }))
-            },
-        );
-        let l = link.clone();
-        let mark = self.register(
-            CommandSpec::new(
-                MARK_VOLUME,
-                "Write the identity file (.helios/volume.json) on a volume known only by its label and size, plugged in (`volume`)",
-                "Library",
-            ),
-            move |args, _| {
-                let v = volume_of(&l.volumes()?, args)?;
-                if v.identified_by != Identity::Weak || !v.online() || v.is_card() {
-                    return Err(format!("{} is not a disk to mark", v.name));
-                }
-                let marked = l.mark(&v)?;
-                Ok(json!({ "volume": marked.id.as_str() }))
-            },
-        );
-        let l = link.clone();
-        let set_strategy = self.register(
-            CommandSpec::new(
-                SET_STRATEGY,
-                "Set the library's backup strategy (`key`: on, copies, destination, offSite, onImport or onConnect; `value`)",
-                "Library",
-            ),
-            move |args, _| {
-                let s = with_strategy(l.strategy()?.as_ref(), args)?;
-                l.set_strategy(s.as_ref())?;
-                Ok(json!({ "set": s.is_some() }))
-            },
-        );
-        let l = link.clone();
-        let set_up = self.register(
-            CommandSpec::new(
-                SET_UP_STRATEGY,
-                "Set up the library's backups at once (`copies`, `destination`, `offSite`, `onImport`, `onConnect`): the backup wizard's result",
-                "Library",
-            ),
-            move |args, _| {
-                let s = strategy_of(args)?;
-                l.set_strategy(Some(&s))?;
-                Ok(json!({ "set": true, "copies": s.copies }))
-            },
-        );
-        for r in [volumes, strategy, role, set, mark, set_strategy, set_up] {
-            if let Err(e) = r {
-                log::warn!("the Storage page's commands: {e}");
+        }),
+    );
+    let l = link.clone();
+    let mark = register(
+        CommandSpec::new(
+            MARK_VOLUME,
+            "Write the identity file (.helios/volume.json) on a volume known only by its label and size, plugged in (`volume`)",
+            "Library",
+        ),
+        Box::new(move |args, _| {
+            let v = volume_of(&l.volumes()?, args)?;
+            if v.identified_by != Identity::Weak || !v.online() || v.is_card() {
+                return Err(format!("{} is not a disk to mark", v.name));
             }
+            let marked = l.mark(&v)?;
+            Ok(json!({ "volume": marked.id.as_str() }))
+        }),
+    );
+    let l = link.clone();
+    let set_strategy = register(
+        CommandSpec::new(
+            SET_STRATEGY,
+            "Set the library's backup strategy (`key`: on, copies, destination, offSite, onImport or onConnect; `value`)",
+            "Library",
+        ),
+        Box::new(move |args, _| {
+            let s = with_strategy(l.strategy()?.as_ref(), args)?;
+            l.set_strategy(s.as_ref())?;
+            Ok(json!({ "set": s.is_some() }))
+        }),
+    );
+    let l = link.clone();
+    let set_up = register(
+        CommandSpec::new(
+            SET_UP_STRATEGY,
+            "Set up the library's backups at once (`copies`, `destination`, `offSite`, `onImport`, `onConnect`): the backup wizard's result",
+            "Library",
+        ),
+        Box::new(move |args, _| {
+            let s = strategy_of(args)?;
+            l.set_strategy(Some(&s))?;
+            Ok(json!({ "set": true, "copies": s.copies }))
+        }),
+    );
+    for r in [volumes, strategy, role, set, mark, set_strategy, set_up] {
+        if let Err(e) = r {
+            log::warn!("the Storage page's commands: {e}");
         }
     }
 }

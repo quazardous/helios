@@ -461,32 +461,52 @@ pub(crate) struct StoragePage {
     checking: Rc<RefCell<Option<Receiver<Checked>>>>,
 }
 
+impl StoragePage {
+    /// The library's backup strategy, as last read.
+    pub(crate) fn strategy(&self) -> Option<Strategy> {
+        self.read.borrow().strategy.clone()
+    }
+
+    /// The volumes known, online ones first.
+    pub(crate) fn volumes(&self) -> Vec<Volume> {
+        self.read.borrow().list.clone()
+    }
+
+    /// Reads the volumes again (see [`refresh_volumes`]).
+    pub(crate) fn refresh_volumes(&self, bus: &dyn Bus) {
+        refresh_volumes(&self.read, bus);
+    }
+
+    /// Each photo's backups read again (see [`Shell::refresh_backups`]).
+    pub(crate) fn refresh_backups(&self, bus: &dyn Bus) {
+        refresh_backups(&self.read, bus);
+    }
+}
+
 impl Shell {
     /// Reads and writes volumes through `link`: the Storage page, and the
     /// names of offline photos' volumes in the Library.
     pub fn set_storage(&mut self, link: Arc<dyn StorageLink>) {
         self.register_storage_commands(&link);
-        self.core.storage.read.borrow_mut().link = Some(link);
-        self.refresh_volumes();
+        attach_link(&self.core.storage, link, &*self.core.app.handle().bus());
     }
 
     /// Reads the volumes again: the page's list, and the volumes the
     /// Library names (a scan ran, a disk came or went). What the link
     /// reads off the frame shows at a coming one.
     pub fn refresh_volumes(&mut self) {
-        refresh_volumes(&self.core.storage.read, &*self.core.app.handle().bus());
-    }
-
-    /// The link the volumes are read through, once set.
-    fn storage_link(&self) -> Option<Arc<dyn StorageLink>> {
-        self.core.storage.read.borrow().link.clone()
+        self.core
+            .storage
+            .refresh_volumes(&*self.core.app.handle().bus());
     }
 
     /// Each photo's backups read again (one read for the Library), for
     /// its badges and its `backup:` filters; what the link reads off the
     /// frame shows at a coming one.
     pub fn refresh_backups(&mut self) {
-        refresh_backups(&self.core.storage.read, &*self.core.app.handle().bus());
+        self.core
+            .storage
+            .refresh_backups(&*self.core.app.handle().bus());
     }
 
     /// `storage.cards-waiting`, the shell's listener of `import.ended`:
@@ -614,18 +634,7 @@ impl Shell {
     /// since a backup ended say whether they are safe to format.
     pub(super) fn storage_frame(&mut self) {
         self.reads_frame();
-        if let Some(link) = self.storage_link() {
-            let seq = link.seq();
-            if seq != self.core.storage.seen {
-                self.core.storage.seen = seq;
-                let bus = self.core.app.handle().bus();
-                show_volumes(&self.core.storage.read, &*bus);
-                show_backups(&self.core.storage.read, &*bus);
-                // The Storage page's reads follow, their values kept
-                // while read again.
-                self.read_fact(super::reads::VOLUMES_CHANGED);
-            }
-        }
+        follow_link(&mut self.core.storage, self.core.app.handle());
         let checked = {
             let mut checking = self.core.storage.checking.borrow_mut();
             let checked = match &*checking {
@@ -687,12 +696,12 @@ impl Shell {
 
     /// The library's backup strategy, as last read.
     pub fn storage_strategy(&self) -> Option<Strategy> {
-        self.core.storage.read.borrow().strategy.clone()
+        self.core.storage.strategy()
     }
 
     /// The volumes known, online ones first.
     pub fn storage_volumes(&self) -> Vec<Volume> {
-        self.core.storage.read.borrow().list.clone()
+        self.core.storage.volumes()
     }
 
     /// `library.storage`: opens the Settings app at Storage › Volumes,
@@ -704,6 +713,36 @@ impl Shell {
             None => "storage/volumes".into(),
         };
         self.open_settings_page(&path)
+    }
+}
+
+/// Reads and writes through `link` from now on: the volumes read
+/// again, passed through `storage.read` on `bus`.
+pub(crate) fn attach_link(page: &StoragePage, link: Arc<dyn StorageLink>, bus: &dyn Bus) {
+    page.read.borrow_mut().link = Some(link);
+    refresh_volumes(&page.read, bus);
+}
+
+/// Each frame: what the link read since it was last shown passes
+/// through `storage.read` on `app`'s bus, and the Settings app's reads
+/// of the volumes follow, their values kept while read again.
+pub(crate) fn follow_link(page: &mut StoragePage, app: &egui_pop::api::app::AppHandle) {
+    let Some(link) = page.read.borrow().link.clone() else {
+        return;
+    };
+    let seq = link.seq();
+    if seq == page.seen {
+        return;
+    }
+    page.seen = seq;
+    let bus = app.bus();
+    show_volumes(&page.read, &*bus);
+    show_backups(&page.read, &*bus);
+    if let Some(k) = app
+        .service(&egui_pop::api::admin::ADMIN)
+        .and_then(|a| a.reads())
+    {
+        k.event(super::reads::VOLUMES_CHANGED);
     }
 }
 
@@ -908,3 +947,7 @@ fn check_cards(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "storage_tests.rs"]
+mod tests;
