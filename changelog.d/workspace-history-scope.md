@@ -1,0 +1,3 @@
+kind: changed
+
+The workspace's edits have their own history, apart from the photo's. A change to the network graph, a macro, a sub-workspace, a workshop's design, the workspace's name, icon, keys or tools, or a reset now goes in the "Workspace" history; the "Edit" history holds only the photo's steps. Each is undone and redone on its own, whatever order the edits were made in: undoing a graph edit leaves a later exposure change alone, and the other way round. A new photo edit no longer drops the workspace's redo, and switching photos drops only the photo's steps. Ctrl+Z still undoes the newest step of the two for now; following the focused panel comes next. Agents name the history they walk (`scope: "workspace"`).

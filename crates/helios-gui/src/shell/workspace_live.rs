@@ -750,8 +750,8 @@ impl Shell {
     }
 
     /// `history.undo` with a `group`: that batch of the agent's undone
-    /// alone, in the value store's history (`edit`, the only scope
-    /// holding agents' steps).
+    /// alone, in the value store's history named by `scope` (`edit` by
+    /// default, or `workspace`).
     fn agent_undo_group(
         &mut self,
         request: &Value,
@@ -781,12 +781,13 @@ impl Shell {
         serde_json::to_value(&walked).map_err(|e| e.to_string())
     }
 
-    /// An agent's undo on the desktop: the last step, when it is a
-    /// workspace step an agent made; never the user's.
+    /// An agent's undo on the desktop: the workspace history's last step,
+    /// when an agent made it; never the user's.
     fn agent_undo(&mut self, origin: &Origin) -> Result<Value, String> {
+        use helios_values::HistoryScope;
         let mut store = lock(&self.core.values);
         let last = store
-            .undo_steps()
+            .undo_steps_of(HistoryScope::Workspace)
             .last()
             .ok_or("nothing to undo in this workspace")?;
         let agents = matches!(last.origin, Origin::Agent(_));
@@ -801,7 +802,7 @@ impl Shell {
             ));
         }
         let label = store
-            .undo(origin)
+            .in_history(HistoryScope::Workspace, |s| s.undo(origin))
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
         drop(store);

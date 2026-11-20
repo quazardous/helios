@@ -101,7 +101,7 @@ fn args(dir: &Path, config: &Path, extra: &Value) -> Value {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values().lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().all_undo_steps().len()
 }
 
 fn undo(h: &mut Harness<'static, Shell>) {
@@ -109,7 +109,7 @@ fn undo(h: &mut Harness<'static, Shell>) {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap();
     h.run();
 }
@@ -702,9 +702,9 @@ fn last_step(h: &Harness<'static, Shell>) -> helios_values::Step {
         .values()
         .lock()
         .unwrap()
-        .undo_steps()
+        .all_undo_steps()
         .last()
-        .cloned()
+        .map(|s| (*s).clone())
         .unwrap()
 }
 

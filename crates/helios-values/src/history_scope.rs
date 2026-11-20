@@ -1,18 +1,23 @@
 //! The history scopes of the store's steps: the image's and the
-//! workspace's.
+//! workspace's, each its own line.
 //!
 //! One store holds the open image's values (`node/…`, `bypass/…`, the
 //! masks' marks) and the workspace's state (`workspace/…`: its network,
-//! tools and layout, edited in the workshops' diagrams). Their steps share
-//! one line, in the order they were made, but they do not belong to the
-//! same thing: when another image opens, its values take the paths of the
-//! one before, so that one's steps must not be undone into them, while a
-//! graph edit is the workspace's and stays undoable.
+//! macros, sub-workspaces, workshop design, name, keys and tools, edited
+//! in the workshops' diagrams and the workspace editor). They do not
+//! belong to the same thing, so their steps are two lines: each with its
+//! own undo, redo and replaced lists, undone and redone apart. A step
+//! goes on the workspace's line when it changed a workspace path (a graph
+//! edit, even one that moved image values with it), else on the image's.
 //!
-//! [`Store::leave_image`] is what a photo switch does: the image's steps
-//! go; the workspace's stay, each without the image values it moved (a
-//! graph edit that carried values into a new node), which an undo would
-//! otherwise write into the next image.
+//! The store's own lists hold the image's line;
+//! [`Store::in_history`] walks the workspace's with the same calls (undo,
+//! redo, jump, one step alone, a group), the image's parked meanwhile.
+//!
+//! [`Store::leave_image`] is what a photo switch does: the image's line
+//! goes; the workspace's stays, each step without the image values it
+//! moved (a graph edit that carried values into a new node), which an
+//! undo would otherwise write into the next image.
 
 use crate::points::Branch;
 use crate::{Step, Store};
@@ -21,9 +26,10 @@ use crate::{Step, Store};
 pub const WORKSPACE_PATHS: &str = "workspace/";
 
 /// The history scope a path's steps belong to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HistoryScope {
     /// The open image's edit: left when another image opens.
+    #[default]
     Image,
     /// The workspace (its network, tools, layout): kept across images.
     Workspace,
@@ -39,6 +45,21 @@ impl HistoryScope {
             Self::Image
         }
     }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Image => Self::Workspace,
+            Self::Workspace => Self::Image,
+        }
+    }
+}
+
+/// A scope's line while the store's lists hold the other's.
+#[derive(Debug, Default)]
+pub(crate) struct Parked {
+    undo: Vec<Step>,
+    redo: Vec<Step>,
+    replaced: Vec<Branch>,
 }
 
 impl Step {
@@ -67,35 +88,108 @@ impl Step {
 }
 
 impl Store {
+    /// Swaps the line held with the one parked.
+    fn swap_lines(&mut self) {
+        std::mem::swap(&mut self.undo, &mut self.parked.undo);
+        std::mem::swap(&mut self.redo, &mut self.parked.redo);
+        std::mem::swap(&mut self.replaced, &mut self.parked.replaced);
+        self.active = self.active.other();
+    }
+
+    /// Runs `f` on `scope`'s line: inside it, every history call of the
+    /// store ([`Store::undo`], [`Store::redo`], [`Store::undo_steps`],
+    /// [`Store::jump_replaced`], [`Store::undo_step`],
+    /// [`Store::undo_group`], [`Store::values_at`]…) is that line's. The
+    /// image's line is the one held outside it. A step made inside goes
+    /// on its own scope's line all the same.
+    pub fn in_history<R>(&mut self, scope: HistoryScope, f: impl FnOnce(&mut Self) -> R) -> R {
+        if scope == self.active {
+            return f(self);
+        }
+        self.swap_lines();
+        let r = f(self);
+        self.swap_lines();
+        r
+    }
+
+    fn line_of(&self, scope: HistoryScope) -> (&[Step], &[Step]) {
+        if scope == self.active {
+            (&self.undo, &self.redo)
+        } else {
+            (&self.parked.undo, &self.parked.redo)
+        }
+    }
+
+    /// `scope`'s undo steps, oldest first.
+    pub fn undo_steps_of(&self, scope: HistoryScope) -> &[Step] {
+        self.line_of(scope).0
+    }
+
+    /// `scope`'s redo steps, oldest first: the next redo is the last.
+    pub fn redo_steps_of(&self, scope: HistoryScope) -> &[Step] {
+        self.line_of(scope).1
+    }
+
+    /// The undo steps of both scopes, in the order they were made.
+    pub fn all_undo_steps(&self) -> Vec<&Step> {
+        let mut all: Vec<&Step> = self.undo.iter().chain(&self.parked.undo).collect();
+        all.sort_by_key(|s| s.id);
+        all
+    }
+
+    /// Undoes the newest step of either scope (the one made last, by id),
+    /// as the one line of both did: what a host with no view to route
+    /// Ctrl+Z by (a test, a tool) walks. Its label, `None` when both are
+    /// empty.
+    pub fn undo_newest(
+        &mut self,
+        origin: &crate::Origin,
+    ) -> Result<Option<String>, crate::Refused> {
+        let head = |h| self.undo_steps_of(h).last().map(|s: &Step| s.id);
+        let scope = if head(HistoryScope::Workspace) > head(HistoryScope::Image) {
+            HistoryScope::Workspace
+        } else {
+            HistoryScope::Image
+        };
+        self.in_history(scope, |s| s.undo(origin))
+    }
+
     /// The image's history leaves: another image opens, its values sharing
     /// the paths of the one before, which an undo must not reach. The
-    /// image's steps go (undo, redo and replaced lines); the workspace's
-    /// stay in their order, each without the image values it moved. A
-    /// replaced line whose starting step went goes too. Values, gestures
-    /// and the committed count stay; the preview ends.
+    /// image's line goes (undo, redo and replaced); the workspace's stays,
+    /// each step without the image values it moved. Values, gestures and
+    /// the committed count stay; the preview ends.
     pub fn leave_image(&mut self) {
-        let keep = |steps: &mut Vec<Step>| steps.retain_mut(Step::keep_workspace);
-        keep(&mut self.undo);
-        keep(&mut self.redo);
-        for line in &mut self.replaced {
-            keep(&mut line.steps);
-        }
-        let mut ids: std::collections::BTreeSet<u64> = self
-            .undo
-            .iter()
-            .chain(&self.redo)
-            .chain(self.replaced.iter().flat_map(|l| &l.steps))
-            .map(|s| s.id)
-            .collect();
-        ids.insert(0);
-        // Lines left from a step that is still there; a line that leaves
-        // from another kept line is checked against the ids before it.
-        self.replaced
-            .retain(|Branch { after, steps }| !steps.is_empty() && ids.contains(after));
+        self.in_history(HistoryScope::Image, |s| {
+            s.undo.clear();
+            s.redo.clear();
+            s.replaced.clear();
+        });
+        self.in_history(HistoryScope::Workspace, |s| {
+            let keep = |steps: &mut Vec<Step>| steps.retain_mut(Step::keep_workspace);
+            keep(&mut s.undo);
+            keep(&mut s.redo);
+            for line in &mut s.replaced {
+                keep(&mut line.steps);
+            }
+            let mut ids: std::collections::BTreeSet<u64> = s
+                .undo
+                .iter()
+                .chain(&s.redo)
+                .chain(s.replaced.iter().flat_map(|l| &l.steps))
+                .map(|st| st.id)
+                .collect();
+            ids.insert(0);
+            // Lines left from a step that is still there.
+            s.replaced
+                .retain(|Branch { after, steps }| !steps.is_empty() && ids.contains(after));
+        });
         let groups: std::collections::BTreeSet<u64> = self
             .undo
             .iter()
             .chain(&self.redo)
+            .chain(&self.parked.undo)
+            .chain(&self.parked.redo)
             .filter_map(|s| s.group)
             .collect();
         self.named.retain(|_, g| groups.contains(g));
@@ -128,6 +222,32 @@ mod tests {
     }
 
     #[test]
+    fn a_graph_edit_is_on_the_workspace_s_line_and_undone_apart() {
+        let mut s = store();
+        set(&mut s, STATE, Value::Text("b".into()));
+        set(&mut s, EV, Value::Float(1.0));
+        assert_eq!(s.undo_steps().len(), 1, "the image's line: the exposure");
+        assert_eq!(s.undo_steps_of(HistoryScope::Workspace).len(), 1);
+        assert_eq!(s.all_undo_steps().len(), 2);
+        // The workspace's undo takes the graph edit back, under the
+        // exposure made after it, which stays.
+        s.in_history(HistoryScope::Workspace, |s| s.undo(&Origin::User))
+            .unwrap();
+        assert_eq!(s.get(STATE).unwrap().value, Value::Text("a".into()));
+        assert_eq!(s.get(EV).unwrap().value, Value::Float(1.0));
+        // A new exposure keeps the workspace's redo.
+        set(&mut s, EV, Value::Float(2.0));
+        assert_eq!(s.redo_steps_of(HistoryScope::Workspace).len(), 1);
+        // The image's undo takes the exposure back, the state untouched.
+        s.undo(&Origin::User).unwrap();
+        assert_eq!(s.get(EV).unwrap().value, Value::Float(1.0));
+        assert_eq!(s.get(STATE).unwrap().value, Value::Text("a".into()));
+        s.in_history(HistoryScope::Workspace, |s| s.redo(&Origin::User))
+            .unwrap();
+        assert_eq!(s.get(STATE).unwrap().value, Value::Text("b".into()));
+    }
+
+    #[test]
     fn a_switch_keeps_the_workspace_s_steps_without_the_image_s_values() {
         let mut s = store();
         set(&mut s, EV, Value::Float(1.0));
@@ -139,22 +259,30 @@ mod tests {
             .unwrap();
         s.end(g);
         set(&mut s, EV, Value::Float(2.5));
-        assert_eq!(s.undo_steps().len(), 3);
-        assert_eq!(s.undo_steps()[1].history_scope(), HistoryScope::Workspace);
+        assert_eq!(s.undo_steps().len(), 2, "the image's two exposures");
+        let ws = s.undo_steps_of(HistoryScope::Workspace);
+        assert_eq!(ws.len(), 1);
+        assert_eq!(ws[0].history_scope(), HistoryScope::Workspace);
         assert_eq!(s.undo_steps()[0].history_scope(), HistoryScope::Image);
         let rev = s.history_rev();
         s.leave_image();
         assert!(s.history_rev() > rev);
-        let left = s.undo_steps();
+        assert!(s.undo_steps().is_empty(), "the image's line went");
+        let left = s.undo_steps_of(HistoryScope::Workspace);
         assert_eq!(left.len(), 1, "only the graph edit");
         assert_eq!(left[0].label, "add a node");
         assert_eq!(left[0].paths(), [STATE], "without the image's value");
         // Undone on the next image: the state back, the image's value
         // untouched.
-        s.undo(&Origin::User).unwrap();
+        s.in_history(HistoryScope::Workspace, |s| s.undo(&Origin::User))
+            .unwrap();
         assert_eq!(s.get(STATE).unwrap().value, Value::Text("a".into()));
         assert_eq!(s.get(EV).unwrap().value, Value::Float(2.5));
-        assert_eq!(s.undo(&Origin::User).unwrap(), None);
+        assert_eq!(
+            s.in_history(HistoryScope::Workspace, |s| s.undo(&Origin::User))
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -163,18 +291,27 @@ mod tests {
         set(&mut s, STATE, Value::Text("b".into()));
         set(&mut s, EV, Value::Float(1.0));
         s.undo(&Origin::User).unwrap();
-        s.undo(&Origin::User).unwrap();
-        // A new step replaces the redo list (the state, then the value).
+        s.in_history(HistoryScope::Workspace, |s| s.undo(&Origin::User))
+            .unwrap();
+        // New steps replace each line's redo list.
         set(&mut s, EV, Value::Float(0.5));
         set(&mut s, STATE, Value::Text("c".into()));
-        s.undo(&Origin::User).unwrap();
-        assert_eq!(s.redo_steps().len(), 1);
+        s.in_history(HistoryScope::Workspace, |s| s.undo(&Origin::User))
+            .unwrap();
+        assert_eq!(s.redo_steps_of(HistoryScope::Workspace).len(), 1);
         s.leave_image();
         assert!(s.undo_steps().is_empty());
-        assert_eq!(s.redo_steps().len(), 1, "the state's redo kept");
-        // The replaced line left from the start: kept, its state step only.
-        let replaced = s.replaced_steps();
-        assert_eq!(replaced.len(), 1);
-        assert_eq!(replaced[0].1.paths(), [STATE]);
+        assert!(
+            s.replaced_steps().is_empty(),
+            "the image's replaced line went"
+        );
+        s.in_history(HistoryScope::Workspace, |s| {
+            assert!(s.undo_steps().is_empty());
+            assert_eq!(s.redo_steps().len(), 1, "the state's redo kept");
+            // The replaced line left from the start: kept.
+            let replaced = s.replaced_steps();
+            assert_eq!(replaced.len(), 1);
+            assert_eq!(replaced[0].1.paths(), [STATE]);
+        });
     }
 }

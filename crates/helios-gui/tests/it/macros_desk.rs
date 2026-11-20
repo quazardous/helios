@@ -109,14 +109,14 @@ fn undo(h: &mut Harness<'static, Shell>) {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
     follow(h);
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values().lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().all_undo_steps().len()
 }
 
 /// A parameter of a node of the graph shown; `None` without that node.

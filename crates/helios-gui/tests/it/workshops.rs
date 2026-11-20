@@ -170,7 +170,7 @@ fn applying_a_workshop_is_one_undo_step_carrying_its_aimed_value() {
         .network
         .view
         .node;
-    let steps = h.state().values().lock().unwrap().undo_steps().len();
+    let steps = h.state().values().lock().unwrap().all_undo_steps().len();
     // A dry run changes nothing and says what would.
     let dry = answer(
         &mut h,
@@ -196,7 +196,7 @@ fn applying_a_workshop_is_one_undo_step_carrying_its_aimed_value() {
     );
     // One step: the node in the network, its aimed value on the image.
     assert_eq!(
-        h.state().values().lock().unwrap().undo_steps().len(),
+        h.state().values().lock().unwrap().all_undo_steps().len(),
         steps + 1
     );
     assert!(nodes(&h).contains(&node));
@@ -214,7 +214,7 @@ fn applying_a_workshop_is_one_undo_step_carrying_its_aimed_value() {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
     follow(&mut h);
@@ -309,13 +309,13 @@ fn the_panel_lists_the_shipped_workshop_and_applies_it() {
     h.run();
     h.get_by_label("Lift midtones");
     // Apply, from its row: one undo step, its node selected.
-    let steps = h.state().values().lock().unwrap().undo_steps().len();
+    let steps = h.state().values().lock().unwrap().all_undo_steps().len();
     h.get_by_label("Apply").click();
     follow(&mut h);
     follow(&mut h);
     assert!(nodes(&h).contains(&"lift_midtones".to_string()));
     assert_eq!(
-        h.state().values().lock().unwrap().undo_steps().len(),
+        h.state().values().lock().unwrap().all_undo_steps().len(),
         steps + 1
     );
     // Applied: the row says so, and the workshop's sliders show, the
@@ -355,7 +355,7 @@ fn aiming_again_is_one_value_step_that_undo_takes_back() {
     follow(&mut h);
     assert_eq!(brightness(&h), Some(0.0));
     let state = h.state().workspace_state().unwrap();
-    let steps = h.state().values().lock().unwrap().undo_steps().len();
+    let steps = h.state().values().lock().unwrap().all_undo_steps().len();
     // A dry run says the value, sets nothing.
     let dry = answer(
         &mut h,
@@ -370,7 +370,7 @@ fn aiming_again_is_one_value_step_that_undo_takes_back() {
     assert_eq!(a["node"], json!("lift_midtones"));
     assert_eq!(a["aimed"][0]["reached"], json!(true), "{a}");
     assert_eq!(brightness(&h), Some(aimed));
-    let store_steps = h.state().values().lock().unwrap().undo_steps().len();
+    let store_steps = h.state().values().lock().unwrap().all_undo_steps().len();
     assert_eq!(store_steps, steps + 1);
     assert_eq!(
         h.state().workspace_state().unwrap().to_json(),
@@ -381,7 +381,7 @@ fn aiming_again_is_one_value_step_that_undo_takes_back() {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
     follow(&mut h);
@@ -466,7 +466,7 @@ fn with_a_macro(root: &Path, on: bool) -> Harness<'static, Shell> {
 fn saving_a_macro_as_a_workshop_is_its_next_version_and_one_undo_step() {
     let root = temp("save");
     let mut h = with_a_macro(&root, true);
-    let steps = h.state().values().lock().unwrap().undo_steps().len();
+    let steps = h.state().values().lock().unwrap().all_undo_steps().len();
     let dry = answer(
         &mut h,
         "workshop.save",
@@ -493,7 +493,7 @@ fn saving_a_macro_as_a_workshop_is_its_next_version_and_one_undo_step() {
     assert_eq!(w.keywords, ["dark", "moody"]);
     assert_eq!(w.targets[0].param, "brightness");
     assert_eq!(
-        h.state().values().lock().unwrap().undo_steps().len(),
+        h.state().values().lock().unwrap().all_undo_steps().len(),
         steps + 1
     );
     // A workshop now: suggested, and aimed again on the image.
@@ -508,7 +508,7 @@ fn saving_a_macro_as_a_workshop_is_its_next_version_and_one_undo_step() {
             .values()
             .lock()
             .unwrap()
-            .undo(&Origin::User)
+            .undo_newest(&Origin::User)
             .unwrap()
             .expect("a step to undo");
         follow(&mut h);

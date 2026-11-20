@@ -54,7 +54,7 @@ fn circle(h: &Harness<'static, Shell>) -> Vec<(String, Option<String>)> {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values().lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().all_undo_steps().len()
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn keys_changed_for_the_workspace_are_its_own_and_say_where_they_come_from() {
         .values()
         .lock()
         .unwrap()
-        .undo(&Origin::User)
+        .undo_newest(&Origin::User)
         .unwrap();
     h.run();
     assert_eq!(

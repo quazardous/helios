@@ -3,11 +3,22 @@
 //!
 //! Helios's kernel owns the history: the steps of its value store
 //! (`helios_values`), which the vault saves as versions. [`HeliosHistory`]
-//! shows them to egui-pop as one scope, [`EDIT`], always active: egui-pop
-//! routes Ctrl+Z to it (after a focused text field and a component's own
-//! history, the theme editor's or the settings window's), labels the
-//! Edit menu from its steps, and runs `edit.undo`, `edit.redo` and
-//! `edit.jump` on it.
+//! shows them to egui-pop as two scopes, each its own line in the store
+//! ([`helios_values::HistoryScope`]): [`EDIT`], the open image's edit,
+//! and [`WORKSPACE`], the workspace's real edits (its network and graph,
+//! macros, sub-workspaces, workshop design, name and icon, keys, tools, a
+//! reset). egui-pop routes Ctrl+Z to them (after a focused text field and
+//! a component's own history, the theme editor's or the settings
+//! window's), labels the Edit menu from their steps, and runs
+//! `edit.undo`, `edit.redo` and `edit.jump` on them. A photo switch
+//! drops the edit's steps and keeps the workspace's.
+//!
+//! - **Which scope Ctrl+Z walks**, until it follows the focused view: both
+//!   scopes are always active, like the edit alone was, so egui-pop picks
+//!   the one whose last step is the newest (each step is stamped when
+//!   first seen). Ctrl+Z after a graph edit undoes it, after an exposure
+//!   change the exposure, as when both were one line; the History panel
+//!   and agents name the scope they walk.
 //!
 //! - **Steps** keep the id the store gave them
 //!   ([`helios_values::Step::id`]) while they are undone, redone or
@@ -77,7 +88,7 @@ use egui_pop::i18n::I18n;
 use egui_pop::model::commands::Origin as PopOrigin;
 use egui_pop::model::ids::FrameId;
 use helios_core::{Message, Value};
-use helios_values::{GestureId, Refused, Set, Step, Store};
+use helios_values::{GestureId, HistoryScope, Refused, Set, Step, Store};
 
 use crate::edit_snapshots::{self, Shared, Taken};
 use crate::host::{to_helios, to_pop};
@@ -85,6 +96,22 @@ use crate::library_history::{LIBRARY, LibraryHistory};
 
 /// The scope of Helios's value store: the open image's edit.
 pub const EDIT: ScopeId = ScopeId::from_static("edit");
+
+/// The scope of the workspace's real edits in the value store: its
+/// network and graph, macros, sub-workspaces, workshop design, name and
+/// icon, keys, tools, a reset. Kept across photos.
+pub const WORKSPACE: ScopeId = ScopeId::from_static("workspace");
+
+/// The store's history scope behind one of egui-pop's, if any.
+fn store_scope(scope: &ScopeId) -> Option<HistoryScope> {
+    if *scope == EDIT {
+        Some(HistoryScope::Image)
+    } else if *scope == WORKSPACE {
+        Some(HistoryScope::Workspace)
+    } else {
+        None
+    }
+}
 
 /// How a snapshot's restore step starts: its label is kept as it is.
 const RESTORE: &str = "Restore ";
@@ -142,10 +169,9 @@ impl HeliosHistory {
         }
         stamps.0 = rev;
         let t = now();
-        let ids: Vec<u64> = store
-            .undo_steps()
-            .iter()
-            .chain(store.redo_steps().iter())
+        let ids: Vec<u64> = [HistoryScope::Image, HistoryScope::Workspace]
+            .into_iter()
+            .flat_map(|h| store.undo_steps_of(h).iter().chain(store.redo_steps_of(h)))
             .map(|s| s.id)
             .collect();
         stamps.1.retain(|id, _| ids.contains(id));
@@ -154,13 +180,16 @@ impl HeliosHistory {
         }
     }
 
-    /// The edit's line, each step with when it was first seen.
-    fn edit_line(&self) -> Line {
-        let store = self.lock();
+    /// A scope's line, each step with when it was first seen.
+    fn scope_line(&self, scope: HistoryScope) -> Line {
+        let mut store = self.lock();
         self.stamp(&store);
-        let mut line = line_of(&store);
-        self.relabel(&store, &mut line.undo);
-        self.relabel(&store, &mut line.redo);
+        let mut line = store.in_history(scope, |s| {
+            let mut line = line_of(s);
+            self.relabel(s, &mut line.undo);
+            self.relabel(s, &mut line.redo);
+            line
+        });
         let stamps = self.stamps.lock().unwrap_or_else(PoisonError::into_inner);
         for s in line.undo.iter_mut().chain(line.redo.iter_mut()) {
             s.at = stamps.1.get(&s.id).copied().unwrap_or_default();
@@ -193,14 +222,14 @@ impl HeliosHistory {
     }
 
     /// Checks a request against the store: the scope, its revision, a
-    /// gesture in progress.
-    fn check(store: &Store, request: &Request) -> Result<(), Refusal> {
-        if request.scope != EDIT {
+    /// gesture in progress. The store's scope it names.
+    fn check(store: &Store, request: &Request) -> Result<HistoryScope, Refusal> {
+        let Some(scope) = store_scope(&request.scope) else {
             return Err(Refusal::new(
                 RefusalKind::Unknown,
                 format!("no history `{}`", request.scope),
             ));
-        }
+        };
         request.check(store.history_rev())?;
         if let Some(label) = store.open_gesture() {
             return Err(Refusal::new(
@@ -208,34 +237,41 @@ impl HeliosHistory {
                 format!("“{label}” is in progress"),
             ));
         }
-        Ok(())
+        Ok(scope)
     }
 
-    /// Answers a request: checked, then `f` walks the store.
+    /// Answers a request: checked, then `f` walks the line of the scope
+    /// it names.
     fn answer(
         &self,
         request: &Request,
         f: impl FnOnce(&mut Store) -> Result<Vec<StepInfo>, Refusal>,
     ) -> Answer {
         let mut store = self.lock();
-        Answer::Done(Self::check(&store, request).and_then(|()| {
-            let mut steps = f(&mut store)?;
-            self.relabel(&store, &mut steps);
-            let line = line_of(&store);
-            Ok(Walked {
-                scope: EDIT,
-                steps,
-                rev: line.rev,
-                head: line.head_id(),
-                dry_run: request.dry_run,
+        Answer::Done(Self::check(&store, request).and_then(|scope| {
+            store.in_history(scope, |s| {
+                let mut steps = f(s)?;
+                self.relabel(s, &mut steps);
+                let line = line_of(s);
+                Ok(Walked {
+                    scope: request.scope.clone(),
+                    steps,
+                    rev: line.rev,
+                    head: line.head_id(),
+                    dry_run: request.dry_run,
+                })
             })
         }))
     }
 }
 
-/// A step of the store as egui-pop sees it.
+/// A step of the store as egui-pop sees it, in its scope.
 fn step_info(step: &Step) -> StepInfo {
-    let mut info = StepInfo::new(step.id, EDIT, label_of(step), to_pop(&step.origin));
+    let scope = match step.history_scope() {
+        HistoryScope::Image => EDIT,
+        HistoryScope::Workspace => WORKSPACE,
+    };
+    let mut info = StepInfo::new(step.id, scope, label_of(step), to_pop(&step.origin));
     info.group = step.group;
     info.place = step
         .place
@@ -400,6 +436,14 @@ fn snapshot_info(t: &Taken) -> Snapshot {
         at: t.at,
         pending: t.pin.is_none(),
     }
+}
+
+/// Refused: only the edit has snapshots.
+fn no_snapshots(scope: &ScopeId) -> Refusal {
+    Refusal::new(
+        RefusalKind::Unknown,
+        format!("no snapshots in `{scope}`: only `{EDIT}` has them"),
+    )
 }
 
 /// Seconds since the epoch: when a snapshot is taken.
@@ -617,8 +661,18 @@ impl HeliosHistory {
         origin: &PopOrigin,
     ) -> Result<Walked, Refusal> {
         let mut store = self.lock();
-        Self::check(&store, request)?;
-        let line = line_of(&store);
+        let scope = Self::check(&store, request)?;
+        store.in_history(scope, |s| Self::undo_group_in(s, request, group, origin))
+    }
+
+    /// [`HeliosHistory::undo_group`] on the line held.
+    fn undo_group_in(
+        store: &mut Store,
+        request: &Request,
+        group: u64,
+        origin: &PopOrigin,
+    ) -> Result<Walked, Refusal> {
+        let line = line_of(store);
         let steps: Vec<StepInfo> = line
             .undo
             .iter()
@@ -638,9 +692,9 @@ impl HeliosHistory {
         if !request.dry_run {
             store.undo_group(group, &o).map_err(|e| refused(&e))?;
         }
-        let line = line_of(&store);
+        let line = line_of(store);
         Ok(Walked {
-            scope: EDIT,
+            scope: request.scope.clone(),
             steps,
             rev: line.rev,
             head: line.head_id(),
@@ -651,18 +705,23 @@ impl HeliosHistory {
 
 impl History for HeliosHistory {
     fn scopes(&self) -> Vec<ScopeInfo> {
-        vec![ScopeInfo::new(EDIT, "Edit"), LibraryHistory::scope()]
+        // Both always active until Ctrl+Z follows the focused view.
+        vec![
+            ScopeInfo::new(EDIT, "Edit"),
+            ScopeInfo::new(WORKSPACE, "Workspace"),
+            LibraryHistory::scope(),
+        ]
     }
 
     fn line(&self, scope: &ScopeId) -> Option<Line> {
         if *scope == LIBRARY {
             return Some(self.library.line());
         }
-        (*scope == EDIT).then(|| self.edit_line())
+        store_scope(scope).map(|h| self.scope_line(h))
     }
 
     fn rev(&self, scope: &ScopeId) -> u64 {
-        if *scope == EDIT {
+        if store_scope(scope).is_some() {
             let store = self.lock();
             self.stamp(&store);
             store.history_rev()
@@ -752,20 +811,21 @@ impl History for HeliosHistory {
     }
 
     fn replaced(&self, scope: &ScopeId) -> Vec<Replaced> {
-        if *scope != EDIT {
+        let Some(scope) = store_scope(scope) else {
             return Vec::new();
-        }
-        let store = self.lock();
-        store
-            .replaced_steps()
-            .into_iter()
-            .map(|(after, s)| {
-                let mut step = [step_info(s)];
-                self.relabel(&store, &mut step);
-                let [step] = step;
-                Replaced { step, after }
-            })
-            .collect()
+        };
+        self.lock().in_history(scope, |store| {
+            store
+                .replaced_steps()
+                .into_iter()
+                .map(|(after, s)| {
+                    let mut step = [step_info(s)];
+                    self.relabel(store, &mut step);
+                    let [step] = step;
+                    Replaced { step, after }
+                })
+                .collect()
+        })
     }
 
     fn features(&self, scope: &ScopeId) -> Features {
@@ -773,6 +833,8 @@ impl History for HeliosHistory {
         if *scope == EDIT {
             f.undo_step = true;
             f.snapshots = true;
+        } else if *scope == WORKSPACE {
+            f.undo_step = true;
         }
         f
     }
@@ -792,7 +854,9 @@ impl History for HeliosHistory {
         origin: &PopOrigin,
     ) -> Result<Snapshot, Refusal> {
         let store = self.lock();
-        Self::check(&store, request)?;
+        if Self::check(&store, request)? != HistoryScope::Image {
+            return Err(no_snapshots(&request.scope));
+        }
         let name = name.trim();
         if name.is_empty() {
             return Err(Refusal::new(RefusalKind::Owner, "a snapshot needs a name"));
@@ -803,6 +867,9 @@ impl History for HeliosHistory {
     }
 
     fn restore(&mut self, request: &Request, snapshot: u64, origin: &PopOrigin) -> Answer {
+        if request.scope != EDIT {
+            return Answer::Done(Err(no_snapshots(&request.scope)));
+        }
         let Some(taken) = edit_snapshots::lock(&self.snapshots).get(snapshot).cloned() else {
             return Answer::Done(Err(Refusal::new(
                 RefusalKind::Nothing,
@@ -846,7 +913,7 @@ impl History for HeliosHistory {
                 let why = if line.redo.iter().any(|x| x.id == step) {
                     format!("step {step} is undone already")
                 } else {
-                    format!("no step {step} in `{EDIT}`")
+                    format!("no step {step} in `{}`", request.scope)
                 };
                 return Err(Refusal::new(RefusalKind::Nothing, why));
             };
@@ -1265,5 +1332,53 @@ mod tests {
         };
         assert_eq!(r.kind, RefusalKind::Held);
         assert_eq!(h.in_progress(&EDIT).unwrap().text, "drag exposure");
+    }
+
+    #[test]
+    fn the_workspace_s_steps_are_a_scope_of_their_own_kept_across_photos() {
+        const STATE: &str = "workspace/state";
+        let values = store();
+        values
+            .lock()
+            .unwrap()
+            .declare(STATE, Descriptor::text("workspace", "a"));
+        let user = helios_shell::commands::Origin::User;
+        values
+            .lock()
+            .unwrap()
+            .set(Set::new(STATE, Change::To(Value::Text("b".into())), user))
+            .unwrap();
+        set(&values, 1.0);
+        let mut h = HeliosHistory::new(values.clone());
+        assert!(
+            h.scopes()
+                .iter()
+                .any(|s| s.id == WORKSPACE && s.focus.is_empty())
+        );
+        let edit = h.line(&EDIT).unwrap();
+        let ws = h.line(&WORKSPACE).unwrap();
+        assert_eq!((edit.undo.len(), ws.undo.len()), (1, 1));
+        assert_eq!(ws.undo[0].scope, WORKSPACE);
+        assert!(!h.features(&WORKSPACE).snapshots);
+        // The workspace's undo, under the exposure made after it.
+        let Answer::Done(Ok(w)) = h.undo(&Request::new(WORKSPACE), &PopOrigin::User) else {
+            panic!("undone");
+        };
+        assert_eq!((w.scope, w.steps.len()), (WORKSPACE, 1));
+        let state = |v: &Arc<Mutex<Store>>| v.lock().unwrap().get(STATE).unwrap().value.clone();
+        assert_eq!(state(&values), Value::Text("a".into()));
+        assert_eq!(value(&values), Value::Float(1.0));
+        // A photo switch: the edit's steps go, the workspace's redo stays.
+        values.lock().unwrap().leave_image();
+        assert!(h.line(&EDIT).unwrap().undo.is_empty());
+        let Answer::Done(Ok(_)) = h.redo(&Request::new(WORKSPACE), &PopOrigin::User) else {
+            panic!("redone");
+        };
+        assert_eq!(state(&values), Value::Text("b".into()));
+        // No snapshots there.
+        assert!(
+            h.snapshot(&Request::new(WORKSPACE), "x", &PopOrigin::User)
+                .is_err()
+        );
     }
 }

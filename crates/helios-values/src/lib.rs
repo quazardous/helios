@@ -37,8 +37,9 @@
 //!   ([`Store::undo_group`]); so can one step ([`Store::undo_step`]).
 //! - History scopes ([`HistoryScope`]): a step is the workspace's when
 //!   it changed a `workspace/…` path (a graph edit), else the open
-//!   image's. Another image opening leaves the image's steps
-//!   ([`Store::leave_image`]); the workspace's stay undoable.
+//!   image's. Each scope has its own line, undone and redone apart
+//!   ([`Store::in_history`]). Another image opening leaves the image's
+//!   line ([`Store::leave_image`]); the workspace's stays undoable.
 //! - Replaced steps: the redo list a new step drops is kept as a line
 //!   leaving from the step it came after ([`Store::replaced_steps`]), and
 //!   a jump reaches it ([`Store::jump_replaced`]).
@@ -707,6 +708,11 @@ pub struct Store {
     /// The redo lists new steps dropped, oldest first: kept so a jump
     /// reaches them.
     replaced: Vec<points::Branch>,
+    /// Whose history `undo`, `redo` and `replaced` hold now (the image's,
+    /// but while [`Store::in_history`] walks the workspace's).
+    active: HistoryScope,
+    /// The other history scope's line, parked meanwhile.
+    parked: history_scope::Parked,
     /// The groups named by their origin (a request id an agent gives),
     /// by origin and name.
     named: BTreeMap<(String, String), u64>,
@@ -1098,6 +1104,14 @@ impl Store {
             self.next_group += 1;
             step.group = Some(self.next_group);
         }
+        // The step goes on its own scope's line (the workspace's for a
+        // graph edit, the image's for the rest).
+        let scope = step.history_scope();
+        self.in_history(scope, |s| s.push_on_line(step));
+    }
+
+    /// Pushes `step` on the line held now.
+    fn push_on_line(&mut self, mut step: Step) {
         self.commit(step.label.clone(), &step.origin);
         self.drop_redo();
         // A group's steps that follow each other are one step.
@@ -1192,6 +1206,7 @@ impl Store {
         self.undo.clear();
         self.redo.clear();
         self.replaced.clear();
+        self.parked = history_scope::Parked::default();
         self.named.clear();
         self.preview.clear();
         self.history_rev += 1;

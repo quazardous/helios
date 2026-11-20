@@ -128,7 +128,7 @@ fn node_bypass_toggles_the_selected_module_as_one_undo_step() {
         .values()
         .lock()
         .unwrap()
-        .undo_steps()
+        .all_undo_steps()
         .last()
         .map(|s| s.label.clone());
     assert_eq!(label.as_deref(), Some("bypass exp"));
@@ -164,7 +164,7 @@ fn node_bypass_toggles_the_selected_module_as_one_undo_step() {
         .values()
         .lock()
         .unwrap()
-        .undo_steps()
+        .all_undo_steps()
         .last()
         .map(|s| s.label.clone());
     assert_eq!(last.as_deref(), Some("restore exp"));

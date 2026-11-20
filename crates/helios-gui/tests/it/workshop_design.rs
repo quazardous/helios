@@ -313,7 +313,7 @@ fn answer(out: Json) -> Json {
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
-    h.state().values().lock().unwrap().undo_steps().len()
+    h.state().values().lock().unwrap().all_undo_steps().len()
 }
 
 fn has_value(h: &Harness<'static, Shell>, path: &str) -> bool {
@@ -676,7 +676,7 @@ fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
     let store = h.state().values().lock().unwrap();
     assert!(
         store
-            .undo_steps()
+            .all_undo_steps()
             .iter()
             .any(|s| s.aim.as_deref() == Some("the climber's face is too dark"))
     );
@@ -909,7 +909,7 @@ fn the_agent_proposes_the_user_accepts_one_ghost_and_rejects_another() {
     {
         let mut store = h.state().values().lock().unwrap();
         assert_eq!(
-            store.undo_steps().last().unwrap().aim.as_deref(),
+            store.all_undo_steps().last().unwrap().aim.as_deref(),
             Some("the climber's face is too dark")
         );
         store.undo(&Origin::User).unwrap();
