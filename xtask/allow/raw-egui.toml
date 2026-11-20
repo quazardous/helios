@@ -5,7 +5,6 @@
 
 [files]
 "activity.rs" = 6
-"calibrate.rs" = 22
 "caption.rs" = 4
 "duplicates.rs" = 16
 "graph.rs" = 7
