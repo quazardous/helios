@@ -21,7 +21,12 @@
 //! listener ([`ROUTE_LISTENER`], also on `screen.added` and
 //! `screen.removed`) places it there. On a screen said to show sRGB only
 //! (`display/screens/<name>`, [`ScreenColour`]) the window wants sRGB;
-//! elsewhere it wants what the setting asks. Each window drawing the
+//! elsewhere it wants what the setting asks. What each screen shows is
+//! read from the system at start and again on `screen.added`
+//! ([`SCREENS_LISTENER`]): on Wayland, each output's image description
+//! (`helios_display::screens`), sorted by `helios_display::Shows`;
+//! a screen the system does not describe stays as it was (unknown at
+//! first). Each window drawing the
 //! image gets an image surface of its own, negotiated for what that
 //! window wants (egui-pop's `image_surface`, per window): the main
 //! window's from its handles at install, another window's (a detached
@@ -427,6 +432,64 @@ pub fn tell_screen_colour(
         .map_err(|e| format!("{e:?}"))
 }
 
+impl From<helios_display::Shows> for ScreenColour {
+    fn from(shows: helios_display::Shows) -> ScreenColour {
+        match shows {
+            helios_display::Shows::Srgb => ScreenColour::Srgb,
+            helios_display::Shows::WideGamut => ScreenColour::WideGamut,
+            helios_display::Shows::Hdr => ScreenColour::Hdr,
+        }
+    }
+}
+
+/// Says what each screen the system `described` shows
+/// ([`tell_screen_colour`]): those with a name and enough of a
+/// description to tell ([`helios_display::ScreenDescription::shows`]);
+/// the others stay as they were. Returns the screens told, by name.
+pub fn tell_described_screens(
+    app: &AppHandle,
+    described: &[helios_display::ScreenDescription],
+) -> Vec<String> {
+    let mut told = Vec::new();
+    for d in described {
+        let (Some(name), Some(shows)) = (d.name.as_deref(), d.shows()) else {
+            log::debug!(target: "helios", "display: a screen not told: {d:?}");
+            continue;
+        };
+        match tell_screen_colour(app, name, Some(shows.into())) {
+            Ok(()) => told.push(name.to_owned()),
+            Err(e) => log::warn!(target: "helios", "display: the screen {name}: {e}"),
+        }
+    }
+    told
+}
+
+/// Reads what each screen shows from the system (`read`) and says it
+/// ([`tell_described_screens`]); logged when the system could not be
+/// asked.
+pub fn read_system_screens(
+    app: &AppHandle,
+    read: fn() -> Result<Vec<helios_display::ScreenDescription>, String>,
+) -> Vec<String> {
+    match read() {
+        Ok(described) => {
+            let told = tell_described_screens(app, &described);
+            if !told.is_empty() {
+                log::info!(target: "helios", "display: the system describes the screens {told:?}");
+            }
+            told
+        }
+        Err(e) => {
+            log::warn!(target: "helios", "display: the screens' descriptions: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// The display's listener of `screen.added`: what the screens show is
+/// read from the system again, a screen plugged in being described.
+pub const SCREENS_LISTENER: &str = "helios.display.screen_colour";
+
 /// What the screen `name` shows, when Helios is told; none otherwise
 /// (the window's route then follows what the display offers).
 pub fn screen_colour(app: &AppHandle, name: &str) -> Option<ScreenColour> {
@@ -639,8 +702,28 @@ fn collector(app: AppHandle) -> FnCollector {
     .snapshot(move |ctx| snapshot(ctx, wide_gamut(&app)))
 }
 
-/// Declares the display's settings and its debug collectors.
-pub struct Display;
+/// Declares the display's settings and its debug collectors, and says
+/// what each screen shows as the system describes it (`read`, at start
+/// and on `screen.added`).
+pub struct Display {
+    read: fn() -> Result<Vec<helios_display::ScreenDescription>, String>,
+}
+
+impl Default for Display {
+    /// The system's descriptions (`helios_display::screens`).
+    fn default() -> Display {
+        Display::reading(helios_display::screens)
+    }
+}
+
+impl Display {
+    /// The screens' descriptions read by `read` (a test's fake system).
+    pub fn reading(
+        read: fn() -> Result<Vec<helios_display::ScreenDescription>, String>,
+    ) -> Display {
+        Display { read }
+    }
+}
 
 impl Plugin for Display {
     fn id(&self) -> PluginId {
@@ -659,6 +742,19 @@ impl Plugin for Display {
             ),
         )?;
         declare(&*ctx.app().bus());
+        let (app, read) = (ctx.app(), self.read);
+        read_system_screens(&app, read);
+        let listening = ctx.app().bus().listen_local::<ScreenAdded>(
+            SCREENS_LISTENER,
+            ListenOpts::new().owner(BUS_OWNER),
+            move |_: &ScreenChange, (): &mut ()| {
+                read_system_screens(&app, read);
+                Ok::<(), HookError>(())
+            },
+        );
+        if let Err(e) = listening {
+            log::error!(target: "helios", "display: {e}");
+        }
         ctx.collector(collector(ctx.app()))?;
         ctx.collector(egui_pop::viewport::debug::collector())?;
         Ok(())

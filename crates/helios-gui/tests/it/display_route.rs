@@ -13,6 +13,7 @@ use egui_pop::model::values::{Change, Set, Value as PopValue};
 use egui_pop::viewport::display::{ColorSpace, SurfaceFormat};
 use egui_pop::viewport::image_surface::{self, Offer, raw_window_handle};
 use egui_pop_wayland::{Capabilities, Feature, NamedPrimaries as P, NamedTransfer as T};
+use helios_display::{Chromaticities, ScreenDescription};
 use helios_gui::display::ScreenColour;
 use helios_gui::{Shell, display, headless, helios_panels};
 use serde_json::{Value as Json, json};
@@ -80,6 +81,27 @@ fn list_open(h: &mut Harness<'static, Shell>, viewer: egui::ViewportId) {
     h.step();
 }
 
+/// A Display P3 panel's primaries, as the compositor gives them.
+const DISPLAY_P3: Chromaticities = Chromaticities {
+    red: (680_000, 320_000),
+    green: (265_000, 690_000),
+    blue: (150_000, 60_000),
+    white: (312_700, 329_000),
+};
+
+/// The image description a compositor gives the output `name`: sRGB
+/// encoded, on a panel of `panel` primaries.
+fn described(name: &str, panel: Chromaticities) -> ScreenDescription {
+    ScreenDescription {
+        name: Some(name.into()),
+        primaries_named: Some("srgb".into()),
+        primaries: Some(Chromaticities::SRGB),
+        target_primaries: Some(panel),
+        transfer: Some("gamma22".into()),
+        ..ScreenDescription::default()
+    }
+}
+
 fn steps(h: &mut Harness<'static, Shell>) {
     for _ in 0..4 {
         h.step();
@@ -103,10 +125,26 @@ fn a_detached_viewer_takes_the_route_of_the_screen_it_is_on() {
     let (mut h, windows_of) =
         headless::harness_with_windows(Shell::new(helios_panels(), None), vec2(1024.0, 700.0), 1.0);
     h.step();
-    // What each screen shows, and the Wide-gamut preview on.
+    // What each screen shows, as the system describes it (an sRGB panel
+    // and a Display P3 one, both encoded sRGB), and the Wide-gamut
+    // preview on.
     let app = h.state().app().handle().clone();
-    display::tell_screen_colour(&app, PLAIN, Some(ScreenColour::Srgb)).unwrap();
-    display::tell_screen_colour(&app, WIDE, Some(ScreenColour::WideGamut)).unwrap();
+    let told = display::tell_described_screens(
+        &app,
+        &[
+            described(PLAIN, Chromaticities::SRGB),
+            described(WIDE, DISPLAY_P3),
+        ],
+    );
+    assert_eq!(told, [PLAIN, WIDE]);
+    assert_eq!(
+        display::screen_colour(&app, PLAIN),
+        Some(ScreenColour::Srgb)
+    );
+    assert_eq!(
+        display::screen_colour(&app, WIDE),
+        Some(ScreenColour::WideGamut)
+    );
     set(
         &mut h,
         &format!("settings/{}", display::SETTING_WIDE_GAMUT),

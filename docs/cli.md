@@ -586,7 +586,12 @@ be asked; and `viewport`, where the image goes there with the Wide-gamut
 preview setting on: its `route` (`tagged`, a surface of its own that
 Helios tags through the compositor; `wsi`, one in a colour space the GPU
 driver declares; `srgb`, the window's surface), its `encoding` and the
-`reason`. It asks the compositor only, so the route is a prediction: the
+`reason`; and `screens`, each output's image description as the
+compositor gives it (`wp_color_management_output_v1`: its name, primaries
+and the display's own `target_primaries`, transfer, luminances) with what
+it `shows` (`srgb`, `wide-gamut` or `hdr`; `null` when the description
+says too little), empty off Wayland (`screens_error` when they could not
+be read). It asks the compositor only, so the route is a prediction: the
 running desktop's debug bridge (`helios.display` collector, its `route`)
 says what its window actually negotiated. See
 [Wide gamut](wide-gamut.md).

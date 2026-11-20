@@ -45,7 +45,8 @@ always sRGB; only the image asks for more.
 - **Diagnostics**: `helios doctor display` ([command line](cli.md#doctor))
   prints the session, what the compositor's `wp_color_management_v1`
   announces, and the route it predicts from that (`viewport`: `route`,
-  `encoding`, `reason`). In the running desktop, the debug bridge's
+  `encoding`, `reason`), and each screen's image description with what
+  it shows (`screens`). In the running desktop, the debug bridge's
   `helios.display` collector shows the same, what the window resolved
   (wanted, surface, drawn, reason) and the `route` it actually
   negotiated; egui-pop's `viewport` collector shows the image surface in
