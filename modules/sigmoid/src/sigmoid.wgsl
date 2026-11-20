@@ -57,23 +57,28 @@ fn preserve_hue(input: vec3<f32>, curved: vec3<f32>, hue: f32) -> vec3<f32> {
         blend = 2.0 * input[mn] / min_plus_mid;
     }
     let aim = blend * energy + (1.0 - blend) * naive_energy;
-    var out = vec3<f32>(0.0);
     if (naive_mid <= curved[md]) {
         let corrected = ((1.0 - hue) * curved[md]
             + hue * (midscale * curved[mx] + (1.0 - midscale) * (aim - curved[mx])))
             / (1.0 + hue * (1.0 - midscale));
-        out[mn] = aim - curved[mx] - corrected;
-        out[md] = corrected;
-        out[mx] = curved[mx];
-    } else {
-        let corrected = ((1.0 - hue) * curved[md]
-            + hue * (curved[mn] * (1.0 - midscale) + midscale * (aim - curved[mn])))
-            / (1.0 + hue * midscale);
-        out[mn] = curved[mn];
-        out[md] = corrected;
-        out[mx] = aim - curved[mn] - corrected;
+        return place(o, curved[mx], corrected, aim - curved[mx] - corrected);
     }
-    return out;
+    let corrected = ((1.0 - hue) * curved[md]
+        + hue * (curved[mn] * (1.0 - midscale) + midscale * (aim - curved[mn])))
+        / (1.0 + hue * midscale);
+    return place(o, aim - curved[mn] - corrected, corrected, curved[mn]);
+}
+
+// The channels of `o` (largest, middle, smallest) set to `hi`, `mid` and
+// `lo`. Chosen, not written through an index: DX12's FXC compiler refuses
+// a write into a vector at an index known only at run time (X3500, "not
+// natively addressable"), and the whole kernel then ran on the CPU.
+fn place(o: vec3<u32>, hi: f32, mid: f32, lo: f32) -> vec3<f32> {
+    return vec3<f32>(pick(o, 0u, hi, mid, lo), pick(o, 1u, hi, mid, lo), pick(o, 2u, hi, mid, lo));
+}
+
+fn pick(o: vec3<u32>, c: u32, hi: f32, mid: f32, lo: f32) -> f32 {
+    return select(select(lo, mid, o.y == c), hi, o.x == c);
 }
 
 @compute @workgroup_size(64)

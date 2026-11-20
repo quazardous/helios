@@ -5,6 +5,13 @@
 //! A shader that is put after another one at run time says so on a line
 //! `// wgsl-prelude: <file>` (a path next to it), and is validated with
 //! that file in front, as it is compiled.
+//!
+//! Validating is not compiling everywhere: on Windows, wgpu's DX12 backend
+//! hands naga's HLSL to FXC, which refuses a write into a local vector at
+//! an index known only at run time (`v[i] = x`, error X3500, "not natively
+//! addressable"). Such a kernel fails there and its step runs on the CPU,
+//! while Vulkan and Metal take it. Every shader is checked for that write
+//! here, where FXC is not at hand.
 
 use std::path::{Path, PathBuf};
 
@@ -69,6 +76,23 @@ fn every_shader_validates() {
         if let Err(e) = validator.validate(&module) {
             failures.push(e.emit_to_string_with_path(&source, &name));
         }
+        let functions = module
+            .functions
+            .iter()
+            .map(|(_, f)| f)
+            .chain(module.entry_points.iter().map(|e| &e.function));
+        for function in functions {
+            let mut writes = 0;
+            dynamic_vector_writes(&module, function, &function.body, &mut writes);
+            if writes > 0 {
+                failures.push(format!(
+                    "{name}: fn {}: {writes} write(s) into a local vector at a run-time \
+                     index, which DX12's FXC refuses (X3500): choose the value per \
+                     component (select) instead",
+                    function.name.as_deref().unwrap_or("?")
+                ));
+            }
+        }
     }
     assert!(
         failures.is_empty(),
@@ -77,4 +101,46 @@ fn every_shader_validates() {
         found.len(),
         failures.join("\n")
     );
+}
+
+/// Counts in `block` the stores into a component of a function's local
+/// vector at a run-time index (`Access`; a constant index is `AccessIndex`).
+fn dynamic_vector_writes(
+    module: &naga::Module,
+    function: &naga::Function,
+    block: &naga::Block,
+    writes: &mut usize,
+) {
+    use naga::{Expression, Statement, TypeInner};
+    for statement in block.iter() {
+        match statement {
+            Statement::Store { pointer, .. } => {
+                if let Expression::Access { base, .. } = function.expressions[*pointer]
+                    && let Expression::LocalVariable(local) = function.expressions[base]
+                {
+                    let ty = function.local_variables[local].ty;
+                    if matches!(module.types[ty].inner, TypeInner::Vector { .. }) {
+                        *writes += 1;
+                    }
+                }
+            }
+            Statement::Block(inner) => dynamic_vector_writes(module, function, inner, writes),
+            Statement::If { accept, reject, .. } => {
+                dynamic_vector_writes(module, function, accept, writes);
+                dynamic_vector_writes(module, function, reject, writes);
+            }
+            Statement::Switch { cases, .. } => {
+                for case in cases {
+                    dynamic_vector_writes(module, function, &case.body, writes);
+                }
+            }
+            Statement::Loop {
+                body, continuing, ..
+            } => {
+                dynamic_vector_writes(module, function, body, writes);
+                dynamic_vector_writes(module, function, continuing, writes);
+            }
+            _ => {}
+        }
+    }
 }

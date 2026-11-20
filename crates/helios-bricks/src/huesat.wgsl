@@ -137,10 +137,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let r = input[base];
     let g = input[base + 1u];
     let b = input[base + 2u];
-    var o: vec3<f32>;
-    for (var c = 0u; c < 3u; c = c + 1u) {
-        o[c] = plan[c].x * r + plan[c].y * g + plan[c].z * b;
-    }
+    // Each channel by name, not `o[c]` in a loop: DX12's FXC compiler
+    // refuses a write into a vector at an index known only at run time.
+    var o = vec3<f32>(
+        plan[0].x * r + plan[0].y * g + plan[0].z * b,
+        plan[1].x * r + plan[1].y * g + plan[1].z * b,
+        plan[2].x * r + plan[2].y * g + plan[2].z * b,
+    );
     if (plan[3].w > 0.0) {
         o = table(o);
     }

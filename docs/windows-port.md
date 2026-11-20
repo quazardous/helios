@@ -47,6 +47,17 @@ commit last tested skips the tests and stays green: the last red run
 still holds the failures. The build, in `ci.yml`, is required. Making
 the tests pass is the next task. What fails, by cause:
 
+- **GPU on WARP (fixed, 2026-11-20).** The runner has no GPU; wgpu
+  finds WARP (DX12 in software), so the GPU tests run there. Two causes:
+  sigmoid's kernel wrote a vector component at a run-time index, which
+  FXC refuses (X3500), so the step ran on the CPU and the residency and
+  fault tests counted wrong (`helios-gpu` backend, faults, residency);
+  it now picks each component with `select`, and the WGSL test refuses
+  such a write in every shader. And `cargo test` ran the GUI's hundreds
+  of tests in one process on one shared WARP device: renders timed out
+  (`viewport`, `mask_display`) and the device was rebuilt under the
+  tests holding it (`zero_copy`). The workflow now runs nextest, one
+  process per test, as Linux CI does.
 - **The vault's snapshots (fixed, 2026-11-11).** `helios-vault-sqlite`
   (lib, `integrity`, `migrations`, `catalogue`) and the GUI's
   `health` test: a snapshot's copy was flushed through a handle opened
