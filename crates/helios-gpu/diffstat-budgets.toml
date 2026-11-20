@@ -1,0 +1,74 @@
+# Per-module CPU vs GPU budgets for `cargo xtask engine-diffstat` (helios_gpu::diffstat).
+#
+# Each module's budget is the measured distance times 4, with a floor of
+# 1e-6 for max_abs and 1e-7 for mean_abs (a few float steps of 1.0), so
+# float rounding never trips it but a real parity bug does. `over` is the
+# share of pixels past the threshold (1/255): measured 0 everywhere, and the
+# budget keeps it at 0. Pixel values are linear, 1.0 = white.
+#
+# Measured 2026-11-20 on the bench box's NVIDIA GeForce RTX 3070 (Vulkan),
+# box job `diffstat` (fixtures tone and vkdt, 512x384 synthetic input, tiles
+# of 64 px). `measured_*` hold that run's values; `alone` = the module on the
+# CPU's input, `chain` = through the fixture's pipeline.
+#
+# Not a CI gate yet: these numbers are for that GPU. A gate in CI would run
+# on lavapipe and needs its own measurement first.
+
+measured_on = "2026-11-20"
+adapter = "NVIDIA GeForce RTX 3070 (DiscreteGpu, Vulkan)"
+threshold = 0.00392156862745098
+tile = 64
+
+[[module]]
+fixture = "tone"
+node = "exposure"
+module = "exposure"
+alone.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+chain.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+
+[[module]]
+fixture = "tone"
+node = "blur"
+module = "blur"
+alone.measured = { max_abs = 2.861e-06, mean_abs = 2.428e-07, over = 0, worst_tile = [448, 320, 64, 64] }
+alone.budget = { max_abs = 1.2e-05, mean_abs = 9.8e-07, over = 0.0 }
+chain.measured = { max_abs = 2.861e-06, mean_abs = 2.428e-07, over = 0, worst_tile = [448, 320, 64, 64] }
+chain.budget = { max_abs = 1.2e-05, mean_abs = 9.8e-07, over = 0.0 }
+
+[[module]]
+fixture = "tone"
+node = "sigmoid"
+module = "sigmoid"
+alone.measured = { max_abs = 5.96e-07, mean_abs = 5.075e-08, over = 0, worst_tile = [384, 128, 64, 64] }
+alone.budget = { max_abs = 2.4e-06, mean_abs = 2.1e-07, over = 0.0 }
+chain.measured = { max_abs = 7.153e-07, mean_abs = 1.523e-07, over = 0, worst_tile = [256, 320, 64, 64] }
+chain.budget = { max_abs = 2.9e-06, mean_abs = 6.1e-07, over = 0.0 }
+
+[[module]]
+fixture = "vkdt"
+node = "exposure"
+module = "vkdt_exposure"
+alone.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+chain.measured = { max_abs = 0, mean_abs = 0, over = 0, worst_tile = [0, 0, 64, 64] }
+chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+
+[[module]]
+fixture = "vkdt"
+node = "grade"
+module = "vkdt_grade"
+alone.measured = { max_abs = 2.384e-07, mean_abs = 2.146e-08, over = 0, worst_tile = [448, 320, 64, 64] }
+alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+chain.measured = { max_abs = 2.384e-07, mean_abs = 2.146e-08, over = 0, worst_tile = [448, 320, 64, 64] }
+chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+
+[[module]]
+fixture = "vkdt"
+node = "filmcurv"
+module = "vkdt_filmcurv"
+alone.measured = { max_abs = 1.788e-07, mean_abs = 1.482e-08, over = 0, worst_tile = [0, 320, 64, 64] }
+alone.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
+chain.measured = { max_abs = 2.384e-07, mean_abs = 2.157e-08, over = 0, worst_tile = [0, 320, 64, 64] }
+chain.budget = { max_abs = 1e-06, mean_abs = 1e-07, over = 0.0 }
