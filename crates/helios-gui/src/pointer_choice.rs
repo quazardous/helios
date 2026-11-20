@@ -19,11 +19,13 @@
 use std::sync::PoisonError;
 
 use egui_pop::api::AppHandle;
-use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::icon::Icon;
+use egui_pop::core::ui::{TextRole, UiPop as _};
 use egui_pop::model::commands::Origin;
 use egui_pop::model::ids::OwnerId;
 use egui_pop::model::values::{Change, Descriptor, Set, Value};
 use helios_core::Message;
+use helios_ui::Action;
 
 /// The pointer profile by default (egui-pop's `input.pointer_profile`).
 pub const DEFAULT_PROFILE: &str = "photoshop";
@@ -130,17 +132,17 @@ pub fn body(ui: &mut egui::Ui, app: &AppHandle) {
     ui.horizontal(|ui| {
         ui.strong_text(&title);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let r = ui.small_button("×").on_hover_text(&close);
-            egui_pop::core::a11y::name(&r, egui::Role::Button, &close);
-            closed = r.clicked();
+            // The kit's icon button: its name is its tooltip too.
+            closed = ui.add(Icon::Close.label(&close).sense_click()).clicked();
         });
     });
-    ui.label(&text);
+    ui.text_role(TextRole::Body, &text);
     ui.horizontal(|ui| {
-        if ui.button(&use_darktable).clicked() {
+        // Two answers of equal weight: neither is the screen's primary.
+        if helios_ui::action(ui, Action::Secondary, &use_darktable).clicked() {
             chosen = Some(true);
         }
-        if ui.button(&keep).clicked() {
+        if helios_ui::action(ui, Action::Secondary, &keep).clicked() {
             chosen = Some(false);
         }
     });
