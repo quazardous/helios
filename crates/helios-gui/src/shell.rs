@@ -1058,12 +1058,18 @@ impl Shell {
             // The window's frame: Helios's own on the desktop, the
             // system's elsewhere (tests, pictures, tools) until asked.
             // On the desktop its title bar holds VS Code's layout
-            // controls: Customize layout and a toggle per area.
-            .plugin(if ui_settings.is_some() {
-                FramePlugin::own().layout_controls(true)
-            } else {
-                FramePlugin::system()
-            })
+            // controls: Customize layout and a toggle per area. Its
+            // title bar starts with the menu button, Helios's logo and
+            // its name.
+            .plugin(
+                if ui_settings.is_some() {
+                    FramePlugin::own().layout_controls(true)
+                } else {
+                    FramePlugin::system()
+                }
+                // Helios's logo after the menu button, before its name.
+                .logo(plugins::logo_image),
+            )
             .plugin(plugins::Frame {
                 status: status.clone(),
             })
