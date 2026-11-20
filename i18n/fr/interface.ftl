@@ -49,6 +49,9 @@ command-graph-select =
 command-graph-view =
     .description = Ajuste le graphe d’un éditeur de nœuds (`fit` : true), zoome à un niveau (`level` : overview, ports ou detail) ou cible un nœud (`focus`), à sa prochaine image.
 
+command-help-report-bundle =
+    .description = Ce que joint Signaler un problème, en JSON : les dernières minutes du journal, expurgées, les versions, les points du bus et le contexte de l’application.
+
 command-window-close =
     .description = Ferme une fenêtre : celle nommée, ou la fenêtre active.
 
