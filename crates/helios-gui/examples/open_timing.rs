@@ -32,8 +32,9 @@
 //! neighbour is framed ahead at the measured viewport's size (its
 //! `framed` state), as the desktop frames it once its viewport is known.
 //!
-//! Writes `<out>/open-timing.jsonl` (one line per run) and
-//! `<out>/open-timing.md` (the table).
+//! Writes `<out>/open-timing.jsonl` (one line per run),
+//! `<out>/open-timing.md` (the table) and `<out>/open-timing-spans.md`
+//! (the largest raw's last open, span by span, with each span's thread).
 //!
 //! ```text
 //! cargo run --release -p helios-gui --example open_timing -- \
@@ -181,6 +182,15 @@ fn main() {
                         .unwrap_or_else(PoisonError::into_inner)
                         .clone();
                     from_spans(&mut run, &spans);
+                    // The largest raw's last run, span by span: where a
+                    // cold open's time goes, step by step and thread by
+                    // thread.
+                    if rows.is_empty() && i + 1 == a.runs {
+                        let md = a.out.join("open-timing-spans.md");
+                        let text = spans_table(&name, &spans);
+                        std::fs::write(&md, text)
+                            .unwrap_or_else(|e| panic!("{}: {e}", md.display()));
+                    }
                     let line = json!({
                         "file": name, "run": i, "mp": round(mp),
                         "decode_ms": run.decode, "graph_ms": run.graph, "ready_ms": run.ready,
@@ -620,6 +630,33 @@ fn from_spans(run: &mut Run, spans: &[Record]) {
     run.decode = (run.decode * 10.0).round() / 10.0;
     run.graph = (run.graph * 10.0).round() / 10.0;
     run.demosaic = (run.demosaic * 10.0).round() / 10.0;
+}
+
+/// Every span of one open, by start: its offset and length in ms, its
+/// thread, its name and detail.
+fn spans_table(name: &str, spans: &[Record]) -> String {
+    let mut sorted: Vec<&Record> = spans.iter().collect();
+    sorted.sort_by_key(|r| r.start);
+    let Some(t0) = sorted.first().map(|r| r.start) else {
+        return format!("{name}: no span\n");
+    };
+    let mut out = format!(
+        "Spans of one open of {name}, by start (ms from the first span):\n\n\
+         | start | end | ms | thread | span | detail |\n|---|---|---|---|---|---|\n"
+    );
+    for r in sorted {
+        let at = r.start.duration_since(t0).as_secs_f64() * 1e3;
+        let _ = writeln!(
+            out,
+            "| {at:.1} | {:.1} | {:.1} | {} | {} | {} |",
+            at + r.ms(),
+            r.ms(),
+            r.thread.as_deref().unwrap_or("?"),
+            r.name,
+            r.detail,
+        );
+    }
+    out
 }
 
 /// The median of `f` over the runs.
