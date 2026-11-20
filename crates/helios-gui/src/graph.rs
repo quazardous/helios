@@ -28,6 +28,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Ui;
 use egui_pop::api::AppHandle;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
 use egui_pop::viewport::graph::{
     Edge, Edit, GraphEditor, GraphEvent, GraphModel, GraphState, Group, Kind, Level, Node, Param,
     Port, PortRef, PortType, Refusal, Request, WireStyle,
@@ -777,9 +779,14 @@ fn header_ui(ui: &mut Ui, h: &Header) {
         NodeState::Idle => tokens.text.muted,
     };
     let text = header_text(ui.ctx(), h);
+    // The two raw calls left (`ui.label`, `RichText`): the state in the
+    // node's title bar, small and in its `state.*` colour, the editor's
+    // header slot. The kit has text in a role or in a tone, not small
+    // text in a theme token's colour; the editor itself should draw a
+    // node's status (follow-up in egui-pop's graph editor).
     let r = ui.label(egui::RichText::new(text).small().color(color));
     if !h.detail.is_empty() {
-        r.on_hover_text(&h.detail);
+        r.tip(&h.detail);
     }
 }
 
@@ -989,7 +996,7 @@ impl GraphPanel {
             let Some(t) = &self.template else {
                 drop(store);
                 ui.centered_and_justified(|ui| {
-                    ui.weak(crate::i18n::text(
+                    ui.muted(crate::i18n::text(
                         &ctx,
                         Message::new(
                             "gui-graph-no-workspace",
@@ -1118,18 +1125,12 @@ impl GraphPanel {
         };
         ui.horizontal(|ui| {
             let label = crate::i18n::text(&ctx, Message::new("gui-graph-wires", "Wires"));
-            ui.label(&label);
+            ui.text_role(TextRole::Body, &label);
             let mut picked = wires;
-            let r = egui::ComboBox::from_id_salt("helios.graph.wires")
-                .selected_text(name(wires))
-                .show_ui(ui, |ui| {
-                    for s in WireStyle::ALL {
-                        ui.selectable_value(&mut picked, s, name(s));
-                    }
-                })
-                .response;
-            egui_pop::core::a11y::name(&r, egui::Role::ComboBox, &label);
-            if picked != wires {
+            let options: Vec<(WireStyle, String)> =
+                WireStyle::ALL.into_iter().map(|s| (s, name(s))).collect();
+            if helios_ui::choice(ui, "helios.graph.wires", &label, &mut picked, &options).changed()
+            {
                 let _ = lock(values).set(Set::new(
                     WIRES,
                     Change::To(helios_core::Value::Choice(picked.name().into())),
