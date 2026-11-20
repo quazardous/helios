@@ -44,16 +44,6 @@ pub const POLICIES: &[(&str, Option<Duration>, &[&str])] = &[
     ),
     // The volumes: free space read again now and then; a disk coming or
     // going, a scan or an edit says so at once.
-    (
-        super::storage_admin::VOLUMES,
-        Some(Duration::from_secs(30)),
-        &["storage.*", "helios.library.*"],
-    ),
-    (
-        super::storage_admin::STRATEGY,
-        Some(Duration::from_secs(30)),
-        &["storage.*", "helios.library.*"],
-    ),
     // The health check's findings change only when a run starts or ends
     // or a finding is ignored, each said as `health.*`.
     (super::health::FINDINGS, None, &["health.*"]),
@@ -66,6 +56,13 @@ pub const POLICIES: &[(&str, Option<Duration>, &[&str])] = &[
         &["account.*"],
     ),
 ];
+
+/// Every read policy: the desktop's own ([`POLICIES`]) and the feature
+/// crates' (storage's).
+fn policies()
+-> impl Iterator<Item = &'static (&'static str, Option<Duration>, &'static [&'static str])> {
+    POLICIES.iter().chain(helios_storage_ui::READ_POLICIES)
+}
 
 /// Reads a read-only command through its handler in Helios's registry,
 /// held only to take the handler.
@@ -81,7 +78,7 @@ impl RegistryReads {
 
 impl ReadTransport for RegistryReads {
     fn serves(&self, command: &str) -> bool {
-        POLICIES.iter().any(|(c, _, _)| *c == command)
+        policies().any(|(c, _, _)| *c == command)
     }
 
     fn read(&self, command: &str, args: &Value) -> Result<Value, String> {
@@ -98,7 +95,7 @@ impl ReadTransport for RegistryReads {
 /// The kernel over `registry`, with [`POLICIES`].
 pub fn kernel(registry: Arc<Mutex<Registry>>) -> Arc<ReadKernel> {
     let k = ReadKernel::new(Arc::new(RegistryReads::new(registry)));
-    for (command, fresh, events) in POLICIES {
+    for (command, fresh, events) in policies() {
         let mut p = ReadPolicy::new().invalidated_by(events);
         p.fresh_for = *fresh;
         k.policy(command, p);
@@ -146,9 +143,7 @@ fn volume_event(change: &crate::node_volumes::Change) -> NodeEvent {
     }
 }
 
-/// The fact the shell gives the kernel when the storage link read
-/// something new (a disk came or went, a scan, an edit saved).
-pub const VOLUMES_CHANGED: &str = "storage.volumes.changed";
+pub use helios_storage_ui::VOLUMES_CHANGED;
 
 impl Shell {
     /// Attaches the read kernel to the Settings app, once.
@@ -159,7 +154,7 @@ impl Shell {
         if admin.reads().is_none() {
             admin.attach_reads(kernel(self.core.registry.clone()));
         }
-        if self.core.storage.reads.is_none() {
+        if self.core.reads.is_none() {
             // A remote node's facts come through the node listener table;
             // the desktop's own node's are the application bus's, heard
             // by the same listener as `helios.reads`.
@@ -185,13 +180,13 @@ impl Shell {
             if let Err(e) = listened {
                 log::error!(target: "helios", "{READS}: {e}");
             }
-            self.core.storage.reads = Some(listener);
+            self.core.reads = Some(listener);
         }
     }
 
     /// Each frame: the node facts heard since reach the kernel.
     pub(super) fn reads_frame(&self) {
-        let Some(listener) = &self.core.storage.reads else {
+        let Some(listener) = &self.core.reads else {
             return;
         };
         let Some(k) = self.reads() else {

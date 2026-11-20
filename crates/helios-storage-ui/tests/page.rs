@@ -1,19 +1,24 @@
 //! The Storage page (the Settings app's Storage and Backup scopes) run
-//! without the shell, on the feature host (`super::feature_host`): its
+//! without the desktop, on the feature host (`helios_feature_host`): its
 //! commands, its link to a node over a temporary vault and fake volumes,
 //! its points on the application's bus, nothing else. The tests that
 //! need the Library, the import window, the health check or the
-//! desktop's dialogs stay on a whole shell (`tests/it/storage.rs`).
+//! desktop's dialogs stay on a whole desktop (helios-gui's
+//! `tests/it/storage.rs`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{By, Queryable as _};
 use egui_pop::api::AppHandle;
+use egui_pop::api::admin::model::Manifest;
 use egui_pop::api::bus::bus_contract::Bus as ContractBus;
+use egui_pop::egui::{self, vec2};
+use helios_core::Message;
+use helios_feature_host::{self as feature_host, Feature, Hosted, ReadPolicies, Register};
+use helios_inspect::client::Client;
 use helios_storage::strategy::{self, Scope, Strategy, Trigger};
 use helios_storage::{
     Identity, Role, Volume, VolumeId, VolumeKind, Volumes, detect, registry, scan,
@@ -22,13 +27,11 @@ use helios_vault::Vault;
 use helios_vault_sqlite::SqliteStore;
 use serde_json::json;
 
-use crate::persist::Persist;
-use crate::shell::feature_host::{self, Feature, Hosted};
-use crate::shell::storage::{NodeStorage, StorageLink, StoragePage, attach_link, follow_link};
-use crate::shell::storage_admin::{
-    Register, STRATEGY as BACKUP_STRATEGY_COMMAND, VOLUME_ROLE as VOLUME_ROLE_COMMAND,
+use helios_storage_ui::admin::{
+    STRATEGY as BACKUP_STRATEGY_COMMAND, VOLUME_ROLE as VOLUME_ROLE_COMMAND,
     VOLUMES as VOLUMES_COMMAND, register_commands,
 };
+use helios_storage_ui::{NodeStorage, StorageLink, StoragePage, settings};
 
 /// Volumes plugged in and out by the test, read as slowly as it says
 /// (a network drive's free space).
@@ -92,14 +95,32 @@ impl Feature for Storage {
         register_commands(register, &link, i18n, (&self.page.owners, &self.page.cards));
     }
 
-    fn connect(&mut self, bus: &dyn ContractBus) {
-        crate::storage_read::declare(bus);
-        crate::backup_end::declare(bus);
-        attach_link(&self.page, self.link.clone(), bus);
+    /// The Storage and Backup scopes, with their pages and the backup
+    /// wizard, as the desktop's manifest places them.
+    fn settings(&self, m: Manifest, t: &dyn Fn(Message) -> String) -> Manifest {
+        m.scope_at("storage", "Storage", "disc", 40)
+            .scope_at("backup", "Backup", "lock", 50)
+            .section("storage/volumes", "Volumes", |s| {
+                settings::volumes_section(s, t, "library.forgetVolume");
+            })
+            .section("backup/strategy", "Strategy", |s| {
+                settings::strategy_section(s, t);
+            })
+            .wizard(settings::backup_wizard(t))
+    }
+
+    fn reads(&self) -> ReadPolicies {
+        helios_storage_ui::READ_POLICIES
+    }
+
+    fn connect(&mut self, _app: &AppHandle, bus: &dyn ContractBus) {
+        helios_storage_ui::read::declare(bus);
+        helios_storage_ui::backup_end::declare(bus);
+        self.page.attach_link(self.link.clone(), bus);
     }
 
     fn frame(&mut self, app: &AppHandle) {
-        follow_link(&mut self.page, app);
+        self.page.follow_link(app);
     }
 }
 
@@ -110,7 +131,8 @@ type H<'a> = Harness<'a, Hosted<Storage>>;
 struct World {
     dir: PathBuf,
     vault: Arc<Vault<SqliteStore>>,
-    _persist: Persist<SqliteStore>,
+    _library: helios_node_core::desktop::Library<SqliteStore>,
+    _node: Arc<Client>,
     plugged: Arc<Plugged>,
     link: Arc<NodeStorage>,
     studio: Volume,
@@ -124,18 +146,19 @@ impl World {
         std::fs::create_dir_all(&b).unwrap();
         let file = b.join("photo.jpg");
         std::fs::write(&file, b"not really a jpeg, enough for the vault").unwrap();
-        let persist = Persist::new(
+        let library = helios_node_core::desktop::Library::on_store(
             SqliteStore::open(&dir.join("vault.db")).unwrap(),
             Arc::new(helios_core::Bus::new()),
         );
-        let vault = persist.vault().clone();
+        let vault = library.vault().clone();
+        let node = Arc::new(Client::in_process(Arc::new(library.service("test"))));
         vault.import_file(&file, 1).unwrap();
         let studio = disk("uuid:studio", "Studio", &a);
         let backup = disk("uuid:backup", "Backup", &b);
         let plugged = Arc::new(Plugged::default());
         plugged.set(&[&studio, &backup]);
         scan::scan(&vault, &plugged.volumes(), "studio-pc", FIRST, None).unwrap();
-        let link = Arc::new(NodeStorage::new(persist.node(), plugged.clone(), "test"));
+        let link = Arc::new(NodeStorage::new(&node, plugged.clone(), "test"));
         assert!(
             link.settle(Duration::from_secs(10)),
             "read through the node"
@@ -149,7 +172,8 @@ impl World {
         let world = Self {
             dir,
             vault,
-            _persist: persist,
+            _library: library,
+            _node: node,
             plugged,
             link,
             studio,

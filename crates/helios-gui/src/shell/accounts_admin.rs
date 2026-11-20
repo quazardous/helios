@@ -257,7 +257,10 @@ impl Shell {
             .storage
             .owners
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some((book.clone(), saved.clone()));
+            .unwrap_or_else(PoisonError::into_inner) = Some((
+            book.clone(),
+            Arc::new(super::storage::Sources(saved.clone())),
+        ));
         if self.has_command(ACCOUNTS) {
             return;
         }

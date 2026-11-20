@@ -1551,7 +1551,7 @@ impl Shell {
             }
             Event::Dropped(paths) => self.open_import_window(&json!({ "paths": paths })),
             Event::Storage => {
-                if let Err(e) = self.run(super::storage::COMMAND, Value::Null, Origin::User) {
+                if let Err(e) = self.run(helios_storage_ui::COMMAND, Value::Null, Origin::User) {
                     self.warn(format!("storage: {e}"));
                 }
             }
@@ -1753,10 +1753,10 @@ impl ImportWindow {
             title: t(window_title()),
             sources: t(Message::new("gui-import-window-sources", "Sources")),
             cards: t(Message::new("gui-import-window-cards", "Cards and cameras")),
-            card_safe: t(super::storage_admin::card_words(
+            card_safe: t(helios_storage_ui::admin::card_words(
                 crate::backup_end::CardState::Safe,
             )),
-            card_waiting: t(super::storage_admin::card_words(
+            card_waiting: t(helios_storage_ui::admin::card_words(
                 crate::backup_end::CardState::Waiting,
             )),
             no_cards: t(Message::new(

@@ -29,7 +29,7 @@ use helios_core::{Engine, Message};
 use helios_shell::commands::Registry;
 use serde_json::Value;
 
-use super::{ImportLines, Queue, health, storage};
+use super::{ImportLines, Queue, health};
 use crate::dialogs::Notice;
 use crate::plugins::{Declarations, ListSource};
 
@@ -85,7 +85,10 @@ pub(super) struct Core {
     /// The first-run setup and its partial runs.
     pub(super) init: super::init_wizard::InitState,
     /// The Storage page (a page of the Settings app).
-    pub(super) storage: storage::StoragePage,
+    pub(super) storage: helios_storage_ui::StoragePage,
+    /// The node facts the Settings app's read kernel follows
+    /// ([`super::reads`]).
+    pub(super) reads: Option<crate::node_events::Listener>,
     /// The lines of the imports the host runs (`import_sink`).
     pub(super) import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
     /// Where every import's end is said (`import_ends`), and where the

@@ -35,10 +35,9 @@ use helios_storage::strategy::{self, Destination, Strategy, Trigger};
 use helios_storage::{Identity, Role, Volume, VolumeId};
 use serde_json::{Value, json};
 
-use super::Shell;
-use super::import_sources::SavedSource;
-use super::storage::{StorageLink, backup_line, day_of, destination_text, kind_of, role_text};
 use crate::backup_end::{CardList, CardState};
+use crate::link::StorageLink;
+use crate::page::{Owners, SourceUse, backup_line, day_of, destination_text, kind_of, role_text};
 
 /// Lists the volumes known (read-only).
 pub const VOLUMES: &str = "library.volumes";
@@ -221,7 +220,7 @@ pub fn with_cards(t: &dyn Fn(Message) -> String, rows: &mut Value, cards: &CardL
 }
 
 /// What a card's state says, in the Storage page and the import window.
-pub(crate) fn card_words(state: CardState) -> Message {
+pub fn card_words(state: CardState) -> Message {
     match state {
         CardState::Safe => Message::new("gui-storage-card-safe", "safe to format"),
         CardState::Waiting => Message::new("gui-storage-card-waiting", "not safe to format yet"),
@@ -240,7 +239,7 @@ pub struct Owner {
 
 /// The owners of remote volumes: each account, and the saved sources
 /// using it (the name given, else the account's).
-pub fn owners_of(accounts: &[Account], sources: &[SavedSource]) -> Vec<Owner> {
+pub fn owners_of(accounts: &[Account], sources: &[SourceUse]) -> Vec<Owner> {
     accounts
         .iter()
         .map(|a| Owner {
@@ -602,41 +601,20 @@ fn with_role(volumes: &[Volume], args: &Value) -> Result<Volume, String> {
 }
 
 /// A command's handler, as Helios's registry runs it.
-pub(crate) type Handler = Box<dyn Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync>;
+pub type Handler = Box<dyn Fn(&Value, &Origin) -> Result<Value, String> + Send + Sync>;
 
-/// Where a feature registers its commands: the shell's
-/// [`Shell::register`], or a test's feature host
-/// (`crate::feature_host`), which has no shell.
-pub(crate) type Register<'a> = dyn FnMut(CommandSpec, Handler) -> Result<(), String> + 'a;
-
-impl Shell {
-    /// Registers the Storage page's commands over `link`, once.
-    pub(super) fn register_storage_commands(&mut self, link: &Arc<dyn StorageLink>) {
-        if self.has_command(VOLUMES) {
-            return;
-        }
-        let i18n = self.core.i18n.clone();
-        let (owners, cards) = (
-            self.core.storage.owners.clone(),
-            self.core.storage.cards.clone(),
-        );
-        register_commands(
-            &mut |spec, handler| self.register(spec, handler),
-            link,
-            &i18n,
-            (&owners, &cards),
-        );
-    }
-}
+/// Where a feature registers its commands: the desktop's registry, or a
+/// test's feature host, which has no desktop.
+pub type Register<'a> = dyn FnMut(CommandSpec, Handler) -> Result<(), String> + 'a;
 
 /// Registers the Storage page's commands over `link` through `register`:
 /// they read the owners of remote volumes and the card list, and say
 /// their texts through `texts`. Knows no shell.
-pub(crate) fn register_commands(
+pub fn register_commands(
     register: &mut Register<'_>,
     link: &Arc<dyn StorageLink>,
     texts: &egui_pop::i18n::I18n,
-    (owners, cards): (&super::storage::Owners, &CardList),
+    (owners, cards): (&Owners, &CardList),
 ) {
     let (l, i18n) = (link.clone(), texts.clone());
     let owned = owners.clone();
@@ -651,10 +629,7 @@ pub(crate) fn register_commands(
         Box::new(move |_, _| {
             let t = |m: Message| helios_i18n::message(&i18n, &m);
             let owners = match &*owned.lock().unwrap_or_else(PoisonError::into_inner) {
-                Some((book, saved)) => owners_of(
-                    &book.accounts()?,
-                    &saved.lock().unwrap_or_else(PoisonError::into_inner),
-                ),
+                Some((book, saved)) => owners_of(&book.accounts()?, &saved.sources()),
                 None => Vec::new(),
             };
             let grouped = by_account(l.volumes()?, l.photos()?, &owners);
@@ -784,8 +759,7 @@ mod tests {
 
     /// Two accounts of one connector signed in as one identity, each
     /// with a saved source: the case the Storage page showed twice.
-    fn twice_signed_in() -> (Vec<Account>, Vec<SavedSource>) {
-        use super::super::import_sources::SourceKey;
+    fn twice_signed_in() -> (Vec<Account>, Vec<SourceUse>) {
         let mut a = Account::new("photos", "Photos", &[]);
         let mut b = Account::new("photos", "Photos", std::slice::from_ref(&a));
         for x in [&mut a, &mut b] {
@@ -794,9 +768,9 @@ mod tests {
                 "ann@example.com".into(),
             );
         }
-        let source = |account: &Account, name: &str| SavedSource {
+        let source = |account: &Account, name: &str| SourceUse {
+            account: Some(account.id.clone()),
             name: Some(name.into()),
-            ..SavedSource::new("photos".into(), &SourceKey::Account(account.id.clone()))
         };
         let sources = vec![source(&a, "Holidays"), source(&b, "Family")];
         (vec![a, b], sources)
