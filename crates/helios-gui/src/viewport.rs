@@ -40,6 +40,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Ui;
 use egui_pop::core::areas::{self, AreaKind, AreaSpec};
+use egui_pop::core::ui::UiPop as _;
 use egui_pop::viewport::display::{
     DisplayTarget, DisplayTransform, Primaries, Stage, SurfaceFormat, Transfer,
 };
@@ -1294,9 +1295,18 @@ impl Viewport {
         crate::name_rect(ui.ctx(), "viewport.display", rect);
         self.draw_stand_in(ui, rect);
         if self.edited.is_none() && self.stand_in().is_none() {
-            ui.put(
-                rect,
-                egui::Label::new(egui::RichText::new("No image").weak()),
+            // Centred over the display, as the kit's secondary text.
+            let text = crate::i18n::text(
+                ui.ctx(),
+                helios_core::Message::new("gui-viewport-no-image", "No image"),
+            );
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::centered_and_justified(
+                        egui::Direction::TopDown,
+                    )),
+                |ui| ui.muted(text),
             );
         }
         self.readout = out.readout;

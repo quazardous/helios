@@ -2921,6 +2921,8 @@ gui-version-remove-title = Remove version { $number }?
 
 gui-version-remove-verb = Remove Version
 
+gui-viewport-no-image = No image
+
 gui-window-frame-error = window frame: { $error }
 
 gui-wizard-account = Account

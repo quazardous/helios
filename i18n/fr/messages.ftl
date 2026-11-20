@@ -1751,6 +1751,7 @@ gui-library-keep-best = Garder la meilleure : la choisir, rejeter les autres
 gui-library-no-cursor = Aucune image sous le curseur
 
 gui-library-none = Aucune image
+gui-viewport-no-image = Aucune image
 
 gui-library-search = Rechercher des images
 
