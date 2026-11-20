@@ -112,7 +112,7 @@ fn dynamic_vector_writes(
     writes: &mut usize,
 ) {
     use naga::{Expression, Statement, TypeInner};
-    for statement in block.iter() {
+    for statement in block {
         match statement {
             Statement::Store { pointer, .. } => {
                 if let Expression::Access { base, .. } = function.expressions[*pointer]
