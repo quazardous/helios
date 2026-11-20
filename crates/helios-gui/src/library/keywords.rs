@@ -21,7 +21,12 @@ use std::collections::BTreeMap;
 
 use egui::Ui;
 use egui_pop::api::bus::drag::{self, Seen};
+use egui_pop::core::fold::{Fold, TreeRow};
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::{TextRole, UiPop as _};
+use egui_pop::core::widgets;
 use helios_core::Message;
+use helios_ui::Scroll;
 use helios_vault::keywords::{self, SEPARATOR};
 
 use super::{DraggedPhotos, DropOn, Library, drop_target, quoted, tokens};
@@ -259,23 +264,24 @@ impl Library {
         let selection = self.targets().is_ok();
         let mut chosen = None;
         let mut runs: Vec<(&'static str, serde_json::Value)> = Vec::new();
-        egui_pop::core::fold::Fold::new(
+        Fold::new(
             "helios.library.keywords",
             word(Message::new("gui-library-keywords", "Keywords")),
         )
         .show(ui, |ui| {
             let counts = self.keyword_counts().clone();
             if counts.is_empty() {
-                ui.weak(word(Message::new(
+                ui.muted(word(Message::new(
                     "gui-library-keywords-none",
                     "No keyword yet: write levels with | (Animals|Dog)",
                 )));
                 return;
             }
-            egui::ScrollArea::vertical()
-                .id_salt("helios.library.keywords.scroll")
-                .max_height(200.0)
-                .show(ui, |ui| {
+            helios_ui::scroll(
+                ui,
+                "helios.library.keywords.scroll",
+                Scroll::Section,
+                |ui| {
                     self.keyword_rows(
                         ui,
                         &counts,
@@ -285,7 +291,8 @@ impl Library {
                         &mut chosen,
                         &mut runs,
                     );
-                });
+                },
+            );
         });
         if let Some(path) = chosen {
             let same = selected.as_deref() == Some(path.as_str());
@@ -323,32 +330,22 @@ impl Library {
         for (path, count) in children(counts, parent) {
             let below = !children(counts, Some(path)).is_empty();
             let key = ui.make_persistent_id(("helios.library.keyword", path));
-            let mut state =
-                egui::collapsing_header::CollapsingState::load_with_default_open(&ctx, key, false);
-            let open = state.is_open();
-            ui.horizontal(|ui| {
-                if below {
-                    let toggle =
-                        state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
-                    let name = crate::i18n::text(
-                        &ctx,
-                        Message::new(
-                            "gui-library-keyword-toggle",
-                            "Show or hide the keywords below { $name }",
-                        )
-                        .with("name", path),
-                    );
-                    toggle.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, true, &name)
-                    });
-                } else {
-                    ui.add_space(ui.spacing().icon_width + ui.spacing().item_spacing.x);
-                }
+            let mut row = TreeRow::new(key, keywords::leaf(path)).leaf(!below);
+            if below {
+                row = row.toggle_name(crate::i18n::text(
+                    &ctx,
+                    Message::new(
+                        "gui-library-keyword-toggle",
+                        "Show or hide the keywords below { $name }",
+                    )
+                    .with("name", path),
+                ));
+            }
+            row.show(ui, |ui| {
                 let text = format!("{} {count}", keywords::leaf(path));
-                let r = ui
-                    .selectable_label(selected == Some(path), text)
+                let r = widgets::selectable_label(ui, selected == Some(path), text)
                     .interact(egui::Sense::drag())
-                    .on_hover_text(path);
+                    .tip(path);
                 if r.drag_started() {
                     drag::start(&ctx, "keyword", DraggedKeyword(path.to_string()));
                 }
@@ -380,13 +377,10 @@ impl Library {
                 if r.clicked() {
                     *chosen = Some(path.to_string());
                 }
+            })
+            .body(ui, |ui| {
+                self.keyword_rows(ui, counts, Some(path), selected, selection, chosen, runs);
             });
-            state.store(&ctx);
-            if below && open {
-                ui.indent(key, |ui| {
-                    self.keyword_rows(ui, counts, Some(path), selected, selection, chosen, runs);
-                });
-            }
         }
     }
 
@@ -435,7 +429,7 @@ impl Library {
                     );
                     // egui hides hover tooltips while something is dragged.
                     egui::Tooltip::for_widget(grid).at_pointer().show(|ui| {
-                        ui.label(text);
+                        ui.text_role(TextRole::Body, text);
                     });
                 }
                 Seen::Dropped(keyword) => {
