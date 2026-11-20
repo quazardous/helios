@@ -88,6 +88,13 @@ pub enum StateKind {
     /// open of the photo reads them instead of demosaicing; its
     /// `development` the file, network and head version.
     Developed,
+    /// The photo's frame rendered ahead for the darkroom's viewport: its
+    /// proxy and its fit, at the scales the viewport asks them at its
+    /// current size, kept in the engine's cache ([`helios_core::Hold`]),
+    /// so an open's first frame crops them instead of rendering. Its
+    /// `development` the `developed` state's and the viewport's size in
+    /// physical pixels, its `size` the viewport's longest side.
+    Framed,
     /// The full-size steps (the demosaic's output) kept in the engine's
     /// cache: a [`helios_core::Hold`], its `development` the steps' keys.
     /// The fit, a zoom and the preview read them instead of demosaicing
@@ -107,6 +114,7 @@ impl StateKind {
             StateKind::FullSize => "full_size",
             StateKind::Decoded => "decoded",
             StateKind::Developed => "developed",
+            StateKind::Framed => "framed",
         }
     }
 }
@@ -559,6 +567,25 @@ impl ImageStates {
         BackgroundHold {
             router: self.inner.clone(),
         }
+    }
+
+    /// Lets go of the ready states of `kind` (pinned ones aside) at once,
+    /// each said evicted: what they computed for no longer holds (the
+    /// frames rendered for a viewport size that changed). The bytes
+    /// freed.
+    pub fn evict_kind(&self, kind: StateKind) -> u64 {
+        let mut guard = self.inner.table();
+        let table = &mut *guard;
+        let gone: Vec<(StateKey, u64)> = table
+            .ready
+            .keys()
+            .filter(|k| k.state == kind && !table.pins.contains_key(*k))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|k| table.order.remove(&k).map(|bytes| (k, bytes)))
+            .collect();
+        self.inner.let_go(table, gone)
     }
 
     /// Every state it knows, ready or in flight, by photo then kind: what
@@ -1418,5 +1445,28 @@ mod tests {
         drop(hold);
         warm.wait(LONG).expect("near");
         assert!(ran.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evicting_a_kind_lets_its_unpinned_states_go_and_keeps_the_rest() {
+        let states = ImageStates::new(Arc::new(Bus::new()), 2);
+        let framed = |photo: &str| StateKey {
+            state: StateKind::Framed,
+            ..key(photo)
+        };
+        let sized: Compute = Arc::new(|| Ok(Ready::new(0u32, 100)));
+        for k in [framed("a"), framed("b"), key("a")] {
+            states
+                .ask(k, Priority::Prefetch, sized.clone())
+                .wait(LONG)
+                .expect("ready");
+        }
+        let _pin = states.pin(&framed("b"));
+        assert_eq!(states.evict_kind(StateKind::Framed), 100);
+        let (ready, _) = states.list();
+        assert!(!ready.contains(&framed("a")), "{ready:?}");
+        assert!(ready.contains(&framed("b")), "pinned: kept");
+        assert!(ready.contains(&key("a")), "another kind: kept");
+        assert_eq!(states.counters().evicted, 1);
     }
 }

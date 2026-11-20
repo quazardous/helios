@@ -1005,6 +1005,16 @@ impl Viewport {
         Some(done)
     }
 
+    /// Where the image was last drawn and at how many physical pixels
+    /// per point (its last mapping's): the size a photo opened next is
+    /// framed at ([`crate::warm::Book::follow_view`]).
+    pub fn display(&self) -> Option<crate::warm::ViewSize> {
+        self.state.mapping().map(|m| crate::warm::ViewSize {
+            rect: m.rect,
+            ppp: m.ppp,
+        })
+    }
+
     /// egui-pop's viewport state: its tiles, its last mapping, its hooks.
     pub fn state(&self) -> &ViewportState {
         &self.state
