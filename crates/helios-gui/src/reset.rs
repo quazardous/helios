@@ -11,9 +11,16 @@
 //!   agents**: the agent bridge refuses it whatever the agent's grant
 //!   (`crate::destructive::NOT_FOR_AGENTS`). It plans the reset at once
 //!   (a plan refused, a photo folder among the targets, is said and
-//!   nothing moves), then hands the plan to the desktop ([`Reset::go`]):
-//!   Helios quits through `helios.app.quit`, runs the plan once the
-//!   library is closed, and starts again on the first-run setup.
+//!   nothing moves), keeps it in [`Reset::pending`] and asks the desktop
+//!   to quit ([`Reset::go`]): Helios quits through `helios.app.quit`,
+//!   runs the plan once the library is closed, and starts again on the
+//!   first-run setup.
+//!
+//! A plan lives for **the quit it was confirmed for** only: that quit
+//! refused, or its question answered with anything but Quit (unsaved
+//! work, running jobs, then Cancel), drops it, said in a notice and in
+//! the log ([`Shell::on_quit_abandoned`]). It never runs at a later,
+//! ordinary quit.
 //!
 //! The photo folders the plan is checked against are the library's
 //! folders (where its photos are) and its library folder (where imports
@@ -24,7 +31,7 @@
 //! typed, checked as it is typed ([`CHECK_WORD`]).
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use egui_pop::api::admin::model::hooks::{Hook, Problem};
 use egui_pop::api::admin::model::{
@@ -93,6 +100,35 @@ pub fn photos_of(answer: &Value, library_folder: Option<PathBuf>) -> Photos {
     photos
 }
 
+/// A confirmed plan, waiting for the quit it was confirmed for: the
+/// desktop takes it once the library is closed ([`Pending::take`]); an
+/// abandoned quit drops it.
+#[derive(Clone, Debug, Default)]
+pub struct Pending(Arc<Mutex<Option<Plan>>>);
+
+impl Pending {
+    fn slot(&self) -> std::sync::MutexGuard<'_, Option<Plan>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Keeps `plan` for the quit asked next.
+    pub fn set(&self, plan: Plan) {
+        *self.slot() = Some(plan);
+    }
+
+    /// The plan, taken: by the desktop once Helios has quit, or dropped.
+    pub fn take(&self) -> Option<Plan> {
+        self.slot().take()
+    }
+
+    /// Whether a plan waits.
+    pub fn is_set(&self) -> bool {
+        self.slot().is_some()
+    }
+}
+
 /// What the desktop hands the reset commands.
 #[derive(Clone)]
 pub struct Reset {
@@ -100,8 +136,10 @@ pub struct Reset {
     pub places: Places,
     /// The photos, read when a plan is made.
     pub photos: Arc<dyn Fn() -> Photos + Send + Sync>,
-    /// Runs a confirmed plan: quit, reset, start again.
-    pub go: Arc<dyn Fn(Plan) -> Result<(), String> + Send + Sync>,
+    /// The confirmed plan, kept for the quit [`Reset::go`] asks.
+    pub pending: Pending,
+    /// Asks Helios to quit and start again, the plan run in between.
+    pub go: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
 }
 
 /// Where Helios keeps its things on this machine: its configuration,
@@ -245,7 +283,11 @@ pub fn run(reset: &Reset, args: &Value) -> Result<Value, String> {
         "backup": plan.backup,
         "targets": plan.targets.len(),
     });
-    (reset.go)(plan)?;
+    reset.pending.set(plan);
+    if let Err(e) = (reset.go)() {
+        reset.pending.take();
+        return Err(e);
+    }
     Ok(answer)
 }
 
@@ -254,6 +296,19 @@ pub fn run(reset: &Reset, args: &Value) -> Result<Value, String> {
 /// # Errors
 /// A command cannot be registered.
 pub fn register(shell: &mut Shell, reset: Reset) -> Result<(), String> {
+    let pending = reset.pending.clone();
+    shell.on_quit_abandoned(move || {
+        let plan = pending.take()?;
+        log::warn!(
+            target: "helios::reset",
+            "reset dropped ({:?}): Helios did not quit, nothing was reset",
+            plan.scope
+        );
+        Some(Message::new(
+            "gui-reset-dropped",
+            "Reset cancelled: Helios did not quit, so nothing was reset. Confirm it again to reset.",
+        ))
+    });
     let t = shell.texts();
     let for_plan = reset.clone();
     shell.register(

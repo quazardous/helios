@@ -3,6 +3,8 @@
 //! "Reset Helios…" opens the wizard, a word other than RESET is refused,
 //! RESET hands the plan over (run here: every photo byte for byte the
 //! same), and the agent bridge refuses the command whatever it carries.
+//! A confirmed reset lives for the quit it was confirmed for only: that
+//! quit refused and cancelled, a later ordinary quit resets nothing.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -12,9 +14,10 @@ use egui::accesskit::Role;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
-use helios_gui::reset::{self, Photos, Reset};
+use helios_gui::reset::{self, Pending, Photos, Reset};
+use helios_gui::shell::LastWindow;
 use helios_gui::{Shell, headless, helios_panels};
-use helios_node_core::reset::{Places, Plan};
+use helios_node_core::reset::Places;
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
 
@@ -98,6 +101,26 @@ impl Home {
         }
     }
 
+    /// Every file under the home (Helios's folders and the photos) and
+    /// its bytes.
+    fn all_bytes(&self) -> Vec<(PathBuf, Vec<u8>)> {
+        fn walk(dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else {
+                    let b = std::fs::read(&p).unwrap();
+                    out.push((p, b));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.root, &mut out);
+        out.sort();
+        out
+    }
+
     /// Every photo file and its bytes.
     fn photo_bytes(&self) -> Vec<(PathBuf, Vec<u8>)> {
         let mut out: Vec<_> = std::fs::read_dir(&self.photos)
@@ -119,7 +142,9 @@ impl Drop for Home {
     }
 }
 
-fn shell(home: &Home, plans: Arc<Mutex<Vec<Plan>>>) -> Shell {
+/// The shell with the reset's commands: a confirmed plan kept in
+/// `pending`, each quit asked counted in `asked`.
+fn shell_with(home: &Home, pending: Pending, asked: Arc<Mutex<usize>>) -> Shell {
     let mut shell = Shell::new(helios_panels(), None);
     let roots = vec![home.photos.clone()];
     reset::register(
@@ -130,8 +155,9 @@ fn shell(home: &Home, plans: Arc<Mutex<Vec<Plan>>>) -> Shell {
                 roots: roots.clone(),
                 count: 3,
             }),
-            go: Arc::new(move |plan| {
-                plans.lock().unwrap().push(plan);
+            pending,
+            go: Arc::new(move || {
+                *asked.lock().unwrap() += 1;
                 Ok(())
             }),
         },
@@ -140,11 +166,15 @@ fn shell(home: &Home, plans: Arc<Mutex<Vec<Plan>>>) -> Shell {
     shell
 }
 
+fn shell(home: &Home, pending: Pending) -> Shell {
+    shell_with(home, pending, Arc::default())
+}
+
 #[test]
 fn the_danger_zone_resets_only_once_reset_is_typed_and_never_for_an_agent() {
     let home = Home::new();
     let before = home.photo_bytes();
-    let plans = Arc::new(Mutex::new(Vec::new()));
+    let plans = Pending::default();
     let mut h = headless::harness(shell(&home, plans.clone()), vec2(1280.0, 900.0));
     h.run();
 
@@ -198,13 +228,10 @@ fn the_danger_zone_resets_only_once_reset_is_typed_and_never_for_an_agent() {
             "`{wrong}` resets"
         );
     }
-    assert!(
-        plans.lock().unwrap().is_empty(),
-        "no reset without the word"
-    );
+    assert!(!plans.is_set(), "no reset without the word");
     // The command itself asks for the word too.
     assert!(run(&mut h, reset::COMMAND, json!({ "scope": "everything" })).is_err());
-    assert!(plans.lock().unwrap().is_empty());
+    assert!(!plans.is_set());
 
     // The agent bridge refuses it, even with the word.
     let refused = h
@@ -216,7 +243,7 @@ fn the_danger_zone_resets_only_once_reset_is_typed_and_never_for_an_agent() {
         )
         .unwrap_err();
     assert!(refused.contains("not offered to agents"), "{refused}");
-    assert!(plans.lock().unwrap().is_empty(), "an agent never resets");
+    assert!(!plans.is_set(), "an agent never resets");
 
     // RESET typed: the plan is handed over.
     run(
@@ -226,10 +253,8 @@ fn the_danger_zone_resets_only_once_reset_is_typed_and_never_for_an_agent() {
     )
     .unwrap();
     run(&mut h, "admin.wizard.finish", json!({})).unwrap();
-    until(&mut h, "the plan handed over", |_| {
-        !plans.lock().unwrap().is_empty()
-    });
-    let plan = plans.lock().unwrap().remove(0);
+    until(&mut h, "the plan handed over", |_| plans.is_set());
+    let plan = plans.take().unwrap();
     assert!(
         plan.targets
             .iter()
@@ -257,9 +282,9 @@ fn a_photo_folder_inside_helios_folders_refuses_the_reset() {
     let home = Home::at(&format!("helios-reset-refused-{}", std::process::id()));
     let inside = home.places.data.join("Photos");
     std::fs::create_dir_all(&inside).unwrap();
-    let plans = Arc::new(Mutex::new(Vec::new()));
+    let plans = Pending::default();
     let mut shell = Shell::new(helios_panels(), None);
-    let (p, roots) = (plans.clone(), vec![inside]);
+    let roots = vec![inside];
     reset::register(
         &mut shell,
         Reset {
@@ -268,10 +293,8 @@ fn a_photo_folder_inside_helios_folders_refuses_the_reset() {
                 roots: roots.clone(),
                 count: 1,
             }),
-            go: Arc::new(move |plan| {
-                p.lock().unwrap().push(plan);
-                Ok(())
-            }),
+            pending: plans.clone(),
+            go: Arc::new(|| Ok(())),
         },
     )
     .unwrap();
@@ -289,7 +312,7 @@ fn a_photo_folder_inside_helios_folders_refuses_the_reset() {
         refused.contains("never touches a photo folder"),
         "{refused}"
     );
-    assert!(plans.lock().unwrap().is_empty());
+    assert!(!plans.is_set());
     assert!(home.places.config.exists(), "nothing moved");
 }
 
@@ -320,10 +343,7 @@ fn reset_snapshots() {
     let mut results = egui_kittest::SnapshotResults::new();
     // A fixed folder: its paths are in the picture.
     let home = Home::at("helios-reset-shot");
-    let mut h = headless::harness(
-        shell(&home, Arc::new(Mutex::new(Vec::new()))),
-        vec2(1280.0, 900.0),
-    );
+    let mut h = headless::harness(shell(&home, Pending::default()), vec2(1280.0, 900.0));
     h.run();
     run(&mut h, "admin.open", json!({ "path": reset::SECTION })).unwrap();
     until(&mut h, "the Danger zone drawn", |h| {
@@ -342,4 +362,86 @@ fn reset_snapshots() {
     .unwrap();
     h.run_steps(4);
     results.add(h.try_body_shot("reset-wizard-confirm-pop-dark-1x"));
+}
+
+/// A confirmed reset waits for the quit it was confirmed for only. That
+/// quit refused (a job running) and its question cancelled, the plan is
+/// dropped, said in a notice; the job done, an ordinary quit goes and
+/// the desktop finds nothing to run: every byte of the fixture home,
+/// settings and photos alike, is the same.
+#[test]
+fn a_reset_whose_quit_is_cancelled_never_runs_at_a_later_quit() {
+    let home = Home::at(&format!("helios-reset-cancelled-{}", std::process::id()));
+    let before = home.all_bytes();
+    let pending = Pending::default();
+    let asked = Arc::new(Mutex::new(0));
+    let mut h = headless::harness(
+        shell_with(&home, pending.clone(), asked.clone()),
+        vec2(1280.0, 900.0),
+    );
+    h.ctx.set_embed_viewports(false);
+    h.state_mut().set_last_window(LastWindow::Quit);
+    h.run();
+
+    // A job running: the quit will be refused and asked about.
+    let job = h.state().jobs().start(helios_core::jobs::Start::new(
+        "test-job",
+        "A test job",
+        "test",
+    ));
+    job.on_cancel(|| {});
+
+    // The reset confirmed: the plan waits, the quit is asked (the
+    // desktop's `go` asks `workbench.quit` at its next pass).
+    run(
+        &mut h,
+        reset::COMMAND,
+        json!({ "scope": "everything", "confirm": reset::WORD }),
+    )
+    .unwrap();
+    assert!(pending.is_set(), "the plan waits for its quit");
+    assert_eq!(*asked.lock().unwrap(), 1, "the quit is asked");
+    run(&mut h, "workbench.quit", Value::Null).unwrap();
+    h.run_steps(2);
+    assert!(!h.state().quitting(), "refused: a job is running");
+    assert!(
+        h.query_by_label_contains("jobs are running").is_some(),
+        "the question about the running job"
+    );
+    assert!(pending.is_set(), "kept while the question is open");
+
+    // Cancel: the quit is abandoned, the plan dropped and said so.
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    assert!(!h.state().quitting(), "Cancel keeps Helios");
+    assert!(!pending.is_set(), "the plan is dropped with its quit");
+    let abandoned = h
+        .state()
+        .app()
+        .handle()
+        .events_since(0)
+        .into_iter()
+        .filter(|e| e.name == helios_gui::shell::QUIT_ABANDONED)
+        .count();
+    assert_eq!(abandoned, 1, "the journal says the quit was abandoned");
+    assert!(
+        h.query_by_label_contains("Reset cancelled").is_some(),
+        "a notice says the reset was cancelled"
+    );
+
+    // The job done, an ordinary quit goes: nothing to reset.
+    job.finished();
+    h.run_steps(2);
+    run(&mut h, "workbench.quit", Value::Null).unwrap();
+    h.run_steps(2);
+    assert!(h.state().quitting(), "the ordinary quit goes");
+    assert!(
+        pending.take().is_none(),
+        "the desktop finds no plan to run after this quit"
+    );
+    assert_eq!(
+        home.all_bytes(),
+        before,
+        "every byte of the home is the same"
+    );
 }

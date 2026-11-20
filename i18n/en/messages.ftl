@@ -403,6 +403,8 @@ gui-catalogue-restore-ask = Restore the catalogue from the snapshot of { $when }
 
 gui-catalogue-restore-confirm = Restore and restart
 
+gui-catalogue-restore-dropped = Catalogue restore cancelled: Helios did not quit, so the catalogue was not replaced. Ask for the restore again.
+
 gui-catalogue-restore-title = Restore the catalogue?
 
 gui-catalogue-snapshot-now = Snapshot now
@@ -2326,6 +2328,8 @@ gui-reset-cancel = Leave the reset?
 gui-reset-cancel-verb = Leave
 
 gui-reset-confirm-about = Take a catalogue snapshot first if you may want your ratings, tags and edits back. Then type the word: Helios quits and starts again.
+
+gui-reset-dropped = Reset cancelled: Helios did not quit, so nothing was reset. Confirm it again to reset.
 
 gui-reset-fate-backup = moved to the backup folder
 

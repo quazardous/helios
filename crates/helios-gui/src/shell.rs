@@ -125,7 +125,7 @@ pub use import_history::{Reader as ImportHistoryReader, reader_of as import_hist
 pub use import_merge::MergeLibrary as MergeImportLibrary;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
 pub use library_imports::{SHOW_IMPORT_SETTING, sessions_of as import_sessions_of};
-pub use lifetime::{Closing, LastWindow};
+pub use lifetime::{Closing, LastWindow, QUIT_ABANDONED};
 mod reads;
 mod said;
 mod storage;
@@ -7624,6 +7624,9 @@ impl Shell {
         }
         self.set_context(&ctx);
         self.core.app.logic(&ctx);
+        // A quit's question closed without the quit going: what waited
+        // on that quit is dropped.
+        self.settle_quit();
         // New undo steps are made in the place the stack shows now, and
         // inside a sub-workspace only its nodes may be written.
         crate::contexts::follow_place(
