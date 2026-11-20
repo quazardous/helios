@@ -52,6 +52,9 @@ command-graph-select =
 command-graph-view =
     .description = Fits a node editor's graph (`fit`: true), zooms to a level (`level`: overview, ports or detail) or focuses a node (`focus`), at its next frame.
 
+command-help-report-bundle =
+    .description = What Report a problem attaches, as JSON: the last minutes of the journal, redacted, the versions, the bus's points and the application's context.
+
 command-window-close =
     .description = Closes a window: the one named, or the active one.
 

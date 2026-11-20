@@ -41,6 +41,11 @@ pub const PLUGIN: PluginId = PluginId::from_static("helios.agent_state");
 pub struct Late(Rc<RefCell<Option<Sources>>>);
 
 impl Late {
+    /// The shell's library, once assembled.
+    pub fn library(&self) -> Option<Rc<RefCell<Library>>> {
+        self.0.borrow().as_ref().map(|s| s.library.clone())
+    }
+
     /// The shell's library and viewport, from now on.
     pub fn set(
         &self,

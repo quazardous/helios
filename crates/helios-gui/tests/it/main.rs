@@ -104,6 +104,7 @@ mod quick_open;
 mod quick_settings;
 mod quit;
 mod raw_front;
+mod report;
 mod reset;
 mod reset_reimport;
 mod scale;
