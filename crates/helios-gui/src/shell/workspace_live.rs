@@ -750,8 +750,8 @@ impl Shell {
     }
 
     /// `history.undo` with a `group`: that batch of the agent's undone
-    /// alone, in the value store's history named by `scope` (`edit` by
-    /// default, or `workspace`).
+    /// alone, in the value store's history named by `scope` (`edit` or
+    /// `workspace`; by default the one holding the batch).
     fn agent_undo_group(
         &mut self,
         request: &Value,
@@ -763,7 +763,19 @@ impl Shell {
             Some(s) => {
                 egui_pop::api::history::ScopeId::new(s).map_err(|e| format!("`scope`: {e}"))?
             }
-            None => crate::history::EDIT,
+            // None named: the history holding the batch.
+            None => {
+                let store = lock(&self.core.values);
+                let workspace = store
+                    .undo_steps_of(helios_values::HistoryScope::Workspace)
+                    .iter()
+                    .any(|s| s.group == Some(group));
+                if workspace {
+                    crate::history::WORKSPACE
+                } else {
+                    crate::history::EDIT
+                }
+            }
         };
         let mut ask = Request::new(scope);
         if let Some(rev) = request["if_rev"].as_u64() {
