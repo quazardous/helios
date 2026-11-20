@@ -799,11 +799,29 @@ gui-history-preview-param = { $label } ({ $node })
 
 gui-history-quick-add = Add { $count } photos to the quick collection
 
+gui-history-quick-add-named = Add { $count } photos to the quick collection “{ $name }”
+
 gui-history-quick-clear = Clear the quick collection
+
+gui-history-quick-clear-named = Clear the quick collection “{ $name }”
+
+gui-history-quick-delete = Delete the quick collection “{ $name }”
+
+gui-history-quick-new = New quick collection “{ $name }”
 
 gui-history-quick-remove = Remove { $count } photos from the quick collection
 
+gui-history-quick-remove-named = Remove { $count } photos from the quick collection “{ $name }”
+
+gui-history-quick-rename = Rename the quick collection “{ $name }”
+
+gui-history-quick-rename-first = Rename the quick collection
+
 gui-history-quick-save = Save the quick collection as “{ $name }”
+
+gui-history-quick-target = Make “{ $name }” the target
+
+gui-history-quick-target-first = Make the quick collection the target
 
 gui-history-rotate-left = Rotate { $count } photos left
 
@@ -1675,6 +1693,16 @@ gui-library-quick = Quick collection
 
 gui-library-quick-clear = Clear the quick collection
 
+gui-library-quick-delete = Delete the quick collection
+
+gui-library-quick-new = New quick collection…
+
+gui-library-quick-new-title = New quick collection
+
+gui-library-quick-rename = Rename…
+
+gui-library-quick-rename-title = Rename the quick collection
+
 gui-library-quick-save = Save as album…
 
 gui-library-quick-save-clear = then clear the quick collection
@@ -1683,7 +1711,11 @@ gui-library-quick-save-title = Save the quick collection as an album
 
 gui-library-quick-save-verb = Save
 
+gui-library-quick-set-target = Set as target
+
 gui-library-quick-tip = B adds the selected photos or takes them out
+
+gui-library-quick-tip-other = Drop photos here; its menu makes it the target of B
 
 gui-library-quick-toggle = Add or remove the selected photos
 

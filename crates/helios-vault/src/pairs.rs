@@ -370,12 +370,12 @@ fn side<S: Store + ?Sized>(store: &S, id: &ImageId) -> Result<Side, String> {
     })
 }
 
-/// The plain albums and the quick collection, with their members.
+/// The plain albums and the quick collections, with their members.
 fn collections<S: Store + ?Sized>(store: &S) -> Result<Vec<Members>, String> {
     let mut out = Vec::new();
     for (key, doc) in store.documents(COLLECTIONS)? {
         let kind = doc.get("kind").and_then(Value::as_str);
-        if kind != Some(ALBUM) && !(key == QUICK && kind == Some(QUICK)) {
+        if kind != Some(ALBUM) && kind != Some(QUICK) {
             continue;
         }
         out.push(Members {

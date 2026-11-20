@@ -30,6 +30,8 @@ pub const DESTRUCTIVE: &[&str] = &[
     "library.keyword.remove",
     "library.metadata.template.delete",
     "library.quick.clear",
+    "library.quick.delete",
+    "library.quick.remove",
     "library.remove",
     "library.removeVersion",
     "library.trash",

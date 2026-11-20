@@ -80,6 +80,12 @@ pub(super) struct Focus {
     /// The album a rename form was opened for (`library.collection.rename`
     /// without `id` renames it).
     pub(super) album_renamed: Option<String>,
+    /// The quick collection a new name was asked for, for the form's
+    /// answer.
+    pub(super) quick_renamed: Option<String>,
+    /// The quick collection an album name was asked for (saved as an
+    /// album), for the form's answer.
+    pub(super) quick_saved: Option<String>,
     /// The smart album a rules form was opened for
     /// (`library.collection.rules` without `id` sets its rules).
     pub(super) album_ruled: Option<String>,
@@ -197,6 +203,8 @@ impl Focus {
             open_in_compare: false,
             compare_panel_shown: false,
             album_renamed: None,
+            quick_renamed: None,
+            quick_saved: None,
             album_ruled: None,
             rule_editor: None,
             decisions: Rc::default(),

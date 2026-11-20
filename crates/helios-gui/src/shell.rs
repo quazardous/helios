@@ -3584,15 +3584,43 @@ impl Shell {
             ),
             (
                 crate::library::QUICK_TOGGLE_COMMAND,
-                "Put photos in the quick collection (`images`: ids, else the selection), or take them out when it holds them all; scope the library to it with the collection `quick`",
+                "B: put photos in the target quick collection (`id`: another one; `images`: ids, else the selection), or take them out when it holds them all; scope the library to one with `library.collection` and its `id` (the first is `quick`)",
             ),
             (
                 crate::library::QUICK_CLEAR_COMMAND,
-                "Empty the quick collection; its photos stay in the library",
+                "Empty a quick collection (`id`; none: the target); its photos stay in the library",
             ),
             (
                 crate::library::QUICK_SAVE_COMMAND,
-                "Save the quick collection as an album (`name`; `clear`: empty it too); without `name`, asks it. Answers the album's `id`",
+                "Save a quick collection (`id`; none: the target) as an album (`name`; `clear`: empty it too); without `name`, asks it. Answers the album's `id`",
+            ),
+            (
+                crate::library::QUICK_CREATE_COMMAND,
+                "New quick collection (`name`; `images`: ids, none by default; `target: true` makes it the target); without `name`, asks it. Answers its `id`",
+            ),
+            (
+                crate::library::QUICK_RENAME_COMMAND,
+                "Rename a quick collection (`id`, `name`); without `name`, asks it",
+            ),
+            (
+                crate::library::QUICK_DELETE_COMMAND,
+                "Delete a quick collection (`id`), not the first (`quick`); its photos stay in the library. When it was the target, the first one is",
+            ),
+            (
+                crate::library::QUICK_TARGET_COMMAND,
+                "Make a quick collection (`id`) the target: B and drops on it put photos there",
+            ),
+            (
+                crate::library::QUICK_ADD_COMMAND,
+                "Add photos to a quick collection (`id`; none: the target; `images`: ids, else the selection)",
+            ),
+            (
+                crate::library::QUICK_REMOVE_COMMAND,
+                "Remove photos from a quick collection (`id`; none: the target; `images`: ids, else the selection); they stay in the library",
+            ),
+            (
+                crate::library::QUICK_LIST_COMMAND,
+                "List the quick collections, the first one first: `id`, `name` (none for the first until renamed), `count`, `target` (true for the target of B)",
             ),
         ] {
             add(
@@ -5507,7 +5535,8 @@ impl Shell {
                         .borrow()
                         .albums()
                         .is_none_or(|a| a.iter().any(|a| a.id == *id))
-                        || id == helios_vault::collections::QUICK;
+                        || id == helios_vault::collections::QUICK
+                        || self.focus.library.borrow().quick_collection(id).is_some();
                     if !known {
                         return Err(format!("`id`: no album `{id}`"));
                     }
@@ -5690,12 +5719,7 @@ impl Shell {
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty());
         let name = name.as_deref();
-        if matches!(
-            command,
-            crate::library::QUICK_TOGGLE_COMMAND
-                | crate::library::QUICK_CLEAR_COMMAND
-                | crate::library::QUICK_SAVE_COMMAND
-        ) {
+        if command.starts_with("library.quick.") {
             return self.quick_edit(command, args, name, &albums);
         }
         let taken = |name: &str, id: &str| {
@@ -5996,8 +6020,9 @@ impl Shell {
         }
     }
 
-    /// The quick collection's commands (`library.quick.*`), queued for the
-    /// host as the albums' are: one step of the library's history each.
+    /// The quick collections' commands (`library.quick.*`), queued for
+    /// the host as the albums' are: one step of the library's history
+    /// each. A command without `id` acts on the target.
     fn quick_edit(
         &mut self,
         command: &'static str,
@@ -6005,72 +6030,240 @@ impl Shell {
         name: Option<&str>,
         albums: &[helios_vault::collections::Album],
     ) -> Result<Value, String> {
-        use crate::library::{AlbumEdit, QUICK_CLEAR_COMMAND, QUICK_TOGGLE_COMMAND};
+        use crate::library::{
+            AlbumEdit, QUICK_ADD_COMMAND, QUICK_CLEAR_COMMAND, QUICK_CREATE_COMMAND,
+            QUICK_DELETE_COMMAND, QUICK_LIST_COMMAND, QUICK_REMOVE_COMMAND, QUICK_RENAME_COMMAND,
+            QUICK_SAVE_COMMAND, QUICK_TARGET_COMMAND, QUICK_TOGGLE_COMMAND,
+        };
+        use helios_vault::collections::QUICK;
+        let text = |a: &Value, key: &str| a.get(key).and_then(Value::as_str).map(String::from);
         let mut lib = self.focus.library.borrow_mut();
-        if command == QUICK_TOGGLE_COMMAND {
-            let images: Vec<String> = match args.get("images") {
-                Some(Value::Array(list)) => list
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect(),
-                Some(other) => return Err(format!("`images`: {other} is not a list of ids")),
-                None => lib.targets()?,
+        if command == QUICK_LIST_COMMAND {
+            let target = lib.quick_target().to_string();
+            let list: Vec<Value> = lib
+                .quick_collections()
+                .iter()
+                .map(|q| {
+                    json!({
+                        "id": q.id,
+                        "name": q.name,
+                        "count": lib.quick_count_of(&q.id),
+                        "target": q.id == target,
+                    })
+                })
+                .collect();
+            return Ok(json!({ "quick": list, "target": target, "shown": lib.collection() }));
+        }
+        let folded = |n: &str| helios_vault::fields::fold_case(n);
+        let named_taken = |lib: &crate::library::Library, name: &str, id: &str| {
+            lib.quick_collections()
+                .iter()
+                .any(|q| q.id != id && q.name.as_deref().is_some_and(|n| folded(n) == folded(name)))
+        };
+        if command == QUICK_CREATE_COMMAND {
+            let Some(name) = name else {
+                drop(lib);
+                self.quick_name_form(QUICK_CREATE_COMMAND, "");
+                return Ok(Value::Null);
             };
-            if images.is_empty() {
-                return Err("no image selected".into());
+            if named_taken(&lib, name, "") {
+                return Err(format!("a quick collection is already named “{name}”"));
             }
-            // `add` (a drop on its row) only puts in: those already in
-            // stay, and with none missing nothing changes.
-            if args.get("add").and_then(Value::as_bool) == Some(true) {
-                let missing: Vec<String> = images
-                    .into_iter()
-                    .filter(|i| !lib.quick().contains(i))
-                    .collect();
-                let count = missing.len();
-                if count > 0 {
-                    lib.edit_album(AlbumEdit::QuickToggle { images: missing });
-                }
-                return Ok(json!({ "added": true, "images": count }));
-            }
-            // As the vault decides: all in, out; else in.
-            let added = !images.iter().all(|i| lib.quick().contains(i));
+            let images = images_arg(args)?.unwrap_or_default();
+            let id = helios_vault::collections::album_key(name, |k| {
+                albums.iter().any(|a| a.id == k) || lib.quick_collection(k).is_some()
+            });
             let count = images.len();
-            lib.edit_album(AlbumEdit::QuickToggle { images });
-            return Ok(json!({ "added": added, "images": count }));
+            lib.edit_album(AlbumEdit::QuickCreate {
+                id: id.clone(),
+                name: name.to_string(),
+                images,
+            });
+            if args.get("target").and_then(Value::as_bool) == Some(true) {
+                lib.edit_album(AlbumEdit::QuickTarget { id: id.clone() });
+            }
+            return Ok(json!({ "id": id, "name": name, "images": count }));
         }
-        if command == QUICK_CLEAR_COMMAND {
-            lib.edit_album(AlbumEdit::QuickClear);
-            return Ok(Value::Null);
-        }
-        if lib.quick_count() == 0 {
-            return Err("the quick collection is empty".into());
-        }
-        let Some(name) = name else {
-            drop(lib);
-            self.quick_save_form();
-            return Ok(Value::Null);
+        // The quick collection named, else (renaming from the form) the
+        // one asked, else the target.
+        let id = match text(args, "id") {
+            Some(id) => id,
+            None if command == QUICK_RENAME_COMMAND => self
+                .focus
+                .quick_renamed
+                .clone()
+                .ok_or("`id`: no quick collection named")?,
+            // The form's answer: the one whose menu asked.
+            None if command == QUICK_SAVE_COMMAND && name.is_some() => self
+                .focus
+                .quick_saved
+                .take()
+                .unwrap_or_else(|| lib.quick_target().to_string()),
+            None => lib.quick_target().to_string(),
         };
-        let folded = helios_vault::fields::fold_case(name);
-        if albums
-            .iter()
-            .any(|a| helios_vault::fields::fold_case(&a.name) == folded)
-        {
-            return Err(format!("an album is already named “{name}”"));
-        }
-        let clear = match args.get("clear") {
-            None | Some(Value::Null) => false,
-            Some(Value::Bool(b)) => *b,
-            Some(other) => return Err(format!("`clear`: {other} is not true or false")),
+        let Some(quick) = lib.quick_collection(&id).cloned().or_else(|| {
+            (id == QUICK).then(|| helios_vault::collections::QuickCollection {
+                id: QUICK.into(),
+                name: None,
+                images: Vec::new(),
+            })
+        }) else {
+            return Err(format!("`id`: no quick collection `{id}`"));
         };
-        let id = helios_vault::collections::album_key(name, |k| albums.iter().any(|a| a.id == k));
-        let count = lib.quick().len();
-        lib.edit_album(AlbumEdit::QuickSave {
-            id: id.clone(),
-            name: name.to_string(),
-            clear,
+        let in_it = |lib: &crate::library::Library, i: &String| {
+            if id == lib.quick_target() {
+                lib.quick().contains(i)
+            } else {
+                quick.images.contains(i)
+            }
+        };
+        match command {
+            QUICK_TOGGLE_COMMAND | QUICK_ADD_COMMAND | QUICK_REMOVE_COMMAND => {
+                let images = match images_arg(args)? {
+                    Some(images) => images,
+                    None => lib.targets()?,
+                };
+                if images.is_empty() {
+                    return Err("no image selected".into());
+                }
+                // Add (a drop on its row, or `add: true`) only puts in:
+                // those already in stay, and with none missing nothing
+                // changes.
+                let add = command == QUICK_ADD_COMMAND
+                    || args.get("add").and_then(Value::as_bool) == Some(true);
+                if add {
+                    let missing: Vec<String> =
+                        images.into_iter().filter(|i| !in_it(&lib, i)).collect();
+                    let count = missing.len();
+                    if count > 0 {
+                        lib.edit_album(AlbumEdit::QuickAdd {
+                            id: id.clone(),
+                            images: missing,
+                        });
+                    }
+                    return Ok(json!({ "id": id, "added": true, "images": count }));
+                }
+                if command == QUICK_REMOVE_COMMAND {
+                    let held: Vec<String> = images.into_iter().filter(|i| in_it(&lib, i)).collect();
+                    let count = held.len();
+                    if count > 0 {
+                        lib.edit_album(AlbumEdit::QuickRemove {
+                            id: id.clone(),
+                            images: held,
+                        });
+                    }
+                    return Ok(json!({ "id": id, "removed": count }));
+                }
+                // As the vault decides: all in, out; else in.
+                let added = !images.iter().all(|i| in_it(&lib, i));
+                let count = images.len();
+                lib.edit_album(AlbumEdit::QuickToggle {
+                    id: id.clone(),
+                    images,
+                });
+                Ok(json!({ "id": id, "added": added, "images": count }))
+            }
+            QUICK_CLEAR_COMMAND => {
+                lib.edit_album(AlbumEdit::QuickClear { id });
+                Ok(Value::Null)
+            }
+            QUICK_TARGET_COMMAND => {
+                lib.edit_album(AlbumEdit::QuickTarget { id: id.clone() });
+                Ok(json!({ "target": id }))
+            }
+            QUICK_DELETE_COMMAND => {
+                if id == QUICK {
+                    return Err("the first quick collection stays: clear it or rename it".into());
+                }
+                lib.edit_album(AlbumEdit::QuickDelete { id: id.clone() });
+                Ok(json!({ "id": id }))
+            }
+            QUICK_RENAME_COMMAND => {
+                let Some(name) = name else {
+                    drop(lib);
+                    let current = quick.name.clone().unwrap_or_default();
+                    self.focus.quick_renamed = Some(id);
+                    self.quick_name_form(QUICK_RENAME_COMMAND, &current);
+                    return Ok(Value::Null);
+                };
+                if named_taken(&lib, name, &id) {
+                    return Err(format!("a quick collection is already named “{name}”"));
+                }
+                lib.edit_album(AlbumEdit::QuickRename {
+                    id: id.clone(),
+                    name: name.to_string(),
+                });
+                Ok(json!({ "id": id, "name": name }))
+            }
+            QUICK_SAVE_COMMAND => {
+                let count = if id == lib.quick_target() {
+                    lib.quick().len()
+                } else {
+                    quick.images.len()
+                };
+                if count == 0 {
+                    return Err("the quick collection is empty".into());
+                }
+                let Some(name) = name else {
+                    drop(lib);
+                    self.focus.quick_saved = Some(id);
+                    self.quick_save_form();
+                    return Ok(Value::Null);
+                };
+                let folded_name = folded(name);
+                if albums.iter().any(|a| folded(&a.name) == folded_name) {
+                    return Err(format!("an album is already named “{name}”"));
+                }
+                let clear = match args.get("clear") {
+                    None | Some(Value::Null) => false,
+                    Some(Value::Bool(b)) => *b,
+                    Some(other) => return Err(format!("`clear`: {other} is not true or false")),
+                };
+                let album = helios_vault::collections::album_key(name, |k| {
+                    albums.iter().any(|a| a.id == k) || lib.quick_collection(k).is_some()
+                });
+                lib.edit_album(AlbumEdit::QuickSave {
+                    from: id,
+                    id: album.clone(),
+                    name: name.to_string(),
+                    clear,
+                });
+                Ok(json!({ "id": album, "name": name, "images": count, "clear": clear }))
+            }
+            other => Err(format!("`{other}` is not a quick collection command")),
+        }
+    }
+
+    /// Asks the name of a new quick collection, or a quick collection's
+    /// new name (`current`), then runs `command`.
+    fn quick_name_form(&mut self, command: &str, current: &str) {
+        let (title, verb) = if command == crate::library::QUICK_CREATE_COMMAND {
+            (
+                Message::new("gui-library-quick-new-title", "New quick collection"),
+                Message::new("gui-library-album-new-verb", "Create"),
+            )
+        } else {
+            (
+                Message::new(
+                    "gui-library-quick-rename-title",
+                    "Rename the quick collection",
+                ),
+                Message::new("gui-library-album-rename-verb", "Rename"),
+            )
+        };
+        self.form(crate::dialogs::Form {
+            title: self.text(title),
+            fields: vec![crate::dialogs::Field {
+                key: "name".into(),
+                descriptor: helios_values::Descriptor::text(
+                    &self.text(Message::new("gui-library-album-name", "name")),
+                    current,
+                ),
+                value: helios_core::Value::Text(current.to_string()),
+            }],
+            verb: self.text(verb),
+            command: command.into(),
         });
-        Ok(json!({ "id": id, "name": name, "images": count, "clear": clear }))
     }
 
     /// Asks the name of the album the quick collection is saved as, and
@@ -8699,4 +8892,18 @@ pub(crate) fn confirm_dialog(c: crate::dialogs::Confirm) -> Result<dialogs::Conf
         d = d.danger();
     }
     Ok(d)
+}
+
+/// The photos a command names (`images`: ids), none when it names none.
+fn images_arg(args: &Value) -> Result<Option<Vec<String>>, String> {
+    match args.get("images") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(list)) => Ok(Some(
+            list.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect(),
+        )),
+        Some(other) => Err(format!("`images`: {other} is not a list of ids")),
+    }
 }

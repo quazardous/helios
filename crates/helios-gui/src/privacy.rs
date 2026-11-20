@@ -90,6 +90,9 @@ pub const PRIVATE: &[&str] = &[
     "library.metadata.template.apply",
     "library.metadata.template.list",
     "library.metadata.template.save",
+    "library.quick.create",
+    "library.quick.list",
+    "library.quick.rename",
     "library.quick.saveAs",
 ];
 

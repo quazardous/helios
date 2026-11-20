@@ -412,19 +412,58 @@ pub fn album_label(
             Message::new("gui-history-album-new-smart", "New smart album “{ $name }”")
         }
         E::Rules { .. } => Message::new("gui-history-album-rules", "Edit the rules of “{ $name }”"),
-        E::QuickToggle { .. } if added => Message::new(
+        // The first quick collection, never named: "the quick collection".
+        E::QuickToggle { .. } | E::QuickAdd { .. } if added && name.is_empty() => Message::new(
             "gui-history-quick-add",
             "Add { $count } photos to the quick collection",
         ),
-        E::QuickToggle { .. } => Message::new(
-            "gui-history-quick-remove",
-            "Remove { $count } photos from the quick collection",
+        E::QuickToggle { .. } | E::QuickAdd { .. } | E::QuickRemove { .. } if name.is_empty() => {
+            Message::new(
+                "gui-history-quick-remove",
+                "Remove { $count } photos from the quick collection",
+            )
+        }
+        E::QuickToggle { .. } | E::QuickAdd { .. } if added => Message::new(
+            "gui-history-quick-add-named",
+            "Add { $count } photos to the quick collection “{ $name }”",
         ),
-        E::QuickClear => Message::new("gui-history-quick-clear", "Clear the quick collection"),
+        E::QuickToggle { .. } | E::QuickAdd { .. } | E::QuickRemove { .. } => Message::new(
+            "gui-history-quick-remove-named",
+            "Remove { $count } photos from the quick collection “{ $name }”",
+        ),
+        E::QuickClear { .. } if name.is_empty() => {
+            Message::new("gui-history-quick-clear", "Clear the quick collection")
+        }
+        E::QuickClear { .. } => Message::new(
+            "gui-history-quick-clear-named",
+            "Clear the quick collection “{ $name }”",
+        ),
         E::QuickSave { .. } => Message::new(
             "gui-history-quick-save",
             "Save the quick collection as “{ $name }”",
         ),
+        E::QuickCreate { .. } => {
+            Message::new("gui-history-quick-new", "New quick collection “{ $name }”")
+        }
+        E::QuickRename { .. } if name.is_empty() => Message::new(
+            "gui-history-quick-rename-first",
+            "Rename the quick collection",
+        ),
+        E::QuickRename { .. } => Message::new(
+            "gui-history-quick-rename",
+            "Rename the quick collection “{ $name }”",
+        ),
+        E::QuickDelete { .. } => Message::new(
+            "gui-history-quick-delete",
+            "Delete the quick collection “{ $name }”",
+        ),
+        E::QuickTarget { .. } if name.is_empty() => Message::new(
+            "gui-history-quick-target-first",
+            "Make the quick collection the target",
+        ),
+        E::QuickTarget { .. } => {
+            Message::new("gui-history-quick-target", "Make “{ $name }” the target")
+        }
     }
     .with("name", name)
     .with("count", count);

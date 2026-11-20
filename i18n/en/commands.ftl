@@ -457,14 +457,35 @@ command-library-openFolder =
 command-library-pasteFiles =
     .title = Paste Files or Image (`dry_run`: only say what would be imported)
 
+command-library-quick-add =
+    .title = Add photos to a quick collection (`id`; none: the target; `images`: ids, else the selection)
+
 command-library-quick-clear =
-    .title = Empty the quick collection; its photos stay in the library
+    .title = Empty a quick collection (`id`; none: the target); its photos stay in the library
+
+command-library-quick-create =
+    .title = New quick collection (`name`; `images`: ids, none by default; `target: true` makes it the target); without `name`, asks it. Answers its `id`
+
+command-library-quick-delete =
+    .title = Delete a quick collection (`id`), not the first (`quick`); its photos stay in the library. When it was the target, the first one is
+
+command-library-quick-list =
+    .title = List the quick collections, the first one first: `id`, `name` (none for the first until renamed), `count`, `target` (true for the target of B)
+
+command-library-quick-remove =
+    .title = Remove photos from a quick collection (`id`; none: the target; `images`: ids, else the selection); they stay in the library
+
+command-library-quick-rename =
+    .title = Rename a quick collection (`id`, `name`); without `name`, asks it
 
 command-library-quick-saveAs =
-    .title = Save the quick collection as an album (`name`; `clear`: empty it too); without `name`, asks it. Answers the album's `id`
+    .title = Save a quick collection (`id`; none: the target) as an album (`name`; `clear`: empty it too); without `name`, asks it. Answers the album's `id`
+
+command-library-quick-target =
+    .title = Make a quick collection (`id`) the target: B and drops on it put photos there
 
 command-library-quick-toggle =
-    .title = Put photos in the quick collection (`images`: ids, else the selection), or take them out when it holds them all; scope the library to it with the collection `quick`
+    .title = B: put photos in the target quick collection (`id`: another one; `images`: ids, else the selection), or take them out when it holds them all; scope the library to one with `library.collection` and its `id` (the first is `quick`)
 
 command-library-remove =
     .title = Remove from Library: take the photos out (`images`: ids, else the selection), their files untouched; Ctrl+Z puts them back
