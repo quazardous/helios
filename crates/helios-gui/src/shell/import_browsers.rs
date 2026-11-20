@@ -27,6 +27,7 @@
 use std::path::{Path, PathBuf};
 
 use egui_pop::api::files::browser::{FileBrowser, MODE_AGENDA};
+use egui_pop::core::fold::TreeRow;
 use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::ui::{TextRole, UiPop as _};
 use egui_pop::core::widgets;
@@ -302,20 +303,21 @@ pub(super) fn tree_ui(ui: &mut egui::Ui, w: &mut ImportWindow, words: &BrowseWor
                 || folder.display().to_string(),
                 |n| n.to_string_lossy().into_owned(),
             );
-            ui.horizontal(|ui| {
-                // The one raw call left: the kit has no row of a flat
-                // tree at a depth (egui-pop's `TreeRow` nests its rows
-                // under open branches, and these folders are listed
-                // flat, an ancestor without photos left out).
-                #[allow(clippy::cast_precision_loss)]
-                ui.add_space(12.0 * (depth + 1) as f32);
-                if widgets::selectable_label(ui, shown.as_ref() == Some(folder), name)
-                    .tip(folder.display().to_string())
-                    .clicked()
-                {
-                    chosen = Some(Some(folder.clone()));
-                }
-            });
+            // A row of a flat tree at its depth: the folders are listed
+            // flat (an ancestor without photos left out), each indented
+            // and said at its level.
+            let id = ui.make_persistent_id(("helios.import.tree", folder));
+            TreeRow::new(id, name.as_str())
+                .leaf(true)
+                .depth(depth)
+                .show(ui, |ui| {
+                    if widgets::selectable_label(ui, shown.as_ref() == Some(folder), name)
+                        .tip(folder.display().to_string())
+                        .clicked()
+                    {
+                        chosen = Some(Some(folder.clone()));
+                    }
+                });
         }
     });
     if let Some(folder) = chosen {

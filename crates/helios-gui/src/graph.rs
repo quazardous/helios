@@ -28,11 +28,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Ui;
 use egui_pop::api::AppHandle;
-use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::ui::{TextRole, UiPop as _};
 use egui_pop::viewport::graph::{
-    Edge, Edit, GraphEditor, GraphEvent, GraphModel, GraphState, Group, Kind, Level, Node, Param,
-    Port, PortRef, PortType, Refusal, Request, WireStyle,
+    Edge, Edit, GraphEditor, GraphEvent, GraphModel, GraphState, Group, Kind, Level, Node,
+    NodeStatus, Param, Port, PortRef, PortType, Refusal, Request, WireStyle,
 };
 use helios_core::{Engine, Graph, Message, ModuleKind, NodeState, Region};
 use helios_shell::commands::Origin;
@@ -767,27 +766,26 @@ pub fn header_text(ctx: &egui::Context, h: &Header) -> String {
     }
 }
 
-fn header_ui(ui: &mut Ui, h: &Header) {
-    let tokens = crate::theme::Tokens::of(ui.ctx());
-    let extra = crate::theme::Extra::of(&tokens);
-    let color = match h.state {
-        NodeState::Done => extra.state_done,
-        NodeState::Running => extra.state_running,
-        NodeState::Stale => extra.state_stale,
-        NodeState::Failed => extra.state_failed,
-        NodeState::Pending => extra.state_pending,
-        NodeState::Idle => tokens.text.muted,
+/// A header as the editor's node status: its text in its `state.*`
+/// theme token's colour (muted text when idle), its detail as the
+/// tooltip.
+fn node_status(ctx: &egui::Context, h: &Header) -> NodeStatus {
+    let token = match h.state {
+        NodeState::Done => Some("state.done"),
+        NodeState::Running => Some("state.running"),
+        NodeState::Stale => Some("state.stale"),
+        NodeState::Failed => Some("state.failed"),
+        NodeState::Pending => Some("state.pending"),
+        NodeState::Idle => None,
     };
-    let text = header_text(ui.ctx(), h);
-    // The two raw calls left (`ui.label`, `RichText`): the state in the
-    // node's title bar, small and in its `state.*` colour, the editor's
-    // header slot. The kit has text in a role or in a tone, not small
-    // text in a theme token's colour; the editor itself should draw a
-    // node's status (follow-up in egui-pop's graph editor).
-    let r = ui.label(egui::RichText::new(text).small().color(color));
-    if !h.detail.is_empty() {
-        r.tip(&h.detail);
+    let mut status = NodeStatus::new(header_text(ctx, h));
+    if let Some(token) = token {
+        status = status.token(token);
     }
+    if !h.detail.is_empty() {
+        status = status.detail(h.detail.as_str());
+    }
+    status
 }
 
 // ---------------------------------------------------------------------
@@ -1053,7 +1051,11 @@ impl GraphPanel {
             &ctx,
             Message::new("gui-graph-label", "The workspace's network"),
         );
-        let headers = self.headers.clone();
+        let statuses: BTreeMap<String, NodeStatus> = self
+            .headers
+            .iter()
+            .map(|(id, h)| (id.clone(), node_status(&ctx, h)))
+            .collect();
         // egui-pop draws the hint, the hand mode indicator and the
         // overview just above the canvas: a window, popup or dialog over
         // the canvas stays over them.
@@ -1062,11 +1064,7 @@ impl GraphPanel {
             .snap(Some(10.0))
             .wires(wires)
             .requests(requests)
-            .header(move |ui, node| {
-                if let Some(h) = headers.get(&node.id) {
-                    header_ui(ui, h);
-                }
-            });
+            .status(move |node| statuses.get(&node.id).cloned());
         let out = match &self.app {
             Some(app) => egui_pop::imaging::show_graph(app, GRAPH, editor, ui),
             None => editor.show(ui),

@@ -6,12 +6,10 @@
 [files]
 "activity.rs" = 6
 "caption.rs" = 2
-"graph.rs" = 2
 "jobs.rs" = 10
 "params.rs" = 26
 "plugins.rs" = 2
 "promise_line.rs" = 13
 "queue.rs" = 16
 "shell.rs" = 2
-"shell/import_browsers.rs" = 1
 "shell/import_window.rs" = 1
