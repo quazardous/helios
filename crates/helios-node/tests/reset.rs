@@ -141,7 +141,7 @@ fn the_reset_says_its_plan_asks_for_the_word_and_never_touches_a_photo() {
     assert!(!home.root.join(".local/state/helios").exists());
     let backups: Vec<_> = std::fs::read_dir(home.root.join(".local/share"))
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.file_name().to_string_lossy().starts_with("helios-reset-"))
         .collect();
     assert_eq!(backups.len(), 1, "one dated backup folder");

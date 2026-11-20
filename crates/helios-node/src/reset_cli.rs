@@ -169,11 +169,10 @@ pub fn run(
         say("helios: Helios's folders cannot be told here (no HOME)");
         return 3;
     };
-    let library = ask
-        .vault
-        .clone()
-        .map(|v| std::path::absolute(&v).unwrap_or(v))
-        .unwrap_or_else(|| places.data.join(LIBRARY_FILE));
+    let library = ask.vault.clone().map_or_else(
+        || places.data.join(LIBRARY_FILE),
+        |v| std::path::absolute(&v).unwrap_or(v),
+    );
     places.library = Some(library.clone());
     match running(&library) {
         Ok(false) => {}
