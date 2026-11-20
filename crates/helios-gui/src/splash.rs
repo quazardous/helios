@@ -19,8 +19,11 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use egui_pop::core::progress::Spinner;
+use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
 use helios_core::Message;
 use helios_node_core::phases::{Phase, Running};
+use helios_ui::Action;
 
 /// How long a step runs before the splash says why it lasts.
 pub const STUCK: Duration = Duration::from_secs(3);
@@ -69,77 +72,74 @@ pub fn show_as(
     ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
     let steps = phase.steps();
     let width = 420.0_f32.min(rect.width());
+    // The column starts low enough to sit about the middle of the window.
+    let lines = steps.len() as f32;
+    let top = ((rect.height() - 220.0 - lines * 24.0) / 2.0).max(8.0);
     let mut column = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(egui::Rect::from_center_size(
-                rect.center(),
-                egui::vec2(width, rect.height()),
+            .max_rect(egui::Rect::from_min_size(
+                egui::pos2(rect.center().x - width / 2.0, rect.top() + top),
+                egui::vec2(width, (rect.height() - top).max(0.0)),
             ))
             .layout(egui::Layout::top_down(egui::Align::Center)),
     );
     let ui = &mut column;
-    let lines = steps.len() as f32;
-    ui.add_space(((rect.height() - 220.0 - lines * 24.0) / 2.0).max(8.0));
     let logo = crate::plugins::logo(ui.ctx());
     ui.add(egui::Image::new((logo.id(), egui::vec2(64.0, 64.0))));
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("Helios").heading().strong());
-    ui.label(egui::RichText::new(version).weak().small());
-    ui.add_space(12.0);
-    ui.horizontal(|ui| {
-        let title = text(title(kind));
-        let wide = ui.spacing().interact_size.y + ui.spacing().item_spacing.x;
-        let galley_width = ui.fonts_mut(|f| {
-            f.layout_no_wrap(
-                title.clone(),
-                egui::TextStyle::Body.resolve(ui.style()),
-                egui::Color32::WHITE,
-            )
-            .size()
-            .x
-        });
-        ui.add_space(((ui.available_width() - galley_width - wide) / 2.0).max(0.0));
-        ui.add(egui::Spinner::new());
-        ui.label(title);
-    });
-    ui.add_space(12.0);
+    ui.space_role(Space::Inline);
+    ui.text_role(TextRole::Title, "Helios");
+    ui.meta(version);
+    ui.space_role(Space::Group);
+    // The spinner draws the title after it, which names it too.
+    ui.add(Spinner::new().label(text(title(kind))));
+    ui.space_role(Space::Group);
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         for step in &steps {
             ui.horizontal(|ui| {
                 let icon = ui.spacing().interact_size.y;
-                ui.allocate_ui(egui::vec2(icon, icon), |ui| {
-                    if step.done() {
-                        ui.label(egui::RichText::new(DONE).color(ui.visuals().selection.bg_fill));
-                    } else if step.running() {
-                        ui.add(egui::Spinner::new().size(icon * 0.7));
+                ui.sized_ui(
+                    egui::vec2(icon, icon),
+                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                    |ui| {
+                        if step.done() {
+                            ui.text_tone(Tone::Accent, DONE);
+                        } else if step.running() {
+                            ui.add(Spinner::new().size(icon * 0.7));
+                        } else {
+                            ui.muted("·");
+                        }
+                    },
+                );
+                // What a lasting step says lines up under its label.
+                ui.vertical(|ui| {
+                    let label = text(step.label.clone());
+                    // The running step stands out, the others recede.
+                    if step.running() {
+                        ui.strong_text(label);
                     } else {
-                        ui.label(egui::RichText::new("·").weak());
+                        ui.muted(label);
                     }
-                });
-                let label = egui::RichText::new(text(step.label.clone()));
-                ui.label(if step.running() {
-                    label.strong()
-                } else {
-                    label
+                    if step.running() && step.running_for(now) >= stuck_after {
+                        ui.horizontal(|ui| {
+                            let why = step.why.clone().unwrap_or_else(|| {
+                                Message::new("gui-splash-still-working", "Still working…")
+                            });
+                            ui.muted(text(why));
+                            if kind == Kind::End
+                                && step.can_skip
+                                && helios_ui::action(
+                                    ui,
+                                    Action::Secondary,
+                                    &text(Message::new("gui-splash-quit-now", "Quit now")),
+                                )
+                                .clicked()
+                            {
+                                phase.quit_now();
+                            }
+                        });
+                    }
                 });
             });
-            if step.running() && step.running_for(now) >= stuck_after {
-                ui.horizontal(|ui| {
-                    ui.add_space(ui.spacing().interact_size.y + ui.spacing().item_spacing.x);
-                    let why = step.why.clone().unwrap_or_else(|| {
-                        Message::new("gui-splash-still-working", "Still working…")
-                    });
-                    ui.label(egui::RichText::new(text(why)).weak());
-                    if kind == Kind::End
-                        && step.can_skip
-                        && ui
-                            .button(text(Message::new("gui-splash-quit-now", "Quit now")))
-                            .clicked()
-                    {
-                        phase.quit_now();
-                    }
-                });
-            }
         }
     });
     if phase.busy() {
