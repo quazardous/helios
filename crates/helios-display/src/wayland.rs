@@ -253,10 +253,8 @@ impl Dispatch<WpImageDescriptionInfoV1, usize> for Outputs {
                 d.primaries_named = Some(primaries_name(u32::from(primaries)));
             }
             E::TfNamed { tf } => d.transfer = Some(transfer_name(u32::from(tf))),
-            E::TfPower { eexp } => {
-                if d.transfer.is_none() {
-                    d.transfer = Some(format!("power {}", f64::from(eexp) / 10_000.0));
-                }
+            E::TfPower { eexp } if d.transfer.is_none() => {
+                d.transfer = Some(format!("power {}", f64::from(eexp) / 10_000.0));
             }
             E::Luminances {
                 max_lum,
