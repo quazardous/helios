@@ -2662,6 +2662,7 @@ dependencies = [
  "helios-plugin",
  "helios-plugin-darktable-library",
  "helios-profile",
+ "helios-rack",
  "helios-scopes",
  "helios-shell",
  "helios-storage",
@@ -3115,6 +3116,21 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
+name = "helios-rack"
+version = "0.92.0"
+dependencies = [
+ "egui-pop",
+ "egui_hud",
+ "helios-controls",
+ "helios-core",
+ "helios-i18n",
+ "helios-module-masks",
+ "helios-shell",
+ "helios-values",
+ "serde_json",
 ]
 
 [[package]]

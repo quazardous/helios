@@ -1844,6 +1844,56 @@ pub fn operator_glyph(ui: &mut Ui, operator: &str, hint: &str) -> egui::Response
     response.tip(hint)
 }
 
+/// A group's operator as a preview for a menu (the Parameters panel's
+/// operator): the picture [`operator_glyph`] draws, made at twice its
+/// size as a texture, once per operator and theme, its effect and the
+/// operator's name as its hint.
+pub fn operator_preview(ctx: &egui::Context, operator: &str) -> helios_rack::Preview {
+    const SCALE: usize = 2;
+    const W: usize = 20 * SCALE;
+    const H: usize = 14 * SCALE;
+    const R: f32 = 5.5;
+    let t = crate::theme::Tokens::of(ctx);
+    let (accent, muted) = (t.accent.default, t.text.muted);
+    let id = egui::Id::unique(("helios.operator-preview", operator, accent, muted));
+    let texture = ctx
+        .data(|d| d.get_temp::<egui::TextureHandle>(id))
+        .unwrap_or_else(|| {
+            let op = Operator::from_name(operator).unwrap_or(Operator::Maximum);
+            let centres = [egui::pos2(7.0, 7.0), egui::pos2(13.0, 7.0)];
+            let disc =
+                |c: egui::Pos2, p: egui::Pos2| ((R - c.distance(p)) / 2.0 + 0.5).clamp(0.0, 1.0);
+            let mut pixels = vec![egui::Color32::TRANSPARENT; W * H];
+            for (i, px) in pixels.iter_mut().enumerate() {
+                let p = egui::pos2(
+                    ((i % W) as f32 + 0.5) / SCALE as f32,
+                    ((i / W) as f32 + 0.5) / SCALE as f32,
+                );
+                let v = fold(op, centres.map(|c| (disc(c, p), 1.0, false))).unwrap_or(0.0);
+                let mut c = accent.gamma_multiply(v);
+                // The members' outlines, a point wide, over the fill.
+                let edge = centres
+                    .iter()
+                    .map(|c| (c.distance(p) - R).abs())
+                    .fold(f32::MAX, f32::min);
+                if edge < 0.5 {
+                    c = muted;
+                }
+                *px = c;
+            }
+            let image = egui::ColorImage::new([W, H], pixels);
+            let handle = ctx.load_texture(
+                format!("helios.operator-preview.{operator}"),
+                image,
+                egui::TextureOptions::LINEAR,
+            );
+            ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
+            handle
+        });
+    helios_rack::Preview::texture(texture.id(), [W as u32, H as u32])
+        .hint(operator_hint(ctx, operator))
+}
+
 fn add_items() -> Vec<MenuItem> {
     ADD_KINDS
         .into_iter()

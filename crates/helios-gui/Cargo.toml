@@ -34,6 +34,9 @@ helios-values.workspace = true
 helios-controls = { workspace = true, features = ["render"] }
 # GPLv3 (this workspace): the intent presets screens draw with.
 helios-ui.workspace = true
+# GPLv3 (this workspace): the frame visual modules draw through (the
+# Parameters panel).
+helios-rack.workspace = true
 helios-core.workspace = true
 # The edit's decisions, answered in the Decisions panel.
 helios-decision.workspace = true

@@ -472,11 +472,11 @@ fn a_path_s_points_fold_into_a_summary_that_opens() {
         );
     }
     // A click opens it: a point a line, numbered.
-    h.get_by_label("4 points").click();
+    h.get_by_label_contains(": 4 points").click();
     h.run();
     h.get_by_label_contains("4: ");
     // And another closes it.
-    h.get_by_label("4 points").click();
+    h.get_by_label_contains(": 4 points").click();
     h.run();
     assert!(h.query_by_label_contains("4: ").is_none());
 }
