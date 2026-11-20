@@ -254,8 +254,7 @@ fn capture(keep: &[Vec<char>], shape: &[Vec<char>], i: usize, end: End) -> (Stri
                     bal -= 1;
                     None
                 }
-                ',' if end == End::Field && bal == 0 => Some(k),
-                ')' | ']' | '}' if end == End::Field && bal == 0 => Some(k),
+                ',' | ')' | ']' | '}' if end == End::Field && bal == 0 => Some(k),
                 '(' | '[' | '{' => {
                     bal += 1;
                     None

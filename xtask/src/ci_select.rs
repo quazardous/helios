@@ -505,7 +505,7 @@ fn affected_file(input: &Input, change: &Change, s: &mut Selection) {
             }
             Err(e) => {
                 why =
-                    format!("{path} changed, a feature crate whose edit may reach helios-gui: {e}")
+                    format!("{path} changed, a feature crate whose edit may reach helios-gui: {e}");
             }
         }
     }
