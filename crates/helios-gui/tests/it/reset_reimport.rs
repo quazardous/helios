@@ -165,7 +165,7 @@ fn after_a_reset_the_setup_adds_the_photos_back_where_they_are() {
     assert_eq!(helios_node_core::reset::run(&plan).failed, None);
     let offer = helios_node_core::reset::pending_reimport(&places.data)
         .expect("the reset recorded the photo folders");
-    assert_eq!(offer.folders, [photos.clone()]);
+    assert_eq!(offer.folders, std::slice::from_ref(&photos));
 
     // The next launch: a fresh library, the first-run setup.
     let folder = Arc::new(Mutex::new(None));
