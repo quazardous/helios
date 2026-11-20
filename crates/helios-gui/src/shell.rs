@@ -115,7 +115,7 @@ mod import_profiles;
 mod import_sources;
 mod import_window;
 mod import_wizard;
-pub(crate) mod init_wizard;
+pub mod init_wizard;
 mod library_imports;
 mod library_keywords;
 mod library_meta;
@@ -349,6 +349,10 @@ enum Action {
     InitLibraryFolder(Value),
     InitApply(Value),
     InitChooseFolder,
+    /// `helios.app.reimport`: the photos a reset kept, added back in place.
+    Reimport,
+    /// `helios.app.reimport.folders`: the folders it adds.
+    ReimportFolders,
     Fullscreen,
     Minimize,
     Maximize,
@@ -4041,6 +4045,23 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                init_wizard::REIMPORT,
+                "Add the photos of the folders a reset kept back to the library, where they are (nothing copied or moved)",
+                "Library",
+            ),
+            Box::new(|_, _| Ok(Action::Reimport)),
+        );
+        add(
+            CommandSpec::new(
+                init_wizard::REIMPORT_FOLDERS,
+                "The photo folders a reset kept, offered for a re-import in place",
+                "Library",
+            )
+            .read_only(),
+            Box::new(|_, _| Ok(Action::ReimportFolders)),
+        );
+        add(
+            CommandSpec::new(
                 "library.chooseFolder",
                 "Choose the library folder imports copy photos into (`path`; asked through the folder chooser when absent)",
                 "Library",
@@ -7375,6 +7396,8 @@ impl Shell {
             Action::InitLibraryFolder(args) => return self.init_library_folder(&args),
             Action::InitApply(args) => return self.init_apply(&args),
             Action::InitChooseFolder => return self.init_choose_folder(),
+            Action::Reimport => return self.reimport(),
+            Action::ReimportFolders => return Ok(self.reimport_folders()),
             Action::PauseAutomaticImports(args) => return self.pause_automatic_imports(&args),
             Action::AddImportSource(args) => return self.add_import_source(&args),
             Action::Calibrate(args) => {

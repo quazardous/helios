@@ -96,6 +96,8 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("health.checkNow", "phosphor:heartbeat"),
     ("health.fix", "phosphor:wrench"),
     ("health.ignore", "phosphor:bell-slash"),
+    ("helios.app.reimport", "phosphor:folder-plus"),
+    ("helios.app.reimport.folders", "folder"),
     ("helios.quit.confirmed", "phosphor:sign-out"),
     ("helios.quit.unsaved", "phosphor:floppy-disk"),
     ("helios.setUp", "phosphor:wrench"),

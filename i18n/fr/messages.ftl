@@ -3318,3 +3318,23 @@ gui-library-view-list = Liste
 gui-library-view-per-row = Vignettes, { $count } par ligne
 
 gui-library-view-tip = Afficher les résultats en vignettes, tant par ligne, en liste, ou en détails par colonnes
+
+gui-init-reimport = Vos photos
+
+gui-init-reimport-about = Helios a été réinitialisé. Ses photos sont toujours dans ces dossiers : ajoutez-les de nouveau à la bibliothèque, là où elles sont. Rien n’est copié ni déplacé.
+
+gui-init-reimport-toggle = Ajouter de nouveau ces photos, là où elles sont
+
+gui-forget-open = Oublier les comptes…
+
+gui-forget-wizard = Oublier les comptes
+
+gui-forget-wizard-about = Les connexions des comptes et les clés d’IA qu’Helios garde dans le trousseau du système sont supprimées. Chaque compte se reconnecte. Les photos et la bibliothèque restent.
+
+gui-forget-cancel = Quitter sans oublier les comptes ?
+
+gui-forget-cancel-verb = Quitter
+
+gui-forget-verb = Oublier les comptes
+
+gui-reset-forget-accounts = Oublier aussi les comptes (leurs connexions et les clés d’IA du trousseau du système)

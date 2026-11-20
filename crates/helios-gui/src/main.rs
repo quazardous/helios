@@ -354,6 +354,11 @@ fn reset_commands(
         RESTART.store(false, Ordering::Relaxed);
         None
     });
+    // "Forget accounts": the system keyring's Helios entries.
+    helios_gui::forget::register(shell, Arc::new(helios_gui::forget::SystemKeyring))?;
+    // A reset of everything recorded the photo folders: the first-run
+    // setup offers to add them back where they are.
+    shell.offer_reimport(helios_node_core::reset::pending_reimport(&places.data));
     reset::register(
         shell,
         reset::Reset {
@@ -2242,10 +2247,16 @@ fn main() -> Result<(), String> {
             ending.finish();
             // A reset was confirmed: the library is closed now, its plan
             // runs before Helios starts again (on its first-run setup).
-            if let Some(plan) = PENDING_RESET.take() {
+            if let Some((plan, forget_accounts)) = PENDING_RESET.take_with_accounts() {
                 let report = helios_node_core::reset::run(&plan);
                 if let Some((path, why)) = &report.failed {
                     warn(&format!("reset: stopped at {}: {why}", path.display()));
+                }
+                // Asked with the reset: the keyring's Helios entries.
+                if forget_accounts
+                    && let Err(e) = helios_gui::forget::forget(&helios_gui::forget::SystemKeyring)
+                {
+                    warn(&format!("reset: the accounts: {e}"));
                 }
             }
             // A catalogue restore was asked: the next Helios applies it as

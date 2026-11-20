@@ -28,7 +28,10 @@
 //!
 //! The Danger zone section offers a catalogue snapshot first, then
 //! "Reset Helios…", which opens the [`WIZARD`]: the scope, then the word
-//! typed, checked as it is typed ([`CHECK_WORD`]).
+//! typed, checked as it is typed ([`CHECK_WORD`]). An "everything" reset
+//! may forget the accounts too (`forget_accounts`, `crate::forget`): the
+//! keyring's Helios entries are removed with the plan, after the quit.
+//! "Forget accounts…" does that alone (`crate::forget::WIZARD`).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -69,10 +72,10 @@ pub use helios_node_core::reset::{Photos, photos_of};
 /// desktop takes it once the library is closed ([`Pending::take`]); an
 /// abandoned quit drops it.
 #[derive(Clone, Debug, Default)]
-pub struct Pending(Arc<Mutex<Option<Plan>>>);
+pub struct Pending(Arc<Mutex<Option<(Plan, bool)>>>);
 
 impl Pending {
-    fn slot(&self) -> std::sync::MutexGuard<'_, Option<Plan>> {
+    fn slot(&self) -> std::sync::MutexGuard<'_, Option<(Plan, bool)>> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -80,11 +83,22 @@ impl Pending {
 
     /// Keeps `plan` for the quit asked next.
     pub fn set(&self, plan: Plan) {
-        *self.slot() = Some(plan);
+        self.set_with_accounts(plan, false);
+    }
+
+    /// Keeps `plan` for the quit asked next, the accounts forgotten with
+    /// it when `forget_accounts` (`crate::forget`).
+    pub fn set_with_accounts(&self, plan: Plan, forget_accounts: bool) {
+        *self.slot() = Some((plan, forget_accounts));
     }
 
     /// The plan, taken: by the desktop once Helios has quit, or dropped.
     pub fn take(&self) -> Option<Plan> {
+        self.take_with_accounts().map(|(plan, _)| plan)
+    }
+
+    /// The plan and whether the accounts go with it, taken.
+    pub fn take_with_accounts(&self) -> Option<(Plan, bool)> {
         self.slot().take()
     }
 
@@ -228,11 +242,15 @@ pub fn run(reset: &Reset, args: &Value) -> Result<Value, String> {
         ));
     }
     let scope = scope_of(args)?;
+    let forget_accounts = args.get("forget_accounts") == Some(&Value::Bool(true));
+    if forget_accounts && scope != Scope::Everything {
+        return Err("`forget_accounts` goes with an `everything` reset only".into());
+    }
     let photos = (reset.photos)();
     let plan = reset::plan(&reset.places, scope, &photos.roots, &stamp()).map_err(|r| r.0)?;
     log::warn!(
         target: "helios::reset",
-        "reset asked ({scope:?}): {} targets, backup {:?}; Helios quits and starts again",
+        "reset asked ({scope:?}): {} targets, backup {:?}, accounts forgotten: {forget_accounts}; Helios quits and starts again",
         plan.targets.len(),
         plan.backup
     );
@@ -241,8 +259,9 @@ pub fn run(reset: &Reset, args: &Value) -> Result<Value, String> {
         "scope": plan.scope,
         "backup": plan.backup,
         "targets": plan.targets.len(),
+        "forget_accounts": forget_accounts,
     });
-    reset.pending.set(plan);
+    reset.pending.set_with_accounts(plan, forget_accounts);
     if let Err(e) = (reset.go)() {
         reset.pending.take();
         return Err(e);
@@ -282,7 +301,7 @@ pub fn register(shell: &mut Shell, reset: Reset) -> Result<(), String> {
     shell.register(
         CommandSpec::new(
             COMMAND,
-            "Reset Helios (`scope`: everything, caches or settings; `confirm`: the word RESET): Helios quits, puts its own folders aside and starts again; photos are never touched",
+            "Reset Helios (`scope`: everything, caches or settings; `confirm`: the word RESET; `forget_accounts`: the keyring's secrets too, with everything): Helios quits, puts its own folders aside and starts again; photos are never touched",
             "Help",
         ),
         move |args, _| run(&reset, args),
@@ -328,6 +347,14 @@ pub fn section(s: &mut SectionBuilder<'_>, t: &dyn Fn(Message) -> String) {
             .args(json!({ "id": WIZARD }))
             .danger(),
     );
+    // An id of its own: an action's id is its command's by default, and
+    // a group keeps one item per id.
+    let mut forget = Action::command(egui_pop::api::admin::CMD_WIZARD_OPEN.as_str())
+        .title(&t(Message::new("gui-forget-open", "Forget accounts…")))
+        .args(json!({ "id": crate::forget::WIZARD }))
+        .danger();
+    forget.meta.id = "forgetAccounts".into();
+    s.action(forget);
 }
 
 /// The reset's wizard: what to reset, then the word typed; its finish
@@ -362,6 +389,16 @@ pub fn wizard(t: &dyn Fn(Message) -> String) -> Wizard {
     )
     .default_value(json!("everything"))
     .required();
+    let accounts = Field::draft(
+        WIZARD,
+        "forget_accounts",
+        &t(Message::new(
+            "gui-reset-forget-accounts",
+            "Also forget the accounts (their sign-ins and AI keys in the system keyring)",
+        )),
+        FieldKind::Toggle,
+    )
+    .default_value(json!(false));
     let word = Field::draft(
         WIZARD,
         "confirm",
@@ -384,6 +421,9 @@ pub fn wizard(t: &dyn Fn(Message) -> String) -> Wizard {
         &t(Message::new("gui-reset-step-scope", "What to reset")),
         |s| {
             s.field(scope);
+            s.group("accounts", "")
+                .group_when("form.scope == 'everything'")
+                .field(accounts);
         },
     )
     .step(
@@ -397,7 +437,11 @@ pub fn wizard(t: &dyn Fn(Message) -> String) -> Wizard {
             .field(word);
         },
     )
-    .args(json!({ "scope": "${scope}", "confirm": "${confirm}" }))
+    .args(json!({
+        "scope": "${scope}",
+        "confirm": "${confirm}",
+        "forget_accounts": "${forget_accounts}",
+    }))
     .no_summary()
     .cancel(Confirmation::new(
         &t(Message::new("gui-reset-cancel", "Leave the reset?")),
@@ -410,16 +454,25 @@ pub fn wizard(t: &dyn Fn(Message) -> String) -> Wizard {
 /// The [`CHECK_WORD`] hook: a word typed that is not [`WORD`] is a
 /// problem, said in the field.
 pub fn check_word(t: impl Fn(Message) -> String + Send + Sync + 'static) -> Hook {
+    typed_word(WORD, t)
+}
+
+/// A `validate` hook over the draft's `confirm`: a word typed that is
+/// not `word` is a problem, said in the field.
+pub fn typed_word(
+    word: &'static str,
+    t: impl Fn(Message) -> String + Send + Sync + 'static,
+) -> Hook {
     Hook::Validate(Box::new(move |values| {
         let typed = values.get("confirm").and_then(Value::as_str).unwrap_or("");
-        if typed.is_empty() || typed.trim() == WORD {
+        if typed.is_empty() || typed.trim() == word {
             return Vec::new();
         }
         vec![Problem {
             field: "confirm".to_owned(),
             tone: Tone::Danger,
             message: t(
-                Message::new("gui-reset-word-wrong", "Type { $word } exactly").with("word", WORD),
+                Message::new("gui-reset-word-wrong", "Type { $word } exactly").with("word", word),
             ),
         }]
     }))

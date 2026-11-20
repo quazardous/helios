@@ -859,6 +859,12 @@ command-library-importAutomatic-pause =
 command-helios-setUp =
     .title = Configurer Helios…
 
+command-helios-app-reimport =
+    .title = Ajouter de nouveau à la bibliothèque les photos des dossiers qu’une réinitialisation a gardés, là où elles sont (rien n’est copié ni déplacé)
+
+command-helios-app-reimport-folders =
+    .title = Les dossiers de photos qu’une réinitialisation a gardés, proposés pour un nouvel ajout sur place
+
 command-init-apply =
     .title = Écrire les réglages de la configuration (`library.folder` : le dossier de la bibliothèque)
 

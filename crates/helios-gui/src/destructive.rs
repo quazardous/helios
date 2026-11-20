@@ -62,6 +62,11 @@ pub const NOT_FOR_AGENTS: &[&str] = &[
     // Puts Helios's own folders aside and restarts it: the word typed by
     // the person is its confirmation (`crate::reset`).
     "helios.app.reset",
+    // Removes Helios's secrets from the system keyring (`crate::forget`).
+    "helios.app.forgetAccounts",
+    // Adds back the photos of the folders a reset kept, in place: run by
+    // the person from the first-run setup (`shell::init_wizard`).
+    "helios.app.reimport",
 ];
 
 /// Whether the agent bridge refuses `command` ([`NOT_FOR_AGENTS`]).
@@ -160,6 +165,10 @@ mod tests {
             "sets or removes metadata; Ctrl+Z takes it back",
         ),
         ("library.show", "clears the filter, a view"),
+        (
+            "helios.app.reimport.folders",
+            "read-only: lists the photo folders a reset kept",
+        ),
         (
             "library.quick.saveAs",
             "saves an album; emptying the quick collection after is asked by `clear`",

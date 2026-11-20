@@ -103,6 +103,12 @@ command-health-fix =
 command-health-ignore =
     .title = Ignore a health finding, or show it again (`id`, `on`: true by default)
 
+command-helios-app-reimport =
+    .title = Add the photos of the folders a reset kept back to the library, where they are (nothing copied or moved)
+
+command-helios-app-reimport-folders =
+    .title = The photo folders a reset kept, offered for a re-import in place
+
 command-helios-compare-detach =
     .title = Move Compare to a new window
 
