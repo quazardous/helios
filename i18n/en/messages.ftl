@@ -2319,6 +2319,68 @@ gui-recording-saved = recording saved to { $path }
 
 gui-recording-stopped = recording stopped: { $error }
 
+gui-reset-about = Reset Helios as on its first launch: its settings, workspaces, catalogue, caches and logs are put aside in a dated backup folder (the caches are removed). Photos and their sidecars are never touched, wherever they are.
+
+gui-reset-cancel = Leave the reset?
+
+gui-reset-cancel-verb = Leave
+
+gui-reset-confirm-about = Take a catalogue snapshot first if you may want your ratings, tags and edits back. Then type the word: Helios quits and starts again.
+
+gui-reset-fate-backup = moved to the backup folder
+
+gui-reset-fate-remove = removed
+
+gui-reset-goes = What goes
+
+gui-reset-open = Reset Helios…
+
+gui-reset-refused = A reset is not possible here: { $why }
+
+gui-reset-scope = Reset
+
+gui-reset-scope-caches = Caches only: thumbnails and previews are made again
+
+gui-reset-scope-everything = Everything: the next launch is a first launch
+
+gui-reset-scope-settings = Settings only: the library stays
+
+gui-reset-snapshot = Snapshot the catalogue first
+
+gui-reset-stays = Stay untouched: your { $count } photos and their sidecars (folders: { $folders }), and the backup disks.
+
+gui-reset-stays-title = What stays
+
+gui-reset-step-confirm = Confirm
+
+gui-reset-step-scope = What to reset
+
+gui-reset-summary = { $count } places are removed.
+
+gui-reset-summary-backup = { $count } places go: moved to a dated helios-reset folder beside the data folder, so a reset can be undone by hand; the caches are removed.
+
+gui-reset-type = Type { $word } to confirm
+
+gui-reset-verb = Reset and restart
+
+gui-reset-what-cache = Caches
+
+gui-reset-what-config = Settings and workspaces (configuration folder)
+
+gui-reset-what-data = Default library, its snapshots and image map (data folder)
+
+gui-reset-what-library = Library catalogue
+
+gui-reset-what-state = Logs and crash reports
+
+gui-reset-what-thumbnails = Thumbnails
+
+gui-reset-wizard = Reset Helios
+
+gui-reset-wizard-about = Helios quits, puts its own folders aside and starts again. Photos are never touched.
+
+gui-reset-word-wrong = Type { $word } exactly
+
 gui-rule-add-condition = + Condition
 
 gui-rule-add-group = + Group
@@ -2521,6 +2583,8 @@ gui-settings-clients-about = Helios signs in to these services with its own OAut
 
 gui-settings-clients-none = No service signing in through OAuth is installed.
 
+gui-settings-danger = Danger zone
+
 gui-settings-decisions = Decisions
 
 gui-settings-destinations = Destinations
@@ -2574,6 +2638,8 @@ gui-settings-plugin-settings = Settings
 gui-settings-plugins = Plugins
 
 gui-settings-plugins-capabilities = Permissions
+
+gui-settings-reset = Reset Helios
 
 gui-settings-snapshots = Snapshots
 

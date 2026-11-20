@@ -32,6 +32,7 @@ pub const PRIVATE: &[&str] = &[
     "gui.record.start",
     "gui.snapshot",
     "health.findings",
+    "helios.app.reset.plan",
     "init.apply",
     "init.chooseFolder",
     "init.libraryFolder",

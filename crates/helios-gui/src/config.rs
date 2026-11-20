@@ -551,6 +551,8 @@ pub fn title(path: &str) -> Message {
         "hardware/display" => Message::new("gui-settings-display", "Display"),
         "backup/strategy" => Message::new("gui-settings-strategy", "Strategy"),
         "backup/destinations" => Message::new("gui-settings-destinations", "Destinations"),
+        "danger" => Message::new("gui-settings-danger", "Danger zone"),
+        "danger/reset" => Message::new("gui-settings-reset", "Reset Helios"),
         other => Message::from(other.to_string()),
     }
 }
@@ -575,6 +577,8 @@ pub fn manifest(
         .scope_at("plugins", &tt("plugins"), "phosphor:puzzle-piece", 65)
         .scope_at("hardware", &tt("hardware"), "command", 70)
         .scope_at("health", &tt("health"), "success", 90)
+        // Last: what cannot be had back easily.
+        .scope_at("danger", &tt("danger"), "warning", 99)
         .quick(QUICK);
     m = m.section("storage/volumes", &tt("storage/volumes"), |s| {
         helios_storage_ui::settings::volumes_section(s, t, crate::shell::FORGET_VOLUME);
@@ -639,7 +643,11 @@ pub fn manifest(
     .section("accounts/clients", &tt("accounts/clients"), |s| {
         clients_section(s, t);
     })
+    .section(crate::reset::SECTION, &tt(crate::reset::SECTION), |s| {
+        crate::reset::section(s, t);
+    })
     .wizard(helios_storage_ui::settings::backup_wizard(t))
+    .wizard(crate::reset::wizard(t))
     .wizard(init_wizard(&helios_init::Registry::builtin(), t));
     plugins::sections(m, plugins, t)
 }
@@ -1239,6 +1247,14 @@ impl Plugin for BridgePlugin {
         admin.hook(
             crate::shell::init_wizard::CHECK_FOLDER,
             check_library_folder(move |m| match &words {
+                Some(i) => helios_i18n::message(i, &m),
+                None => m.english,
+            }),
+        );
+        let words = self.i18n.clone();
+        admin.hook(
+            crate::reset::CHECK_WORD,
+            crate::reset::check_word(move |m| match &words {
                 Some(i) => helios_i18n::message(i, &m),
                 None => m.english,
             }),

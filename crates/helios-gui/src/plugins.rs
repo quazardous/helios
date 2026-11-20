@@ -364,6 +364,9 @@ pub fn declared(spec: &HeliosSpec, d: &Declarations) -> Result<CommandSpec, Plug
     for (arg, value) in crate::destructive::destructive_if(&spec.id) {
         s = s.destructive_if(arg, serde_json::json!(value));
     }
+    if !crate::destructive::is_for_agents(&spec.id) {
+        s = s.no_agent();
+    }
     Ok(s)
 }
 

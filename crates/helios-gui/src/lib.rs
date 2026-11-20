@@ -86,6 +86,7 @@ pub mod quit;
 pub mod recent_filters;
 pub mod relay;
 pub mod report;
+pub mod reset;
 pub mod rule_editor;
 pub mod rule_editor_ui;
 pub mod schemas;
