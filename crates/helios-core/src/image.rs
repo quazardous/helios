@@ -427,7 +427,21 @@ impl Image {
     }
 
     /// The hash of the image content: region, channel count and pixel bits.
+    ///
+    /// The pixels' bytes go to the hasher in large batches, never 4 bytes
+    /// at a time: BLAKE3 hashes a batch of many KiB with SIMD across its
+    /// chunks, while one call per value cost about 17 ns each (some 430 ms
+    /// for a 25 MP mosaic, most of building a raw's graph). The bytes fed
+    /// are the same, so is the hash.
     pub fn content_hash(&self) -> ContentHash {
+        /// Bytes gathered before each hasher update.
+        const BATCH: usize = 1 << 18;
+        let _span = crate::trace::span("image.hash", || {
+            format!(
+                "{}x{}x{}",
+                self.region.width, self.region.height, self.channels
+            )
+        });
         let mut h = blake3::Hasher::new();
         h.update(b"helios.image.v1");
         h.update(&self.region.x.to_le_bytes());
@@ -435,11 +449,15 @@ impl Image {
         h.update(&self.region.width.to_le_bytes());
         h.update(&self.region.height.to_le_bytes());
         h.update(&self.channels.to_le_bytes());
+        let mut bytes: Vec<u8> = Vec::with_capacity(BATCH + self.row_len() * 4);
         for y in self.region.y..self.region.bottom() {
-            for v in self.row(y) {
-                h.update(&v.to_bits().to_le_bytes());
+            bytes.extend(self.row(y).iter().flat_map(|v| v.to_bits().to_le_bytes()));
+            if bytes.len() >= BATCH {
+                h.update(&bytes);
+                bytes.clear();
             }
         }
+        h.update(&bytes);
         ContentHash(*h.finalize().as_bytes())
     }
 
@@ -542,6 +560,27 @@ mod tests {
         assert!(!a.overlaps(&Region::new(-2, 1, 2, 1)));
         assert!(!a.overlaps(&Region::new(1, 1, 0, 3)), "an empty region");
         assert!(Region::new(-5, -5, 20, 20).overlaps(&a));
+    }
+
+    #[test]
+    fn content_hash_in_batches_is_the_hash_value_by_value() {
+        // Rows wider than one batch and a view off the origin: the bytes
+        // fed in batches hash as the same bytes fed 4 at a time.
+        let a = ramp(Region::new(-2, 3, 70_001, 3));
+        let mut h = blake3::Hasher::new();
+        h.update(b"helios.image.v1");
+        let r = a.region();
+        h.update(&r.x.to_le_bytes());
+        h.update(&r.y.to_le_bytes());
+        h.update(&r.width.to_le_bytes());
+        h.update(&r.height.to_le_bytes());
+        h.update(&1u32.to_le_bytes());
+        for y in r.y..r.bottom() {
+            for v in a.row(y) {
+                h.update(&v.to_bits().to_le_bytes());
+            }
+        }
+        assert_eq!(a.content_hash(), ContentHash(*h.finalize().as_bytes()));
     }
 
     #[test]

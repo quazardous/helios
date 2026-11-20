@@ -288,6 +288,30 @@ pub fn image(value: Value) -> Option<Arc<Image>> {
     value.downcast::<Image>().ok()
 }
 
+/// The longest side of a raw's first paint, in pixels: a full-screen
+/// viewport's size, never the embedded preview's full size (6048 px on
+/// a Nikon Z6 II), whose float conversion and hash cost more than the
+/// JPEG's decode.
+pub const FIRST_PAINT_SIDE: u32 = 2560;
+
+/// A raw's embedded preview alone in a graph (its source's `image`
+/// port), at most [`FIRST_PAINT_SIDE`] pixels long, turned by the raw's
+/// EXIF orientation as the development will be: what the desktop draws
+/// while the raw is developed. `None` for a picture or a raw without one.
+///
+/// Showing the embedded JPEG first, before the developed frame, is what
+/// darktable's darkroom and Lightroom do on a cold open.
+pub fn first_paint(path: &std::path::Path) -> Option<(Graph, NodeId)> {
+    if helios_load::Kind::of(path) != helios_load::Kind::Raw {
+        return None;
+    }
+    let (preview, tag) = helios_load::preview_oriented_at(path, Some(FIRST_PAINT_SIDE)).ok()?;
+    let preview = helios_load::upright(preview?, tag);
+    let mut graph = Graph::new();
+    let node = graph.add_source("source", preview);
+    Some((graph, node))
+}
+
 /// How often the follower looks for a newer graph while a preview renders.
 const LOOK: Duration = Duration::from_millis(20);
 

@@ -942,21 +942,6 @@ struct Preparing {
     ready: std::sync::mpsc::Receiver<Ready>,
 }
 
-/// A raw's embedded preview alone in a graph (its source's `image`
-/// port), turned by the raw's EXIF orientation as the development will
-/// be, to draw while the raw is developed; none for a picture or a raw
-/// without one.
-fn first_paint(path: &Path) -> Option<(helios_core::Graph, helios_core::NodeId)> {
-    if helios_load::Kind::of(path) != helios_load::Kind::Raw {
-        return None;
-    }
-    let (preview, tag) = helios_load::preview_oriented(path).ok()?;
-    let preview = helios_load::upright(preview?, tag);
-    let mut graph = helios_core::Graph::new();
-    let node = graph.add_source("source", preview);
-    Some((graph, node))
-}
-
 /// Starts making an image of the library ready, off the window's thread:
 /// a raw's embedded preview first, then the image through `bundle`'s
 /// network (the darkroom applies its head version's edit), the `decoded`
@@ -976,14 +961,26 @@ fn prepare_library(
         .name("helios-image-open".into())
         .spawn(move || {
             let _span = helios_core::trace::span("photo.open", || file.display().to_string());
-            let first = {
-                let _span =
-                    helios_core::trace::span("photo.first_paint", || file.display().to_string());
-                first_paint(&file)
-            };
-            if let Some((graph, node)) = first {
-                let _ = sender.send(Ready::First(graph, node));
-            }
+            // The embedded preview on a thread of its own, beside the
+            // decode, which no longer waits on it (darktable likewise
+            // shows a raw's embedded JPEG while its pipe runs). Should the
+            // development land first, the window has dropped this opening's
+            // receiver and the late first paint goes nowhere.
+            let first_file = file.clone();
+            let first_sender = sender.clone();
+            let _ = std::thread::Builder::new()
+                .name("helios-first-paint".into())
+                .spawn(move || {
+                    let first = {
+                        let _span = helios_core::trace::span("photo.first_paint", || {
+                            first_file.display().to_string()
+                        });
+                        helios_gui::preview::first_paint(&first_file)
+                    };
+                    if let Some((graph, node)) = first {
+                        let _ = first_sender.send(Ready::First(graph, node));
+                    }
+                });
             let decoded = helios_gui::warm::open(&states, &photo, &file, &bundle);
             let prepared = decoded.map(|(graph, node)| Prepared {
                 path: file,
