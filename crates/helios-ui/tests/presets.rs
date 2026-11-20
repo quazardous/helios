@@ -333,7 +333,7 @@ fn a_scroll_shows_its_content_and_a_tail_section_dialog_or_form_stays_bounded() 
                 assert!(ui.min_rect().height() < 300.0, "{kind:?} is bounded");
             }
         });
-        let shown = if kind == Scroll::Tail {
+        let shown = if matches!(kind, Scroll::Tail | Scroll::Log) {
             "line 99"
         } else {
             "line 0"

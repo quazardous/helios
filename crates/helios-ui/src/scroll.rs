@@ -27,16 +27,20 @@ pub enum Scroll {
     /// width and height, whatever its rows' size, its bar on the strip's
     /// edge.
     Strip,
+    /// A log filling its panel (the Log panel): the panel's whole width
+    /// and height, the newest line kept in view.
+    Log,
 }
 
 impl Scroll {
-    pub const ALL: [Scroll; 6] = [
+    pub const ALL: [Scroll; 7] = [
         Scroll::Region,
         Scroll::Tail,
         Scroll::Section,
         Scroll::Dialog,
         Scroll::Form,
         Scroll::Strip,
+        Scroll::Log,
     ];
 
     /// How many lines of text a tail shows.
@@ -64,6 +68,7 @@ impl Scroll {
 /// Need (layout): a dialog's body, its buttons kept in view below it.
 /// Need (layout): a form in a side panel's section, a share of its height.
 /// Need (layout): a list filling a strip beside another region, its bar on the strip's edge.
+/// Need (layout): a log filling its panel, the newest line kept in view.
 pub fn scroll<R>(ui: &mut Ui, id: &str, kind: Scroll, add: impl FnOnce(&mut Ui) -> R) -> R {
     let area = ScrollArea::vertical().id_salt(id);
     let area = match kind {
@@ -80,6 +85,7 @@ pub fn scroll<R>(ui: &mut Ui, id: &str, kind: Scroll, add: impl FnOnce(&mut Ui) 
             )
             .auto_shrink([false, true]),
         Scroll::Strip => area.auto_shrink([false, false]),
+        Scroll::Log => area.auto_shrink([false, false]).stick_to_bottom(true),
     };
     ui.scroll_area(area, add).inner
 }

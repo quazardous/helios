@@ -8,7 +8,9 @@
 //! the log file too (`log`, target `helios`).
 
 use egui::Ui;
+use egui_pop::core::ui::{Tone, UiPop as _};
 use helios_core::Message;
+use helios_ui::{Action, Scroll};
 
 use crate::dialogs::Level;
 
@@ -57,45 +59,33 @@ impl Log {
     }
 
     /// The panel: the entries, newest at the bottom, warnings and errors
-    /// in the theme's colours.
+    /// in the kit's warning and danger tones.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let text = |m: &Message| crate::i18n::text(&ctx, m.clone());
         if self.entries.is_empty() {
-            ui.weak(text(&Message::new(
+            ui.muted(text(&Message::new(
                 "gui-log-empty",
                 "Nothing to report yet",
             )));
             return;
         }
-        let mut clear = false;
-        ui.horizontal(|ui| {
-            if ui
-                .button(text(&Message::new("gui-log-clear", "Clear")))
-                .clicked()
-            {
-                clear = true;
+        let clear = helios_ui::action(
+            ui,
+            Action::Secondary,
+            &text(&Message::new("gui-log-clear", "Clear")),
+        )
+        .clicked();
+        helios_ui::scroll(ui, "helios.log.lines", Scroll::Log, |ui| {
+            for e in &self.entries {
+                let tone = match e.level {
+                    Level::Info => Tone::Neutral,
+                    Level::Warning => Tone::Warning,
+                    Level::Error => Tone::Danger,
+                };
+                ui.text_tone(tone, text(&e.message));
             }
         });
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                for e in &self.entries {
-                    let line = text(&e.message);
-                    let colour = match e.level {
-                        Level::Info => None,
-                        Level::Warning => Some(ui.visuals().warn_fg_color),
-                        Level::Error => Some(ui.visuals().error_fg_color),
-                    };
-                    let rich = egui::RichText::new(line);
-                    let rich = match colour {
-                        Some(c) => rich.color(c),
-                        None => rich,
-                    };
-                    ui.add(egui::Label::new(rich).wrap());
-                }
-            });
         if clear {
             self.entries.clear();
         }
