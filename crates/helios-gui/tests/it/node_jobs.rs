@@ -65,7 +65,8 @@ impl Node {
     }
 
     /// A node serving its relayable facts, as `helios-node` does: its
-    /// application bus has its fact bus as journal and relay.
+    /// application bus has its fact bus as journal and relay, served over
+    /// bus-bridge on Unix.
     fn relaying(name: &str) -> Node {
         Node::serving(name, helios_core::bus::JOURNAL, true)
     }
@@ -83,6 +84,16 @@ impl Node {
             inspector = inspector.with_relay(kernel.clone());
         }
         helios_inspect::serve(inspector.clone(), &dir.join("node.sock")).unwrap();
+        // On Unix its relayable facts go over bus-bridge, next to its
+        // inspect socket.
+        #[cfg(unix)]
+        if let Some(kernel) = &kernel {
+            helios_node::bridge::serve(
+                kernel.clone(),
+                &helios_inspect::bridge_socket(&dir.join("node.sock")),
+            )
+            .unwrap();
+        }
         let cancels = jobs.clone();
         helios_inspect::serve_at(
             &Listen::Unix(dir.join("control.sock")),
