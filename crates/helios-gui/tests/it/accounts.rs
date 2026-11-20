@@ -2731,7 +2731,7 @@ pub fn selected_items(h: &Harness<'_, Shell>) -> Vec<String> {
 fn an_account_clicked_then_focused_is_drawn_selected() {
     let (mut h, ..) = picking_world(None);
     h.run_steps(4);
-    let row = h.get_by_label("ann@example.org");
+    let row = h.get_by_role_and_label(egui::accesskit::Role::Button, "ann@example.org");
     let all: Vec<_> = h
         .query_all_by_label_contains("ann@example.org")
         .map(|n| {
@@ -2751,7 +2751,7 @@ fn an_account_clicked_then_focused_is_drawn_selected() {
     );
     row.focus();
     h.run_steps(3);
-    let row = h.get_by_label("ann@example.org");
+    let row = h.get_by_role_and_label(egui::accesskit::Role::Button, "ann@example.org");
     assert!(row.is_focused());
     assert_eq!(
         row.accesskit_node().toggled(),
