@@ -42,6 +42,9 @@
 use std::sync::Arc;
 
 use egui_pop::api::history::Label;
+use egui_pop::core::tooltip::TooltipExt as _;
+use egui_pop::core::ui::UiPop as _;
+use egui_pop::core::widgets;
 use helios_core::Message;
 use helios_inspect::client::{CallMeta, Client};
 use helios_node_core::calibrate::{
@@ -49,6 +52,7 @@ use helios_node_core::calibrate::{
     LOOK_SET_DEFAULT, SET_DEFAULT,
 };
 use helios_shell::commands::{CommandSpec, Origin};
+use helios_ui::Action;
 use helios_vault::Changes;
 use serde_json::Value;
 
@@ -871,34 +875,35 @@ pub fn header_ui(ui: &mut egui::Ui, store: &std::sync::Mutex<helios_values::Stor
         ),
         _ => camera.clone(),
     };
-    ui.weak(about);
+    ui.muted(about);
     let name = text(Message::new(
         "gui-calibration-header-choose",
         "Calibration profile",
     ));
     let mut picked = None;
-    let r = egui::ComboBox::from_id_salt(("helios.chartprofile.choose", node))
+    let combo = widgets::combo_box(("helios.chartprofile.choose", node))
         .selected_text(&shown)
-        .width(ui.available_width().min(240.0))
-        .show_ui(ui, |ui| {
-            if ui.selectable_label(!on, &none).clicked() && on {
+        .width(ui.available_width().min(240.0));
+    let r = ui
+        .combo_box(combo, |ui| {
+            if widgets::selectable_label(ui, !on, none.as_str()).clicked() && on {
                 picked = Some("none".to_string());
             }
             for p in &profiles {
                 let id = p["id"].as_str().unwrap_or_default();
                 let label = format!("{} ({})", p["name"].as_str().unwrap_or_default(), light(p));
                 let chosen = on && id == current;
-                if ui.selectable_label(chosen, label).clicked() && !chosen {
+                if widgets::selectable_label(ui, chosen, label).clicked() && !chosen {
                     picked = Some(id.to_string());
                 }
             }
         })
         .response;
     egui_pop::core::a11y::name(&r, egui::Role::ComboBox, &name);
-    let r = r.on_hover_text(&name);
+    let r = r.tip(&name);
     crate::name_rect(&ctx, "helios.chartprofile.choose", r.rect);
     if profiles.is_empty() {
-        ui.weak(text(Message::new(
+        ui.muted(text(Message::new(
             "gui-calibration-header-empty",
             "No calibration profile for this camera yet",
         )));
@@ -907,7 +912,7 @@ pub fn header_ui(ui: &mut egui::Ui, store: &std::sync::Mutex<helios_values::Stor
         "gui-calibration-header-make",
         "Make a profile…",
     ));
-    let r = ui.small_button(&make);
+    let r = helios_ui::row_action(ui, Action::Secondary, &make);
     egui_pop::core::a11y::name(&r, egui::Role::Button, &make);
     if r.clicked() {
         crate::dialogs::request(
@@ -1409,9 +1414,9 @@ pub fn look_header_ui(
             "Not fitted yet: the look starts from the camera's own JPEG",
         )
     };
-    ui.weak(text(status));
+    ui.muted(text(status));
     if colour_off {
-        ui.weak(text(Message::new(
+        ui.muted(text(Message::new(
             "gui-look-header-chart",
             "Colour half off: the chart profile rules the colours",
         )));
@@ -1429,7 +1434,11 @@ pub fn look_header_ui(
     ui.horizontal(|ui| {
         let name = text(Message::new("gui-look-header-switch", "Camera look"));
         let mut checked = on && fitted;
-        let r = ui.add_enabled(fitted, egui::Checkbox::new(&mut checked, &name));
+        let r = ui
+            .add_enabled_ui(fitted, |ui| {
+                widgets::checkbox(ui, &mut checked, name.as_str())
+            })
+            .inner;
         egui_pop::core::a11y::name(&r, egui::Role::CheckBox, &name);
         crate::name_rect(&ctx, "helios.cameralook.switch", r.rect);
         if r.changed() {
@@ -1443,9 +1452,13 @@ pub fn look_header_ui(
                 "Fit to the camera's JPEG",
             ))
         };
-        let r = ui.add_enabled(image, egui::Button::new(&fit).small());
+        let r = ui
+            .add_enabled_ui(image, |ui| {
+                helios_ui::row_action(ui, Action::Secondary, &fit)
+            })
+            .inner;
         egui_pop::core::a11y::name(&r, egui::Role::Button, &fit);
-        let r = r.on_hover_text(text(Message::new(
+        let r = r.tip(text(Message::new(
             "gui-look-header-fit-about",
             "Fits a matrix, a hue and saturation table and tone curves to the camera's embedded JPEG, checked on pixels it did not fit",
         )));
@@ -1477,8 +1490,11 @@ fn presets_ui(ui: &mut egui::Ui, enabled: bool) {
         "The camera's default look, or a look fitted to the camera's JPEG when the camera has none",
     ));
     let r = ui
-        .add_enabled(enabled, egui::Button::new(&presets))
-        .on_hover_text(&about);
+        .add_enabled_ui(enabled, |ui| {
+            helios_ui::action(ui, Action::Secondary, &presets)
+        })
+        .inner
+        .tip(&about);
     egui_pop::core::a11y::name(&r, egui::Role::Button, &presets);
     crate::name_rect(&ctx, "helios.cameralook.presets", r.rect);
     if r.clicked() {
@@ -1578,7 +1594,7 @@ fn default_ui(
         default.name.clone()
     };
     if default.in_use(on) {
-        ui.weak(text(
+        ui.muted(text(
             Message::new(
                 "gui-look-header-default-in-use",
                 "The default look of { $camera }: its raws are imported with it",
@@ -1586,7 +1602,7 @@ fn default_ui(
             .with("camera", camera.clone()),
         ));
     } else if default.preview.is_some() {
-        ui.weak(text(
+        ui.muted(text(
             Message::new(
                 "gui-look-header-default-other",
                 "{ $camera } has another default look: its raws are imported with that one",
@@ -1611,12 +1627,13 @@ fn default_ui(
             "gui-look-header-default-save",
             "Save as the camera's default",
         ));
-        let r = ui.add_enabled(
-            fitted && !default.in_use(on),
-            egui::Button::new(&save).small(),
-        );
+        let r = ui
+            .add_enabled_ui(fitted && !default.in_use(on), |ui| {
+                helios_ui::row_action(ui, Action::Secondary, &save)
+            })
+            .inner;
         egui_pop::core::a11y::name(&r, egui::Role::Button, &save);
-        let r = r.on_hover_text(text(
+        let r = r.tip(text(
             Message::new(
                 "gui-look-header-default-save-about",
                 "Raws of { $camera } imported from now on start with this camera look; photos already in the library keep theirs",
@@ -1638,7 +1655,7 @@ fn default_ui(
                 "gui-look-header-default-clear",
                 "Clear the default",
             ));
-            let r = ui.small_button(&clear);
+            let r = helios_ui::row_action(ui, Action::Secondary, &clear);
             egui_pop::core::a11y::name(&r, egui::Role::Button, &clear);
             crate::name_rect(&ctx, "helios.cameralook.default.clear", r.rect);
             if r.clicked() {
@@ -1674,9 +1691,13 @@ fn compare_ui(
         "Compare with the camera's JPEG",
     ));
     let mut checked = compare.on;
-    let r = ui.add_enabled(compare.file, egui::Checkbox::new(&mut checked, &name));
+    let r = ui
+        .add_enabled_ui(compare.file, |ui| {
+            widgets::checkbox(ui, &mut checked, name.as_str())
+        })
+        .inner;
     egui_pop::core::a11y::name(&r, egui::Role::CheckBox, &name);
-    let r = r.on_hover_text(text(Message::new(
+    let r = r.tip(text(Message::new(
         "gui-look-header-compare-about",
         "Shows the camera's embedded JPEG left of the split and the render right of it; drag the split to move it",
     )));
@@ -1696,6 +1717,6 @@ fn compare_ui(
         )),
     };
     if let Some(m) = missing {
-        ui.weak(text(m));
+        ui.muted(text(m));
     }
 }
