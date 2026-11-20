@@ -118,10 +118,16 @@ fn requests(source: &str) -> Vec<String> {
 
 /// The request points that are fail-open on purpose, each with its
 /// reason. The list only shrinks.
-const FAIL_OPEN: &[(&str, &str)] = &[(
-    "AppQuit",
-    "quitting must stay possible: a listener that fails or hangs is reported and the quit goes on; a listener keeping Helios open refuses",
-)];
+const FAIL_OPEN: &[(&str, &str)] = &[
+    (
+        "AppQuit",
+        "quitting must stay possible: a listener that fails or hangs is reported and the quit goes on; a listener keeping Helios open refuses",
+    ),
+    (
+        "NodeQuit",
+        "the node's stop must end: a jobs listener past its deadline is cut and reported, and the library's close still runs, last",
+    ),
+];
 
 /// Every request point Helios declares is fail-closed
 /// (`PointDecl::fail_closed`): a listener that fails, panics or misses

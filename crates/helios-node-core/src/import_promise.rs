@@ -37,8 +37,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, PoisonError, RwLock};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, LazyLock, Mutex, PoisonError, RwLock};
 
 use helios_connect::{Cancel, Connector, ConnectorProvider, ConnectorServices, Item, SourceRef};
 use helios_core::Bus;
@@ -76,9 +75,6 @@ pub const KIND: &str = "import";
 
 /// Items a listing page holds.
 const PAGE: usize = 500;
-
-/// How often a running import looks whether a cancel was asked.
-const CANCEL_POLL: Duration = Duration::from_millis(50);
 
 /// What an import by rule takes in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -323,6 +319,22 @@ fn listed<S: Store>(source: &Path, handle: &Handle<S>, cancel: &Cancel) -> Resul
     }
 }
 
+/// What wakes an import's cancel watcher.
+#[derive(Debug, Default)]
+struct Woken {
+    /// A promise changed: the watcher looks whether its own was cancelled.
+    changed: bool,
+    /// The import ended: the watcher stops.
+    ended: bool,
+}
+
+impl Woken {
+    fn wake(woken: &(Mutex<Woken>, Condvar), f: impl FnOnce(&mut Woken)) {
+        f(&mut woken.0.lock().unwrap_or_else(PoisonError::into_inner));
+        woken.1.notify_all();
+    }
+}
+
 /// The import of `handle`'s request, settling its promise.
 fn run<S: Store + Send + 'static>(
     vault: &Arc<Vault<S>>,
@@ -334,25 +346,51 @@ fn run<S: Store + Send + 'static>(
     let request = handle.request().clone();
     let stop = Arc::new(AtomicBool::new(false));
     // A cancel asked of the promise stops the import before its next
-    // file.
-    let ended = Arc::new(AtomicBool::new(false));
+    // file: the watcher wakes on the promise's changes on the bus (the
+    // vault announces each), and on the import's end; it never polls.
+    let woken: Arc<(Mutex<Woken>, Condvar)> = Arc::default();
+    let changes = {
+        let woken = woken.clone();
+        bus.subscribe_kinds(
+            &[
+                helios_vault::promises::PROGRESS,
+                helios_vault::promises::DONE,
+            ],
+            Some(Arc::new(move || Woken::wake(&woken, |w| w.changed = true))),
+        )
+    };
     let watcher = {
-        let (stop, ended) = (stop.clone(), ended.clone());
+        let (stop, woken) = (stop.clone(), woken.clone());
         let (vault, id) = (vault.clone(), handle.id().to_string());
         std::thread::Builder::new()
             .name("helios-import-cancel".into())
             .spawn(move || {
-                while !ended.load(Ordering::SeqCst) {
-                    let asked = vault
-                        .promise(&id)
-                        .ok()
-                        .flatten()
-                        .is_none_or(|p| p.cancel_asked);
+                // Asked before the watch began, or gone.
+                let mut asked = vault
+                    .promise(&id)
+                    .ok()
+                    .flatten()
+                    .is_none_or(|p| p.cancel_asked);
+                loop {
                     if asked {
                         stop.store(true, Ordering::SeqCst);
                         return;
                     }
-                    std::thread::sleep(CANCEL_POLL);
+                    {
+                        let (state, changed) = &*woken;
+                        let mut w = state.lock().unwrap_or_else(PoisonError::into_inner);
+                        while !w.changed && !w.ended {
+                            w = changed.wait(w).unwrap_or_else(PoisonError::into_inner);
+                        }
+                        if w.ended {
+                            return;
+                        }
+                        w.changed = false;
+                    }
+                    asked = changes.try_iter().any(|e| {
+                        e.payload["id"].as_str() == Some(id.as_str())
+                            && e.payload["cancel_asked"].as_bool() == Some(true)
+                    });
                 }
             })
             .ok()
@@ -361,7 +399,7 @@ fn run<S: Store + Send + 'static>(
     if let (Err(e), Some(watch)) = (&outcome, watch) {
         watch.failed(&request, e);
     }
-    ended.store(true, Ordering::SeqCst);
+    Woken::wake(&woken, |w| w.ended = true);
     if let Some(watcher) = watcher {
         let _ = watcher.join();
     }

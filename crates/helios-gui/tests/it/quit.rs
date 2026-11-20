@@ -552,7 +552,8 @@ fn the_quit_report_is_journaled_and_read_back_at_the_next_start() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// No sleep is left on the quit and close path: each wait there is woken
+/// No sleep is left on the quit and close path, the node's side included
+/// (its quit request, its jobs, the import's cancel watch): each wait there is woken
 /// by what it waits for, with a deadline (a channel, a condition), never
 /// a clock polled.
 #[test]
@@ -564,7 +565,9 @@ fn no_sleep_is_left_on_the_quit_and_close_path() {
         "crates/helios-gui/src/quit.rs",
         "crates/helios-gui/src/shell/lifetime.rs",
         "crates/helios-node-core/src/node.rs",
+        "crates/helios-node-core/src/node_quit.rs",
         "crates/helios-node-core/src/job_promises.rs",
+        "crates/helios-node-core/src/import_promise.rs",
     ];
     let mut found = Vec::new();
     for file in files {
@@ -582,5 +585,128 @@ fn no_sleep_is_left_on_the_quit_and_close_path() {
         found.is_empty(),
         "sleeps on the quit path:\n{}",
         found.join("\n")
+    );
+}
+
+/// Exports that stop when let go: the node's quit waits on them.
+struct HeldExports {
+    began: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    gate: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl helios_node_core::node::NodeJobs for HeldExports {
+    fn name(&self) -> helios_core::Message {
+        helios_core::Message::new("node-end-exports", "Stopping the exports")
+    }
+    fn running(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn cancel_all(&self) {
+        if let Some(began) = self.began.lock().unwrap().take() {
+            let _ = began.send(());
+        }
+    }
+    fn wait(&self, deadline: std::time::Duration) -> bool {
+        let (open, opened) = &*self.gate;
+        let held = open.lock().unwrap();
+        *opened
+            .wait_timeout_while(held, deadline, |o| !*o)
+            .unwrap()
+            .0
+    }
+    fn stop_within(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(5)
+    }
+}
+
+/// The node's quit, told over its link, shows on the end splash: the row
+/// of the node's listener running names what it waits for, and what the
+/// node's quit did goes in the end's report.
+#[test]
+fn the_end_splash_shows_the_node_s_listener_running() {
+    use helios_gui::app_quit::{NodeEnd, ShutdownReport};
+    use helios_node_core::node::LocalNode;
+    use helios_node_core::node_quit::VAULT;
+    use helios_vault_sqlite::SqliteStore;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let dir = std::env::temp_dir().join(format!("helios-quit-node-end-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let node = LocalNode::open(
+        SqliteStore::open(&dir.join("vault.db")).unwrap(),
+        Arc::new(helios_core::Bus::new()),
+        Duration::from_hours(1),
+    );
+    node.quit_on(Arc::new(egui_pop::api::bus::egui_pop_hooks::Kernel::new()));
+    let link = node.link();
+    let (began, begun) = std::sync::mpsc::channel();
+    let gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)> = Arc::default();
+    link.adopt(Arc::new(HeldExports {
+        began: std::sync::Mutex::new(Some(began)),
+        gate: gate.clone(),
+    }));
+    let phase = helios_node_core::phases::Phase::new();
+    let mut follow = NodeEnd::new(link.follow_quit().expect("the node's facts"), phase.clone());
+    let client = node.connect();
+    link.quit_cancelling_jobs();
+    drop(client);
+    begun
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the exports' listener began");
+    follow.pump();
+    let steps = phase.steps();
+    let running: Vec<_> = steps.iter().filter(|s| s.running()).collect();
+    assert_eq!(running.len(), 1, "{steps:?}");
+    assert_eq!(running[0].label.key, "node-end-exports");
+    assert_eq!(
+        running[0].why.as_ref().map(|w| w.english.as_str()),
+        Some("Waiting for: exports")
+    );
+    *gate.0.lock().unwrap() = true;
+    gate.1.notify_all();
+    assert!(
+        link.wait_stopped(Duration::from_secs(10)),
+        "the node stopped"
+    );
+    follow.pump();
+    assert!(!phase.busy(), "every row done: {:?}", phase.steps());
+    let ended = follow.ended().expect("the node's quit ended, said");
+    assert_eq!(ended.finished, ["helios.node.quit.exports", VAULT]);
+    let mut report = ShutdownReport::default();
+    report.record_node(ended);
+    assert!(report.clean());
+    assert!(report.finished.contains(&VAULT.to_owned()));
+    node.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A node listener cut at its deadline is named in the end's report,
+/// what the next start says.
+#[test]
+fn a_node_listener_cut_is_named_in_the_quit_report() {
+    use helios_gui::app_quit::ShutdownReport;
+    use helios_node_core::node_quit::{LateListener, QuitEnded, VAULT};
+
+    let ended = QuitEnded {
+        finished: vec![VAULT.to_owned()],
+        late: vec![LateListener {
+            listener: "helios.node.quit.exports".into(),
+            deadline_ms: 2000,
+            cut: true,
+        }],
+        failed: Vec::new(),
+    };
+    let mut report = ShutdownReport::default();
+    report.record_node(&ended);
+    assert!(report.may_have_lost_work);
+    assert!(
+        report
+            .lines()
+            .iter()
+            .any(|l| l.contains("stopped `helios.node.quit.exports` after its 2 s deadline")),
+        "{:?}",
+        report.lines()
     );
 }
