@@ -33,6 +33,13 @@ settings window and dialogs) in English and French.
   `cargo xtask i18n check` reports coverage, missing and orphan keys, and
   keys whose English changed since (review them, then `stamp <locale>
   --all`).
+- **A change that adds English adds its French.** pr-lint runs `cargo
+  xtask i18n check --new-since <base>`, which fails on the gaps a pull
+  request adds since its merge base: an English key with no French, an
+  English key reworded since its French was stamped, a French key left
+  unstamped. Gaps the base already had do not count. Translate in
+  `fr/`, then `cargo xtask i18n stamp fr` (`--all` once reworded keys
+  were reviewed).
 - The desktop's Language setting picks the locale; `system` reads
   `HELIOS_LANG`, then the system's language. `x-pseudo`
   (`HELIOS_LANG=x-pseudo`) shows accented, longer English to spot
