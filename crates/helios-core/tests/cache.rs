@@ -289,3 +289,36 @@ fn evicting_many_entries_walks_the_victims_only() {
         started.elapsed()
     );
 }
+
+#[test]
+fn a_kept_output_serves_its_parts_past_the_budget_until_its_hold_drops() {
+    let (g, copy) = network(Copy { gate: None });
+    // Room for two regions only: the kept output is four.
+    let e = Engine::with_budget(Arc::new(Bus::new()), Some(2 * TILE_BYTES));
+    let whole = Region::new(0, 0, TILE * 4, TILE);
+    let kept = e.keep_at(&g, copy, "output", whole, 1.0).unwrap();
+    assert_eq!(kept.keys().len(), 1, "the output alone is kept");
+    // Other renders push the cache past its budget: the kept output stays.
+    for i in 4..8 {
+        e.render(&g, copy, "output", tile(i)).unwrap();
+    }
+    let before = e.counters();
+    for i in 0..4 {
+        e.render(&g, copy, "output", tile(i)).unwrap();
+    }
+    assert_eq!(
+        e.counters().since(&before).computed,
+        0,
+        "each part of the kept output is cropped from it"
+    );
+    drop(kept);
+    for i in 4..8 {
+        e.render(&g, copy, "output", tile(i)).unwrap();
+    }
+    let before = e.counters();
+    e.render(&g, copy, "output", tile(1)).unwrap();
+    assert!(
+        e.counters().since(&before).computed > 0,
+        "let go, the output is evicted like any other"
+    );
+}

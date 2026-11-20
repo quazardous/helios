@@ -1036,7 +1036,7 @@ struct App {
     /// Where the photos near are, for the warmer's recipe.
     warm_book: helios_gui::warm::Book,
     /// Decodes the photos near ahead; ends with the application.
-    _warmer: helios_node_core::warm::Warmer,
+    warmer: helios_node_core::warm::Warmer,
     /// The darkroom was open at the last pass: left, its photos are said
     /// hidden.
     in_darkroom: bool,
@@ -1153,8 +1153,10 @@ impl App {
     /// Lets the router's background work go once the open is over: its
     /// image made ready and its preview rendered (or past [`OPEN_HOLD`]).
     /// The darkroom left, its photos are said hidden: their warm-ups are
-    /// withdrawn.
-    fn follow_photos(&mut self) {
+    /// withdrawn. In the darkroom, the photos near are framed at its
+    /// viewport's size: once a new size settles, the frames rendered at
+    /// the old one go and the photos near are warmed again.
+    fn follow_photos(&mut self, ctx: &egui::Context) {
         if let Some((_, since, rendered)) = &self.opening {
             let preview = self.shell.preview();
             let opened = !self.preparing.iter().any(|p| p.library.is_some())
@@ -1171,6 +1173,21 @@ impl App {
                 .publish(self.shell.image_states().bus(), None, &[]);
         }
         self.in_darkroom = in_darkroom;
+        if in_darkroom {
+            let view = self.shell.viewport().display();
+            let now = std::time::Instant::now();
+            if let Some(view) = view
+                && self.warm_book.follow_view(view, now)
+            {
+                self.shell
+                    .image_states()
+                    .evict_kind(helios_node_core::image_states::StateKind::Framed);
+                self.warmer.rewarm();
+            }
+            if let Some(wait) = self.warm_book.view_pending(now) {
+                ctx.request_repaint_after(wait);
+            }
+        }
     }
 
     /// The darkroom the workspace was left in, its image opened again;
@@ -1741,7 +1758,7 @@ impl eframe::App for App {
             );
         }
         self.render_heads();
-        self.follow_photos();
+        self.follow_photos(ui.ctx());
         let activated = self.shell.library_mut().take_activated();
         if let Some(id) = activated
             && let Err(e) = self.open_from_library(&id)
@@ -2700,7 +2717,7 @@ fn main() -> Result<(), String> {
             let mut app = App {
                 photos: helios_node_core::warm::Lifecycle::default(),
                 warm_book,
-                _warmer: warmer,
+                warmer,
                 in_darkroom: false,
                 opening: None,
                 _exporter: exporter,

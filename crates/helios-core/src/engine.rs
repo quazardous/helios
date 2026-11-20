@@ -815,6 +815,15 @@ impl Drop for Hold {
     }
 }
 
+/// What a render's [`Hold`] keeps.
+#[derive(Clone, Copy)]
+enum Keep {
+    /// The full-size steps it read ([`Engine::hold_at`]).
+    FullSize,
+    /// Its own output ([`Engine::keep_at`]).
+    Output,
+}
+
 /// The keys of the steps a planned render's reduces read at full
 /// resolution, sources aside.
 fn full_size_keys(planned: &Planned) -> Vec<ContentHash> {
@@ -1190,7 +1199,34 @@ impl Engine {
             port,
             region,
             scale,
-            Some(&mut hold),
+            Some((&mut hold, Keep::FullSize)),
+            |_, _, _| Ok(()),
+        )?;
+        Ok(hold.expect("a render that ran took its hold"))
+    }
+
+    /// Renders like [`Engine::render_at`] and keeps the render's own
+    /// output (the step asked for, over `region` at `scale`) in the cache
+    /// until the [`Hold`] drops: a later render of that output at the same
+    /// scale over `region` or any part of it (a viewport's tiles) crops
+    /// the content kept instead of computing. Pinned before the render
+    /// runs, as [`Engine::hold_at`]'s.
+    pub fn keep_at(
+        &self,
+        graph: &Graph,
+        node: NodeId,
+        port: &str,
+        region: Region,
+        scale: f64,
+    ) -> Result<Hold, Error> {
+        let mut hold = None;
+        self.render_content_holding(
+            graph,
+            node,
+            port,
+            region,
+            scale,
+            Some((&mut hold, Keep::Output)),
             |_, _, _| Ok(()),
         )?;
         Ok(hold.expect("a render that ran took its hold"))
@@ -1222,7 +1258,7 @@ impl Engine {
         port: &str,
         region: Region,
         scale: f64,
-        mut hold: Option<&mut Option<Hold>>,
+        mut hold: Option<(&mut Option<Hold>, Keep)>,
         finish: impl Fn(&Arc<Step>, &Arc<Content>, usize) -> Result<T, Error>,
     ) -> Result<T, Error> {
         if !(scale > 0.0 && scale <= 1.0) {
@@ -1244,9 +1280,13 @@ impl Engine {
         let mut replays = 0;
         loop {
             let planned = self.plan(graph, node, index, region, scale)?;
-            if let Some(hold) = hold.as_deref_mut() {
+            if let Some((hold, keep)) = hold.as_mut() {
                 // A replay plans again: the hold follows the last plan.
-                *hold = Some(self.hold(full_size_keys(&planned)));
+                let keys = match keep {
+                    Keep::FullSize => full_size_keys(&planned),
+                    Keep::Output => vec![planned.root.key],
+                };
+                **hold = Some(self.hold(keys));
             }
             let pins = self.pin(&planned);
             let evictions = self.cache.lock().expect("engine cache lock").evictions;

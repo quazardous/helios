@@ -12,13 +12,21 @@
 //! does, and holds the full-size steps of its preview in the viewport's
 //! engine, the preview rendered there. Opened, the photo's frame and
 //! preview read them: no demosaic.
+//!
+//! Once the darkroom's viewport size is known ([`Book::follow_view`]),
+//! a photo near is framed too: its `framed` state ([`framed`]) renders
+//! the developed output whole at the scales the viewport asks for its
+//! proxy and its fit, kept in the engine's cache, so the open's first
+//! frame crops them instead of rendering. A new viewport size, once it
+//! settles ([`VIEW_SETTLE`]), lets those frames go and frames the photos
+//! near again.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use helios_core::{ContentHash, Engine, Graph, Hold, Image, NodeId, Priority};
+use helios_core::{ContentHash, Engine, Graph, Hold, Image, NodeId, Priority, Region};
 use helios_node_core::image_states::{
     Compute, ImageStates, Ready, StateError, StateKey, StateKind,
 };
@@ -96,10 +104,13 @@ pub fn open(
 }
 
 /// A photo developed ahead: the full-size steps its preview reads, held
-/// in the engine's cache, and the preview.
+/// in the engine's cache, the preview, and the developed graph and node
+/// its frame is rendered from ([`framed`]).
 pub struct Developed {
     _hold: Hold,
     pub preview: Arc<Image>,
+    pub graph: Arc<Graph>,
+    pub node: NodeId,
 }
 
 /// The `developed` state of `photo`: its `decoded` state's development
@@ -155,6 +166,124 @@ pub fn developed(
             Developed {
                 _hold: hold,
                 preview: Arc::new(preview),
+                graph: Arc::new(graph),
+                node,
+            },
+            bytes,
+        ))
+    })
+}
+
+/// The darkroom's viewport as the frame's scales depend on it: its
+/// rectangle in points and the physical pixels per point of its window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewSize {
+    pub rect: egui::Rect,
+    pub ppp: f32,
+}
+
+impl ViewSize {
+    /// The viewport in physical pixels, rounded as egui-pop's mapping
+    /// rounds it: `[width, height]`.
+    pub fn pixels(&self) -> [u32; 2] {
+        let p = f64::from(self.ppp);
+        let px = |v: f32| (f64::from(v) * p).round();
+        [
+            (px(self.rect.max.x) - px(self.rect.min.x)).max(0.0) as u32,
+            (px(self.rect.max.y) - px(self.rect.min.y)).max(0.0) as u32,
+        ]
+    }
+
+    /// The scales the viewport asks an image of `extent` at, fitted: its
+    /// proxy's and its exact tiles' (egui-pop's `proxy_scale` and
+    /// `exact_scale`), the same numbers to the bit, so the tiles find
+    /// what was rendered ahead.
+    pub fn scales(&self, extent: Region) -> (f64, f64) {
+        use egui_pop::viewport::{tiles, view};
+        let image = [f64::from(extent.width), f64::from(extent.height)];
+        let m = view::Mapping::new(&view::View::fit(), image, self.rect, self.ppp);
+        (tiles::proxy_scale(&m), tiles::exact_scale(&m))
+    }
+}
+
+/// The whole of `extent` at `scale`, placed as the viewport places its
+/// tiles (`engine_source::region_of`): a tile at any scale is inside it.
+pub fn whole_at(extent: Region, scale: f64) -> Region {
+    let at = |v: i64| (v as f64 * scale).floor() as i64;
+    let size = |n: u32| ((f64::from(n) * scale).ceil() as u32).max(1);
+    Region::new(
+        at(extent.x),
+        at(extent.y),
+        size(extent.width),
+        size(extent.height),
+    )
+}
+
+/// A photo's frame rendered ahead for one viewport size: the proxy and
+/// the fit kept in the engine's cache.
+pub struct Framed {
+    _holds: Vec<Hold>,
+    /// The scales they were rendered at: the proxy's, the fit's.
+    pub scales: (f64, f64),
+}
+
+/// The `framed` state of a photo developed as `developed` says, for the
+/// viewport `view`.
+pub fn framed_key(developed: &StateKey, view: ViewSize) -> StateKey {
+    let [w, h] = view.pixels();
+    let mut bytes = developed.development.0.to_vec();
+    bytes.extend_from_slice(&w.to_le_bytes());
+    bytes.extend_from_slice(&h.to_le_bytes());
+    // The rectangle's position counts too: the pixels round per edge.
+    for v in [view.rect.min.x, view.rect.min.y, view.ppp] {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    StateKey {
+        photo: developed.photo.clone(),
+        development: ContentHash::of(&bytes),
+        state: StateKind::Framed,
+        size: w.max(h),
+    }
+}
+
+/// How the `framed` state is computed: the `developed` state taken from
+/// `states` (ready, joined or computed here), then its output rendered
+/// whole at the viewport's proxy scale and at its fit, each kept in
+/// `engine`'s cache ([`Engine::keep_at`]): the open's first tiles crop
+/// them.
+pub fn framed(
+    states: &ImageStates,
+    developed: (StateKey, Compute),
+    engine: Arc<Engine>,
+    view: ViewSize,
+) -> Compute {
+    let states = states.clone();
+    Arc::new(move || {
+        let value = states.get_here(
+            developed.0.clone(),
+            Priority::Prefetch,
+            developed.1.clone(),
+            OPEN_WAIT,
+        )?;
+        let d = value
+            .downcast_ref::<Developed>()
+            .ok_or_else(|| StateError::Failed("the developed state holds no graph".into()))?;
+        let extent = d
+            .graph
+            .extent(d.node)?
+            .ok_or_else(|| StateError::Failed("the image has no extent".into()))?;
+        let (proxy, exact) = view.scales(extent);
+        let keep =
+            |scale: f64| engine.keep_at(&d.graph, d.node, "output", whole_at(extent, scale), scale);
+        let mut holds = vec![keep(proxy)?];
+        if exact != proxy {
+            holds.push(keep(exact)?);
+        }
+        let bytes = holds.iter().map(Hold::bytes).sum();
+        Ok(Ready::held(
+            Framed {
+                _holds: holds,
+                scales: (proxy, exact),
             },
             bytes,
         ))
@@ -183,6 +312,21 @@ struct Render {
     reader: Reader,
 }
 
+/// How long the darkroom's viewport keeps one size before the photos
+/// near are framed again at it: a window being resized changes it every
+/// frame, and only the size it stops at is worth rendering.
+pub const VIEW_SETTLE: Duration = Duration::from_millis(300);
+
+/// The viewport sizes the book follows.
+#[derive(Default)]
+struct Views {
+    /// The size the photos near are framed at (none: not known yet, they
+    /// are developed only).
+    framed: Option<ViewSize>,
+    /// The last size seen, and since when, while it differs.
+    seen: Option<(ViewSize, Instant)>,
+}
+
 /// Where the photos around the shown one are and through which network
 /// they are developed: kept by the darkroom as it says them near, read
 /// by the warmer's recipe.
@@ -190,6 +334,7 @@ struct Render {
 pub struct Book {
     photos: Arc<Mutex<BTreeMap<String, (PathBuf, Bundle)>>>,
     render: Arc<Mutex<Option<Render>>>,
+    views: Arc<Mutex<Views>>,
 }
 
 impl Book {
@@ -204,6 +349,58 @@ impl Book {
         });
     }
 
+    /// The darkroom's viewport is `view` now (`now` being when): true
+    /// once a size other than the one the photos near are framed at has
+    /// stayed [`VIEW_SETTLE`] (at once for the first size known), the
+    /// book then framing at it. The caller lets the frames rendered at the
+    /// old size go and has the photos near warmed again
+    /// ([`helios_node_core::warm::Warmer::rewarm`]). False while nothing
+    /// changes or the size has not settled: [`Book::view_pending`] says
+    /// when to look again.
+    pub fn follow_view(&self, view: ViewSize, now: Instant) -> bool {
+        let mut views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(framed) = views.framed else {
+            views.framed = Some(view);
+            views.seen = None;
+            return true;
+        };
+        if framed == view {
+            views.seen = None;
+            return false;
+        }
+        match views.seen {
+            Some((seen, since)) if seen == view => {
+                if now.duration_since(since) >= VIEW_SETTLE {
+                    views.framed = Some(view);
+                    views.seen = None;
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => {
+                views.seen = Some((view, now));
+                false
+            }
+        }
+    }
+
+    /// How long until a size seen settles, while one waits.
+    pub fn view_pending(&self, now: Instant) -> Option<Duration> {
+        let views = self.views.lock().unwrap_or_else(PoisonError::into_inner);
+        views
+            .seen
+            .map(|(_, since)| (since + VIEW_SETTLE).saturating_duration_since(now))
+    }
+
+    /// The viewport size the photos near are framed at.
+    pub fn view(&self) -> Option<ViewSize> {
+        self.views
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .framed
+    }
+
     /// The photos now around, each with its file and network.
     pub fn set(&self, photos: impl IntoIterator<Item = (String, PathBuf, Bundle)>) {
         *self.photos.lock().unwrap_or_else(PoisonError::into_inner) = photos
@@ -212,11 +409,13 @@ impl Book {
             .collect();
     }
 
-    /// The warmer's recipe: a photo of the book warms its `developed`
-    /// state (its `decoded` one on the way), or its `decoded` state alone
-    /// with nothing to render with; another photo nothing.
+    /// The warmer's recipe: a photo of the book warms its `framed` state
+    /// at the viewport's size (its `developed` and `decoded` ones on the
+    /// way), its `developed` state while the size is not known, or its
+    /// `decoded` state alone with nothing to render with; another photo
+    /// nothing.
     pub fn recipe(&self) -> Recipe {
-        let (book, render) = (self.photos.clone(), self.render.clone());
+        let (book, render, views) = (self.photos.clone(), self.render.clone(), self.views.clone());
         Arc::new(move |photo: &str| {
             let found = book
                 .lock()
@@ -237,7 +436,21 @@ impl Book {
             match head(&r.reader, photo) {
                 Ok(head) => {
                     let key = developed_key(&decoded.0, head.as_ref());
-                    vec![(key, developed(&r.states, decoded, r.engine, head))]
+                    let developed = (
+                        key.clone(),
+                        developed(&r.states, decoded, r.engine.clone(), head),
+                    );
+                    let view = views.lock().unwrap_or_else(PoisonError::into_inner).framed;
+                    match view {
+                        // One ask: the frame's computation takes the
+                        // developed state on its own thread, never
+                        // queued behind it on the router's pool.
+                        Some(view) => vec![(
+                            framed_key(&key, view),
+                            framed(&r.states, developed, r.engine, view),
+                        )],
+                        None => vec![developed],
+                    }
                 }
                 Err(e) => {
                     log::warn!("warm-up of {photo}: its edit: {e}");

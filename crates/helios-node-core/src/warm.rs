@@ -134,6 +134,9 @@ pub struct WarmCounters {
     /// Warmed photos hidden without being shown: wasted work, also said
     /// as [`facts::WARM_UNUSED`].
     pub unused: u64,
+    /// Times the warm-ups started over ([`Warmer::rewarm`]): what they
+    /// computed no longer fit (the darkroom's viewport changed size).
+    pub rewarmed: u64,
 }
 
 /// The warmer's state, shared with its thread.
@@ -178,6 +181,21 @@ impl Warming {
             }
             _ => {}
         }
+    }
+
+    /// The photos warmed (or warming) and those settling start over: each
+    /// warm-up in flight withdrawn, each photo pending again from now, so
+    /// it is asked anew once settled, with what the recipe says then.
+    fn rewarm(&mut self) {
+        let now = Instant::now();
+        self.asks.clear();
+        for photo in std::mem::take(&mut self.warmed) {
+            self.pending.insert(photo, now);
+        }
+        for since in self.pending.values_mut() {
+            *since = now;
+        }
+        self.counters.rewarmed += 1;
     }
 
     /// Starts the warm-ups of the photos settled near.
@@ -258,6 +276,19 @@ impl Warmer {
             log::warn!("no thread to warm the photos near: {e}");
         }
         Warmer { stop, warming }
+    }
+
+    /// Warms the photos near again, once they settle ([`SETTLE`] from
+    /// now): what their recipe gives has changed (the darkroom's viewport
+    /// took another size, so their frames are rendered at other scales).
+    /// Their warm-ups in flight are withdrawn; called again within the
+    /// settle time, the clock starts over, so a window being resized
+    /// starts nothing until it stops.
+    pub fn rewarm(&self) {
+        self.warming
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .rewarm();
     }
 
     /// The photos with a warm-up still in flight.
@@ -567,5 +598,44 @@ mod tests {
             .map(|e| e.payload["photo"].as_str().unwrap_or_default().to_string())
             .collect();
         assert_eq!(said, ["a"]);
+    }
+
+    #[test]
+    fn a_rewarm_withdraws_the_warm_ups_and_asks_again_once_settled() {
+        let bus = Arc::new(Bus::new());
+        let states = ImageStates::new(bus.clone(), 2);
+        let (runs, go) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        // Each rewarm gives the photo's state another development, as a
+        // new viewport size gives its frame other scales.
+        let generation = Arc::new(AtomicUsize::new(0));
+        let inner = recipe(&runs, &go);
+        let g = generation.clone();
+        let recipe: Recipe = Arc::new(move |photo: &str| {
+            let mut asks = inner(photo);
+            asks[0].0.size = g.load(Ordering::SeqCst) as u32;
+            asks
+        });
+        let warmer = Warmer::start(states.clone(), recipe);
+        Lifecycle::default().publish(&bus, Some("a"), &ids(&["b"]));
+        until("b warming", || runs.load(Ordering::SeqCst) == 1);
+        // Resized three times in a row: one warm-up once it stops.
+        for _ in 0..3 {
+            generation.fetch_add(1, Ordering::SeqCst);
+            warmer.rewarm();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        until("the first withdrawn", || states.counters().cancelled == 1);
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "nothing before it settles");
+        go.store(true, Ordering::SeqCst);
+        until("b warmed again", || runs.load(Ordering::SeqCst) == 2);
+        until("let go", || warmer.warming().is_empty());
+        let c = warmer.counters();
+        assert_eq!((c.started, c.rewarmed), (2, 3), "{c:?}");
+        let (ready, _) = states.list();
+        assert_eq!(ready.len(), 1, "{ready:?}");
+        assert_eq!(ready[0].size, 3, "the last size's");
     }
 }

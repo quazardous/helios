@@ -27,8 +27,10 @@
 //! a NEF by default; the return scenario's first raw shown): the shown one opened
 //! cold while the neighbour warms (its `developed` state, as the desktop
 //! warms a neighbour), background work free then held back from the
-//! open's start to its preview; then the neighbour opened: its frame and
-//! histogram times, the KPI of a warmed open.
+//! open's start to its preview, each `--runs` times; then the neighbour
+//! opened: its frame and histogram times, the KPI of a warmed open. The
+//! neighbour is framed ahead at the measured viewport's size (its
+//! `framed` state), as the desktop frames it once its viewport is known.
 //!
 //! Writes `<out>/open-timing.jsonl` (one line per run) and
 //! `<out>/open-timing.md` (the table).
@@ -50,6 +52,18 @@ use serde_json::json;
 
 /// A row is unstable past this spread of its runs (open to fit).
 const STABLE_SPREAD: f64 = 0.15;
+
+/// The darkroom's viewport measured: 1920×1080 physical pixels.
+const VIEW: helios_gui::warm::ViewSize = helios_gui::warm::ViewSize {
+    rect: egui::Rect {
+        min: egui::Pos2 { x: 0.0, y: 0.0 },
+        max: egui::Pos2 {
+            x: 1920.0,
+            y: 1080.0,
+        },
+    },
+    ppp: 1.0,
+};
 
 struct Args {
     corpus: PathBuf,
@@ -228,29 +242,47 @@ fn main() {
         } else {
             mid
         };
-        for hold in [false, true] {
-            let line = match warmed_neighbour(shown, near, &bundle, gpu.as_ref(), hold, &records) {
-                Ok(line) => line,
-                Err(e) => json!({"scenario": "warmed_neighbour", "error": e}),
+        // Each variant `--runs` times, interleaved (free, held, free, ...)
+        // so the box's drift hits both alike; the medians compared.
+        let mut by_hold: [Vec<serde_json::Value>; 2] = [Vec::new(), Vec::new()];
+        for _ in 0..a.runs {
+            for hold in [false, true] {
+                let line =
+                    match warmed_neighbour(shown, near, &bundle, gpu.as_ref(), hold, &records) {
+                        Ok(line) => line,
+                        Err(e) => json!({"scenario": "warmed_neighbour", "error": e}),
+                    };
+                eprintln!("{line}");
+                writeln!(lines, "{line}").expect("the results file");
+                by_hold[usize::from(hold)].push(line);
+            }
+        }
+        for (hold, runs) in [false, true].into_iter().zip(&by_hold) {
+            let m = |field: &str| {
+                let mut v: Vec<f64> = runs.iter().filter_map(|l| l[field].as_f64()).collect();
+                v.sort_by(f64::total_cmp);
+                v.get(v.len() / 2).copied().unwrap_or(f64::NAN)
             };
-            eprintln!("{line}");
-            writeln!(lines, "{line}").expect("the results file");
+            let first = runs.first().cloned().unwrap_or_default();
             let _ = writeln!(
                 table,
-                "\nWarmed neighbour ({} shown cold while {} warms, background {}): shown fit {} ms, histogram {} ms; the neighbour's warm-up {} ms; then the neighbour opened: frame (fit) {} ms, histogram {} ms, {} demosaic call(s).",
-                line["shown"].as_str().unwrap_or("?"),
-                line["near"].as_str().unwrap_or("?"),
+                "\nWarmed neighbour ({} shown cold while {} warms, framed at 1920×1080, background {}; median of {} runs): shown fit {} ms, histogram {} ms; the neighbour's warm-up {} ms (developed {} ms, then its frames {} ms); then the neighbour opened: frame (proxy then fit) {} ms, histogram {} ms, {} demosaic call(s).",
+                first["shown"].as_str().unwrap_or("?"),
+                first["near"].as_str().unwrap_or("?"),
                 if hold {
                     "held back until the shown preview"
                 } else {
                     "free"
                 },
-                line["shown_fit_ms"],
-                line["shown_histogram_ms"],
-                line["warm_ms"],
-                line["warmed_fit_ms"],
-                line["warmed_histogram_ms"],
-                line["warmed_demosaic_calls"],
+                runs.len(),
+                m("shown_fit_ms"),
+                m("shown_histogram_ms"),
+                m("warm_ms"),
+                m("warm_developed_ms"),
+                m("warm_frame_ms"),
+                m("warmed_fit_ms"),
+                m("warmed_histogram_ms"),
+                m("warmed_demosaic_calls"),
             );
         }
     }
@@ -376,18 +408,39 @@ fn warmed_neighbour(
         let (_, fit, _, histogram) = concurrent_held(&engine, &graph, node, extent, start, held);
         Ok((decoded, fit, histogram))
     };
-    // The neighbour's warm-up, asked as the open starts.
+    // The neighbour's warm-up, asked as the open starts: framed at the
+    // viewport's size (developed on the way), as the desktop warms it
+    // once the darkroom's viewport size is known.
     let decoded = (
         helios_gui::warm::key(&name(near), near, bundle),
         helios_gui::warm::compute(near.to_path_buf(), bundle.clone()),
     );
-    let key = helios_gui::warm::developed_key(&decoded.0, None);
-    let compute = helios_gui::warm::developed(&states, decoded, engine.clone(), None);
+    let developed_key = helios_gui::warm::developed_key(&decoded.0, None);
+    // When its developed state lands: the frames' own warm cost follows.
+    let developed_at = Arc::new(std::sync::Mutex::new(None));
+    let inner = helios_gui::warm::developed(&states, decoded, engine.clone(), None);
+    let at = developed_at.clone();
+    let developed: (_, helios_node_core::image_states::Compute) = (
+        developed_key.clone(),
+        Arc::new(move || {
+            let ready = inner();
+            *at.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
+            ready
+        }),
+    );
+    let key = helios_gui::warm::framed_key(&developed_key, VIEW);
+    let compute = helios_gui::warm::framed(&states, developed, engine.clone(), VIEW);
     let start = Instant::now();
     let mut warm = states.ask(key, helios_core::Priority::Prefetch, compute);
     let (_, shown_fit, shown_histogram) = open(shown, start)?;
     warm.wait(wait).map_err(|e| e.to_string())?;
     let warm_ms = ms(start);
+    let developed_ms = developed_at
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .map_or(0.0, |at| {
+            (at.duration_since(start).as_secs_f64() * 1e6).round() / 1e3
+        });
     records
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -402,7 +455,9 @@ fn warmed_neighbour(
     Ok(json!({
         "scenario": "warmed_neighbour", "hold": hold, "shown": name(shown), "near": name(near),
         "shown_fit_ms": round(shown_fit), "shown_histogram_ms": round(shown_histogram),
-        "warm_ms": round(warm_ms), "warmed_decoded_ms": round(warmed_decoded),
+        "warm_ms": round(warm_ms), "warm_developed_ms": round(developed_ms),
+        "warm_frame_ms": round(warm_ms - developed_ms),
+        "warmed_decoded_ms": round(warmed_decoded),
         "warmed_fit_ms": round(warmed_fit), "warmed_histogram_ms": round(warmed_histogram),
         "warmed_demosaic_calls": run.demosaics, "states": states.usage(),
     }))
@@ -491,25 +546,12 @@ fn concurrent_then(
     start: Instant,
     histogram_done: &(dyn Fn() + Sync),
 ) -> (f64, f64, f64, f64) {
-    // The viewport at 1920×1080: the fit scale, and a proxy at a power of
-    // two below a quarter of it.
-    let fit = (1920.0 / f64::from(extent.width))
-        .min(1080.0 / f64::from(extent.height))
-        .min(1.0);
-    let mut proxy = 1.0;
-    while proxy > fit / 4.0 {
-        proxy /= 2.0;
-    }
+    // The viewport at 1920×1080: its proxy and fit scales, as egui-pop's
+    // viewport asks them.
+    let (proxy, fit) = VIEW.scales(extent);
     // Placed as the viewport places it (`engine_source::region_of`): a
     // turned image's extent starts off the origin.
-    let at = move |s: f64| {
-        Region::new(
-            (extent.x as f64 * s).floor() as i64,
-            (extent.y as f64 * s).floor() as i64,
-            ((f64::from(extent.width) * s).ceil() as u32).max(1),
-            ((f64::from(extent.height) * s).ceil() as u32).max(1),
-        )
-    };
+    let at = move |s: f64| helios_gui::warm::whole_at(extent, s);
     // The preview is a state of the image-state router, as in the desktop.
     let states = helios_node_core::image_states::ImageStates::new(
         engine.bus().clone(),
@@ -520,7 +562,7 @@ fn concurrent_then(
         .name("open-timing-viewport".into())
         .spawn(move || {
             let mut p = 0.0;
-            if with_proxy {
+            if with_proxy && proxy != fit {
                 let _ = e1.render_at(&g1, node, "output", at(proxy), proxy);
                 p = ms(start);
             }
