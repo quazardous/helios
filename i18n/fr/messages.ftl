@@ -154,6 +154,10 @@ gui-account-another = Utiliser un autre compte…
 
 gui-account-choose = Choisir des photos…
 
+gui-account-connected = connecté
+
+gui-account-connecting = connexion…
+
 gui-account-disconnect = Déconnecter
 
 gui-account-disconnect-explain = Helios demande au service de révoquer son accès, oublie les clés et jetons de ce compte sur cet ordinateur et retire le compte. Ce qui a été importé reste.
@@ -174,9 +178,15 @@ gui-account-manage = Gérer les comptes…
 
 gui-account-menu = Compte
 
+gui-account-needs-attention = à vérifier
+
 gui-account-needs-reconnecting = à reconnecter
 
 gui-account-never-used = Jamais
+
+gui-account-not-connected = non connecté
+
+gui-account-reconnect = Reconnecter
 
 gui-account-status-connecting = Connexion en cours
 
@@ -285,13 +295,31 @@ gui-choose-waiting = Choisissez vos photos dans le navigateur, appuyez sur OK, p
 
 gui-confirmed-by-policy = { $verb } : confirmé par la règle
 
+gui-connect-browser = Connectez-vous dans votre navigateur, puis revenez ici.
+
+gui-connect-cancel = Annuler
+
+gui-connect-close = Fermer
+
 gui-connect-copy-link = Copier le lien
+
+gui-connect-done = { $account } est connecté.
+
+gui-connect-failed = Non connecté : { $why }
 
 gui-connect-link = Adresse de la page
 
 gui-connect-link-hint = L'adresse de la page, à coller dans votre navigateur s'il ne l'a pas ouverte.
 
+gui-connect-next = Connecter
+
 gui-connect-open-again = Ouvrir à nouveau
+
+gui-connect-secret-refused = Un secret est saisi par la personne, jamais donné par un agent
+
+gui-connect-title = Connecter { $source }
+
+gui-connect-working = Connexion…
 
 gui-copied = copié { $text }
 
@@ -350,6 +378,8 @@ gui-decisions-threshold-hint = À quel point le modèle doit être sûr pour que
 gui-decisions-waiting-model = En attente du modèle
 
 gui-decisions-why = Pourquoi : { $why }
+
+gui-display-screen-auto = Auto (ce que dit le système)
 
 gui-edit-does-not-fit = Une partie de la retouche enregistrée ne correspond pas à ce réseau : { $part }
 
@@ -493,6 +523,8 @@ gui-calibrate-shot = Photo de la mire
 
 gui-calibrate-title = Calibrer les couleurs du boîtier
 
+gui-calibrate-working = En attente de la bibliothèque…
+
 gui-calibrate-worst = Pastilles les plus éloignées : { $patches }
 
 gui-calibration-header-make = Faire un profil…
@@ -524,6 +556,9 @@ gui-history-set-new = Nouvel ensemble d’albums « { $name } »
 gui-history-album-move = Déplacer « { $name } » dans un ensemble
 gui-history-album-move-out = Sortir « { $name } » de son ensemble
 gui-history-library-remove = Retirer { $count } photos de la bibliothèque
+
+gui-history-library-undoing = Annulation de « { $step } »…
+
 gui-history-rotate-left = Rotation à gauche de { $count } photos
 gui-history-rotate-right = Rotation à droite de { $count } photos
 gui-history-rotate-reset = Réinitialiser la rotation de { $count } photos
@@ -1054,15 +1089,25 @@ gui-scopes-waveform = Forme d’onde
 
 gui-settings-account-last-used = Dernière utilisation
 
+gui-settings-account-name = Compte
+
 gui-settings-account-rename = Nom
 
 gui-settings-account-rename-help = Le nom de ce compte dans Helios ; l'adresse avec laquelle il s'est connecté reste à côté.
 
 gui-settings-account-service = Service
 
+gui-settings-account-source = Source
+
 gui-settings-account-status = État
 
 gui-settings-account-used-by = Utilisé par
+
+gui-settings-account-why = Pourquoi
+
+gui-settings-accounts = Comptes
+
+gui-settings-accounts-about = Les comptes depuis lesquels Helios importe. Leurs clés et jetons restent dans le trousseau de cet ordinateur ; la bibliothèque ne garde que leurs noms.
 
 gui-settings-accounts-add = Ajouter un compte
 
@@ -1134,6 +1179,8 @@ gui-status-zoom = Zoom
 gui-status-zoom-fill = Remplir
 
 gui-status-zoom-fit = Ajuster
+
+gui-storage-backup-destination = reçoit des copies
 
 gui-subworkspace-gone = Le sous-espace de travail { $id } n’existe plus : retour là où il avait été ouvert
 
@@ -1224,6 +1271,20 @@ gui-wizard-sign-in = Se connecter à un compte…
 gui-wizard-account-has-source = Ce compte a déjà une source, { $source } : une source par compte suffit.
 gui-wizard-open-source = Ouvrir cette source
 gui-settings-volume-sources = Sources d’import
+
+gui-settings-volume-space = Espace
+
+gui-settings-volume-state = État
+
+gui-settings-volumes = Volumes
+
+gui-settings-volumes-none = Aucun volume connu pour l’instant : branchez un disque.
+
+gui-settings-volumes-seen = Volumes
+
+gui-settings-workbench = Plan de travail
+
+gui-settings-workers = Tâches
 
 gui-wizard-title = Ajouter une source
 
@@ -1569,6 +1630,9 @@ gui-library-cull-clipped = écrêtée
 gui-library-cull-unmeasured = non mesurée
 gui-library-badge-soft = floue
 gui-library-badge-blown = hautes lumières brûlées
+
+gui-library-badge-changed-outside = modifiée ailleurs
+
 gui-library-badge-crushed = ombres bouchées
 gui-library-sort-focus = Netteté
 gui-library-folders = Dossiers
@@ -1748,6 +1812,12 @@ gui-library-images = Images
 
 gui-library-keep-best = Garder la meilleure : la choisir, rejeter les autres
 
+gui-library-key-date = Date de prise de vue
+
+gui-library-key-keyword = Mot-clé
+
+gui-library-key-tag = Balise
+
 gui-library-no-cursor = Aucune image sous le curseur
 
 gui-library-none = Aucune image
@@ -1816,6 +1886,18 @@ gui-duplicates-waiting-note = { $count } doublons attendent une réponse dans le
 
 gui-import-form-title = Importer des photos
 
+gui-import-history = Historique
+
+gui-import-history-added = { $count } ajoutées
+
+gui-import-history-again = Importer à nouveau
+
+gui-import-history-by = Par { $origin }
+
+gui-import-history-counts = { $added } ajoutées, { $located } retrouvées, { $unchanged } inchangées, { $skipped } ignorées, { $failed } en échec
+
+gui-import-history-failed = échec
+
 gui-import-path = carte ou dossier
 
 gui-import-verb = Importer
@@ -1867,6 +1949,8 @@ gui-import-window-empty = Aucune photo dans les sources cochées
 gui-import-window-example = ex. { $example }
 
 gui-import-history-imports = Importations
+
+gui-import-history-none = Aucun import pour l’instant
 
 gui-import-window-folders = Dossiers
 
@@ -1963,6 +2047,8 @@ gui-image-not-reopened = L’image laissée ouverte n’a pas pu être rouverte 
 gui-image-opened = { $name } est ouverte
 
 gui-image-opening = Ouverture de { $name }…
+
+gui-import-accounts-merged = { $count } comptes { $connector } connectés avec la même adresse réunis en un : { $address }
 
 gui-library-read = { $count } images dans la bibliothèque
 
@@ -2455,6 +2541,10 @@ gui-settings-health = Santé
 
 gui-settings-health-check = Bilan de santé
 
+gui-settings-history = Historique
+
+gui-settings-image-map = Carte des images
+
 gui-health-ignore = Ignorer
 
 health-card-short = { $card } ne peut pas encore être formatée
@@ -2612,6 +2702,10 @@ gui-storage-role-ingest = Source
 
 gui-storage-role-scratch = Travail
 
+gui-storage-strategy-none = Aucune sauvegarde configurée
+
+gui-storage-summary = { $online } en ligne, { $offline } hors ligne
+
 gui-storage-name-hint = Son nom ; Entrée l’enregistre
 
 gui-storage-online = en ligne
@@ -2651,6 +2745,8 @@ gui-storage-node = Dans { $node }
 gui-storage-last-seen = Vu pour la dernière fois le { $date } sur { $node }
 
 gui-storage-mark-explain = Ce disque n’est connu que par son nom de volume et sa taille : Helios pourrait le confondre avec un autre. Le marquer écrit un petit fichier, .helios/volume.json, à sa racine : rien d’autre ne change sur le disque.
+
+gui-storage-mark-title = Marquer { $disk } ?
 
 gui-storage-mark-confirm = Écrire le fichier d’identité
 
@@ -2728,6 +2824,11 @@ gui-catalogue-one-day = il y a 1 jour
 gui-catalogue-restore = Restaurer…
 gui-catalogue-restore-ask = Restaurer le catalogue depuis l'instantané d'{ $when } ? Les changements faits depuis sont perdus. Le catalogue actuel est mis de côté, et Helios se ferme puis redémarre sur l'instantané.
 gui-catalogue-restore-confirm = Restaurer et redémarrer
+
+gui-catalogue-restore-dropped = Restauration du catalogue annulée : Helios n’a pas quitté, le catalogue n’a donc pas été remplacé. Demandez à nouveau la restauration.
+
+gui-catalogue-restore-title = Restaurer le catalogue ?
+
 gui-catalogue-snapshot-now = Instantané maintenant
 gui-catalogue-today = aujourd'hui
 gui-backup-wizard = Configurer les sauvegardes
@@ -2825,6 +2926,38 @@ gui-settings-plugins = Extensions
 
 gui-settings-plugins-capabilities = Autorisations
 
+gui-settings-reset = Réinitialiser Helios
+
+gui-settings-snapshots = Instantanés
+
+gui-settings-storage = Stockage
+
+gui-settings-strategy = Stratégie
+
+gui-settings-strategy-copies = Copies
+
+gui-settings-strategy-destinations = Sur
+
+gui-settings-strategy-online = Disques branchés
+
+gui-settings-volume-backup = Sauvegarde
+
+gui-settings-volume-forget = Oublier…
+
+gui-settings-volume-forget-title = Oublier ce qui a été vu sur { $disk } ?
+
+gui-settings-volume-forget-verb = Oublier
+
+gui-settings-volume-kind = Type
+
+gui-settings-volume-name = Nom
+
+gui-settings-volume-photos = Photos
+
+gui-settings-volume-scan = Analyser maintenant
+
+gui-settings-volume-seen = Vu
+
 gui-oauth-client-built-in = Le client de Helios
 
 gui-oauth-client-environment = Celui de l’environnement
@@ -2834,6 +2967,8 @@ gui-oauth-client-none = Aucun dans cette version : utilisez le vôtre
 gui-oauth-client-own = Votre propre client
 
 gui-settings-accounts-clients = Utiliser mon propre client OAuth
+
+gui-settings-accounts-list = Comptes d’import
 
 gui-settings-client-helios = Utiliser le client de Helios
 
@@ -2848,6 +2983,28 @@ gui-settings-client-used = Client utilisé
 gui-settings-clients-about = Helios se connecte à ces services avec son propre client OAuth. Pour utiliser le vôtre à la place (une application de bureau que vous avez enregistrée auprès du service), donnez son ID client et son code secret : ils restent dans le trousseau de cet ordinateur. Reconnectez-vous ensuite.
 
 gui-settings-clients-none = Aucun service se connectant par OAuth n’est installé.
+
+gui-settings-danger = Zone de danger
+
+gui-settings-decisions = Décisions
+
+gui-settings-destinations = Destinations
+
+gui-settings-display = Affichage
+
+gui-settings-display-no-screens = Aucun écran connu pour l’instant.
+
+gui-settings-display-screen = Écran
+
+gui-settings-display-screens = Écrans
+
+gui-settings-display-shows = Affiche
+
+gui-settings-display-shows-help = Corrige ce que le système dit de ce que montre cet écran ; Auto suit le système. Le HDR est seulement détecté et indiqué : un écran HDR est pour l’instant traité comme un écran à gamut étendu.
+
+gui-settings-display-system-says = Le système dit
+
+gui-settings-experimental = Expérimental
 
 gui-settings-focus-import = Fenêtre d’import
 
@@ -2866,6 +3023,8 @@ gui-settings-for-library-about = tant que cette bibliothèque est ouverte
 gui-settings-for-workspace = Cet espace de travail
 
 gui-settings-for-workspace-about = tant que cet espace de travail est ouvert
+
+gui-settings-hardware = Matériel
 
 gui-health-owner-storage = Stockage
 
@@ -2898,6 +3057,14 @@ gui-import-auto-resume = Reprendre
 gui-import-auto-resumed = Imports automatiques repris
 
 gui-settings-automatic-imports = Imports automatiques
+
+gui-settings-backup = Sauvegarde
+
+gui-settings-caches = Caches
+
+gui-settings-catalogue = Catalogue
+
+gui-settings-catalogue-about = Des instantanés vérifiés du catalogue (notes, étiquettes, retouches) : gardés à côté de lui et copiés sur les disques de sauvegarde branchés.
 
 gui-import-no-library-folder = Choisissez d'abord un dossier de bibliothèque : les imports y copient les photos (menu Helios › Configurer Helios…).
 
@@ -2953,10 +3120,17 @@ gui-rule-field-imported = date d’importation
 
 gui-settings-imports = Importations
 
+gui-settings-library = Bibliothèque
+
 gui-library-window = Bibliothèque
 gui-library-window-elsewhere = La bibliothèque est ouverte dans sa propre fenêtre
 gui-history-keyword-merge = Fusionner le mot-clé { $from } dans { $to }
 gui-history-keyword-rename = Renommer le mot-clé { $from } en { $to }
+
+gui-history-library-redoing = Rétablissement de « { $step } »…
+
+gui-history-library-refused = Annulation refusée : { $reason }
+
 gui-library-keyword-add = Ajouter aux photos sélectionnées
 gui-library-keyword-drop = Ajouter { $keyword } à { $count } photos
 gui-library-keyword-merge = Fusionner dans…
