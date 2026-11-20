@@ -635,6 +635,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
+name = "bus-bridge"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79f2c0f34f9182df8fdfe2ef3541e9f5c4c621ef27d52b984c9d663833234e6d"
+dependencies = [
+ "bus-contract",
+ "bus-contract-crossing",
+ "bus-contract-journal",
+ "nix 0.32.0",
+ "rustix 1.1.6",
+]
+
+[[package]]
 name = "bus-contract"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1278,7 +1291,7 @@ dependencies = [
  "getrandom 0.4.3",
  "interprocess",
  "log",
- "nix",
+ "nix 0.31.4",
  "serde_json",
  "sha2",
  "widestring",
@@ -2602,6 +2615,7 @@ version = "0.92.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "bus-bridge",
  "bus-kernel",
  "chrono",
  "eframe",
@@ -4162,6 +4176,19 @@ name = "nix"
 version = "0.31.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bc81ce8148d3b4f3274da811f11cdd824ae661ee4ef732cdb229825cf5be7f7"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
+name = "nix"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77730ed34f01f4990cb2ea67fec715ecebc6fab9a6396cf83c5529b13f581bdc"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
