@@ -663,6 +663,18 @@ gui-export-space = colour space
 
 gui-export-verb = Export
 
+gui-forget-cancel = Leave without forgetting the accounts?
+
+gui-forget-cancel-verb = Leave
+
+gui-forget-open = Forget accounts…
+
+gui-forget-verb = Forget the accounts
+
+gui-forget-wizard = Forget the accounts
+
+gui-forget-wizard-about = The accounts' sign-ins and the AI keys Helios keeps in the system keyring are removed. Each account signs in again. Photos and the library stay.
+
 gui-gesture-in-progress = { $gesture } is in progress
 
 gui-graph-add-macro = Macros › { $name }
@@ -1276,6 +1288,12 @@ gui-importer-warning = { $importer }: { $warning }
 gui-init-library-folder-choose = Choose…
 
 gui-init-library-folder-help = A folder on a disk with room for your photos; it is made if missing.
+
+gui-init-reimport = Your photos
+
+gui-init-reimport-about = Helios was reset. Its photos are still in these folders: add them back to the library where they are. Nothing is copied or moved.
+
+gui-init-reimport-toggle = Add these photos back, where they are
 
 gui-init-wizard = Set up Helios
 
@@ -2342,6 +2360,8 @@ gui-reset-dropped = Reset cancelled: Helios did not quit, so nothing was reset. 
 gui-reset-fate-backup = moved to the backup folder
 
 gui-reset-fate-remove = removed
+
+gui-reset-forget-accounts = Also forget the accounts (their sign-ins and AI keys in the system keyring)
 
 gui-reset-goes = What goes
 

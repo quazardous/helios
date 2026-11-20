@@ -110,6 +110,8 @@ command-gui-snapshot.title b408436c6f1ff343
 command-health-checkNow.title f8dc3e3e8d7ee6d8
 command-health-fix.title 2ecc29744a3313ea
 command-health-ignore.title 392bdd709e064211
+command-helios-app-reimport-folders.title 8e66dcc019900705
+command-helios-app-reimport.title f00cb3343000dccc
 command-helios-compare-detach.title aa7ae7ff58e60317
 command-helios-compare-dock.title ff65736beab0b53c
 command-helios-compare-moveTo.title 97c151ef90724c30
@@ -670,6 +672,12 @@ gui-export-scope 407d68a505749e56
 gui-export-scope-help 23b5a8281fe77c29
 gui-export-space 5ce187c659045433
 gui-export-verb f8b90c9ddacf7313
+gui-forget-cancel ecf31ca86372317b
+gui-forget-cancel-verb 68010cc9002a2716
+gui-forget-open 39982410243ef482
+gui-forget-verb d533626495a9632d
+gui-forget-wizard d533626495a9632d
+gui-forget-wizard-about b539e03505114d8f
 gui-gesture-in-progress c25ee937ebc97642
 gui-graph-add-macro db3acd4cacf311c5
 gui-graph-label 117a61ee1d524de1
@@ -977,6 +985,9 @@ gui-importer-scanned da651acfeeecce9b
 gui-importer-warning 48ec8d182f072be9
 gui-init-library-folder-choose 7d571608b37851ba
 gui-init-library-folder-help a60c7feef0a81f7f
+gui-init-reimport 8a0ae3536f258617
+gui-init-reimport-about a2d70b349810e3ca
+gui-init-reimport-toggle cdc2156d9b8325bc
 gui-init-wizard ceb08e552bf4c794
 gui-init-wizard-about 425eaaefa856dbeb
 gui-init-wizard-finish 99be14717ae2bf40
@@ -1510,6 +1521,7 @@ gui-reset-confirm-about 7ce389f55e5fdf2e
 gui-reset-dropped 4d73623173748b6a
 gui-reset-fate-backup a03818c66f1caed6
 gui-reset-fate-remove 01ac98a4a260a42b
+gui-reset-forget-accounts 23208d1a67c037c0
 gui-reset-goes 83dcb7de95579d93
 gui-reset-open 3623e12468627290
 gui-reset-refused 35f64ce4d494776f
