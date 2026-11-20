@@ -3940,22 +3940,14 @@ fn the_import_window_has_the_main_windows_title_bar_and_menus() {
     assert!(main_menus.len() >= 4, "{main_menus:?}");
     let nodes = window_nodes(&mut h, window, Vec::new());
     let names: Vec<&String> = nodes.iter().map(|(n, _, _)| n).collect();
-    // The title bar's start: the menu button, the logo, the name.
+    // The title bar's start: the menu button, the logo, the name (the
+    // frame's, `FramePlugin::logo`).
     for name in ["Window menu", "Helios"] {
         assert!(names.iter().any(|n| *n == name), "{name} in {names:?}");
     }
-    let named = h.ctx.data(|d| {
-        d.get_temp::<std::collections::BTreeMap<String, (egui::Rect, egui::ViewportId)>>(
-            egui::Id::unique("helios.named"),
-        )
-    });
-    assert_eq!(
-        named
-            .unwrap_or_default()
-            .get("helios.logo")
-            .map(|(_, v)| *v),
-        Some(window),
-        "the logo is drawn in the import window's title bar"
+    assert!(
+        names.iter().any(|n| n.contains("logo")),
+        "the logo is drawn in the import window's title bar: {names:?}"
     );
     // The same menus as the main window.
     assert_eq!(top_menus(&app), main_menus);

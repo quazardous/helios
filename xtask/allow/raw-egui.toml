@@ -7,7 +7,6 @@
 "activity.rs" = 6
 "jobs.rs" = 10
 "params.rs" = 7
-"plugins.rs" = 2
 "promise_line.rs" = 13
 "queue.rs" = 14
 "shell/import_window.rs" = 1
