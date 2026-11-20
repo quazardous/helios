@@ -12,6 +12,10 @@
 
 use std::path::{Path, PathBuf};
 
+use serde_json::{Value as Json, json};
+
+use crate::library::{Library, Restriction};
+
 /// What a dialog is about, for its details.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Context {
@@ -222,6 +226,108 @@ fn redact_home(text: &str, home: &Path) -> String {
     out
 }
 
+/// Whether a token of a problem report is an image id (a file's content
+/// hash, 64 hexadecimal digits): egui-pop's report replaces each by an
+/// alias, `photo-1`, `photo-2`… (`AboutPlugin::alias`).
+pub fn is_image_id(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The library's shape, for a problem report (`AboutPlugin::context`):
+/// how many photos, of which kinds (raw, JPEG, other, raw+JPEG pairs by
+/// their names' stems), stacked, edited, offline or missing; how many the
+/// views show, picked, rejected and selected; what limits the view (an
+/// album, a folder, an import, a set) and the filter's terms. Never a
+/// name, a path or a term's value; the open photo by its id, which the
+/// report aliases.
+pub fn library_shape(lib: &Library, ctx: &egui::Context) -> Json {
+    let (mut raw, mut jpeg, mut other) = (0, 0, 0);
+    let (mut stacked, mut edited, mut offline, mut missing) = (0, 0, 0, 0);
+    let mut stems: std::collections::HashMap<String, (bool, bool)> =
+        std::collections::HashMap::new();
+    for e in &lib.entries {
+        let path = Path::new(&e.name);
+        let ext = path
+            .extension()
+            .and_then(|x| x.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let stem = path
+            .file_stem()
+            .and_then(|x| x.to_str())
+            .unwrap_or("")
+            .to_string();
+        let kind = stems.entry(stem).or_default();
+        if helios_load::Kind::of(path) == helios_load::Kind::Raw {
+            raw += 1;
+            kind.0 = true;
+        } else if matches!(ext.as_str(), "jpg" | "jpeg") {
+            jpeg += 1;
+            kind.1 = true;
+        } else {
+            other += 1;
+        }
+        stacked += usize::from(e.stack.is_some());
+        edited += usize::from(e.edited);
+        match e.presence {
+            helios_vault::Presence::Offline => offline += 1,
+            helios_vault::Presence::Missing => missing += 1,
+            _ => {}
+        }
+    }
+    let pairs = stems.values().filter(|(r, j)| *r && *j).count();
+    let (shown, picked, rejected) = lib.counts();
+    let limits: Vec<&str> = lib
+        .restrictions(ctx)
+        .into_iter()
+        .map(|(_, r)| match r {
+            Restriction::Album => "album",
+            Restriction::Folder => "folder",
+            Restriction::Import => "import",
+            Restriction::Set => "set",
+        })
+        .collect();
+    json!({
+        "photos": lib.entries.len(),
+        "raw": raw,
+        "jpeg": jpeg,
+        "other": other,
+        "raw_jpeg_pairs": pairs,
+        "stacked": stacked,
+        "edited": edited,
+        "offline": offline,
+        "missing": missing,
+        "shown": shown,
+        "picked": picked,
+        "rejected": rejected,
+        "selected": lib.selection().len(),
+        "limited_to": limits,
+        "filter_terms": filter_terms(&lib.filter().text),
+        "open": lib.selected().and_then(|i| lib.entries.get(i)).map(|e| e.id.clone()),
+    })
+}
+
+/// A filter's terms by their key alone (`folder`, `rating`), and how many
+/// free words it has: never a value, which may name a place or a person.
+fn filter_terms(text: &str) -> Json {
+    let mut keys: Vec<String> = Vec::new();
+    let mut words = 0;
+    for token in text.split_whitespace() {
+        match token.split_once(':') {
+            Some((key, _))
+                if !key.is_empty()
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '!') =>
+            {
+                keys.push(key.to_ascii_lowercase());
+            }
+            _ => words += 1,
+        }
+    }
+    json!({ "keys": keys, "words": words })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +409,21 @@ mod tests {
         assert!(!text.contains("1234-abcd"), "{text}");
         assert!(!text.contains("tok-5678"), "{text}");
         assert!(text.contains("[redacted]"), "{text}");
+    }
+
+    #[test]
+    fn image_ids_are_64_hex_digits() {
+        assert!(is_image_id(&"a1".repeat(32)));
+        assert!(!is_image_id(&"a1".repeat(31)));
+        assert!(!is_image_id(&"zz".repeat(32)));
+    }
+
+    #[test]
+    fn a_filter_gives_its_keys_never_its_values() {
+        let t = filter_terms("folder:\"/home/ann/Wedding\" rating:>=3 jane");
+        assert_eq!(t["keys"], json!(["folder", "rating"]));
+        assert_eq!(t["words"], 1);
+        assert!(!t.to_string().contains("ann"));
+        assert!(!t.to_string().contains("jane"));
     }
 }

@@ -259,6 +259,35 @@ fn about_info() -> egui_pop::api::about::AppInfo {
     info
 }
 
+/// Help > About Helios and Help > Report a problem (egui-pop's
+/// `about::AboutPlugin`): the report's journal skips the engine's
+/// per-render facts and the vault migration's progress, which come at
+/// every frame or row and would bury the rest.
+fn report_plugin(late: crate::agent_state::Late) -> egui_pop::api::about::AboutPlugin {
+    use egui_pop::api::about::{self, AboutPlugin, journal::RecorderConfig};
+    AboutPlugin::new(about_info())
+        .journal(
+            RecorderConfig::default()
+                .skip("helios.engine.render_requested")
+                .skip("helios.engine.step_computed")
+                .skip("helios.node.render_done")
+                .skip("helios.vault.migration_progress")
+                .skip("job.progress"),
+        )
+        .alias("photo", crate::report::is_image_id)
+        .context("library", move |app| {
+            late.library().map_or(serde_json::Value::Null, |lib| {
+                lib.try_borrow().map_or(serde_json::Value::Null, |lib| {
+                    crate::report::library_shape(&lib, &app.egui())
+                })
+            })
+        })
+        .context("layout", |app| {
+            serde_json::to_value(app.layout()).unwrap_or(serde_json::Value::Null)
+        })
+        .context("settings", about::changed_settings)
+}
+
 /// What commands ask the shell to do; they are queued and applied at the
 /// next frame, where the shell's state is at hand. The command shows as
 /// running until then (see `host::Later`).
@@ -1118,8 +1147,11 @@ impl Shell {
             // then the status items (Helios's by place, the jobs'); no
             // activity bar.
             .plugin(egui_pop::api::strips::StripsPlugin::status_only())
-            // Help > About Helios.
-            .plugin(egui_pop::api::about::AboutPlugin::new(about_info()))
+            // Help > About Helios. Help > Report a problem attaches the
+            // last 5 minutes of the journal, redacted, image ids aliased
+            // (`photo-1`…), with the library's shape, the layout and the
+            // settings changed, and shows it before anything is sent.
+            .plugin(report_plugin(agent_state.clone()))
             // Help > Tips… and the tips' card (egui-pop's), with Helios's
             // tips; they come by themselves once the desktop asks
             // (`Shell::tips_by_themselves`).
