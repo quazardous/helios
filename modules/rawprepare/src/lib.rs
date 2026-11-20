@@ -77,18 +77,18 @@ impl Module for RawPrepare {
     ) -> Result<Vec<Image>, String> {
         let input = inputs[0];
         // Row by row over slices (a pixel at a time cost ~8 ns each on a
-        // 25 MP mosaic, a fifth of a second).
+        // 25 MP mosaic, a fifth of a second), the rows in bands over the
+        // machine's threads.
         let from = (output.x - input.region().x) as usize;
-        let mut data = Vec::with_capacity(output.area());
-        for y in output.y..output.bottom() {
+        let image = Image::from_rows(output, 1, |y, out| {
             let row = &input.row(y)[from..from + output.width as usize];
             let pair = ((y & 1) * 2) as usize;
-            data.extend(row.iter().enumerate().map(|(i, v)| {
+            for (i, (o, v)) in out.iter_mut().zip(row).enumerate() {
                 let black = plan.black[pair + ((output.x + i as i64) & 1) as usize];
-                (v - black) / (plan.white - black)
-            }));
-        }
-        Ok(vec![Image::new(output, 1, data)])
+                *o = (v - black) / (plan.white - black);
+            }
+        })?;
+        Ok(vec![image])
     }
 }
 
@@ -135,6 +135,24 @@ mod tests {
         let out = RawPrepare.process(&plan, &[&img], r).unwrap();
         // x = 1 takes black 100: (600 - 100) / 1000; x = 2 takes 0: 600 / 1100.
         assert_eq!(out[0].data(), &[0.5, 600.0 / 1100.0]);
+    }
+
+    #[test]
+    fn a_large_mosaic_in_bands_is_each_photosite_bit_for_bit() {
+        let plan = RawPrepare
+            .prepare(
+                &Params::new(),
+                &context([100.0, 110.0, 120.0, 130.0], 4000.0),
+            )
+            .unwrap();
+        let r = Region::new(1, 3, 777, 513);
+        let img = Image::from_fn(r, 1, |x, y, _| ((x * 37 + y * 11) % 3900) as f32 + 100.0);
+        let out = RawPrepare.process(&plan, &[&img], r).unwrap();
+        let want = Image::from_fn(r, 1, |x, y, _| {
+            let black = plan.black[((y & 1) * 2 + (x & 1)) as usize];
+            (img.pixel(x, y)[0] - black) / (plan.white - black)
+        });
+        assert_eq!(out[0].data(), want.data());
     }
 
     #[test]

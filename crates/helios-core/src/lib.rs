@@ -6,6 +6,7 @@
 //! `docs/architecture.md` at the root of the repository.
 //!
 //! - [`image`]: image buffers and regions, addressed by content.
+//! - [`bands`]: per-pixel loops in row bands over the machine's threads.
 //! - [`params`] and [`manifest`]: named, typed parameters and what a module declares.
 //! - [`module`]: the contract a module implements.
 //! - [`graph`]: a network of nodes.
@@ -18,6 +19,7 @@
 //! - [`describe`]: every entity reports its state as structured data.
 //! - [`trace`]: timed spans of the engine's steps, for whoever listens.
 
+pub mod bands;
 pub mod brick;
 pub mod bus;
 pub mod cancel;

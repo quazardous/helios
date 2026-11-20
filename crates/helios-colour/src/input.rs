@@ -272,18 +272,21 @@ impl InputSpace {
                         .collect();
                     (table, max as f32)
                 });
-                for px in rgba.chunks_exact_mut(4) {
-                    let linear = [0, 1, 2].map(|c| match &tables {
-                        Some((table, max)) => {
-                            table[(px[c].clamp(0.0, 1.0) * max).round() as usize][c]
+                let convert = |pixels: &mut [f32]| {
+                    for px in pixels.chunks_exact_mut(4) {
+                        let linear = [0, 1, 2].map(|c| match &tables {
+                            Some((table, max)) => {
+                                table[(px[c].clamp(0.0, 1.0) * max).round() as usize][c]
+                            }
+                            None => curves[c].eval(f64::from(px[c])),
+                        });
+                        let out = apply(to_working, linear);
+                        for c in 0..3 {
+                            px[c] = out[c] as f32;
                         }
-                        None => curves[c].eval(f64::from(px[c])),
-                    });
-                    let out = apply(to_working, linear);
-                    for c in 0..3 {
-                        px[c] = out[c] as f32;
                     }
-                }
+                };
+                in_bands(rgba, convert);
                 Ok(())
             }
             Convert::Cms(transform) => {
@@ -302,6 +305,38 @@ impl InputSpace {
             }
         }
     }
+}
+
+/// Runs `convert` on bands of whole pixels of `rgba` over the machine's
+/// threads, the calling thread taking one: a first paint converts a
+/// 2.7 MP preview at about 60 ns a pixel on one thread (some 0.17 s).
+/// Each pixel goes through the same code whatever band holds it, so the
+/// result is the one-thread result, bit for bit. A small picture is
+/// converted on the calling thread.
+fn in_bands(rgba: &mut [f32], convert: impl Fn(&mut [f32]) + Sync) {
+    /// Pixels a band holds at least: below it, a thread costs more than
+    /// it saves.
+    const MIN_PIXELS: usize = 1 << 15;
+    let pixels = rgba.len() / 4;
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(pixels.div_ceil(MIN_PIXELS))
+        .max(1);
+    if threads == 1 {
+        convert(rgba);
+        return;
+    }
+    let band = pixels.div_ceil(threads) * 4;
+    let mut bands = rgba.chunks_mut(band);
+    let own = bands.next();
+    std::thread::scope(|s| {
+        for b in bands {
+            s.spawn(|| convert(b));
+        }
+        if let Some(b) = own {
+            convert(b);
+        }
+    });
 }
 
 fn text(t: Option<&ProfileText>) -> Option<String> {
@@ -438,6 +473,33 @@ mod tests {
         space.to_working(&mut px, bits).unwrap();
         assert_eq!(px[3], 1.0, "alpha untouched");
         [px[0], px[1], px[2]]
+    }
+
+    #[test]
+    fn a_large_picture_in_bands_is_each_pixel_bit_for_bit() {
+        // Enough pixels to be shared among threads: each comes out as it
+        // does converted on one thread.
+        let space = InputSpace::of(OutputSpace::AdobeRgb);
+        for bits in [Some(8), None] {
+            let mut rgba: Vec<f32> = (0..300_000u32)
+                .flat_map(|i| {
+                    let v = |k: u32| ((i * k) % 256) as f32 / 255.0;
+                    [v(7), v(13), v(29), 1.0]
+                })
+                .collect();
+            // Converted a small run at a time: one thread each.
+            let mut alone = rgba.clone();
+            for run in alone.chunks_mut(4000) {
+                space.to_working(run, bits).unwrap();
+            }
+            space.to_working(&mut rgba, bits).unwrap();
+            assert!(
+                rgba.iter()
+                    .zip(&alone)
+                    .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "{bits:?}"
+            );
+        }
     }
 
     fn close(a: [f32; 3], b: [f32; 3], tolerance: f32) -> bool {
