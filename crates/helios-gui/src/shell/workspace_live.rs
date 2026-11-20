@@ -759,22 +759,19 @@ impl Shell {
         origin: &egui_pop::model::commands::Origin,
     ) -> Result<Value, String> {
         use egui_pop::api::history::Request;
-        let scope = match request["scope"].as_str() {
-            Some(s) => {
-                egui_pop::api::history::ScopeId::new(s).map_err(|e| format!("`scope`: {e}"))?
-            }
+        let scope = if let Some(s) = request["scope"].as_str() {
+            egui_pop::api::history::ScopeId::new(s).map_err(|e| format!("`scope`: {e}"))?
+        } else {
             // None named: the history holding the batch.
-            None => {
-                let store = lock(&self.core.values);
-                let workspace = store
-                    .undo_steps_of(helios_values::HistoryScope::Workspace)
-                    .iter()
-                    .any(|s| s.group == Some(group));
-                if workspace {
-                    crate::history::WORKSPACE
-                } else {
-                    crate::history::EDIT
-                }
+            let store = lock(&self.core.values);
+            let workspace = store
+                .undo_steps_of(helios_values::HistoryScope::Workspace)
+                .iter()
+                .any(|s| s.group == Some(group));
+            if workspace {
+                crate::history::WORKSPACE
+            } else {
+                crate::history::EDIT
             }
         };
         let mut ask = Request::new(scope);
