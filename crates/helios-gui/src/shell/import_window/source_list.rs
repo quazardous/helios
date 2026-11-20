@@ -116,6 +116,15 @@ impl SourcePlaces {
     }
 }
 
+/// An item's line: its parts, a state mark leading them as a sign, not
+/// one of the parts.
+fn line_of(mark: Option<&str>, parts: &[String]) -> String {
+    match mark {
+        Some(mark) => format!("{mark} {}", parts.join(" · ")),
+        None => parts.join(" · "),
+    }
+}
+
 /// One source as a panel's item.
 struct Placed {
     key: SourceKey,
@@ -163,8 +172,7 @@ impl ImportWindow {
         key: SourceKey,
         icon: &str,
         name: String,
-        mark: Option<&str>,
-        line: &[String],
+        line: String,
         tip: Option<String>,
         words: &Words,
     ) -> Placed {
@@ -177,12 +185,6 @@ impl ImportWindow {
         let mut item = PlaceItem::new(item_id(&key), name)
             .icon(icon)
             .toggle(PlaceToggle::new(PIN, pinned, pin.clone()));
-        // A state mark leads the line, as a word's sign, not one of its
-        // parts.
-        let line = match mark {
-            Some(mark) => format!("{mark} {}", line.join(" · ")),
-            None => line.join(" · "),
-        };
         if !line.is_empty() {
             item = item.line(line);
         }
@@ -224,7 +226,7 @@ impl ImportWindow {
             "phosphor:folder"
         };
         let mark = own.then_some("●");
-        self.placed(key, icon, name, mark, &line, Some(tip), words)
+        self.placed(key, icon, name, line_of(mark, &line), Some(tip), words)
     }
 
     /// A path source's line by default: its last import, else where it is.
@@ -307,8 +309,7 @@ impl ImportWindow {
             SourceKey::Account(account.id.clone()),
             "phosphor:cloud",
             name,
-            mark,
-            &line,
+            line_of(mark, &line),
             account.email().map(str::to_owned),
             words,
         );
