@@ -609,3 +609,25 @@ capability, a key not found), the local runtime (installed, running, its
 version and models), the privacy settings and where the AI files are. An
 agent sets all of this up through the `helios_ai_*` MCP tools. See
 [AI models](ai-models.md).
+
+## Reset
+
+```sh
+helios --reset [everything|caches|settings] [--vault FILE] [--photos DIR]... [--confirm RESET]
+```
+
+The reset of Settings > Danger zone, for a Helios that no longer starts:
+the same kernel and the same plan. It lists each of Helios's own places
+and its fate (moved to a dated `helios-reset-*` backup folder beside the
+data folder, or removed for the caches) and the photo folders that stay,
+before anything moves. `everything` (the default) makes the next launch a
+first launch; `caches` and `settings` take only those.
+
+The photo folders the plan is checked against are read from the library
+(`--vault FILE`, else the default one); `--photos DIR` adds one, and is
+needed when the library cannot be read. A photo folder inside one of
+Helios's folders refuses the reset. It refuses while Helios is running
+on that library, and asks for the word `RESET` typed in the terminal;
+with no terminal (a script) it refuses unless `--confirm RESET` is given.
+Photos and their sidecars are never touched. Exit codes: 0 reset, 1 the
+reset stopped part way (the line says where), 2 usage, 3 refused.

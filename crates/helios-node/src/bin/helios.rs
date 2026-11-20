@@ -55,6 +55,8 @@
 //!     helios run [--vault FILE|--node ADDRESS] 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...] | --file SCRIPT|-
 //!                [--keep-going] [--json] [--window W] [--request-id KEY]
 //!
+//!     helios --reset [everything|caches|settings] [--vault FILE] [--photos DIR]... [--confirm RESET]
+//!
 //!     helios doctor display
 //!     helios doctor ai
 //! ```
@@ -180,6 +182,7 @@ macro_rules! out {
 
 const USAGE: &str = "usage:
   helios --version
+  helios --reset [everything|caches|settings] [--vault FILE] [--photos DIR]... [--confirm RESET]
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] state
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] describe ENTITY
   helios inspect [--socket PATH|tcp://HOST:PORT --token-file FILE] events [--since SEQ]
@@ -1714,6 +1717,18 @@ fn main() -> ExitCode {
     {
         out!("helios {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
+    }
+    if args.first().is_some_and(|a| a == "--reset") {
+        let stdin = std::io::stdin();
+        let terminal = std::io::IsTerminal::is_terminal(&stdin);
+        let code = helios_node::reset_cli::run(
+            &args[1..],
+            |name| std::env::var(name).ok(),
+            terminal,
+            &mut stdin.lock(),
+            &mut std::io::stdout(),
+        );
+        return ExitCode::from(code);
     }
     if args.first().is_some_and(|a| a == "sandbox") {
         return sandbox(&args[1..]);
