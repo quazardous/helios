@@ -478,8 +478,16 @@ enum ShapeKind {
         /// resolution ([`crate::Needs::direct_reduction`]), with its
         /// node's extent at full resolution: it reads the full-resolution
         /// region its output covers, aligned as a reduce's ask is.
-        direct: Option<Option<Region>>,
+        direct: Option<Direct>,
     },
+}
+
+/// A module computed straight at its unit's scale from inputs at full
+/// resolution ([`crate::Needs::direct_reduction`]).
+#[derive(Clone, Copy)]
+struct Direct {
+    /// Its node's extent at full resolution, to align what it reads.
+    extent: Option<Region>,
 }
 
 /// The regions a node is computed over, from the regions its consumers
@@ -1926,7 +1934,9 @@ impl Engine {
                 // Straight from full resolution: its inputs read there.
                 let direct = (scale < 1.0 && manifest.needs.full_resolution).then(|| {
                     h.update(b"helios.step.direct.v1");
-                    p.graph.extent(unit.node).ok().flatten()
+                    Direct {
+                        extent: p.graph.extent(unit.node).ok().flatten(),
+                    }
                 });
                 let plan = module.prepare(&params, &context, scale)?;
                 h.update(&context.restricted_to(&manifest.context).canonical_bytes());
@@ -2492,9 +2502,11 @@ fn whole_image_ask(full: Region, extent: Option<Region>) -> Region {
 /// region `r` covers, aligned as a reduce's ask of the whole image is
 /// ([`whole_image_ask`]), so the steps it reads are the ones a full-size
 /// computation of the same image reads.
-fn direct_full(direct: Option<Option<Region>>, r: Region, unit: &Unit) -> Region {
+fn direct_full(direct: Option<Direct>, r: Region, unit: &Unit) -> Region {
     match direct {
-        Some(extent) => whole_image_ask(r.full_resolution(f64::from_bits(unit.scale)), extent),
+        Some(Direct { extent }) => {
+            whole_image_ask(r.full_resolution(f64::from_bits(unit.scale)), extent)
+        }
         None => r,
     }
 }
