@@ -3,48 +3,20 @@
 //! command of the same id, whose params are the request's fields. Running
 //! one (`command.run`) builds that request and answers it as the endpoint
 //! would, so a command and its request behave the same.
+//!
+//! **Each verb is declared by the crate that owns its concept**, as its own
+//! `verbs()` set ([`SETS`]): the workflow's ([`crate::workflow::verbs`]),
+//! the decisions' (`helios_decision::verbs`), the settings layers'
+//! (`helios_node_core::settings::verbs`), the caches'
+//! (`helios_cache::verbs`). The node declares only its own ([`verbs`]):
+//! those answered by the network and the scheduler it runs (render, edit,
+//! export, jobs, a fault for tests), which no other crate owns.
 
 use std::sync::OnceLock;
 
-use helios_node_core::commands::{CommandSpec, Need, Registry, object};
+use helios_command::schema::{absolute, boolean, count, node_params, or_null, string, text, value};
+use helios_node_core::commands::{CommandSpec, Registry, object};
 use serde_json::{Value, json};
-
-fn string() -> Value {
-    json!({ "type": "string" })
-}
-
-fn text(description: &str) -> Value {
-    json!({ "type": "string", "description": description })
-}
-
-fn absolute() -> Value {
-    text("an absolute path")
-}
-
-fn boolean() -> Value {
-    json!({ "type": "boolean" })
-}
-
-fn count() -> Value {
-    json!({ "type": "integer", "minimum": 0 })
-}
-
-/// The same schema, `null` also taken (an optional field).
-fn or_null(mut schema: Value) -> Value {
-    let named = match schema.get("type") {
-        Some(Value::String(one)) => vec![json!(one)],
-        Some(Value::Array(many)) => many.clone(),
-        _ => return schema,
-    };
-    let mut types = named;
-    types.push(json!("null"));
-    schema["type"] = Value::Array(types);
-    schema
-}
-
-fn strings() -> Value {
-    json!({ "type": "array", "items": { "type": "string" } })
-}
 
 fn region() -> Value {
     object(&[
@@ -55,58 +27,22 @@ fn region() -> Value {
     ])
 }
 
-fn file_format() -> Value {
+/// The file formats a node writes.
+pub(crate) fn file_format() -> Value {
     json!({ "type": "string", "enum": ["jpeg", "png", "tiff"] })
 }
 
-fn quality() -> Value {
+/// A JPEG quality.
+pub(crate) fn quality() -> Value {
     json!({ "type": ["integer", "null"], "minimum": 1, "maximum": 100,
             "description": "JPEG quality, 92 when not given" })
 }
 
-/// A parameter value: one of its kinds, `{ "float": 1.0 }`.
-fn value() -> Value {
-    let one = |kind: &str, schema: Value| object(&[(kind, schema, true)]);
-    json!({ "anyOf": [
-        one("float", json!({ "type": "number" })),
-        one("int", json!({ "type": "integer" })),
-        one("bool", boolean()),
-        one("choice", string()),
-        one("list", json!({ "type": "array", "items": { "type": "number" } })),
-        one("ints", json!({ "type": "array", "items": { "type": "integer" } })),
-        one("text", string()),
-    ] })
-}
-
-/// Parameters by name.
-fn params() -> Value {
-    json!({ "type": "object", "additionalProperties": value() })
-}
-
-/// Parameters by node name, then by name.
-fn node_params() -> Value {
-    json!({ "type": "object", "additionalProperties": params(),
-            "description": "parameters changed for this request only, by node name" })
-}
-
-fn run_item() -> Value {
-    json!({ "anyOf": [
-        absolute(),
-        object(&[("path", absolute(), true), ("params", node_params(), false)]),
-    ] })
-}
-
-fn named(field: &str) -> Value {
-    object(&[(field, string(), true)])
-}
-
-fn on_run(extra: &[(&str, Value, bool)]) -> Value {
-    let mut fields = vec![("run", string(), true)];
-    fields.extend(extra.iter().cloned());
-    object(&fields)
-}
-
-fn verbs() -> Vec<CommandSpec> {
+/// The node's own verbs: its network's (render, edit, export, a fault for
+/// tests) and its scheduler's (jobs and batches), plus the library import
+/// and the chart calibration, declared by their owners and kept here in
+/// their place.
+pub fn verbs() -> Vec<CommandSpec> {
     let node = || ("node", string(), true);
     vec![
         CommandSpec::new("render", "Render a node's port over a region", "Render").params(object(
@@ -165,134 +101,30 @@ fn verbs() -> Vec<CommandSpec> {
                 ),
             ]),
         ),
-        CommandSpec::new("decisions", "List the network's decisions", "Decisions").read_only(),
-        CommandSpec::new(
-            "decision_resolve",
-            "Ask the model about the waiting decisions",
-            "Decisions",
-        ),
-        CommandSpec::new(
-            "decision_accept",
-            "Accept a decision's proposal",
-            "Decisions",
-        )
-        .params(object(&[
-            node(),
-            ("option", count(), false),
-            (
-                "who",
-                text("who decided: the run's origin when not given"),
-                false,
-            ),
-        ])),
-        CommandSpec::new("decision_decide", "Give a decision's answer", "Decisions").params(
-            object(&[
-                node(),
-                ("values", params(), true),
-                (
-                    "who",
-                    text("who decided: the run's origin when not given"),
-                    false,
-                ),
-            ]),
-        ),
-        CommandSpec::new(
-            "decision_reask",
-            "Withdraw a decision's answer",
-            "Decisions",
-        )
-        .params(named("node")),
-        CommandSpec::new("workflow.submit", "Submit images as a run", "Workflow").params(object(
-            &[
-                ("title", or_null(string()), false),
-                (
-                    "items",
-                    json!({ "type": "array", "items": run_item() }),
-                    true,
-                ),
-                ("out", absolute(), true),
-                ("format", file_format(), true),
-                ("quality", quality(), false),
-                (
-                    "name",
-                    text("the file name: {stem} and {ext} replaced"),
-                    false,
-                ),
-                ("node", or_null(string()), false),
-                ("source", or_null(string()), false),
-                ("again", boolean(), false),
-                ("concurrency", or_null(count()), false),
-            ],
-        )),
-        CommandSpec::new("workflow.runs", "List the runs", "Workflow").read_only(),
-        CommandSpec::new("workflow.items", "List a run's items", "Workflow")
-            .params(on_run(&[
-                ("node", or_null(string()), false),
-                ("state", or_null(string()), false),
-                ("offset", count(), false),
-                ("limit", count(), false),
-            ]))
-            .read_only(),
-        CommandSpec::new("workflow.forget", "Remove a run not at work", "Workflow")
-            .params(on_run(&[])),
-        CommandSpec::new("workflow.cancel", "Cancel a run's items", "Workflow").params(on_run(&[
-            ("items", or_null(strings()), false),
-            ("node", or_null(string()), false),
-        ])),
-        CommandSpec::new("workflow.retry", "Retry a run's failed items", "Workflow").params(
-            on_run(&[
-                ("items", or_null(strings()), false),
-                ("node", or_null(string()), false),
-            ]),
-        ),
-        CommandSpec::new(
-            "workflow.prioritize",
-            "Move a run's items first or last",
-            "Workflow",
-        )
-        .params(on_run(&[
-            ("items", strings(), true),
-            (
-                "to",
-                json!({ "type": "string", "enum": ["top", "bottom"] }),
-                true,
-            ),
-        ])),
-        CommandSpec::new("workflow.pause", "Pause a run", "Workflow").params(on_run(&[])),
-        CommandSpec::new("workflow.resume", "Resume a run", "Workflow").params(on_run(&[])),
         helios_node_core::library::import_spec(),
-        CommandSpec::new("settings.layer.get", "Read a settings layer", "Settings")
-            .params(object(&[(
-                "layer",
-                text("`user` or `project/<library folder>`"),
-                true,
-            )]))
-            .needs(Need::Vault)
-            .read_only(),
-        CommandSpec::new("settings.layer.set", "Write a settings layer", "Settings")
-            .params(object(&[
-                ("layer", text("`user` or `project/<library folder>`"), true),
-                ("text", text("TOML"), true),
-            ]))
-            .needs(Need::Vault),
-        CommandSpec::new("cache.stats", "Show what the caches hold", "Cache").read_only(),
-        CommandSpec::new("cache.clear", "Clear the caches", "Cache").params(object(&[(
-            "kind",
-            or_null(string()),
-            false,
-        )])),
         crate::calibrate::chart_spec(),
     ]
 }
 
-/// The node's commands: its control verbs, and its library's commands
-/// ([`crate::library`]).
+/// Every set of verbs the node answers, each declared by the crate that
+/// owns its concept: the node's own first.
+pub const SETS: &[fn() -> Vec<CommandSpec>] = &[
+    verbs,
+    helios_decision::verbs::verbs,
+    crate::workflow::verbs,
+    helios_node_core::settings::verbs,
+    helios_cache::verbs::verbs,
+];
+
+/// The node's commands: every verb of [`SETS`], and its library's
+/// commands ([`crate::library`]).
 pub fn registry() -> &'static Registry {
     static REGISTRY: OnceLock<Registry> = OnceLock::new();
     REGISTRY.get_or_init(|| {
         let mut registry = Registry::new();
-        for spec in verbs()
-            .into_iter()
+        for spec in SETS
+            .iter()
+            .flat_map(|set| set())
             .chain(crate::library::specs())
             .chain(crate::cursor::specs())
             .chain(crate::promises::specs())
@@ -455,5 +287,67 @@ mod tests {
         }
         assert!(registry().spec("commands.list").is_none());
         assert!(registry().spec("command.run").is_none());
+    }
+
+    /// Every command `verbs()` held when the node declared them all, before
+    /// each set moved to the crate that owns it (generated from the
+    /// registry on `next` before the move), with
+    /// its label, category, params schema, needs and read-only flag: the
+    /// MCP `helios_*` tools, the inspect `describe` list and what agents
+    /// may run are built from these, so none may change.
+    const BEFORE_THE_MOVE: &str = include_str!("../tests/fixtures/verbs-before-the-move.json");
+
+    #[test]
+    fn every_verb_is_declared_once_and_unchanged_by_the_move() {
+        let mut ids: Vec<String> = SETS
+            .iter()
+            .flat_map(|set| set())
+            .chain(crate::library::specs())
+            .chain(crate::cursor::specs())
+            .chain(crate::promises::specs())
+            .chain(crate::calibrate::profile_specs())
+            .map(|s| s.id)
+            .collect();
+        let all = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), all, "a verb declared twice");
+
+        let before: Vec<Value> = serde_json::from_str(BEFORE_THE_MOVE).unwrap();
+        for spec in &before {
+            let id = spec["id"].as_str().unwrap();
+            let now = registry()
+                .spec(id)
+                .unwrap_or_else(|| panic!("`{id}` is gone"));
+            assert_eq!(&serde_json::to_value(now).unwrap(), spec, "`{id}`");
+        }
+        let moved: usize = SETS[1..].iter().map(|set| set().len()).sum();
+        assert_eq!(verbs().len() + moved, before.len(), "no verb added or lost");
+    }
+
+    /// The node declares only its own verbs: its network's and its
+    /// scheduler's, plus the two its owners declare and it lists in place.
+    #[test]
+    fn the_node_declares_only_its_own_verbs() {
+        let own: Vec<String> = verbs().into_iter().map(|s| s.id).collect();
+        assert_eq!(
+            own,
+            [
+                "render",
+                "set_param",
+                "node.bypass",
+                "load_source",
+                "export",
+                "cancel",
+                "job.cancel",
+                "batch_start",
+                "batch_end",
+                "pause",
+                "resume",
+                "fault",
+                "library.import",
+                "calibrate.chart",
+            ]
+        );
     }
 }

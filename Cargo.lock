@@ -2395,6 +2395,7 @@ name = "helios-cache"
 version = "0.92.0"
 dependencies = [
  "blake3",
+ "helios-command",
  "serde_json",
 ]
 
@@ -2418,6 +2419,14 @@ name = "helios-colour"
 version = "0.92.0"
 dependencies = [
  "moxcms",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "helios-command"
+version = "0.92.0"
+dependencies = [
  "serde",
  "serde_json",
 ]
@@ -2529,6 +2538,7 @@ dependencies = [
 name = "helios-decision"
 version = "0.92.0"
 dependencies = [
+ "helios-command",
  "helios-config",
  "helios-core",
  "serde",
@@ -2950,6 +2960,7 @@ dependencies = [
  "helios-cache",
  "helios-calibrate",
  "helios-colour",
+ "helios-command",
  "helios-config",
  "helios-connect",
  "helios-core",
@@ -2989,6 +3000,7 @@ dependencies = [
  "egui-pop-hooks",
  "helios-cache",
  "helios-calibrate",
+ "helios-command",
  "helios-config",
  "helios-connect",
  "helios-core",

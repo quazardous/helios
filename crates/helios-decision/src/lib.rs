@@ -26,6 +26,7 @@
 //! (it needs the journal's waits and signals).
 
 pub mod settings;
+pub mod verbs;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

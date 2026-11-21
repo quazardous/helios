@@ -7,76 +7,15 @@
 //!
 //! The schemas use the small part of JSON Schema [`validate`] checks
 //! (`helios_core::schema`, shared with the configuration contracts).
+//!
+//! What a command declares ([`CommandSpec`]) is the `helios-command`
+//! contract, so each crate declares the verbs of its own concept.
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
-use serde_json::{Map, Value, json};
-
 pub use helios_core::schema::validate;
 
-/// What a command needs to run, beyond the node itself.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Need {
-    /// The vault the node owns (`helios-node --vault`).
-    Vault,
-    /// A desktop window holding the workspace.
-    Window,
-}
-
-/// What a command declares.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct CommandSpec {
-    /// Stable, never translated: `export`, `workflow.submit`.
-    pub id: String,
-    pub label: String,
-    pub category: String,
-    /// The JSON schema of its params: an object.
-    pub params: Value,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub needs: Vec<Need>,
-    /// It only reads.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub read_only: bool,
-}
-
-impl CommandSpec {
-    /// A command taking no params.
-    pub fn new(id: &str, label: &str, category: &str) -> Self {
-        Self {
-            id: id.into(),
-            label: label.into(),
-            category: category.into(),
-            params: object(&[]),
-            needs: Vec::new(),
-            read_only: false,
-        }
-    }
-
-    pub fn params(mut self, schema: Value) -> Self {
-        self.params = schema;
-        self
-    }
-
-    pub fn needs(mut self, need: Need) -> Self {
-        self.needs.push(need);
-        self
-    }
-
-    pub fn read_only(mut self) -> Self {
-        self.read_only = true;
-        self
-    }
-
-    /// Whether every word of `filter` is in its id, label or category.
-    pub fn matches(&self, filter: &str) -> bool {
-        let hay = format!("{} {} {}", self.id, self.label, self.category).to_lowercase();
-        filter
-            .split_whitespace()
-            .all(|word| hay.contains(&word.to_lowercase()))
-    }
-}
+pub use helios_command::{CommandSpec, Need, object};
 
 /// The commands a node knows, by id.
 #[derive(Clone, Debug, Default)]
@@ -116,31 +55,10 @@ pub fn check_origin(origin: &str) -> Result<(), String> {
     helios_shell::policy::origin(origin).map(|_| ())
 }
 
-/// An object schema: its properties, each `(name, schema, required)`; no
-/// other property is taken.
-pub fn object(properties: &[(&str, Value, bool)]) -> Value {
-    let props: Map<String, Value> = properties
-        .iter()
-        .map(|(name, schema, _)| ((*name).to_string(), schema.clone()))
-        .collect();
-    let required: Vec<&str> = properties
-        .iter()
-        .filter(|(_, _, required)| *required)
-        .map(|(name, _, _)| *name)
-        .collect();
-    let mut schema = json!({
-        "type": "object",
-        "properties": props,
-        "additionalProperties": false,
-    });
-    if !required.is_empty() {
-        schema["required"] = json!(required);
-    }
-    schema
-}
-
 #[cfg(test)]
 mod tests {
+    use serde_json::{Value, json};
+
     use super::*;
 
     fn schema() -> Value {

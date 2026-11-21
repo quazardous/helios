@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# Its verbs (`cache.stats`, `cache.clear`) are declared here.
+helios-command.workspace = true
 blake3.workspace = true
 serde_json.workspace = true
 
