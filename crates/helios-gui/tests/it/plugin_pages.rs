@@ -235,7 +235,7 @@ pages = ["ui/page.json", "ui/missing.json"]
         "not shown",
         "helios.import.folder",
         "library.forget",
-        "unknown brick `hologram`",
+        "unknown node `hologram`",
         "ui/missing.json: not read",
     ] {
         assert!(page.contains(said), "{said}\n{page}");

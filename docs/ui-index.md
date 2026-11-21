@@ -17,7 +17,7 @@ To add an entry, give the public item a doc line
 `/// Need (group): a search field.`, a preset using the same words as
 the widget it wraps; the group is one of: `text`, `layout`, `action`, `input`, `state`, `status`, `icon`, `help`, `dialog`, `data`, `image`.
 
-egui-pop in the lock: 0.20.0.
+egui-pop in the lock: 0.21.0.
 
 ## Text and titles
 
@@ -108,6 +108,7 @@ egui-pop in the lock: 0.20.0.
 |---|---|---|
 | a busy spinner | `Spinner` (egui-pop)<br>`egui_pop::core::progress::Spinner` | A spinner, with a label after it; `Spinner::delayed` shows it only after `motion.spinner.delay`, and keeps it `motion.spinner.min`. |
 | a job's progress, a bar when it counts and a spinner when it does not | **`helios_ui::progress(..)`** (Helios preset)<br>`helios_ui::progress` | The progress of the work named `name` (its accessible name): egui-pop's progress bar at `fraction` (0 to 1), or its spinner when the work does not say how far it is. |
+| a place shown out of reach but still choosable (a folder of an offline volume) | `.dimmed(..)` (egui-pop)<br>`egui_pop::api::files::places::PlaceItem::dimmed` | Drawn muted and said to be unavailable (see `PlaceItem::dimmed`): an offline volume's folders, still choosable. |
 | a place that failed to load, with Retry | **`helios_ui::failed(..)`** (Helios preset)<br>`helios_ui::failed` | A place that failed to load: egui-pop's empty state in danger, with `title`, the `reason` and a Retry action (egui-pop's translated "Retry"). |
 | a progress bar | **`helios_ui::progress(..)`** (Helios preset)<br>`helios_ui::progress` | The progress of the work named `name` (its accessible name): egui-pop's progress bar at `fraction` (0 to 1), or its spinner when the work does not say how far it is. |
 |  | `ProgressBar` (egui-pop, under the preset)<br>`egui_pop::core::progress::ProgressBar` | A progress bar. |
@@ -163,6 +164,7 @@ egui-pop in the lock: 0.20.0.
 | a file or folder picker | `FileBrowser` (egui-pop)<br>`egui_pop::api::files::browser::FileBrowser` | The file browser: entries from a `FileSource`, shown by a `ViewMode` chosen in its toolbar (or with `Ctrl+1` to `Ctrl+9`), kept per dialog in the host's store when drawn with `FileBrowser::show_in`. |
 | a popover's surface in an area the application places itself | `ui.popover(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::popover` | `add` on the kit's popover surface (its `popover` component, with egui's popup shadow): the look of egui-pop's own popovers, for an area the application places itself (a first-run notice, a hint by a control), outside the overlay stack. |
 | a settings or admin page declared as a manifest | `Admin` (egui-pop)<br>`egui_pop::api::admin::Admin` | The administration app's state, manifests, hooks, widget kinds and value layers. |
+| a side panel of places whose rows are drop targets or drag sources | `.on_row(..)` (egui-pop)<br>`egui_pop::api::files::places::PlacesPanel::on_row` | A hook called with each item's row and its response, after the panel's own handling: the application attaches what the panel knows nothing of (a drop target or a drag source through the drag session, `bus::drag`; its own context menu; a tip). |
 | a side panel of places, with sections of an application's | `PlacesPanel` (egui-pop)<br>`egui_pop::api::files::places::PlacesPanel` | A side panel of places: sections, each a heading over its items, as the in-app picker lists them (an import window's sources column). |
 | a submenu in a context menu drawn by hand | `menus::submenu(..)` (egui-pop)<br>`egui_pop::api::menus::submenu` | A submenu item in a menu drawn by hand (a context menu built in a closure, `egui_pop_core::pointer::claim::context_menu`), drawn as the declared menus' submenu items: the kit's `menu-item` with the submenu arrow, `selected` while its submenu is open. |
 | a three-button question (Save, Don't save, Cancel) | `Confirm` (egui-pop)<br>`egui_pop::api::dialogs::Confirm` | A question before an action: a primary button and Cancel, or, with a `Secondary`, the classic three buttons ("Save", "Don't save", "Cancel") in the platform's order (`ButtonOrder`). |
@@ -176,8 +178,10 @@ egui-pop in the lock: 0.20.0.
 | a long list, virtualised | `ListView` (egui-pop)<br>`egui_pop::views::list::ListView` | The list widget. |
 | a row of a hand-built tree with its disclosure toggle (a folder tree in a side panel) | `TreeRow` (egui-pop)<br>`egui_pop::core::fold::TreeRow` | A row of a hand-built tree: a branch's toggle, or a leaf's room for one, then the row the caller draws; `TreeRowResponse::body` shows the rows below a branch, indented, when it is open. |
 | a row picked from a short list | `SelectableRow` (egui-pop)<br>`egui_pop::core::widgets::SelectableRow` | A row picked from a short list: its box is the kit's `selectable-row` component, `selected` for the chosen one (never `hover` then, so the choice stays visible under the pointer), its label in the state's `text`. |
+| a side panel of places with one selection in each section (scopes chosen together) | `.selected_set(..)` (egui-pop)<br>`egui_pop::api::files::places::PlacesPanel::selected_set` | The items shown selected, by id, beside `PlacesPanel::selected`: one in each section where the application's scopes add up (a folder, an album and a keyword chosen together). |
 | a sortable column header | `SortHeader` (egui-pop)<br>`egui_pop::core::widgets::SortHeader` | A column's header: its box is the kit's `table-header-cell` component, `selected` while the rows are sorted by it, the direction the kit's `sort-ascending` or `sort-descending` glyph after the title. |
 | a table with sortable, resizable columns | `DataTable` (egui-pop)<br>`egui_pop::views::table::DataTable` | The data table widget. |
+| a tree of places in a side panel (folders and their subfolders, nested keywords) | `.children(..)` (egui-pop)<br>`egui_pop::api::files::places::PlaceItem::children` | Items nested under it, after those it has: a branch of a tree (volume, folder, subfolders; `Animals`, `Dog`). |
 | a tree, lazy and keyboard-driven | `TreeView` (egui-pop)<br>`egui_pop::views::tree::TreeView` | The tree widget. |
 | many rows of equal height, only the visible ones drawn | `ui.scroll_area_rows(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::scroll_area_rows` | `UiPop::scroll_area` for `rows` rows `row_height` high, the `Ui`'s item spacing apart: egui's `ScrollArea::show_rows`, `add` given the rows in view. |
 | the properties of one item, in two columns | **`helios_ui::details(..)`** (Helios preset)<br>`helios_ui::details` | A details grid: one line per `(name, value)`, the names in a column as wide as the widest, the values taking the rest: egui-pop's grid, its header cells and body text. |
