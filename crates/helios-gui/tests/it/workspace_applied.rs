@@ -86,7 +86,9 @@ fn an_undo_of_a_tools_change_is_applied_once() {
         .values()
         .lock()
         .unwrap()
-        .undo_newest(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.undo(&Origin::User)
+        })
         .unwrap();
     h.run();
     let said = applied_since(&h, since);
@@ -149,7 +151,9 @@ fn a_network_change_runs_the_graph_then_the_workshops() {
         .values()
         .lock()
         .unwrap()
-        .undo_newest(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.undo(&Origin::User)
+        })
         .unwrap();
     h.run();
     let said = applied_since(&h, since);
@@ -190,7 +194,9 @@ fn a_nodes_change_reaches_the_renders_then_the_host_once() {
         .values()
         .lock()
         .unwrap()
-        .undo_newest(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.undo(&Origin::User)
+        })
         .unwrap();
     h.run();
     assert_eq!(crate::host::network_changed(), 1, "the undo's, once");

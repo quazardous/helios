@@ -231,7 +231,10 @@ fn its_api_check_says_whether_the_address_answers() {
     let fake = FakePicker::start(1, vec![]);
     let mut plugin = Plugin::start(&fake.base);
     let answer = plugin
-        .call("command/execute", json!({"command": "google-photos.api-check", "args": {}}))
+        .call(
+            "command/execute",
+            json!({"command": "google-photos.api-check", "args": {}}),
+        )
         .unwrap();
     assert_eq!(answer["answers"], true);
     assert_eq!(answer["status"]["tone"], "success");
@@ -239,7 +242,10 @@ fn its_api_check_says_whether_the_address_answers() {
     // Nothing listens on port 9 (discard), refused at once.
     let mut plugin = Plugin::start("http://127.0.0.1:9/v1");
     let answer = plugin
-        .call("command/execute", json!({"command": "google-photos.api-check"}))
+        .call(
+            "command/execute",
+            json!({"command": "google-photos.api-check"}),
+        )
         .unwrap();
     assert_eq!(answer["answers"], false);
     assert_eq!(answer["status"]["tone"], "danger");

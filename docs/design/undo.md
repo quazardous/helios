@@ -277,10 +277,97 @@ Status (2026-11-20, #5258 R2): the split is done in memory. The value
 store keeps two lines, the image's and the workspace's
 (`helios_values::HistoryScope`, `Store::in_history`), and the desktop
 shows them as the `edit` and `workspace` scopes. A photo switch drops
-the image's line only. Both scopes stay always active, so Ctrl+Z walks
-the newest step of the two, as the one line did, until it follows the
-focused view (R3). Writing the workspace's line to the undo records is
+the image's line only. Since R3 (2026-11-21) Ctrl+Z follows the focused
+view, see below. Writing the workspace's line to the undo records is
 still to do.
+
+## Ctrl+Z follows the focused view (T3 + B)
+
+Decided (2026-11-20): the owner settled the model of the per-photo
+history in two choices, T3 (who routes and who owns) and B (how big a
+step is).
+
+- **The view routes.** The tools hang around a view (the darkroom, the
+  graph, the Library), and Ctrl+Z goes to the view that has the focus,
+  never to whichever step is newest.
+- **The variant owns its history.** The focused view passes Ctrl+Z to
+  the photo variant it shows; two views of the same variant share its
+  one history, and an undo shows in both.
+- **Changes to the same module amend the open step until it is
+  sealed** (darktable's model). Another module, an undo or a jump, the
+  focus leaving the photo, a photo switch, the end of an agent's group or
+  an explicit Commit seals it.
+- **A gesture that touches several modules at once** (a preset, a
+  macro, a pasted edit, the camera's default look) is one step, sealed
+  at once: one Ctrl+Z undoes it whole.
+
+### The lines
+
+| Line (egui-pop scope) | Holds | Views that route to it | Kept |
+|---|---|---|---|
+| `edit` | the open photo's edit: module values, masks, a workshop applied to the photo | the viewport, the modules, masks, parameters, scopes and navigator panels (`helios_gui::history::EDIT_FOCUS`) | left on a photo switch (per-photo stacks kept across switches come with R4) |
+| `workspace` | the workspace's real edits: the network, macros, sub-workspaces, workshop design, name, icon, keys, tools, a reset | the graph and the Workshops (`WORKSPACE_FOCUS`) | across photos, for the session |
+| `library` | imports, albums, removals, rotations, keywords, metadata, stacks, command batches | the Library's grid, filters, filmstrip and duplicates (`library_history::FOCUS`) | for the session |
+
+View state (zoom, sort, panels, auto-advance, the layout) is on no line
+(R1): it is saved straight to the workspace's files and never undone.
+
+### The routing
+
+Helios sets egui-pop's `Routing::Focus` (the shell, at start). Each of
+Helios's scopes lists the panels that route to it (`ScopeInfo::focus`),
+and Ctrl+Z, Ctrl+Shift+Z, Edit › Undo and an agent's undo without a
+scope go, in order, to:
+
+1. a focused text field: its own undo;
+2. the innermost focused surface with a local scope (the theme editor,
+   the settings window, a diagram workshop's own history);
+3. nothing while a modal is open;
+4. the scope of the innermost focused panel that names one;
+5. with the focus where none is named (the menu bar, nothing clicked),
+   the scope focused last, while one of its panels is still shown;
+6. then the newest step among the scopes shown.
+
+Redo goes to the same scope as undo. A scope is active, and reachable,
+only while one of its panels is shown. The pick goes through egui-pop's
+`pop.history.target` step before it is used, so a before-hook can name
+another scope, or none; Helios adds none today. A raw `Store::undo`
+walks the image's line only: code that means the workspace's walks it
+through `Store::in_history(HistoryScope::Workspace, …)`, and
+`Store::undo_newest` stays for a host with no view to route by (a test
+that does not focus a view).
+
+### Amend and seal
+
+What is built today: a gesture (a drag) or a group (held arrows, the
+wheel, a preset, the masks panel's edits) is one step whatever it
+touches, sealed when it ends; a write outside one is a step of its own.
+The darktable rule, where successive writes to the same module amend
+the open step until something seals it, and an explicit Commit
+(`helios.history.commit`), is slice R7.
+
+### Out of scope
+
+- The diagram workshops (node graph, workflow, macros) keep their own
+  history: the `workspace` line, or a workshop's local scope where it
+  has one. A photo's history never holds a diagram edit.
+- The library's history stays its own line, never a photo's.
+- Per-photo stacks kept across switches and rebuilt from the versions
+  (R4, R5), `helios.photo.history` (R6), amend and Commit (R7), compare
+  any step with the live edit (R8, credited to darktable PR #23136).
+
+### Slices
+
+| # | Slice | Status |
+|---|---|---|
+| R1 | View state off the undo path | done (2026-11-20) |
+| R2 | The `workspace` line split from `edit` | done (2026-11-20), persistence to the undo records to do |
+| R3 | Ctrl+Z follows the focused view (egui-pop's `Routing::Focus` and `pop.history.target`, Helios's focus sets) | done (2026-11-21) |
+| R4 | Per-photo stacks kept across switches | to do |
+| R5 | Step markers in the versions; undo rebuilt after a restart | to do |
+| R6 | `helios.photo.history`, read-only | to do |
+| R7 | Amend and seal (B), Commit | to do |
+| R8 | Compare any step with the live edit | to do |
 
 ## Agents
 
@@ -578,7 +665,8 @@ egui-pop's ADR 0014:
    trail after a restart comes later.
 3. Ctrl+Z takes the newest step among the active scopes (the image
    shown, the library, the workspace), after a focused text input and a
-   focused local scope.
+   focused local scope. Replaced (2026-11-20, T3): Ctrl+Z goes to
+   the focused view's scope, see "Ctrl+Z follows the focused view".
 4. Compress history: not for now.
 5. The dropped redo states: hidden in the history panel, with a toggle
    that shows them as "replaced" rows.

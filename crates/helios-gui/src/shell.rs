@@ -1234,6 +1234,12 @@ impl Shell {
         if let Some(d) = app.handle().service(&DIALOGS) {
             let _ = dialogs.set((*d).clone());
         }
+        // #5258 R3: Ctrl+Z goes to the history of the focused view (the
+        // image's views to the edit, the graph and the Workshops to the
+        // workspace, the Library's panels to the library), never to the
+        // newest step of another; with the focus nowhere such, to the one
+        // focused last (`crate::history`).
+        egui_pop::api::history::set_routing(app.handle(), egui_pop::api::history::Routing::Focus);
         // The viewport engine and its render cache: one per process, every
         // window's viewport renders on it.
         let engine = crate::viewport::engine();
