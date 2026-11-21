@@ -110,6 +110,16 @@ fn entries(source: &str) -> Vec<(Option<String>, String)> {
     out
 }
 
+/// Whether `key` is the label or help of one of the plugin's accounts' or
+/// sources' settings: `account-setting-<id>-…`, `source-setting-<id>-…`.
+fn instance_setting(id: &str, key: &str) -> bool {
+    let owner = format!("{}-", ids::slug(id));
+    ["account-setting-", "source-setting-"].iter().any(|area| {
+        key.strip_prefix(area)
+            .is_some_and(|rest| rest.starts_with(&owner))
+    })
+}
+
 /// Adds a plugin's catalogues to `i18n`: its own messages through
 /// `I18n::add_owned`, the titles of the commands it declares
 /// (`commands`, their ids) beside them. Refused, before anything is
@@ -134,7 +144,10 @@ pub fn add(
                     owned.push_str(&text);
                     n += 1;
                 }
-                Some(k) if declared.contains(&k) => {
+                // Its accounts' and sources' settings
+                // (`account-setting-<id>-<key>`, `source-setting-…`), which
+                // egui-pop's areas do not cover either.
+                Some(k) if declared.contains(&k) || instance_setting(id, &k) => {
                     titles.push_str(&text);
                     n += 1;
                 }
@@ -193,6 +206,22 @@ mod tests {
         // English, from the same plugin.
         i.set_locale("en");
         assert_eq!(i.t(&title(ID).key(), &[]), "ExifTool metadata");
+    }
+
+    /// Google Photos' catalogues load whole, its declared page's words
+    /// among them, in both languages.
+    #[test]
+    fn google_photos_translates_its_declared_page() {
+        const GOOGLE: &str = "io.github.quazardous.helios.google-photos";
+        let i = I18n::with_egui_pop("fr");
+        i.add_catalogues(crate::CATALOGUES).unwrap();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/sources/google-photos");
+        let catalogues = read(&dir).unwrap();
+        add(&i, GOOGLE, &["google-photos.api-check".into()], &catalogues).unwrap();
+        let test = "io-github-quazardous-helios-google-photos-page-test";
+        assert_eq!(i.t(test, &[]), "Tester la connexion");
+        i.set_locale("en");
+        assert_eq!(i.t(test, &[]), "Test connection");
     }
 
     #[test]

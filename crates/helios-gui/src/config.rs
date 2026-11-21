@@ -55,6 +55,7 @@ use helios_core::Message;
 use serde_json::{Value as Json, json};
 
 pub mod focus;
+pub mod plugin_pages;
 pub mod plugins;
 pub mod store;
 

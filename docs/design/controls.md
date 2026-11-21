@@ -1129,7 +1129,7 @@ customisation slices of the 2026-11-08 plan.
 | 18 | `colour-picker`, `white-balance`, `temperature-tint`, `chromaticity` | M | 12 |
 | 19 | The device trait and a MIDI backend with feedback (if Q3 says v1) | M | 15 |
 | 20 | Gamepad and console backends | M | 19 |
-| 21 | Plugin-declared controls and composites over the plugin protocol | M | 13 |
+| 21 | Plugin-declared controls and composites over the plugin protocol: static declarations beside the manifest, read before the plugin runs (the `ui` interface, 2026-11-20). **Pages done** (2026-11-21, P1): `[ui] pages`, admin manifests bound to the plugin's own settings and commands (`docs/extensions.md`, "Declared pages"), Google Photos' settings page declared. Next: controls (P2, plugin values in a rack card, `ui/changed`), on-image tools (P3, needs egui_hud's serialisable handles), host module parameters behind a capability (P4). Plugin tools need the handle kinds, not the path's, so slice 13 no longer blocks | M | 12 |
 
 ## 8. Open questions
 

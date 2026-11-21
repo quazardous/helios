@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "main",
+      "scope": "plugins",
+      "groups": [
+        {
+          "id": "connection",
+          "title": "io-github-quazardous-helios-google-photos-page-connection",
+          "items": [
+            {
+              "node": "field",
+              "id": "api",
+              "bind": { "to": "setting", "setting": "io.github.quazardous.helios.google-photos.api" }
+            },
+            {
+              "node": "status",
+              "id": "answers",
+              "title": "io-github-quazardous-helios-google-photos-page-answers",
+              "source": { "from": "command", "command": "google-photos.api-check", "pointer": "/status" }
+            },
+            {
+              "node": "action",
+              "id": "test",
+              "title": "io-github-quazardous-helios-google-photos-page-test",
+              "command": "google-photos.api-check"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
