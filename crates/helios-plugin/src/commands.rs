@@ -221,9 +221,13 @@ fn by_plugin(broker: &Arc<Broker>) -> Vec<(String, CommandSpec, Handler)> {
             };
             let b = broker.clone();
             let (p, id) = (plugin.clone(), c.id.clone());
+            let mut spec = CommandSpec::new(&c.id, &c.title, category);
+            if c.read_only {
+                spec = spec.read_only();
+            }
             out.push((
                 plugin.clone(),
-                CommandSpec::new(&c.id, &c.title, category),
+                spec,
                 Box::new(move |args, _| b.execute(&p, &id, args.clone())),
             ));
         }

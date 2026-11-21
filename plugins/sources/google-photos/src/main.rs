@@ -16,6 +16,7 @@
 //! | `source.thumbnail` | `auth`, `item` (`id`, `download`), `maxSide`, `staging` | `{file, bytes}`: the item's preview, written into `staging` |
 //! | `source.close` | `auth`, `session` | `{}`: the session deleted |
 //! | `health.check` | `check`, `accounts` (`id`, `label`, `state`, `auth`) | `{findings}`: its `accounts` check |
+//! | `command/execute` | `command`: `google-photos.api-check` | `{api, answers, status: {text, tone}}`: whether the Picker API's address answers (no token sent), its settings page's status |
 //!
 //! A token Google refuses answers -32010 ("sign-in needed"): Helios
 //! offers to reconnect the account and nothing is retried.
@@ -31,7 +32,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use helios_connect::{Cancel, ConnectorError, FetchSink, Item};
-use helios_plugin_google_photos::{API, Download, Picker, item_of};
+use helios_plugin_google_photos::{API, API_CHECK, Download, Picker, item_of};
 use serde_json::{Value as Json, json};
 
 const ID: &str = "io.github.quazardous.helios.google-photos";
@@ -321,6 +322,18 @@ impl Plugin {
             "health.check" => match params["check"].as_str() {
                 Some("accounts") => Ok(accounts_check(&self.api, params)),
                 other => Err((-32602, format!("no check {other:?}"))),
+            },
+            "command/execute" => match params["command"].as_str() {
+                Some(API_CHECK) => {
+                    let answers = Picker::new(&self.api, "").answers().is_ok();
+                    let tone = if answers { "success" } else { "danger" };
+                    Ok(json!({
+                        "api": self.api,
+                        "answers": answers,
+                        "status": {"text": self.api, "tone": tone},
+                    }))
+                }
+                other => Err((-32602, format!("no command {other:?}"))),
             },
             "source.fetch" => self.fetch(params),
             "source.thumbnail" => self.thumbnail(params),

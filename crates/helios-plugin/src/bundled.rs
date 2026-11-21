@@ -84,6 +84,7 @@ pub const PLUGINS: &[Bundled] = &[
             file!("sources", "google-photos", "helios-plugin.toml"),
             file!("sources", "google-photos", "i18n/en/plugin.ftl"),
             file!("sources", "google-photos", "i18n/fr/plugin.ftl"),
+            file!("sources", "google-photos", "ui/settings.json"),
         ],
     },
 ];
@@ -274,6 +275,12 @@ mod tests {
                         locale.file_name().unwrap().to_string_lossy(),
                         f.unwrap().file_name().to_string_lossy()
                     ));
+                }
+            }
+            // Its declared pages (`[ui] pages`), when it has any.
+            if let Ok(pages) = std::fs::read_dir(dir.join("ui")) {
+                for f in pages {
+                    files.push(format!("ui/{}", f.unwrap().file_name().to_string_lossy()));
                 }
             }
             files.sort();
