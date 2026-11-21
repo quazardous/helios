@@ -277,6 +277,10 @@ fn the_yes_policy_confirms_at_once_and_says_so() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test panel's content, not a Helios screen"
+)]
 fn a_panel_asks_the_shell_and_never_draws_a_window_itself() {
     let mut shell = Shell::new(helios_panels(), None);
     let mut asked = false;

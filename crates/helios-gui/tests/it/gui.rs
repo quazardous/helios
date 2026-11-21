@@ -194,6 +194,10 @@ fn the_library_s_bar_and_empty_text_stay_in_its_narrow_panel() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test panel's content, not a Helios screen"
+)]
 fn a_named_widget_can_be_pictured() {
     let mut shell = Shell::new(helios_panels(), None);
     shell.set_content("helios.params", |ui| {

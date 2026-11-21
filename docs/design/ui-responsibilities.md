@@ -531,6 +531,17 @@ request may not add a raw egui widget to helios-gui.**
 A file at zero leaves the list; when the list is empty the Clippy list
 above takes over and this tool goes.
 
+The list emptied on 2026-11-21 (the Parameters panel and the import
+window's last calls). The shell's Clippy list is on since:
+`crates/helios-gui/clippy.toml` forbids every method and type the
+ratchet counted, each with its replacement in the reason, plus
+visual-identity.md's entries whose callers are gone. The families that
+still have callers (`set_width`, `set_min_width`, `set_max_width`,
+`Color32::from_rgb`, egui-pop's `Toasts::notify` and Library
+`SearchField`) join it in the slice that moves their last caller. The
+ratchet tool stays until a slice retires it; with an empty list it only
+keeps a new file from starting one.
+
 ### Dependency rules
 
 Checked by `cargo xtask deps-worlds` over `cargo metadata` (built

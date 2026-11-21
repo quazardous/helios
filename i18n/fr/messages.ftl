@@ -1005,13 +1005,11 @@ gui-opening = ouverture de { $path }
 
 gui-param-module-reset = Réinitialiser
 
-gui-params-fold-section = Replier { $group }
-
-gui-params-unfold-section = Déplier { $group }
-
 gui-params-hide-values = Masquer les valeurs
 
 gui-params-no-members = aucun membre pour l’instant
+
+gui-params-none = Aucun paramètre : rien n’est affiché pour l’instant
 
 gui-params-points = { $count } points
 

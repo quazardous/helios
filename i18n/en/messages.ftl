@@ -2217,11 +2217,11 @@ gui-param-past-range = { $label }: past its usual range
 
 gui-param-picker = Pick { $label } from the image
 
-gui-params-fold-section = Fold { $group }
-
 gui-params-hide-values = Hide the values
 
 gui-params-no-members = no members yet
+
+gui-params-none = No parameters: nothing is shown yet
 
 gui-params-points = { $count } points
 
@@ -2230,8 +2230,6 @@ gui-params-port-hint = Port { $port } of the group; the Masks panel edits it on 
 gui-params-port-member = { $member }: { $value }
 
 gui-params-show-values = Show the values
-
-gui-params-unfold-section = Unfold { $group }
 
 gui-params-values = { $count } values
 

@@ -2376,9 +2376,7 @@ fn menu_items(
         ui.close();
     }
     if let Some((offered, set)) = auto {
-        // egui's submenu: egui-pop has no submenu item to draw in a
-        // menu shown by hand yet.
-        ui.menu_button(&words.auto, |ui| {
+        egui_pop::api::menus::submenu(ui, &words.auto, |ui| {
             if widgets::radio(ui, set.is_none(), &words.auto_off).clicked() {
                 asked = Some(MenuAsked::Auto(None));
                 ui.close();
