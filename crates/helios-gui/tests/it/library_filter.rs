@@ -3563,3 +3563,207 @@ fn a_keyword_dragged_from_the_main_window_onto_a_photo_of_the_library_window_tag
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The centre of the cell showing `name` inside the panel `panel`.
+fn cell_in(h: &Harness<'_, Shell>, panel: &str, name: &str) -> egui::Pos2 {
+    let area = h.state().target_rect(panel).unwrap();
+    h.query_all_by(|n| {
+        n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.contains(name))
+    })
+    .map(|n| n.rect())
+    .find(|r| area.contains_rect(*r))
+    .unwrap_or_else(|| panic!("no cell {name} in {panel}"))
+    .center()
+}
+
+/// The photos (ids) a quick collection holds, as the Library last read.
+fn quick_holds(h: &Harness<'_, Shell>, quick: &str) -> Vec<String> {
+    let mut held = h
+        .state()
+        .library()
+        .quick_collection(quick)
+        .map(|q| q.images.clone())
+        .unwrap_or_default();
+    held.sort();
+    held
+}
+
+/// Quick-collection panels (#5255 S6c): two quick collections open in
+/// panels of their own; a photo dragged from one to the other moves
+/// (one step, undone), Ctrl copies, a photo dragged from a panel onto
+/// Compare joins the comparison; the main view's cursor and selection
+/// never move; a restart from the saved layout gives both panels back.
+#[test]
+fn quick_collection_panels_move_copy_and_feed_compare_and_come_back() {
+    use helios_gui::library_views::{QUICK_OPEN_COMMAND, quick_views};
+    let root = temp("quick-panels");
+    let path = vault_file(&root);
+    let (config, workspace) = workspace(&root);
+    let (mut h, mut persist) = open(&config, &workspace, &path);
+    let history = h.state().library_history();
+    {
+        let vault = persist.vault().clone();
+        history.set_apply(Arc::new(move |changes, forward| {
+            if forward {
+                vault.replay(changes)
+            } else {
+                vault.revert(changes)
+            }
+        }));
+    }
+    let (a, b, c) = (id(1).hex(), id(2).hex(), id(3).hex());
+    run(
+        &mut h,
+        "library.quick.create",
+        json!({ "name": "Picks", "images": [a, b] }),
+    );
+    run(
+        &mut h,
+        "library.quick.create",
+        json!({ "name": "Maybe", "images": [c] }),
+    );
+    settle(&mut h, &mut persist, 1.0);
+    // The main view browsed to c.
+    h.state_mut()
+        .library_mut()
+        .select_ids(std::slice::from_ref(&c));
+    h.run();
+    let main = |h: &Harness<'_, Shell>| {
+        h.state()
+            .library_mut()
+            .with_gallery(helios_gui::library::MAIN_GALLERY, |l| {
+                (l.cursor(), l.selection())
+            })
+    };
+    let browsing = main(&h);
+    assert_eq!(browsing.0.as_deref(), Some(c.as_str()));
+
+    // Compared: two photos, then the two quick collections in panels.
+    run(&mut h, "library.compare", json!({ "images": [b, c] }));
+    settle(&mut h, &mut persist, 2.0);
+    run(
+        &mut h,
+        QUICK_OPEN_COMMAND,
+        json!({ "id": "picks", "place": "start_side" }),
+    );
+    run(
+        &mut h,
+        QUICK_OPEN_COMMAND,
+        json!({ "id": "maybe", "place": "end_side" }),
+    );
+    settle(&mut h, &mut persist, 3.0);
+    let views = quick_views(h.state().app().handle());
+    let [(picks, _), (maybe, _)] = &views[..] else {
+        panic!("two quick panels: {views:?}");
+    };
+    let (picks, maybe) = (picks.clone(), maybe.clone());
+    assert_eq!(
+        views,
+        vec![
+            (picks.clone(), "picks".to_string()),
+            (maybe.clone(), "maybe".to_string())
+        ]
+    );
+    let shown = |h: &Harness<'_, Shell>, view: &str| {
+        h.state()
+            .library_mut()
+            .with_gallery(view, |l| l.filter().text.clone())
+    };
+    assert_eq!(shown(&h, &picks), "collection:picks");
+    assert_eq!(shown(&h, &maybe), "collection:maybe");
+
+    // a dragged from Picks to Maybe: it moves, one step.
+    let to = h.state().target_rect(&maybe).unwrap().center();
+    let from = cell_in(&h, &picks, "a.jpg");
+    drag_onto(&mut h, from, to, |_| {});
+    settle(&mut h, &mut persist, 4.0);
+    assert_eq!(quick_holds(&h, "picks"), vec![b.clone()]);
+    let mut both = vec![a.clone(), c.clone()];
+    both.sort();
+    assert_eq!(quick_holds(&h, "maybe"), both);
+    assert_eq!(
+        steps(&h).last().unwrap(),
+        "Move 1 photos to the quick collection “Maybe”"
+    );
+    assert_eq!(main(&h), browsing, "the main view's cursor stays");
+    // Undone: back where it was, in one step.
+    let undone = history.undo(
+        &egui_pop::api::history::Request::new(helios_gui::library_history::LIBRARY),
+        &egui_pop::model::commands::Origin::User,
+    );
+    assert!(
+        matches!(undone, egui_pop::api::history::Answer::Done(Ok(_))),
+        "{undone:?}"
+    );
+    settle(&mut h, &mut persist, 5.0);
+    let mut first = vec![a.clone(), b.clone()];
+    first.sort();
+    assert_eq!(quick_holds(&h, "picks"), first);
+    assert_eq!(quick_holds(&h, "maybe"), vec![c.clone()]);
+
+    // b dragged with Ctrl: copied, it stays in Picks too.
+    let from = cell_in(&h, &picks, "b.jpg");
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+    drag_onto(&mut h, from, to, |_| {});
+    h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(quick_holds(&h, "picks"), first);
+    let mut copied = vec![b.clone(), c.clone()];
+    copied.sort();
+    assert_eq!(quick_holds(&h, "maybe"), copied);
+    assert_eq!(main(&h), browsing, "the main view's cursor stays");
+
+    // a dragged from Picks onto Compare: it joins the comparison.
+    let compare = h
+        .state()
+        .target_rect("helios.library.compare")
+        .unwrap()
+        .center();
+    let from = cell_in(&h, &picks, "a.jpg");
+    drag_onto(&mut h, from, compare, |_| {});
+    settle(&mut h, &mut persist, 7.0);
+    let mut compared = h
+        .state_mut()
+        .run("compare.active", json!({}), Origin::User)
+        .unwrap();
+    if compared == json!({ "queued": true }) {
+        h.run();
+        compared = h
+            .state()
+            .history()
+            .into_iter()
+            .rev()
+            .find(|r| r.id == "compare.active")
+            .expect("compare.active ran")
+            .result
+            .unwrap();
+    }
+    let photos: Vec<&str> = compared["images"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{compared}"))
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(photos.contains(&a.as_str()), "{compared}");
+    assert_eq!(main(&h), browsing, "the main view's cursor stays");
+
+    // A restart from the layout as saved: both panels come back, each on
+    // its quick collection.
+    let saved = h.state().app().handle().layout().to_json();
+    drop((h, persist));
+    let (mut h, mut persist) = open(&config, &workspace, &path);
+    h.state_mut()
+        .set_layout(egui_pop::model::layout::Layout::from_json(&saved).unwrap());
+    settle(&mut h, &mut persist, 8.0);
+    assert_eq!(
+        quick_views(h.state().app().handle()),
+        vec![
+            (picks.clone(), "picks".into()),
+            (maybe.clone(), "maybe".into())
+        ]
+    );
+    assert_eq!(shown(&h, &picks), "collection:picks");
+    assert_eq!(shown(&h, &maybe), "collection:maybe");
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}

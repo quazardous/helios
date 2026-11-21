@@ -19,7 +19,6 @@
 //! when the batch ends, whatever its steps did.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -56,9 +55,6 @@ enum Ask {
         reply: Sender<Result<Value, String>>,
     },
 }
-
-/// The batches' ids in this process.
-static BATCHES: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
     /// The batch the endpoint's thread runs now.
@@ -164,10 +160,7 @@ impl WindowCommands for Bridge {
             if b.is_some() {
                 return false;
             }
-            *b = Some(Group {
-                id: BATCHES.fetch_add(1, Ordering::Relaxed) + 1,
-                origin: crate::host::to_pop(&origin_of(origin)),
-            });
+            *b = Some(Group::new(crate::host::to_pop(&origin_of(origin))));
             true
         });
         Some(Box::new(Open { outer }))

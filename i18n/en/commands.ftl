@@ -478,6 +478,12 @@ command-library-quick-delete =
 command-library-quick-list =
     .title = List the quick collections, the first one first: `id`, `name` (none for the first until renamed), `count`, `target` (true for the target of B)
 
+command-library-quick-move =
+    .title = Move photos to a quick collection (`id`; none: the target) out of another (`from`): `images`, ids, else the selection; one step. A drag between two quick collections does it, Ctrl copies
+
+command-library-quick-open =
+    .title = Open a quick collection (`id`; none: the target) in a panel of its own (`place`: last, here or an area): its photos, photos dropped on it go in. Answers the panel's id (`view`)
+
 command-library-quick-remove =
     .title = Remove photos from a quick collection (`id`; none: the target; `images`: ids, else the selection); they stay in the library
 

@@ -209,6 +209,11 @@ pub fn schema(command: &str) -> Option<Json> {
             object(&[], &[("id", any()), ("images", images())])
         }
         "library.quick.list" => object(&[], &[]),
+        "library.quick.move" => object(
+            &["from"],
+            &[("from", string()), ("id", any()), ("images", images())],
+        ),
+        "library.quick.open" => object(&[], &[("id", any()), ("place", string_or_null())]),
         // Filters.
         "library.filter.apply" => object(&[], &[("query", any()), ("filter", any())]),
         "library.filter.pin" => object(

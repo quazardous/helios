@@ -589,6 +589,14 @@ Each slice is one PR with its tests; the order matters.
    (`helios-gui/src/library_views.rs`). The main explorer stays as it
    is. Keys and undo routing scoped to `helios.vault` do not reach an
    instance yet (quazardous/egui-pop#647).
+   **Quick-collection panels** (2026-11-21): a view may show a quick
+   collection (`library.quick.open`, a quick collection's "Open in a
+   panel"): its state names the collection (`quick`) and its filter is
+   `collection:<id>`; its grid has no search, and the whole panel takes
+   dropped photos. Photos dragged out of one quick collection onto
+   another move (`library.quick.move`, one undo step); Ctrl copies;
+   from anywhere else they are added. The panel's tab keeps the Results
+   instance's title: egui-pop has no way yet to name an instance.
 3. **G3. One grammar.** `rules::parse_text` and `rules::to_text` in
    `helios-vault`, aliases, `-`, `OR`, ranges, relative dates;
    `presence`, `backup`, `cull` as rule fields; the search text, the

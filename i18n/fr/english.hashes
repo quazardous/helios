@@ -236,6 +236,8 @@ command-library-quick-clear.title fda9bb60f1f6cd81
 command-library-quick-create.title d6994e534991356e
 command-library-quick-delete.title 5021c3a7979fd781
 command-library-quick-list.title ba68591b179e7855
+command-library-quick-move.title ef9049733d5311d0
+command-library-quick-open.title 1df745eef1b79b0e
 command-library-quick-remove.title 2c5897e82380cdb9
 command-library-quick-rename.title cbc61e7701100363
 command-library-quick-saveAs.title 2b108c038d5f66aa
@@ -760,6 +762,8 @@ gui-history-quick-add-named a6b8649ce0564e67
 gui-history-quick-clear 9b52b03e469d7bac
 gui-history-quick-clear-named 84910c891f2018f0
 gui-history-quick-delete 1f74459f00013248
+gui-history-quick-move baf2bb0262b280d7
+gui-history-quick-move-named 9461bc64280d9c37
 gui-history-quick-new 444ab2979db772ec
 gui-history-quick-remove 334339e3707ea6b9
 gui-history-quick-remove-named 6be1c714019553f1
@@ -1109,6 +1113,7 @@ gui-library-cull-soft 77664a4fb499c495
 gui-library-cull-unmeasured cc20513cabdb8620
 gui-library-delete-rejected fea035c0029f3686
 gui-library-drop-add bc4b76c3fcf7a86e
+gui-library-drop-move 9c13188c91346e2b
 gui-library-drop-set ec3d777987cd5744
 gui-library-drop-smart 2b52bc1534ed5dd4
 gui-library-duplicate 18bc4e7991234d1c
@@ -1209,6 +1214,9 @@ gui-library-quick-clear 9b52b03e469d7bac
 gui-library-quick-delete cbd8ff473e89c664
 gui-library-quick-new 232b6e4dfca87f80
 gui-library-quick-new-title a336e9f193068840
+gui-library-quick-open 1c90700ffb5a15b9
+gui-library-quick-panel-count 1e78e97c4076de73
+gui-library-quick-panel-gone 7d93a49342f27f00
 gui-library-quick-rename d18d5eae53db6fcd
 gui-library-quick-rename-title 69e56603605e85b1
 gui-library-quick-save 0b0b5c0a2115e659
