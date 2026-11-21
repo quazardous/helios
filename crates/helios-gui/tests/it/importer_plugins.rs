@@ -159,7 +159,7 @@ fn an_importer_asks_for_its_folder_and_its_photos_land_with_their_ratings() {
             .find(|l| {
                 l["path"]
                     .as_str()
-                    .is_some_and(|p| p.ends_with(&format!("/{name}")))
+                    .is_some_and(|p| Path::new(p).file_name() == Some(name.as_ref()))
             })
             .unwrap_or_else(|| panic!("no {name}: {lines:?}"));
         ImageId::from_hex(line["id"].as_str().unwrap()).unwrap()

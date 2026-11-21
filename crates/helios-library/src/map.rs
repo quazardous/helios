@@ -412,7 +412,12 @@ mod tests {
                 volume: None,
             },
         ];
-        let mut checker = Checker::new(Blacklist::new(Os::Linux, &Places::default(), false, rules));
+        let mut checker = Checker::new(Blacklist::new(
+            Os::current(),
+            &Places::default(),
+            false,
+            rules,
+        ));
         assert_eq!(
             forget_excluded(&vault, &volumes, &mut checker, 3).unwrap(),
             2

@@ -206,7 +206,14 @@ mod tests {
         let roots = t.roots();
         let outside = t.0.join("elsewhere/secret.txt");
         assert!(roots.check(&outside, Access::Read).is_err());
-        let dotdot = t.0.join("photos/../elsewhere/secret.txt");
+        // Built as a string: on Windows, joining onto a verbatim (`\\?\`)
+        // path resolves the `..` away before the check could see it.
+        let mut dotdot = t.0.join("photos").into_os_string();
+        for part in ["..", "elsewhere", "secret.txt"] {
+            dotdot.push(std::path::MAIN_SEPARATOR_STR);
+            dotdot.push(part);
+        }
+        let dotdot = PathBuf::from(dotdot);
         let e = roots.check(&dotdot, Access::Read).unwrap_err();
         assert!(e.contains("`..`"), "{e}");
         let e = roots

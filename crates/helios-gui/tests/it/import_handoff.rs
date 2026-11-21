@@ -91,7 +91,7 @@ fn node(dir: &Path, gate: &Arc<Gate>) -> Arc<Client> {
 /// one photo, the import window open on it once it is read through.
 fn card_window(dir: &Path, node: Arc<Client>) -> Harness<'static, Shell> {
     let card = dir.join("EOS_DIGITAL");
-    let dcim = card.join("DCIM/100CANON");
+    let dcim = card.join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     std::fs::copy(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -166,7 +166,11 @@ fn import_hands_off_to_a_promise_the_window_may_close_and_the_status_bar_follows
     // Handed to the node, not queued for the host: answered at once.
     assert!(h.state_mut().take_imports().is_empty());
     let request = gate.requests.lock().unwrap()[0].clone();
-    let photo = dir.join("EOS_DIGITAL/DCIM/100CANON/IMG_0001.JPG");
+    let photo = dir
+        .join("EOS_DIGITAL")
+        .join("DCIM")
+        .join("100CANON")
+        .join("IMG_0001.JPG");
     assert_eq!(request["rule"], json!({ "items": [photo] }), "{request}");
     assert_eq!(request["copy"], json!(true), "{request}");
     assert_eq!(request["darktable"], json!(true), "{request}");

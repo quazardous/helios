@@ -1234,7 +1234,7 @@ fn a_copy_records_a_sighting_where_it_lands_and_an_add_in_place_none() {
 #[test]
 fn a_copy_import_run_again_reads_none_of_what_it_copied() {
     let p = Place::new("copy-again");
-    let card = p.join("card/DCIM/100");
+    let card = p.join("card").join("DCIM").join("100");
     let (a, b) = (card.join("a.png"), card.join("b.png"));
     picture(&a, 0, 1.0, 0);
     picture(&b, 1, 1.0, 0);
@@ -1706,7 +1706,7 @@ fn two_imports_of_one_card_at_once_make_each_photo_once_in_sqlite() {
 fn raw_jpeg_pairs_of_a_card_are_imported_as_one_photo_each() {
     use helios_library::pairs;
     let p = Place::new("pairs");
-    let dcim = p.join("card/DCIM/100HELIO");
+    let dcim = p.join("card").join("DCIM").join("100HELIO");
     std::fs::create_dir_all(&dcim).unwrap();
     for (name, bytes) in [
         ("IMG_0001.NEF", "raw one"),

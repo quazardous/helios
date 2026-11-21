@@ -231,7 +231,13 @@ fn images_copied_or_files_pasted_open_the_import_window_on_them() {
     assert!(h.state().import_window_open());
     assert_eq!(h.state().import_ticked(), std::slice::from_ref(&dir));
     // Files named by another application's text: the same window.
-    let text = format!("file://{}\n/nowhere/c.jpg", file.display());
+    // A URI the platform's way: `file:///C:/…` on Windows.
+    let uri = if cfg!(windows) {
+        format!("file:///{}", file.display().to_string().replace('\\', "/"))
+    } else {
+        format!("file://{}", file.display())
+    };
+    let text = format!("{uri}\n/nowhere/c.jpg");
     let out = clipboard::paste(
         &app,
         PasteRequest::new(LIBRARY_ENDPOINT).text(&text),

@@ -333,11 +333,15 @@ impl Local {
         if id.is_absolute()
             || id
                 .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
         {
             return None;
         }
-        Some(base.join(id))
+        // Part by part, so the path has the system's separators (an id
+        // has `/` on every system).
+        let mut path = base;
+        path.extend(id.components());
+        Some(path)
     }
 
     pub fn access(item: &ItemRef) -> Access {
@@ -396,6 +400,21 @@ mod tests {
             group_of("DCIM/101CANON/IMG_0412.JPG"),
             group_of("DCIM/100CANON/IMG_0412.JPG")
         );
+    }
+
+    #[test]
+    fn an_item_s_file_has_the_system_s_separators_and_stays_in_its_source() {
+        let root = std::env::temp_dir().join("helios-card");
+        let item = |id: &str| ItemRef {
+            source: source_at("card", &root, "CARD".into(), None),
+            id: crate::ItemId(id.into()),
+        };
+        let path = Local::path_of(&item("DCIM/100CANON/IMG_0001.JPG")).unwrap();
+        let native = root.join("DCIM").join("100CANON").join("IMG_0001.JPG");
+        assert_eq!(path.as_os_str(), native.as_os_str());
+        for climbing in ["../x.jpg", "DCIM/../../x.jpg", "/x.jpg"] {
+            assert_eq!(Local::path_of(&item(climbing)), None, "{climbing}");
+        }
     }
 
     #[test]

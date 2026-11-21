@@ -232,7 +232,7 @@ fn card_window_at(
 /// A card holding two JPEGs on 2 November, one of them in the Library
 /// already, and a RAW+JPEG pair on 3 November.
 fn fake_card(dir: &Path) -> (PathBuf, helios_gui::import_scan::Known) {
-    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    let dcim = dir.join("EOS_DIGITAL").join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
     put(&dcim.join("IMG_0002.JPG"), Ok(&jpeg("b")), 2);
@@ -252,7 +252,7 @@ fn fake_card(dir: &Path) -> (PathBuf, helios_gui::import_scan::Known) {
 fn the_import_window_lists_a_card_first_ticks_it_and_imports_it() {
     let dir = temp("card");
     let card = dir.join("EOS_DIGITAL");
-    let dcim = card.join("DCIM/100CANON");
+    let dcim = card.join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
     let mut h = card_window(&dir, None);
@@ -1111,7 +1111,7 @@ pub(crate) fn host_import<S: helios_vault::Store + Send + 'static>(
 fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_step() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let dir = temp("end-to-end");
-    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    let dcim = dir.join("EOS_DIGITAL").join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
     put(&dcim.join("IMG_0002.JPG"), Ok(&jpeg("c")), 3);
@@ -1162,7 +1162,13 @@ fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_ste
     let mut expected = ids.clone();
     expected.sort();
     assert_eq!(selected, expected, "the photos imported are selected");
-    assert!(dir.join("photos/2026/2026-11-02/IMG_0001.JPG").is_file());
+    assert!(
+        dir.join("photos")
+            .join("2026")
+            .join("2026-11-02")
+            .join("IMG_0001.JPG")
+            .is_file()
+    );
     // One undo step: Ctrl+Z with the Library shown takes it back.
     let scope = helios_gui::library_history::LIBRARY;
     let line = egui_pop::api::history::line(h.state().app().handle(), &scope).unwrap();
@@ -1415,7 +1421,7 @@ fn refusal(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> String {
 #[test]
 fn without_a_library_the_import_window_says_so_and_its_import_button_is_off() {
     let dir = temp("no-library");
-    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    let dcim = dir.join("EOS_DIGITAL").join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     put(&dcim.join("IMG_0001.JPG"), Ok(&jpeg("a")), 2);
     let mut h = card_window_with(&dir, None, |shell| shell.set_library_open(false));
@@ -1756,7 +1762,7 @@ fn an_offline_folder_lists_what_the_image_map_recorded_with_cached_thumbnails() 
     std::fs::copy(jpeg("a"), library.join("a.jpg")).unwrap();
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     let id = vault.import_file(&library.join("a.jpg"), 0).unwrap();
-    let gone = dir.join("Unplugged/DCIM");
+    let gone = dir.join("Unplugged").join("DCIM");
     let mut imported = helios_vault::Sighting::seen(gone.join("A.JPG"), 1_000, 50, 60, "import");
     imported.image = Some(id);
     let other = helios_vault::Sighting::seen(gone.join("B.JPG"), 2_000, 50, 60, "import");
@@ -1997,7 +2003,7 @@ fn a_disk_cached_thumbnail_paints_with_its_cell() {
     std::fs::copy(jpeg("a"), library.join("a.jpg")).unwrap();
     let vault = Arc::new(Vault::new(MemoryStore::default()));
     let id = vault.import_file(&library.join("a.jpg"), 0).unwrap();
-    let gone = dir.join("Unplugged/DCIM");
+    let gone = dir.join("Unplugged").join("DCIM");
     let mut imported = helios_vault::Sighting::seen(gone.join("A.JPG"), 1_000, 50, 60, "import");
     imported.image = Some(id);
     vault.record_listed(&[imported]).unwrap();
@@ -2319,7 +2325,7 @@ fn import_opens_in_its_own_window_reads_in_its_status_bar_and_closes_alone() {
 fn a_card_plugged_in_again_shows_its_glances_from_disk_and_reads_only_a_changed_file() {
     const N: usize = 12;
     let dir = temp("card-disk");
-    let dcim = dir.join("EOS_DIGITAL/DCIM/100CANON");
+    let dcim = dir.join("EOS_DIGITAL").join("DCIM").join("100CANON");
     photos(&dcim, N, 320, 240);
     let glances = helios_gui::import_scan::GlanceCache::global();
     let cache = dir.join("cache");
@@ -2337,7 +2343,11 @@ fn a_card_plugged_in_again_shows_its_glances_from_disk_and_reads_only_a_changed_
     std::fs::rename(dir.join("EOS_DIGITAL"), elsewhere.join("EOS_DIGITAL")).unwrap();
     glances.forget_ram();
     glances.open_disk(&cache).unwrap();
-    let changed = elsewhere.join("EOS_DIGITAL/DCIM/100CANON/IMG_0003.JPG");
+    let changed = elsewhere
+        .join("EOS_DIGITAL")
+        .join("DCIM")
+        .join("100CANON")
+        .join("IMG_0003.JPG");
     image::RgbImage::from_pixel(320, 240, image::Rgb([200, 10, 10]))
         .save(&changed)
         .unwrap();

@@ -182,7 +182,7 @@ fn run_imports(h: &mut Harness<'static, Shell>, imports: Vec<Value>, done: &Atom
 fn a_card_set_to_import_when_plugged_in_imports_its_new_photos_with_its_choices() {
     let dir = temp("card");
     let card = dir.join("EOS_DIGITAL");
-    let dcim = card.join("DCIM/100CANON");
+    let dcim = card.join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     std::fs::copy(jpeg("a"), dcim.join("IMG_0001.JPG")).unwrap();
     std::fs::copy(jpeg("b"), dcim.join("IMG_0002.JPG")).unwrap();
@@ -360,7 +360,7 @@ struct CardSetup {
 fn card_setup(name: &str, confirmed: bool) -> CardSetup {
     let dir = temp(name);
     let card = dir.join("EOS_DIGITAL");
-    let dcim = card.join("DCIM/100CANON");
+    let dcim = card.join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     std::fs::copy(jpeg("a"), dcim.join("IMG_0001.JPG")).unwrap();
     std::fs::copy(jpeg("b"), dcim.join("IMG_0002.JPG")).unwrap();
@@ -483,7 +483,11 @@ fn a_source_s_first_automatic_import_opens_the_import_window_where_import_confir
     });
     // Plugged in again with a new photo: imported on its own, no window.
     s.unplug();
-    std::fs::copy(jpeg("c"), s.card.join("DCIM/100CANON/IMG_0003.JPG")).unwrap();
+    std::fs::copy(
+        jpeg("c"),
+        s.card.join("DCIM").join("100CANON").join("IMG_0003.JPG"),
+    )
+    .unwrap();
     s.plug();
     let mut imports = Vec::new();
     until(&mut s.h, "the card imported on its own", |s| {

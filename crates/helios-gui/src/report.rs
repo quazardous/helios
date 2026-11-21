@@ -347,8 +347,15 @@ mod tests {
             .iter()
             .map(|(n, v)| ((*n).to_string(), (*v).to_string()))
             .collect();
-        System::from_env("linux", "x86_64", &vars, Some(PathBuf::from("/home/ann")))
+        System::from_env("linux", "x86_64", &vars, Some(PathBuf::from(HOME)))
     }
+
+    /// An absolute home folder on the platform running the test (a home
+    /// that is not absolute is ignored).
+    #[cfg(not(windows))]
+    const HOME: &str = "/home/ann";
+    #[cfg(windows)]
+    const HOME: &str = r"C:\Users\ann";
 
     fn value<'a>(lines: &'a [(String, String)], key: &str) -> Option<&'a str> {
         lines
@@ -394,14 +401,30 @@ mod tests {
     fn the_home_folder_is_written_as_a_tilde() {
         let system = linux(&[]);
         let lines = details_with(
-            &Context::command("x").cause("/home/ann/Photos/a.raw: unreadable, /home/anna kept"),
+            &Context::command("x").cause(format!("{HOME}/Photos/a.raw: unreadable, {HOME}a kept")),
             &system,
         );
         assert_eq!(
             value(&lines, "error"),
-            Some("~/Photos/a.raw: unreadable, /home/anna kept")
+            Some(format!("~/Photos/a.raw: unreadable, {HOME}a kept").as_str())
         );
-        assert!(!format!("{lines:?}").contains("/home/ann/"));
+        assert!(!format!("{lines:?}").contains(&format!("{HOME}/")));
+    }
+
+    #[test]
+    fn a_windows_home_folder_is_written_as_a_tilde() {
+        let home = Path::new(r"C:\Users\ann");
+        assert_eq!(
+            redact_home(
+                r"C:\Users\ann\Pictures\a.raw: unreadable, C:\Users\anna kept",
+                home
+            ),
+            r"~\Pictures\a.raw: unreadable, C:\Users\anna kept"
+        );
+        assert_eq!(
+            redact_home(r"in C:\Users\ann", Path::new(r"C:\Users\ann\")),
+            "in ~"
+        );
     }
 
     #[test]
