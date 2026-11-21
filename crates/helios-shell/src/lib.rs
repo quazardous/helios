@@ -14,4 +14,5 @@
 
 pub mod commands;
 pub mod policy;
+pub mod settings;
 pub mod when;

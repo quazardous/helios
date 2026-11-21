@@ -36,7 +36,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use helios_config::{Config, Layer, Schema};
+use helios_config::{Config, Layer};
 use helios_core::{Envelope, Event};
 use helios_library::auto_import::{self as guard, Batch, Limits, Settling, Timing, Verdict};
 use helios_library::import::{Duplicates, Layout, Options, Placement};
@@ -210,7 +210,7 @@ struct Runner {
 impl Runner {
     /// The safeguards' settings as the person's layer has them now.
     fn limits(&self) -> Limits {
-        let mut config = Config::new(Schema::core());
+        let mut config = Config::new(helios_node_core::settings::schema());
         match self.settings.read(USER) {
             Ok(Some(text)) => {
                 config.load_str_lenient(Layer::User, &text);

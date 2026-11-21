@@ -1075,7 +1075,8 @@ mod tests {
         assert!(token.sensitive, "a secret is sensitive");
         assert_eq!(token.default.to_json(), json!(""));
 
-        let m = crate::config::manifest(&helios_config::Schema::core(), &[p], &|m| m.english);
+        let m =
+            crate::config::manifest(&helios_node_core::settings::schema(), &[p], &|m| m.english);
         let section = m
             .sections
             .iter()
@@ -1128,7 +1129,7 @@ mod tests {
             "{problems:?}"
         );
         let m = crate::config::manifest(
-            &helios_config::Schema::core(),
+            &helios_node_core::settings::schema(),
             std::slice::from_ref(&bad),
             &|m| m.english,
         );

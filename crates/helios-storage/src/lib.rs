@@ -31,6 +31,7 @@ pub mod macos;
 pub mod marker;
 pub mod registry;
 pub mod scan;
+pub mod settings;
 pub mod strategy;
 pub mod windows;
 

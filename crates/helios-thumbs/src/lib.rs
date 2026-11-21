@@ -13,6 +13,7 @@
 pub mod cache;
 pub mod pool;
 pub mod read;
+pub mod settings;
 
 pub use cache::{DEFAULT_LIMIT, Key, READER, ThumbCache};
 pub use pool::{Job, Loader, Outcome, workers};

@@ -25,6 +25,8 @@
 //! Not yet: a pending decision as a waiting item in the workflow journal
 //! (it needs the journal's waits and signals).
 
+pub mod settings;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

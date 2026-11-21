@@ -111,7 +111,7 @@ impl Settings {
     /// Reads every layer, lowest first; what does not read is left out
     /// and said in [`Settings::problems`], never a failure.
     pub fn resolve(sources: &Sources) -> Settings {
-        let mut config = Config::new(Schema::core());
+        let mut config = Config::new(helios_node_core::settings::schema());
         let mut problems = Vec::new();
         let mut load = |config: &mut Config, layer: Layer, text: Option<&str>, name: &str| {
             let Some(text) = text else { return };
@@ -276,7 +276,7 @@ impl Settings {
 /// A layer's text as compared: what its values give, whatever the
 /// spacing or order written.
 fn normal(text: Option<&str>) -> String {
-    let mut c = Config::new(Schema::core());
+    let mut c = Config::new(helios_node_core::settings::schema());
     let _ = c.load_str_lenient(Layer::Global, text.unwrap_or(""));
     c.layer_toml(Layer::Global)
 }
@@ -657,7 +657,7 @@ pub fn manifest(
 
 /// The first-run setup (`crate::shell` `init_wizard`): a step per init
 /// step, in order; its fields are the settings the step fills, as their
-/// declarations say (`helios_config::KEPT_ELSEWHERE`), required on a
+/// declarations say (`helios_node_core::settings::KEPT_ELSEWHERE`), required on a
 /// required step; an optional step is skipped ("Later"). The library
 /// folder is a path field with "Choose…" (the folder chooser) and a
 /// check that it can be written, with room left. No summary: Finish on
@@ -683,10 +683,13 @@ pub fn init_wizard(registry: &helios_init::Registry, t: &dyn Fn(Message) -> Stri
         w = w.step(&step.id, &t(step.title.clone()), |s| {
             s.description(&t(step.why.clone()));
             for key in &step.fills {
-                let kind = match helios_config::kept_elsewhere(key)
+                let kind = match helios_node_core::settings::kept_elsewhere(key)
                     .map(|d| d.kind)
-                    .or_else(|| Schema::core().get(key).map(|d| d.kind))
-                {
+                    .or_else(|| {
+                        helios_node_core::settings::schema()
+                            .get(key)
+                            .map(|d| d.kind)
+                    }) {
                     Some(Kind::Toggle { .. }) => FieldKind::Toggle,
                     Some(Kind::Number { .. }) => FieldKind::Number,
                     Some(Kind::Choice { .. }) => FieldKind::Choice,
@@ -1328,7 +1331,7 @@ impl Plugin for BridgePlugin {
     }
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
-        let schema = Schema::core();
+        let schema = helios_node_core::settings::schema();
         for s in schema.iter() {
             ctx.setting(setting_id(s.key)?, descriptor(s))?;
         }
@@ -1400,7 +1403,7 @@ pub fn install(
     node: Option<Arc<dyn NodeLayers>>,
     config_dir: &Path,
 ) -> NodeSettingsStore {
-    let schema = Schema::core();
+    let schema = helios_node_core::settings::schema();
     let project = settings.project().is_some();
     let library = settings.project().map(focus::library_name);
     let run: Vec<(&'static str, Json)> = schema
@@ -1576,7 +1579,7 @@ fn stray(app: &AppHandle, admin: &Admin, scope: ValueScope, key: &str) -> bool {
 
 /// Every setting's `app` value, as the Settings app holds it.
 fn app_values(settings: &Settings) -> BTreeMap<&'static str, Json> {
-    Schema::core()
+    helios_node_core::settings::schema()
         .iter()
         .filter_map(|s| Some((s.key, to_json(&s.kind, &settings.app_value(s.key)?))))
         .collect()
@@ -1585,7 +1588,7 @@ fn app_values(settings: &Settings) -> BTreeMap<&'static str, Json> {
 /// The project settings' values in the library's layer (the Settings
 /// app's `library` value scope).
 fn library_values(settings: &Settings) -> BTreeMap<String, Json> {
-    Schema::core()
+    helios_node_core::settings::schema()
         .iter()
         .filter(|s| s.concern == Concern::Project)
         .filter_map(|s| {
@@ -1734,7 +1737,7 @@ mod tests {
 
     #[test]
     fn every_setting_is_placed_once_with_the_scopes_of_its_concern() {
-        let schema = Schema::core();
+        let schema = helios_node_core::settings::schema();
         let m = manifest(&schema, &[], &|m| m.english);
         let bound: Vec<&str> = m.bound_settings().collect();
         for s in schema.iter() {
@@ -1770,7 +1773,9 @@ mod tests {
 
     #[test]
     fn the_manifest_s_texts_go_through_the_catalogues() {
-        let m = manifest(&Schema::core(), &[], &|m| format!("<{}>", m.key));
+        let m = manifest(&helios_node_core::settings::schema(), &[], &|m| {
+            format!("<{}>", m.key)
+        });
         let library = m.scopes.iter().find(|s| s.meta.id == "library").unwrap();
         assert_eq!(library.meta.title, "<gui-settings-library>");
         for s in &m.sections {

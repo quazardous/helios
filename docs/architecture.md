@@ -436,7 +436,9 @@ monitoring, restart) is proposed in [workflow-level.md](workflow-level.md)
   a label, a description, a kind (number with bounds and unit, toggle with
   its two words, choice) with its default, and a **concern**. Options pages,
   get and set by key, and the check of a hand-edited file come from the
-  declarations.
+  declarations. Each crate declares the settings it owns as its own set
+  (2026-11-21); `helios-node-core` (`settings::SETS`) gathers them into
+  the one schema the node and the desktop read.
 - **Pages come from the naming structure**: a setting is named
   `page.group.name` (`interface.graph.zoom`), and that name alone places it
   on the options page `interface`, in the group `graph`; in a file it is
