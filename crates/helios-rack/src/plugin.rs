@@ -9,7 +9,7 @@
 //!   `plugin/<id>/<key>` with a typed descriptor (a number, a whole
 //!   number, a switch, a choice, a text), its texts message ids of the
 //!   plugin's own catalogue;
-//! - **the card**: an `egui_hud` [`Case`] whose parts name the values by
+//! - **the card**: an `egui_hud` [`Case`](egui_hud::model::Case) whose parts name the values by
 //!   key, each edited by a control of Helios's catalogue or by
 //!   [`IMPLICIT`], the value's own managed control (a slider for a
 //!   number, a menu for a choice); `egui_hud` [`Patch`]es may add parts
