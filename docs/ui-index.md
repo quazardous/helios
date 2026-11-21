@@ -17,7 +17,7 @@ To add an entry, give the public item a doc line
 `/// Need (group): a search field.`, a preset using the same words as
 the widget it wraps; the group is one of: `text`, `layout`, `action`, `input`, `state`, `status`, `icon`, `help`, `dialog`, `data`, `image`.
 
-egui-pop in the lock: 0.19.0.
+egui-pop in the lock: 0.20.0.
 
 ## Text and titles
 
@@ -47,6 +47,7 @@ egui-pop in the lock: 0.19.0.
 | a list filling a strip beside another region, its bar on the strip's edge | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 | a list in a side panel's section, a few rows high | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 | a log filling its panel, the newest line kept in view | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
+| a panel opened several times at once, each instance with its own state | `PanelSpec` (egui-pop)<br>`egui_pop::model::panels::PanelSpec` | A panel as declared: its id, title, areas, sizes, and whether it opens once or as many times as asked (`PanelSpec::instances`). |
 | a scrolling region | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 |  | `ui.scroll_area(..)` (egui-pop, under the preset)<br>`egui_pop::core::ui::UiPop::scroll_area` | Shows egui's scroll area with its bars drawn from the kit's `scroll-bar` (`Stock::ScrollBar`: the thumb's fills and corners, the track), `add` its content, drawn in this `Ui`'s own style. |
 | a tab bar button that moves a whole tab group into a window of its own | `DockControls` (egui-pop)<br>`egui_pop::api::workbench::DockControls` | The controls the workbench's docks show beyond the tabs, as the application sets them (`AppBuilder::dock_controls`). |
@@ -55,6 +56,7 @@ egui-pop in the lock: 0.19.0.
 | content in a box of a fixed size (allocate_ui_with_layout) | `ui.sized_ui(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::sized_ui` | `add` in a box of exactly `size` at the layout's cursor, laid out by `layout` (`Layout::centered_and_justified` to fill it): a cell of a set width in a row. |
 | content placed in a given rectangle, clipped to it (put) | `ui.rect_ui(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::rect_ui` | `add` in `rect`, laid out by `layout` and clipped to it, for what places its parts by rectangles (a card laid out by a layout engine, a slot): nothing it draws goes past `rect`. |
 | one of egui's own widgets, styled by the kit | `ui.scoped(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::scoped` | `add` in a scope where egui's own widgets of a `Stock` kind (buttons, combo boxes, text fields, buttons shown on or off) are drawn from the kit's component, in a tone: its states become egui's widget visuals, so egui keeps drawing the widget (`Kit::scope`). |
+| open a closed panel again where it was, or in a given tab group | `PanelOpenAsk` (egui-pop)<br>`egui_pop::api::bus::PanelOpenAsk` | A panel asked open: which panel, where, and who asks. |
 | space between blocks, by intent (never a number of points) | `ui.space_role(..)` (egui-pop)<br>`egui_pop::core::ui::UiPop::space_role` | Space by intent along the layout's direction (`Space`); egui's own `add_space` takes points. |
 | the tail of a console, the newest line kept in view | **`helios_ui::scroll(..)`** (Helios preset)<br>`helios_ui::scroll` | `add` in a region scrolling up and down: egui-pop's scroll area (the kit's bars, the keys). |
 
