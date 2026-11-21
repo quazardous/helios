@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 use egui::Ui;
 use egui_pop::api::bus::drag::{self, Seen};
 use egui_pop::api::files::places::{PlaceItem, PlaceSection, PlacesPanel};
+use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::ui::UiPop as _;
 use helios_core::Message;
 use helios_ui::Action;
@@ -40,6 +41,12 @@ const FOLDERS: &str = "folders";
 const ALBUMS: &str = "albums";
 const KEYWORDS: &str = "keywords";
 const IMPORTS: &str = "imports";
+
+/// The sources' drop-down list's width, as the Filters column's.
+const SOURCES_MENU_WIDTH: f32 = 280.0;
+
+/// The sources' drop-down list's height at most: it scrolls past it.
+const SOURCES_MENU_HEIGHT: f32 = 480.0;
 
 /// What a row stands for: what its hook and a click act on.
 enum Row {
@@ -188,6 +195,41 @@ impl Library {
                 ),
             );
         }
+    }
+
+    /// The sources behind a "Sources" drop-down, for the Filters drawn
+    /// as a bar: the same panel as in a column, in a list that stays open
+    /// while folders and keywords are opened and chosen, until a click
+    /// outside it. Nothing while the library is empty.
+    pub(super) fn sources_menu(&mut self, ui: &mut Ui) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let word = |m: Message| crate::i18n::text(&ctx, m);
+        let name = word(Message::new("gui-library-sources", "Sources"));
+        let tip = word(Message::new(
+            "gui-library-sources-tip",
+            "Folders, albums, keywords and imports: choose the photos shown",
+        ));
+        let combo = egui_pop::core::widgets::combo_box(format!(
+            "helios.library.sources-menu.{}",
+            self.view_id
+        ))
+        .selected_text(name.clone())
+        .height(SOURCES_MENU_HEIGHT)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        let menu = ui
+            .combo_box(combo, |ui| {
+                ui.set_min_width(SOURCES_MENU_WIDTH);
+                self.sources_panel(ui);
+            })
+            .response
+            .tip(&tip);
+        // Named for screen readers (and tests): "Sources".
+        menu.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), &name)
+        });
     }
 
     /// The Folders section: the volumes, each with its folders, counted by

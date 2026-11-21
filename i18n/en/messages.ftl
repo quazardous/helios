@@ -1815,6 +1815,10 @@ gui-library-sort-size = File size
 
 gui-library-sort-tip = Sort by
 
+gui-library-sources = Sources
+
+gui-library-sources-tip = Folders, albums, keywords and imports: choose the photos shown
+
 gui-library-stack-group = Group into Stack
 
 gui-library-stack-not-changed = The stack was not changed: { $error }
