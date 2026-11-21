@@ -399,7 +399,7 @@ fn page(s: &mut SectionBuilder<'_>, p: &PluginSettings, t: &dyn Fn(Message) -> S
                 Item::Callout(c) => s.callout(c),
                 Item::List(r) => s.list(r),
                 Item::Table(r) => s.table(r),
-                Item::Widget(_) => s,
+                Item::Widget(_) | Item::Unknown(_) => s,
             };
         }
     }

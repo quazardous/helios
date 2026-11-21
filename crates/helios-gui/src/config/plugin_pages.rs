@@ -22,8 +22,9 @@
 //!
 //! **Bounds.** A file is at most [`MAX_BYTES`], a page at most
 //! [`MAX_ITEMS`] items. A newer format is refused. A brick this Helios
-//! does not know (a `node` outside [`NODES`]) is left out before the
-//! manifest is read, so a newer brick never fails the page.
+//! does not know (a newer `node`) reads as egui-pop's `Item::Unknown`;
+//! the manifest's own check leaves it out with its diagnostic
+//! (`admin-unknown-node`), so a newer brick never fails the page.
 
 use std::path::Path;
 
@@ -42,11 +43,6 @@ pub const MAX_ITEMS: usize = 200;
 /// The host commands a page's action may name besides the plugin's own:
 /// navigation only.
 pub const NAVIGATION: &[&str] = &["admin.open", "help.health"];
-
-/// The bricks this Helios reads (egui-pop's admin `node`s).
-pub const NODES: &[&str] = &[
-    "field", "action", "status", "callout", "widget", "list", "table",
-];
 
 /// The one section a page may declare: the plugin's own.
 pub const MAIN: &str = "main";
@@ -142,13 +138,22 @@ pub fn read(dir: &Path, manifest: &helios_plugin::Manifest) -> Page {
 
 /// Checks one page file's JSON: the groups it gives the plugin's
 /// section, and what was left out.
-pub fn check(plugin: &Plugin<'_>, mut json: Json) -> (Vec<Group>, Vec<String>) {
-    let mut problems = Vec::new();
-    unknown_nodes(&mut json, &mut problems);
+pub fn check(plugin: &Plugin<'_>, json: Json) -> (Vec<Group>, Vec<String>) {
     let mut m = match Manifest::from_json(&json) {
         Ok(m) => m,
         Err(e) => return (Vec::new(), vec![format!("refused: {e:?}")]),
     };
+    // The manifest's own check: unknown bricks, duplicate ids, clauses
+    // that do not parse. Every scope a section names counts as known, so
+    // the sections outside the plugin's own are said below, by Helios;
+    // the settings are checked below too, against the plugin's.
+    let scopes: Vec<String> = m.sections.iter().map(|s| s.scope.clone()).collect();
+    let mut problems: Vec<String> = m
+        .check(&scopes, &|_| true)
+        .all()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     if !m.scopes.is_empty() || !m.wizards.is_empty() || !m.quick.is_empty() {
         problems.push("scopes, wizards and quick settings are not for plugins: left out".into());
     }
@@ -194,36 +199,6 @@ pub fn check(plugin: &Plugin<'_>, mut json: Json) -> (Vec<Group>, Vec<String>) {
         }
     }
     (groups, problems)
-}
-
-/// Leaves out the items whose `node` this Helios does not know, so a
-/// newer brick never fails the page.
-fn unknown_nodes(json: &mut Json, problems: &mut Vec<String>) {
-    let Some(sections) = json.get_mut("sections").and_then(Json::as_array_mut) else {
-        return;
-    };
-    for s in sections {
-        let Some(groups) = s.get_mut("groups").and_then(Json::as_array_mut) else {
-            continue;
-        };
-        for g in groups {
-            let group = g["id"].as_str().unwrap_or_default().to_string();
-            let Some(items) = g.get_mut("items").and_then(Json::as_array_mut) else {
-                continue;
-            };
-            items.retain(|i| {
-                let node = i["node"].as_str().unwrap_or_default();
-                if NODES.contains(&node) {
-                    return true;
-                }
-                problems.push(format!(
-                    "{group}/{}: unknown brick `{node}` (a newer format): left out",
-                    i["id"].as_str().unwrap_or_default()
-                ));
-                false
-            });
-        }
-    }
 }
 
 /// Every text of a node is a message id of the plugin's (or empty).
@@ -348,6 +323,8 @@ pub fn allowed(plugin: &Plugin<'_>, item: &Item) -> Result<(), String> {
             texts(plugin, &c.meta)
         }
         Item::List(r) | Item::Table(r) => records(plugin, r),
+        // Left out by the manifest's check already, with its diagnostic.
+        Item::Unknown(u) => Err(format!("unknown node `{}`", u.node)),
         Item::Widget(_) => Err("registered widgets are the host's".into()),
     }
 }
@@ -409,7 +386,8 @@ pub fn translated(groups: &[Group], t: &dyn Fn(Message) -> String) -> Vec<Group>
                         }
                     }
                 }
-                Item::Widget(_) => {}
+                // Never kept: `check` leaves unknown bricks out.
+                Item::Widget(_) | Item::Unknown(_) => {}
             }
         }
     }
@@ -487,7 +465,7 @@ mod tests {
         );
         assert_eq!(ids(&groups), ["api", "test"], "{problems:#?}");
         for expect in [
-            "unknown brick `gauge`",
+            "unknown node `gauge`",
             "setting `helios.library.folder` is not one of the plugin's",
             "command `library.forget` is neither the plugin's nor a navigation one",
             "status from `pages.reset`, not a `read_only` command",
