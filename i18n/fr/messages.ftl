@@ -3344,3 +3344,7 @@ gui-forget-cancel-verb = Quitter
 gui-forget-verb = Oublier les comptes
 
 gui-reset-forget-accounts = Oublier aussi les comptes (leurs connexions et les clés d’IA du trousseau du système)
+
+gui-library-sources = Sources
+
+gui-library-sources-tip = Dossiers, albums, mots-clés et imports : choisir les photos affichées

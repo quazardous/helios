@@ -288,6 +288,101 @@ fn the_folders_tree_counts_as_the_vault_and_a_click_scopes_the_grid() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// The Library's Filters docked above its Results across the window
+/// (#5078 A2): a bar's shape, so the search and the sources' drop-down
+/// share one line inside it, the sources hidden until it opens; a folder
+/// chosen there scopes the grid as in the column.
+#[test]
+fn the_filters_docked_above_the_results_draw_one_line_with_the_sources_behind_a_drop_down() {
+    use egui_pop::model::ids::PanelId;
+    use egui_pop::model::layout::Node;
+    use egui_pop::model::panels::Area;
+    let root = temp("bar");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    // At the start side, a column: the sections in view, no drop-down.
+    h.get_by_label("Folders");
+    assert!(
+        h.query_by_label("Sources").is_none(),
+        "a column has no drop-down"
+    );
+
+    let filters = PanelId::new("helios.filters").unwrap();
+    let results = PanelId::new("helios.vault").unwrap();
+    let mut layout = h.state().layout();
+    layout.remove(&filters);
+    layout.remove(&results);
+    // Across the window's middle: the Filters above, the Results under
+    // them beside what the middle held.
+    let at = layout
+        .areas
+        .iter()
+        .position(|(area, _)| *area == Area::Center);
+    let below = match at.map(|at| layout.areas.remove(at).1) {
+        Some(rest) => Node::Split {
+            vertical: false,
+            ratio: 0.6,
+            a: Box::new(Node::tab(results)),
+            b: Box::new(rest),
+        },
+        None => Node::tab(results),
+    };
+    layout.areas.push((
+        Area::Center,
+        Node::Split {
+            vertical: true,
+            ratio: 0.12,
+            a: Box::new(Node::tab(filters)),
+            b: Box::new(below),
+        },
+    ));
+    h.state_mut().set_layout(layout);
+    settle(&mut h, &mut persist, 1.0);
+
+    let panel = h.state().target_rect("helios.filters").unwrap();
+    assert!(
+        panel.width() >= 2.0 * panel.height(),
+        "docked as a bar: {panel:?}"
+    );
+    let sources = h.query_all_by_label("Sources").next().unwrap().rect();
+    let search = h.get_by_label("Search images").rect();
+    for (what, r) in [("Sources", sources), ("the search", search)] {
+        assert!(panel.contains_rect(r), "{what} at {r:?} out of {panel:?}");
+    }
+    assert!(
+        sources.y_range().intersects(search.y_range()) && sources.max.x <= search.min.x,
+        "one line, the sources first: {sources:?} {search:?}"
+    );
+    assert!(
+        h.query_by_label("Folders").is_none(),
+        "the sources behind their drop-down"
+    );
+
+    // Opened, the same sections; a folder chosen scopes the grid, the
+    // list still open to choose again.
+    h.query_all_by_label("Sources").next().unwrap().click();
+    h.run();
+    h.get_by_label("Folders").click();
+    settle(&mut h, &mut persist, 3.0);
+    let raw = root.join("raw").to_string_lossy().into_owned();
+    h.get_by_label("raw, 1").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert_eq!(grid(&h), ["c.nef"]);
+    assert_eq!(h.state().library().folder(), Some(raw));
+    // The scope shows in the bar's line, removable there.
+    let chip = h
+        .query_all_by_label_contains("Folder: ")
+        .next()
+        .unwrap()
+        .rect();
+    assert!(
+        chip.y_range().intersects(search.y_range()),
+        "the restriction on the bar's line: {chip:?} {search:?}"
+    );
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() {
     let root = temp("volumes");

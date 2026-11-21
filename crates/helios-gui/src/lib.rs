@@ -247,7 +247,9 @@ pub fn helios_panels_with(experimental: Experimental) -> Vec<PanelSpec> {
         ("helios.viewport", "Image", Center, &[Center][..], true),
         ("helios.graph", "Graph", Center, &[Center][..], true),
         ("helios.vault", "Library", StartSide, &anywhere[..], true),
-        ("helios.filters", "Filters", StartSide, &sides[..], true),
+        // Anywhere, as its Results: docked above them in the middle,
+        // it draws itself as a bar (#5078 A2).
+        ("helios.filters", "Filters", StartSide, &anywhere[..], true),
         ("helios.modules", "Modules", StartSide, &sides[..], true),
         ("helios.masks", "Masks", StartSide, &sides[..], true),
         (

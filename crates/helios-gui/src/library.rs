@@ -130,6 +130,17 @@ const SEARCH_BESIDE: f32 = 72.0;
 /// side by side (the Library window), a third of the room at most.
 const FILTERS_WIDTH: f32 = 280.0;
 
+/// How many times wider than tall a Filters panel is to be drawn as a
+/// bar: docked above the Results across the window, not a side panel's
+/// column made short by a small window.
+const BAR_SHAPE: f32 = 2.0;
+
+/// Whether a Filters panel of `size` is drawn as a bar (one line) rather
+/// than a column: it is at least [`BAR_SHAPE`] times as wide as tall.
+fn is_bar_shaped(size: egui::Vec2) -> bool {
+    size.y.is_finite() && size.y > 0.0 && size.x >= BAR_SHAPE * size.y
+}
+
 /// The command turning culling's auto-advance on or off in the gallery
 /// the user works in.
 pub const AUTO_ADVANCE_COMMAND: &str = "vault.autoAdvance";
@@ -4321,21 +4332,24 @@ impl Library {
 
     /// The Filters' search field: what the gallery shows, typed.
     fn search_bar(&mut self, ui: &mut Ui) {
-        let ctx = ui.ctx().clone();
-        let search = crate::i18n::text(&ctx, Message::new("gui-library-search", "Search images"));
-        let mut asked = None;
         // Wrapped, the field no wider than what is left of the line: a
         // narrow panel takes the bar on several lines rather than widen
         // its content past its edge (and cut what comes under it).
-        ui.horizontal_wrapped(|ui| {
-            // The field's box holds its icon and its "+" beside the text.
-            let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
-            let mut field = SearchField::new(LIBRARY).label(search).width(width);
-            if let Some(app) = &self.app {
-                field = field.app(app);
-            }
-            asked = field.show(ui, &mut self.view.search).changed;
-        });
+        ui.horizontal_wrapped(|ui| self.search_field(ui));
+    }
+
+    /// The search field, in the line `ui` lays out, no wider than what is
+    /// left of it: what is typed filters the gallery.
+    fn search_field(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        let search = crate::i18n::text(&ctx, Message::new("gui-library-search", "Search images"));
+        // The field's box holds its icon and its "+" beside the text.
+        let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
+        let mut field = SearchField::new(LIBRARY).label(search).width(width);
+        if let Some(app) = &self.app {
+            field = field.app(app);
+        }
+        let asked = field.show(ui, &mut self.view.search).changed;
         let now = ctx.input(|i| i.time);
         if let Some(filter) = asked {
             self.view.typed = Some((filter.clone(), now));
@@ -4568,6 +4582,12 @@ impl Library {
     /// shown carry it; a click adds it to the filter. Shown while a filter
     /// is in force, once the vault counted.
     fn facets_bar(&mut self, ui: &mut Ui) {
+        self.facet_lines(ui, false);
+    }
+
+    /// The facets, each on a line of its own, or all in the line `ui`
+    /// lays out when `one_line`.
+    fn facet_lines(&mut self, ui: &mut Ui, one_line: bool) {
         if self.view.filter.is_empty() {
             return;
         }
@@ -4581,7 +4601,7 @@ impl Library {
             if values.is_empty() {
                 continue;
             }
-            ui.horizontal_wrapped(|ui| {
+            let facet_ui = |ui: &mut Ui| {
                 ui.muted(crate::i18n::text(&ctx, key.label.clone()));
                 for (value, n) in values {
                     let shown = key.shown(&ctx, value);
@@ -4591,7 +4611,12 @@ impl Library {
                         add = Some(key.term_of(value));
                     }
                 }
-            });
+            };
+            if one_line {
+                facet_ui(ui);
+            } else {
+                ui.horizontal_wrapped(facet_ui);
+            }
         }
         if let Some(term) = add {
             let filter = self.view.filter.merged(&Filter::parse(&term));
@@ -4830,19 +4855,49 @@ impl Library {
     /// The gallery's Filters: the search field, what restricts the view,
     /// the facets, the sources and (until they move to the metadata
     /// panel) the current photo's marks. No photos.
+    ///
+    /// The panel's shape lays them out, with nothing to set: docked
+    /// wider than tall (above the Results, a bar's shape), the search,
+    /// the restrictions and the facets share one line, the sources behind
+    /// a "Sources" drop-down at its start; otherwise they stack in a
+    /// column ([`is_bar_shaped`]).
     fn filters_part(&mut self, ui: &mut Ui, options: &GalleryOptions) {
         let id = format!("helios.library.filters.{}", self.view_id);
+        let bar = options.parts == Parts::Filters && is_bar_shaped(ui.available_size());
         helios_ui::scroll(ui, &id, Scroll::Region, |ui| {
-            if options.has_search() {
-                self.search_bar(ui);
-                self.restrictions_line(ui);
-                self.facets_bar(ui);
-            }
-            if options.has_sources() {
-                self.sources_panel(ui);
+            if bar {
+                self.filters_bar(ui, options);
+            } else {
+                if options.has_search() {
+                    self.search_bar(ui);
+                    self.restrictions_line(ui);
+                    self.facets_bar(ui);
+                }
+                if options.has_sources() {
+                    self.sources_panel(ui);
+                }
             }
             if options.marks {
                 self.metadata_section(ui);
+            }
+        });
+    }
+
+    /// The Filters as a bar: the sources' drop-down, the search field,
+    /// the restrictions and the facets on one line (wrapped only when
+    /// they overflow it), the current photo's marks under it.
+    fn filters_bar(&mut self, ui: &mut Ui, options: &GalleryOptions) {
+        ui.horizontal_wrapped(|ui| {
+            if options.has_sources() {
+                self.sources_menu(ui);
+            }
+            if options.has_search() {
+                self.search_field(ui);
+                let restrictions = self.restrictions(ui.ctx());
+                if !restrictions.is_empty() || !self.view.filter.is_empty() {
+                    self.restriction_chips(ui, restrictions);
+                }
+                self.facet_lines(ui, true);
             }
         });
     }
@@ -5022,20 +5077,23 @@ impl Library {
         if restrictions.is_empty() && self.view.filter.is_empty() {
             return;
         }
+        ui.horizontal_wrapped(|ui| self.restriction_chips(ui, restrictions));
+    }
+
+    /// `restrictions`, each removable, then "All photos", in the line
+    /// `ui` lays out.
+    fn restriction_chips(&mut self, ui: &mut Ui, restrictions: Vec<(String, Restriction)>) {
         let all = crate::i18n::text(
             ui.ctx(),
             Message::new("gui-library-all-photos", "All photos"),
         );
         let mut lift = None;
-        let mut all_asked = false;
-        ui.horizontal_wrapped(|ui| {
-            for (text, restriction) in restrictions {
-                if helios_ui::restriction(ui, &text) {
-                    lift = Some(restriction);
-                }
+        for (text, restriction) in restrictions {
+            if helios_ui::restriction(ui, &text) {
+                lift = Some(restriction);
             }
-            all_asked = helios_ui::action(ui, helios_ui::Action::Secondary, &all).clicked();
-        });
+        }
+        let all_asked = helios_ui::action(ui, helios_ui::Action::Secondary, &all).clicked();
         if all_asked {
             self.show_all();
         } else if let Some(r) = lift {

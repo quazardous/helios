@@ -578,7 +578,15 @@ Each slice is one PR with its tests; the order matters.
    the others; an older workspace's auto-advance goes to every view).
    `vault.autoAdvance` acts on the view the user works in. Later: a
    details mode (columns, egui-pop's `DataTable`), the filters laid out
-   in a bar above the results (an option per Filters panel).
+   in a bar above the results.
+   **The Filters as a bar** (#5078 A2, 2026-11-21; the owner chose the
+   panel's shape over an option per panel): a Filters panel docked at
+   least twice as wide as tall (above the Results, across the window)
+   draws the search, the restrictions and the facets on one line, the
+   sources (egui-pop's places panel, as in the column) behind a
+   "Sources" drop-down at its start that stays open until a click
+   outside it; the current photo's marks stay under the line until L13.
+   Docked at a side it stays a column, a short window included.
    **Several views** (2026-11-21): the Results panel opens as many
    times as asked (egui-pop panel instances, `helios.vault#<n>`; View ›
    New Library, `library.view.open` / `library.view.close`). Each new
