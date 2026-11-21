@@ -1,5 +1,5 @@
-//! The history scopes of the store's steps: the image's and the
-//! workspace's, each its own line.
+//! The history scopes of the store's steps: the image's, the
+//! workspace's and the plugins', each its own line.
 //!
 //! One store holds the open image's values (`node/…`, `bypass/…`, the
 //! masks' marks) and the workspace's state (`workspace/…`: its network,
@@ -10,8 +10,12 @@
 //! goes on the workspace's line when it changed a workspace path (a graph
 //! edit, even one that moved image values with it), else on the image's.
 //!
+//! A plugin's own values (`plugin/<id>/<key>`, its declared controls) are
+//! not the image's either: a camera's ISO stays when another photo
+//! opens. Their steps are a third line, the plugins'.
+//!
 //! The store's own lists hold the image's line;
-//! [`Store::in_history`] walks the workspace's with the same calls (undo,
+//! [`Store::in_history`] walks another's with the same calls (undo,
 //! redo, jump, one step alone, a group), the image's parked meanwhile.
 //!
 //! [`Store::leave_image`] is what a photo switch does: the image's line
@@ -25,6 +29,9 @@ use crate::{Step, Store};
 /// The paths of the workspace's history scope.
 pub const WORKSPACE_PATHS: &str = "workspace/";
 
+/// The paths of the plugins' history scope: each plugin's own values.
+pub const PLUGIN_PATHS: &str = "plugin/";
+
 /// The history scope a path's steps belong to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HistoryScope {
@@ -33,28 +40,32 @@ pub enum HistoryScope {
     Image,
     /// The workspace (its network, tools, layout): kept across images.
     Workspace,
+    /// The plugins' own values (`plugin/<id>/<key>`): kept across images.
+    Plugin,
 }
 
 impl HistoryScope {
-    /// The scope of `path`: the workspace's for `workspace/…`, else the
-    /// image's.
+    /// Every scope.
+    pub const ALL: [Self; 3] = [Self::Image, Self::Workspace, Self::Plugin];
+
+    /// The scope of `path`: the workspace's for `workspace/…`, the
+    /// plugins' for `plugin/…`, else the image's.
     pub fn of(path: &str) -> Self {
         if path.starts_with(WORKSPACE_PATHS) {
             Self::Workspace
+        } else if path.starts_with(PLUGIN_PATHS) {
+            Self::Plugin
         } else {
             Self::Image
         }
     }
 
-    fn other(self) -> Self {
-        match self {
-            Self::Image => Self::Workspace,
-            Self::Workspace => Self::Image,
-        }
+    fn index(self) -> usize {
+        self as usize
     }
 }
 
-/// A scope's line while the store's lists hold the other's.
+/// A scope's line while the store's lists hold another's.
 #[derive(Debug, Default)]
 pub(crate) struct Parked {
     undo: Vec<Step>,
@@ -62,17 +73,28 @@ pub(crate) struct Parked {
     replaced: Vec<Branch>,
 }
 
+/// The lines not held, by scope (the one held is left empty).
+pub(crate) type Lines = [Parked; 3];
+
 impl Step {
     /// The scope it is in: the workspace's when it changed a workspace
-    /// path (a graph edit, even one that moved image values with it), else
-    /// the image's.
+    /// path (a graph edit, even one that moved image values with it), the
+    /// plugins' when it changed only plugin values, else the image's.
     pub fn history_scope(&self) -> HistoryScope {
-        if self
-            .changes
-            .iter()
-            .any(|(p, _, _)| HistoryScope::of(p) == HistoryScope::Workspace)
-        {
+        let of = |s| {
+            self.changes
+                .iter()
+                .any(|(p, _, _)| HistoryScope::of(p) == s)
+        };
+        if of(HistoryScope::Workspace) {
             HistoryScope::Workspace
+        } else if !self.changes.is_empty()
+            && self
+                .changes
+                .iter()
+                .all(|(p, _, _)| HistoryScope::of(p) == HistoryScope::Plugin)
+        {
+            HistoryScope::Plugin
         } else {
             HistoryScope::Image
         }
@@ -88,12 +110,19 @@ impl Step {
 }
 
 impl Store {
-    /// Swaps the line held with the one parked.
-    fn swap_lines(&mut self) {
-        std::mem::swap(&mut self.undo, &mut self.parked.undo);
-        std::mem::swap(&mut self.redo, &mut self.parked.redo);
-        std::mem::swap(&mut self.replaced, &mut self.parked.replaced);
-        self.active = self.active.other();
+    /// Parks the line held and holds `scope`'s.
+    fn hold(&mut self, scope: HistoryScope) {
+        let held = Parked {
+            undo: std::mem::take(&mut self.undo),
+            redo: std::mem::take(&mut self.redo),
+            replaced: std::mem::take(&mut self.replaced),
+        };
+        let line = std::mem::take(&mut self.parked[scope.index()]);
+        self.parked[self.active.index()] = held;
+        self.undo = line.undo;
+        self.redo = line.redo;
+        self.replaced = line.replaced;
+        self.active = scope;
     }
 
     /// Runs `f` on `scope`'s line: inside it, every history call of the
@@ -103,12 +132,13 @@ impl Store {
     /// image's line is the one held outside it. A step made inside goes
     /// on its own scope's line all the same.
     pub fn in_history<R>(&mut self, scope: HistoryScope, f: impl FnOnce(&mut Self) -> R) -> R {
-        if scope == self.active {
+        let before = self.active;
+        if scope == before {
             return f(self);
         }
-        self.swap_lines();
+        self.hold(scope);
         let r = f(self);
-        self.swap_lines();
+        self.hold(before);
         r
     }
 
@@ -116,7 +146,8 @@ impl Store {
         if scope == self.active {
             (&self.undo, &self.redo)
         } else {
-            (&self.parked.undo, &self.parked.redo)
+            let p = &self.parked[scope.index()];
+            (&p.undo, &p.redo)
         }
     }
 
@@ -130,34 +161,38 @@ impl Store {
         self.line_of(scope).1
     }
 
-    /// The undo steps of both scopes, in the order they were made.
+    /// The undo steps of every scope, in the order they were made.
     pub fn all_undo_steps(&self) -> Vec<&Step> {
-        let mut all: Vec<&Step> = self.undo.iter().chain(&self.parked.undo).collect();
+        let mut all: Vec<&Step> = self
+            .undo
+            .iter()
+            .chain(self.parked.iter().flat_map(|p| &p.undo))
+            .collect();
         all.sort_by_key(|s| s.id);
         all
     }
 
-    /// Undoes the newest step of either scope (the one made last, by id),
-    /// as the one line of both did: what a host with no view to route
-    /// Ctrl+Z by (a test, a tool) walks. Its label, `None` when both are
+    /// Undoes the newest step of any scope (the one made last, by id),
+    /// as the one line of all did: what a host with no view to route
+    /// Ctrl+Z by (a test, a tool) walks. Its label, `None` when all are
     /// empty.
     pub fn undo_newest(
         &mut self,
         origin: &crate::Origin,
     ) -> Result<Option<String>, crate::Refused> {
         let head = |h| self.undo_steps_of(h).last().map(|s: &Step| s.id);
-        let scope = if head(HistoryScope::Workspace) > head(HistoryScope::Image) {
-            HistoryScope::Workspace
-        } else {
-            HistoryScope::Image
-        };
+        let scope = HistoryScope::ALL
+            .into_iter()
+            .max_by_key(|h| head(*h))
+            .unwrap_or_default();
         self.in_history(scope, |s| s.undo(origin))
     }
 
     /// The image's history leaves: another image opens, its values sharing
     /// the paths of the one before, which an undo must not reach. The
     /// image's line goes (undo, redo and replaced); the workspace's stays,
-    /// each step without the image values it moved. Values, gestures and
+    /// each step without the image values it moved, and the plugins'
+    /// stays whole. Values, gestures and
     /// the committed count stay; the preview ends.
     pub fn leave_image(&mut self) {
         self.in_history(HistoryScope::Image, |s| {
@@ -188,8 +223,11 @@ impl Store {
             .undo
             .iter()
             .chain(&self.redo)
-            .chain(&self.parked.undo)
-            .chain(&self.parked.redo)
+            .chain(
+                self.parked
+                    .iter()
+                    .flat_map(|p| p.undo.iter().chain(&p.redo)),
+            )
             .filter_map(|s| s.group)
             .collect();
         self.named.retain(|_, g| groups.contains(g));
@@ -313,5 +351,30 @@ mod tests {
             assert_eq!(replaced.len(), 1);
             assert_eq!(replaced[0].1.paths(), [STATE]);
         });
+    }
+
+    #[test]
+    fn a_plugin_s_values_are_a_line_of_their_own_kept_across_images() {
+        const ISO: &str = "plugin/org.example.camera/iso";
+        let mut s = store();
+        s.declare(ISO, Descriptor::float("ISO", 100.0, 6400.0, 400.0));
+        set(&mut s, EV, Value::Float(1.0));
+        set(&mut s, ISO, Value::Float(800.0));
+        set(&mut s, STATE, Value::Text("b".into()));
+        assert_eq!(s.undo_steps_of(HistoryScope::Plugin).len(), 1);
+        assert_eq!(s.undo_steps().len(), 1, "the image's line: the exposure");
+        assert_eq!(s.all_undo_steps().len(), 3);
+        s.leave_image();
+        assert!(s.undo_steps().is_empty());
+        assert_eq!(s.undo_steps_of(HistoryScope::Plugin).len(), 1, "kept");
+        // The newest is the workspace's, then the plugin's.
+        s.undo_newest(&Origin::User).unwrap();
+        assert_eq!(s.get(STATE).unwrap().value, Value::Text("a".into()));
+        s.undo_newest(&Origin::User).unwrap();
+        assert_eq!(s.get(ISO).unwrap().value, Value::Float(400.0));
+        assert_eq!(s.redo_steps_of(HistoryScope::Plugin).len(), 1);
+        s.in_history(HistoryScope::Plugin, |s| s.redo(&Origin::User))
+            .unwrap();
+        assert_eq!(s.get(ISO).unwrap().value, Value::Float(800.0));
     }
 }

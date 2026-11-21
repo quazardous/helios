@@ -36,10 +36,12 @@
 //!   out of order, when no later step touched its values
 //!   ([`Store::undo_group`]); so can one step ([`Store::undo_step`]).
 //! - History scopes ([`HistoryScope`]): a step is the workspace's when
-//!   it changed a `workspace/…` path (a graph edit), else the open
+//!   it changed a `workspace/…` path (a graph edit), the plugins' when it
+//!   changed only `plugin/…` paths (a plugin's own values), else the open
 //!   image's. Each scope has its own line, undone and redone apart
 //!   ([`Store::in_history`]). Another image opening leaves the image's
-//!   line ([`Store::leave_image`]); the workspace's stays undoable.
+//!   line ([`Store::leave_image`]); the workspace's and the plugins' stay
+//!   undoable.
 //! - Replaced steps: the redo list a new step drops is kept as a line
 //!   leaving from the step it came after ([`Store::replaced_steps`]), and
 //!   a jump reaches it ([`Store::jump_replaced`]).
@@ -59,7 +61,7 @@ mod preview;
 
 pub use commands::{register, value_from_json, value_to_json};
 pub use graph::{BYPASS, Keep, Rebound, bind_node, bypass_path, node_path, rebind, sync};
-pub use history_scope::{HistoryScope, WORKSPACE_PATHS};
+pub use history_scope::{HistoryScope, PLUGIN_PATHS, WORKSPACE_PATHS};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -711,8 +713,8 @@ pub struct Store {
     /// Whose history `undo`, `redo` and `replaced` hold now (the image's,
     /// but while [`Store::in_history`] walks the workspace's).
     active: HistoryScope,
-    /// The other history scope's line, parked meanwhile.
-    parked: history_scope::Parked,
+    /// The other history scopes' lines, parked meanwhile.
+    parked: history_scope::Lines,
     /// The groups named by their origin (a request id an agent gives),
     /// by origin and name.
     named: BTreeMap<(String, String), u64>,
@@ -1206,7 +1208,7 @@ impl Store {
         self.undo.clear();
         self.redo.clear();
         self.replaced.clear();
-        self.parked = history_scope::Parked::default();
+        self.parked = history_scope::Lines::default();
         self.named.clear();
         self.preview.clear();
         self.history_rev += 1;

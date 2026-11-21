@@ -369,6 +369,17 @@ the open step until something seals it, and an explicit Commit
 | R7 | Amend and seal (B), Commit | to do |
 | R8 | Compare any step with the live edit | to do |
 
+## The plugins' scope
+
+A plugin's own values (`plugin/<id>/<key>`, declared by its `[ui] rack`,
+`docs/extensions.md`) are not the image's: a camera's ISO stays when
+another photo opens. Their steps are a third line of the value store
+(`HistoryScope::Plugin`, the desktop's `plugins` scope), undone and
+redone apart, kept across photos (2026-11-21, #5111 P2). Each committed
+step, undo and redo of a plugin's values is told to it (`ui/changed`). The scope names no panel (its cards are in Settings): it is
+walked from the History panel, by agents naming it, or as the newest step
+where the focus names no scope.
+
 ## Agents
 
 - **Groups.** Each control or MCP request is one group; an agent may
