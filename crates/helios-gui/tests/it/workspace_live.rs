@@ -675,7 +675,11 @@ fn an_agent_reads_and_walks_the_desktop_s_history_each_step_with_its_place() {
     let (failed, dry) = through(
         &mut h,
         "helios_history_undo",
-        args(&dir, &config, &json!({ "if_rev": rev, "dry_run": true })),
+        args(
+            &dir,
+            &config,
+            &json!({ "scope": "workspace", "if_rev": rev, "dry_run": true }),
+        ),
     );
     assert!(!failed, "{dry}");
     assert_eq!(dry["steps"][0]["id"], head);

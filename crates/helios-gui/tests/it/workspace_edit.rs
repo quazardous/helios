@@ -661,7 +661,9 @@ fn view_state_adds_no_undo_step_and_ctrl_z_undoes_the_last_real_edit() {
         kept.import.as_ref().map(|i| i.placement.as_str()),
         Some("copy")
     );
-    // Ctrl+Z undoes the rename, the last real edit.
+    // Ctrl+Z in a workspace view (the graph) undoes the rename, the last
+    // real edit: it follows the focused view (#5258 R3).
+    run(&mut h, "helios.graph.focus", json!(null));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     for _ in 0..3 {
         h.run();
