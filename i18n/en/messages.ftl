@@ -1601,7 +1601,6 @@ gui-library-keyword-rename-title = Rename “{ $name }”
 
 gui-library-keyword-rename-verb = Rename
 
-
 gui-library-keywords = Keywords
 
 gui-library-keywords-none = No keyword yet: write levels with | (Animals|Dog)
@@ -1779,7 +1778,6 @@ gui-library-set-new-title = New album set
 gui-library-set-none = No album set to move it to: make one with New set…
 
 gui-library-set-tip = Album set: its albums' photos together
-
 
 gui-library-set-top = No set (the top)
 
