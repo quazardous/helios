@@ -109,7 +109,7 @@ fn extras(
                     .iter()
                     .map(|o| (o.clone(), crate::mask_tree::operator_preview(ctx, o)))
                     .collect::<BTreeMap<String, Preview>>(),
-                lines: None,
+                ..Extra::default()
             },
             "opacity" | "invert" => match members.get(node) {
                 Some(m) => Extra {

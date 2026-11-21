@@ -12,7 +12,12 @@ activation = ["onService:device"]
 
 [compat]
 helios = ">=0.92.0, <0.93.0"
-interfaces = { protocol = 1, device = 1 }
+interfaces = { protocol = 1, device = 1, ui = 1 }
+
+# Its capture controls: its own values, drawn by Helios, each committed
+# change told by `ui/changed`.
+[ui]
+rack = ["ui/controls.json"]
 
 [settings.gphoto2]
 type = "string"

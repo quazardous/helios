@@ -5,6 +5,12 @@
 //!
 //! It writes only into the folder each download hands it; the broker
 //! moves the files on from there.
+//!
+//! Its capture controls (ISO, a choice, and the shutter speed, a number
+//! of seconds) are declared in `ui/controls.json` (the `ui` interface):
+//! Helios draws them and keeps their values; each committed change comes
+//! as a `ui/changed` notification, set on the camera with
+//! `gphoto2 --set-config`.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
@@ -18,6 +24,17 @@ const ID: &str = "io.github.quazardous.helios.gphoto2-camera";
 struct Plugin {
     gphoto2: String,
     granted: Vec<String>,
+    /// Its own values (`ui/controls.json`), as Helios last said them.
+    ui: serde_json::Map<String, Json>,
+}
+
+/// gphoto2's words for a shutter speed of `seconds`: `1/250`, `2`.
+fn shutter_speed(seconds: f64) -> String {
+    if seconds > 0.0 && seconds < 1.0 {
+        format!("1/{}", (1.0 / seconds).round())
+    } else {
+        format!("{}", seconds.round())
+    }
 }
 
 /// A JSON-RPC error: code and message.
@@ -149,6 +166,30 @@ impl Plugin {
         Ok(json!({ "files": files }))
     }
 
+    /// Helios says its values changed (`ui/changed`): each is set on the
+    /// camera, and said in Helios's log.
+    fn ui_changed(&mut self, params: &Json) {
+        let Some(values) = params.get("values").and_then(Json::as_object) else {
+            return;
+        };
+        for (key, value) in values {
+            self.ui.insert(key.clone(), value.clone());
+            let config = match (key.as_str(), value) {
+                ("iso", Json::String(iso)) => format!("iso={iso}"),
+                ("shutter", v) => match v.as_f64() {
+                    Some(s) => format!("shutterspeed={}", shutter_speed(s)),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let said = match self.run(None, &["--set-config", &config]) {
+                Ok(_) => format!("ui/changed: {config}"),
+                Err((_, e)) => format!("ui/changed: {config} not set: {e}"),
+            };
+            send(&json!({"jsonrpc": "2.0", "method": "$/log", "params": {"message": said}}));
+        }
+    }
+
     fn handle(&mut self, method: &str, params: &Json) -> Result<Json, Failure> {
         let port = params.get("device").and_then(Json::as_str);
         match method {
@@ -163,6 +204,9 @@ impl Plugin {
                     .unwrap_or_default();
                 if let Some(p) = params["settings"][format!("{ID}.gphoto2")].as_str() {
                     self.gphoto2 = p.into();
+                }
+                if let Some(ui) = params["ui"]["values"].as_object() {
+                    self.ui.clone_from(ui);
                 }
                 Ok(json!({"name": "gphoto2-camera", "version": env!("CARGO_PKG_VERSION")}))
             }
@@ -180,6 +224,7 @@ fn main() {
     let mut plugin = Plugin {
         gphoto2: "gphoto2".into(),
         granted: Vec::new(),
+        ui: serde_json::Map::new(),
     };
     for line in std::io::stdin().lock().lines().map_while(Result::ok) {
         let Ok(msg) = serde_json::from_str::<Json>(&line) else {
@@ -187,10 +232,12 @@ fn main() {
         };
         let method = msg.get("method").and_then(Json::as_str).unwrap_or("");
         let Some(id) = msg.get("id") else {
-            if method == "exit" {
-                return;
+            match method {
+                "exit" => return,
+                "ui/changed" => plugin.ui_changed(msg.get("params").unwrap_or(&Json::Null)),
+                _ => {} // initialized, $/cancelRequest
             }
-            continue; // initialized, $/cancelRequest
+            continue;
         };
         let params = msg.get("params").cloned().unwrap_or(Json::Null);
         let reply = match plugin.handle(method, &params) {

@@ -7,11 +7,12 @@
 //! ([`helios_values::HistoryScope`]): [`EDIT`], the open image's edit,
 //! and [`WORKSPACE`], the workspace's real edits (its network and graph,
 //! macros, sub-workspaces, workshop design, name and icon, keys, tools, a
-//! reset). egui-pop routes Ctrl+Z to them (after a focused text field and
-//! a component's own history, the theme editor's or the settings
-//! window's), labels the Edit menu from their steps, and runs
-//! `edit.undo`, `edit.redo` and `edit.jump` on them. A photo switch
-//! drops the edit's steps and keeps the workspace's.
+//! reset), and [`PLUGINS`], the plugins' own values (their declared
+//! controls, `plugin/<id>/<key>`). egui-pop routes Ctrl+Z to them (after
+//! a focused text field and a component's own history, the theme editor's
+//! or the settings window's), labels the Edit menu from their steps, and
+//! runs `edit.undo`, `edit.redo` and `edit.jump` on them. A photo switch
+//! drops the edit's steps and keeps the workspace's and the plugins'.
 //!
 //! - **Which scope Ctrl+Z walks** follows the focused view (#5258 R3,
 //!   egui-pop's `Routing::Focus`, set by the shell): each scope names the
@@ -127,12 +128,18 @@ fn scope_info(id: ScopeId, title: &str, focus: &[&str]) -> ScopeInfo {
     info
 }
 
+/// The scope of the plugins' own values in the value store
+/// (`plugin/<id>/<key>`, their declared controls). Kept across photos.
+pub const PLUGINS: ScopeId = ScopeId::from_static("plugins");
+
 /// The store's history scope behind one of egui-pop's, if any.
 fn store_scope(scope: &ScopeId) -> Option<HistoryScope> {
     if *scope == EDIT {
         Some(HistoryScope::Image)
     } else if *scope == WORKSPACE {
         Some(HistoryScope::Workspace)
+    } else if *scope == PLUGINS {
+        Some(HistoryScope::Plugin)
     } else {
         None
     }
@@ -194,7 +201,7 @@ impl HeliosHistory {
         }
         stamps.0 = rev;
         let t = now();
-        let ids: Vec<u64> = [HistoryScope::Image, HistoryScope::Workspace]
+        let ids: Vec<u64> = HistoryScope::ALL
             .into_iter()
             .flat_map(|h| store.undo_steps_of(h).iter().chain(store.redo_steps_of(h)))
             .map(|s| s.id)
@@ -295,6 +302,7 @@ fn step_info(step: &Step) -> StepInfo {
     let scope = match step.history_scope() {
         HistoryScope::Image => EDIT,
         HistoryScope::Workspace => WORKSPACE,
+        HistoryScope::Plugin => PLUGINS,
     };
     let mut info = StepInfo::new(step.id, scope, label_of(step), to_pop(&step.origin));
     info.group = step.group;
@@ -735,6 +743,8 @@ impl History for HeliosHistory {
         vec![
             scope_info(EDIT, "Edit", EDIT_FOCUS),
             scope_info(WORKSPACE, "Workspace", WORKSPACE_FOCUS),
+            // No panel of its own: its cards are in Settings.
+            ScopeInfo::new(PLUGINS, "Plugins"),
             LibraryHistory::scope(),
         ]
     }
@@ -859,7 +869,7 @@ impl History for HeliosHistory {
         if *scope == EDIT {
             f.undo_step = true;
             f.snapshots = true;
-        } else if *scope == WORKSPACE {
+        } else if *scope == WORKSPACE || *scope == PLUGINS {
             f.undo_step = true;
         }
         f

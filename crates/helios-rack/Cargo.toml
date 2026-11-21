@@ -21,6 +21,7 @@ egui_hud = { workspace = true, features = ["render"] }
 egui-pop = { workspace = true, features = ["viewport", "imaging", "i18n"] }
 # A path's and a brush's points: how many values a point holds.
 helios-module-masks = { path = "../../modules/masks" }
+serde.workspace = true
 serde_json.workspace = true
 
 [lints]

@@ -231,6 +231,12 @@ impl Shell {
     /// out, said in the log.
     pub fn set_plugins(&mut self, broker: Arc<helios_plugin::Broker>) {
         self.import.get_mut().accounts.plugins = Some(broker.clone());
+        crate::plugin_controls::install(
+            self.core.app.handle(),
+            &broker,
+            &self.core.values,
+            crate::values_changed::MAIN_SURFACE,
+        );
         if self.has_command(helios_plugin::commands::CAPABILITIES) {
             return;
         }

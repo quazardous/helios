@@ -25,10 +25,16 @@
 //! with the parts comes back as data ([`Output`]: touches for its names,
 //! menus and clipboard, notes to show). The picker is a bus event.
 //!
+//! A plugin's controls come the same way ([`plugin`]): its rack
+//! declarations, data checked against the catalogue, give its own values
+//! (`plugin/<id>/<key>`) and the card's parts, which [`Rack::card`]
+//! draws as any parameter's.
+//!
 //! The rack also hosts the on-image tools ([`tools`]): a shape's handles
 //! declared on `egui_hud`'s handle kinds ([`handle`]), each drag, double
 //! click and wheel turn bound to the value store the same way.
 
+pub mod plugin;
 pub mod tools;
 mod words;
 
@@ -84,6 +90,9 @@ pub struct Extra {
     pub previews: BTreeMap<String, Preview>,
     /// Read-out lines instead of the value: the part only reads.
     pub lines: Option<Vec<Line>>,
+    /// The control of the catalogue it is edited by (a plugin's part),
+    /// instead of the one patched to it or its implicit one.
+    pub control: Option<String>,
 }
 
 /// A part the shell touches once drawn: its picture's name
@@ -142,6 +151,14 @@ pub fn node_param(path: &str) -> Option<(&str, &str)> {
     path.strip_prefix("node/")?.rsplit_once('/')
 }
 
+/// The name a value takes on a card: a node parameter's name, or a
+/// plugin value's key (`plugin/<id>/<key>`).
+fn card_key(path: &str) -> Option<&str> {
+    node_param(path)
+        .or_else(|| plugin::split(path))
+        .map(|(_, name)| name)
+}
+
 fn write(
     store: &mut Store,
     path: &str,
@@ -160,6 +177,12 @@ fn write(
 /// previews, read-out lines) and by its value (a list with no editor
 /// folds into a summary).
 fn control_of(registry: &Registry, path: &str, d: &Descriptor, extra: Option<&Extra>) -> Control {
+    if let Some(c) = extra
+        .and_then(|e| e.control.as_deref())
+        .and_then(|id| registry.get(id))
+    {
+        return c.clone();
+    }
     if let Some(c) = registry.control_for(path, d) {
         return c.clone();
     }
@@ -670,7 +693,7 @@ impl Rack {
                 let Some(entry) = s.get(path).cloned() else {
                     continue;
                 };
-                let Some((_, name)) = node_param(path) else {
+                let Some(name) = card_key(path) else {
                     continue;
                 };
                 let held = s.held_by(path).filter(|o| **o != Origin::User).cloned();

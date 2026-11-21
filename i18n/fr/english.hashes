@@ -1700,6 +1700,8 @@ gui-settings-history 32a082307a8ba077
 gui-settings-image-map ee8e6acc0ef95cde
 gui-settings-imports cfdb4501fe960455
 gui-settings-library 6d7e88ea6aaf5346
+gui-settings-plugin-controls 9ad3717b7d09a1df
+gui-settings-plugin-controls-refused 85b2f42df1d59180
 gui-settings-plugin-granted 2c8c84258a75df83
 gui-settings-plugin-no-capability f2a2f96d1902f843
 gui-settings-plugin-page 96342b5b65c70118

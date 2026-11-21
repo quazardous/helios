@@ -144,3 +144,46 @@ fn capture_and_download_with_a_fake_gphoto2() {
     let e = b.device_info(None, Some("usb:009,009")).unwrap_err();
     assert!(e.contains("no camera on usb:009,009"), "{e}");
 }
+
+/// Its capture controls (`ui/controls.json`): each committed change Helios
+/// tells it (`ui/changed`) is set on the camera, and said in the log; a
+/// stopped plugin is not started for it, and gets the values when it
+/// starts.
+#[test]
+fn capture_controls_are_set_on_the_camera() {
+    let (b, root, camera) = setup("controls");
+    let notices = b.subscribe();
+    b.grant(CAMERA, "device.usb").unwrap();
+    b.grant(CAMERA, "process.spawn").unwrap();
+    let values = |v: serde_json::Value| v.as_object().unwrap().clone();
+
+    // Not running: kept for its start.
+    let told = b
+        .ui_changed(CAMERA, values(serde_json::json!({"iso": "400"})), "edit")
+        .unwrap();
+    assert_eq!(told, helios_plugin::Told::Nothing);
+    b.device_list().unwrap();
+    let told = b
+        .ui_changed(
+            CAMERA,
+            values(serde_json::json!({"iso": "800", "shutter": 0.004})),
+            "edit",
+        )
+        .unwrap();
+    assert_eq!(told, helios_plugin::Told::Notified);
+    let said: Vec<String> =
+        std::iter::from_fn(|| notices.recv_timeout(Duration::from_secs(10)).ok())
+            .filter_map(|n| match n {
+                Notice::Log { message, .. } if message.starts_with("ui/changed") => Some(message),
+                _ => None,
+            })
+            .take(2)
+            .collect();
+    assert_eq!(
+        said,
+        ["ui/changed: iso=800", "ui/changed: shutterspeed=1/250"]
+    );
+    let config = std::fs::read_to_string(format!("{}.config", camera.display())).unwrap();
+    assert_eq!(config, "iso=800\nshutterspeed=1/250\n");
+    let _ = std::fs::remove_dir_all(&root);
+}

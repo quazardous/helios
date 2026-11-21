@@ -75,9 +75,25 @@ pub fn param_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
+/// A plugin value's text (`plugin/…`): its descriptor holds a message id
+/// of the plugin's catalogue, said in the language of `ctx`.
+fn plugin_text(ctx: &egui::Context, path: &str, id: &str) -> Option<String> {
+    if !path.starts_with(helios_values::PLUGIN_PATHS) || id.is_empty() {
+        return None;
+    }
+    Some(
+        i18n(ctx)
+            .and_then(|i| i.get(id, &[]))
+            .unwrap_or_else(|| id.to_owned()),
+    )
+}
+
 /// A parameter's label in the language of `ctx` (`param-<module>-<name>`'s
 /// `.label`), else the descriptor's English.
 pub fn label(ctx: &egui::Context, path: &str, d: &Descriptor) -> String {
+    if let Some(t) = plugin_text(ctx, path, &d.label) {
+        return t;
+    }
     let key = d
         .module
         .as_deref()
@@ -87,6 +103,9 @@ pub fn label(ctx: &egui::Context, path: &str, d: &Descriptor) -> String {
 
 /// A parameter's description in the language of `ctx`, else its English.
 pub fn description(ctx: &egui::Context, path: &str, d: &Descriptor) -> String {
+    if let Some(t) = plugin_text(ctx, path, &d.description) {
+        return t;
+    }
     let key = d
         .module
         .as_deref()

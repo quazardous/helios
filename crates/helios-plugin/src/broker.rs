@@ -151,6 +151,9 @@ struct State {
     /// The values of its own settings the running process was handed
     /// (at `initialize`, then by `settings/changed`).
     values: Option<Map<String, Json>>,
+    /// Its own values (`[ui] rack`), by key, as last committed: handed at
+    /// `initialize`, then each change by `ui/changed`.
+    ui: Map<String, Json>,
     /// Its process is being started, outside this state's lock: the
     /// other calls to it wait for that start ([`Slot::started`]), the
     /// other plugins go on.
@@ -293,6 +296,7 @@ impl Broker {
                     in_flight: 0,
                     last_error: None,
                     values: None,
+                    ui: Map::new(),
                     starting: false,
                     stops: 0,
                 }),
@@ -383,6 +387,13 @@ impl Broker {
             })
             .collect();
         json!({"plugins": plugins, "rejected": self.rejected})
+    }
+
+    /// Whether a plugin is enabled.
+    pub fn enabled(&self, id: &str) -> bool {
+        self.plugins
+            .get(id)
+            .is_some_and(|s| s.state.lock().expect("plugin lock").enabled)
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
@@ -548,6 +559,43 @@ impl Broker {
             return Err(format!("plugin `{id}`: its new settings not sent: {e}"));
         }
         st.values = Some(values);
+        Ok(Told::Notified)
+    }
+
+    /// A plugin's own values (`plugin/<id>/<key>`, declared by its
+    /// `[ui] rack`) as they stand, by key, without telling it: what it is
+    /// handed at its next `initialize` (`ui.values`).
+    pub fn set_ui_values(&self, id: &str, values: Map<String, Json>) -> Result<(), String> {
+        self.slot(id)?.state.lock().expect("plugin lock").ui = values;
+        Ok(())
+    }
+
+    /// A committed change of a plugin's own values (a step, an undo, a
+    /// redo; never a preview nor a gesture given up): kept for its next
+    /// start, and sent to it when it runs as the notification
+    /// `ui/changed {paths, values, cause}`, `values` by key. A stopped
+    /// plugin is not started for it.
+    pub fn ui_changed(
+        &self,
+        id: &str,
+        changed: Map<String, Json>,
+        cause: &str,
+    ) -> Result<Told, String> {
+        let slot = self.slot(id)?;
+        let mut st = slot.state.lock().expect("plugin lock");
+        for (k, v) in &changed {
+            st.ui.insert(k.clone(), v.clone());
+        }
+        let Some(process) = st.process.clone().filter(|p| p.alive()) else {
+            return Ok(Told::Nothing);
+        };
+        let paths: Vec<String> = changed.keys().map(|k| format!("plugin/{id}/{k}")).collect();
+        process
+            .notify(
+                "ui/changed",
+                json!({"paths": paths, "values": changed, "cause": cause}),
+            )
+            .map_err(|e| format!("plugin `{id}`: its values' change not sent: {e}"))?;
         Ok(Told::Notified)
     }
 
@@ -903,6 +951,7 @@ impl Broker {
         .map_err(|e| format!("plugin `{id}` did not start: {e}"))?;
         let interfaces: BTreeMap<&str, &[u32]> = INTERFACES.iter().copied().collect();
         let values = self.values_of(id, slot);
+        let ui = slot.state.lock().expect("plugin lock").ui.clone();
         let init = json!({
             "protocolVersion": 1,
             "helios": {"version": self.version.to_string()},
@@ -911,6 +960,7 @@ impl Broker {
             "capabilities": {"granted": granted},
             "settings": prefixed(id, &values),
             "config": {"plugin": values},
+            "ui": {"values": ui},
         });
         match process.call("initialize", init, self.policy.start_timeout) {
             Ok(_) => {
