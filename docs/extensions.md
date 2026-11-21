@@ -326,7 +326,8 @@ rack = ["ui/controls.json"]
   and in the log, and the rest of the card stays. A file is at most
   256 KB, 200 values and parts in all; a newer format is refused whole.
 - **The values stay on the host's side.** A drag is one undo step and
-  Escape gives it up without a trace, as for any parameter. A plugin
+  a drag given up leaves no trace, as for any parameter (inside the
+  Settings window, Escape is the window's own for now: it closes it). A plugin
   never writes its values over the protocol (`ui` 1); it hears each
   committed change as the notification `ui/changed` (`{paths, values,
   cause}`: the store paths, the values by key, `edit`, `undo` or
