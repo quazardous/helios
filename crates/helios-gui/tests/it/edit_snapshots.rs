@@ -280,9 +280,12 @@ fn a_restore_is_one_step_an_undo_takes_back_after_reopening() {
     let outcome = history::restore(shell.app().handle(), &EDIT, start.id, &PopOrigin::User);
     assert!(outcome.ok(), "{outcome:?}");
     assert!(shown(&shell).abs() < 1e-9, "{}", shown(&shell));
-    assert!(history::undo(shell.app().handle(), &PopOrigin::User).ok());
-    assert!((shown(&shell) - 1.0).abs() < 1e-9);
-    assert!(history::undo(shell.app().handle(), &PopOrigin::User).ok());
+    // The undo names the edit's scope: Ctrl+Z follows the focused view
+    // (#5258 R3), and no panel is shown or focused here.
+    let undo = |s: &Shell| history::undo_in(s.app().handle(), &EDIT, &PopOrigin::User);
+    assert!(undo(&shell).ok());
+    assert!((shown(&shell) - 1.0).abs() < 1e-9, "{}", shown(&shell));
+    assert!(undo(&shell).ok());
     assert!((shown(&shell) - 2.0).abs() < 1e-9);
     assert_eq!(steps(&shell), before);
     let _ = std::fs::remove_dir_all(&dir);

@@ -491,7 +491,9 @@ fn survival_killed_after_a_save_keeps_the_snapshot_it_pinned() {
             .ok()
     );
     assert!((shown(&shell) - 1.0).abs() < 1e-9, "{}", shown(&shell));
-    assert!(egui_pop::api::history::undo(handle, &user).ok());
+    // The undo names the edit's scope: Ctrl+Z follows the focused view
+    // (#5258 R3), and no panel is shown or focused here.
+    assert!(egui_pop::api::history::undo_in(handle, &helios_gui::history::EDIT, &user).ok());
     assert!((shown(&shell) - 2.0).abs() < 1e-9, "{}", shown(&shell));
     let _ = std::fs::remove_dir_all(&dir);
 }
