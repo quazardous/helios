@@ -51,6 +51,7 @@ pub mod health;
 pub mod import;
 pub mod import_history;
 pub mod import_profile;
+pub mod init;
 pub mod map;
 pub mod map_job;
 pub mod pairs;

@@ -2742,6 +2742,7 @@ dependencies = [
  "helios-decision",
  "helios-export",
  "helios-health",
+ "helios-init",
  "helios-load",
  "helios-storage",
  "helios-thumbs",

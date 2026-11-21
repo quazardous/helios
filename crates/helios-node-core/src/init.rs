@@ -6,14 +6,28 @@
 //! each checked as its keeper does: the library folder is made if
 //! missing, written in, with room left), or on a desktop by running its
 //! command (`init.libraryFolder` with a `path`).
+//!
+//! **The steps.** Every step is declared by the crate that owns it, as
+//! its own [`Set`]; [`SETS`] gathers them in one place and [`registry`]
+//! builds the one registry the node and the desktop read.
 
 use std::path::PathBuf;
 
-use helios_init::{LIBRARY_FOLDER_SETTING, Registry, Values};
+use helios_init::{Registry, Set, Values};
+use helios_library::init::LIBRARY_FOLDER_SETTING;
 use helios_vault::{Store, Vault};
 use serde_json::{Value, json};
 
 use crate::commands::{CommandSpec, Need, object};
+
+/// Every set of init steps Helios knows, each declared by the crate that
+/// owns it, in the order the first run asks them.
+pub const SETS: &[Set] = &[helios_library::init::SET];
+
+/// The registry of every step [`SETS`] declares.
+pub fn registry() -> Registry {
+    Registry::from_sets(SETS)
+}
 
 /// Lists the init steps.
 pub const STEPS: &str = "init.steps";
@@ -107,7 +121,7 @@ impl<S: Store> VaultValues<'_, S> {
 /// # Errors
 /// An unknown command or module, or steps declared in a loop.
 pub fn run<S: Store>(vault: &Vault<S>, id: &str, params: &Value) -> Result<Value, String> {
-    let registry = Registry::builtin();
+    let registry = registry();
     match id {
         STEPS => {
             let steps: Vec<Value> = registry
@@ -151,19 +165,43 @@ mod tests {
     use std::sync::Arc;
 
     use helios_core::Bus;
-    use helios_init::{CHOOSE_LIBRARY_FOLDER, IMPORT, LIBRARY_FOLDER};
+    use helios_library::health::CHOOSE_LIBRARY_FOLDER;
+    use helios_library::init::{IMPORT, LIBRARY_FOLDER};
     use helios_vault_sqlite::SqliteStore;
 
     use super::*;
 
-    /// The library folder step's command is the health warning's fix.
+    /// Every step is declared exactly once, by one set, and the first
+    /// run asks them in the order it did when the init crate declared
+    /// them itself; the library folder step's command is the health
+    /// warning's fix.
     #[test]
-    fn the_folder_step_is_filled_by_the_health_fix() {
-        assert_eq!(
-            CHOOSE_LIBRARY_FOLDER,
-            helios_library::health::CHOOSE_LIBRARY_FOLDER
-        );
+    fn every_step_is_declared_once_in_the_first_run_order() {
+        const BEFORE_THE_MOVE: &[&str] = &["library.folder"];
+        for id in BEFORE_THE_MOVE {
+            let times = SETS
+                .iter()
+                .flat_map(|set| (set.steps)())
+                .filter(|s| s.id == *id)
+                .count();
+            assert_eq!(times, 1, "`{id}`");
+        }
+        let registry = registry();
+        let order: Vec<String> = registry
+            .ordered()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id.clone())
+            .collect();
+        assert_eq!(order, BEFORE_THE_MOVE, "the first run's order");
+        assert_eq!(registry.owner(LIBRARY_FOLDER), Some("library"));
+        assert_eq!(registry.requirements()[IMPORT], [LIBRARY_FOLDER]);
+        let step = registry.step(LIBRARY_FOLDER).unwrap();
+        assert_eq!(step.command.as_deref(), Some(CHOOSE_LIBRARY_FOLDER));
         assert_eq!(LIBRARY_FOLDER, helios_library::health::FOLDER_CHOSEN);
+        for s in registry.ordered().unwrap() {
+            assert_eq!(s.problems(), Vec::<String>::new(), "{}", s.id);
+        }
     }
 
     /// `init.steps` and `init.status` answer through the node's commands;

@@ -9,6 +9,10 @@
 //!   cleared later is missing again), and the steps it comes after.
 //! - A module declares the steps it requires before it runs
 //!   ([`Registry::require`]): import requires the library folder.
+//! - Each crate declares its own steps and requirements as a [`Set`]
+//!   (the library's: `helios_library::init::SET`); the composition root
+//!   gathers the sets and builds the registry from them
+//!   ([`Registry::from_sets`]), so this crate names no module.
 //! - The [`Registry`] holds every step by owner, ordered by their
 //!   dependencies ([`Registry::ordered`]), and says which are done
 //!   ([`Registry::status`]) and which a module still misses
@@ -27,23 +31,6 @@ use std::collections::BTreeMap;
 use helios_core::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-/// The library folder step: where imports copy photos.
-pub const LIBRARY_FOLDER: &str = "library.folder";
-
-/// The setting the library folder step fills: the library folder's path.
-pub const LIBRARY_FOLDER_SETTING: &str = "library.folder";
-
-/// The command that fills the library folder step on a desktop (its
-/// `path`, or the setup opened on the step): the health warning's fix
-/// too.
-pub const CHOOSE_LIBRARY_FOLDER: &str = "init.libraryFolder";
-
-/// The library module, owner of the library folder step.
-pub const LIBRARY_OWNER: &str = "library";
-
-/// The import module, which requires the library folder.
-pub const IMPORT: &str = "import";
 
 /// When a step is done, read from the settings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -197,20 +184,16 @@ fn sound_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-' | '_'))
 }
 
-/// The library module's steps: the library folder.
-pub fn library() -> Vec<Step> {
-    vec![
-        Step::new(
-            LIBRARY_FOLDER,
-            Message::new("init-library-folder", "Library folder"),
-            Message::new(
-                "init-library-folder-why",
-                "Imports copy photos into it, and picked photos go there.",
-            ),
-        )
-        .fills(&[LIBRARY_FOLDER_SETTING])
-        .command(CHOOSE_LIBRARY_FOLDER),
-    ]
+/// One crate's init declarations: its steps, under the module that owns
+/// them, and the steps its modules require before they run.
+#[derive(Clone, Copy, Debug)]
+pub struct Set {
+    /// The module that owns the steps: `library`.
+    pub owner: &'static str,
+    /// Its steps, in the order it declares them.
+    pub steps: fn() -> Vec<Step>,
+    /// Each of its modules, with the steps it requires.
+    pub requires: &'static [(&'static str, &'static [&'static str])],
 }
 
 /// A step and where it stands.
@@ -232,17 +215,27 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// Helios's own steps, each module's, and their requirements.
-    pub fn builtin() -> Self {
+    /// A registry of every step and requirement `sets` declare, in their
+    /// order.
+    pub fn from_sets(sets: &[Set]) -> Self {
         let mut r = Self::default();
-        for step in library() {
-            if let Err(problems) = r.add(LIBRARY_OWNER, step) {
+        for set in sets {
+            r.register(set);
+        }
+        r
+    }
+
+    /// Adds `set`'s steps, under its owner, and its requirements.
+    pub fn register(&mut self, set: &Set) {
+        for step in (set.steps)() {
+            if let Err(problems) = self.add(set.owner, step) {
                 // Helios's own declarations are tested sound.
                 log_problems(&problems);
             }
         }
-        r.require(IMPORT, &[LIBRARY_FOLDER]);
-        r
+        for (module, steps) in set.requires {
+            self.require(module, steps);
+        }
     }
 
     /// Adds `owner`'s step; one with the id of a step already there
@@ -588,9 +581,30 @@ mod tests {
         steps.iter().map(|s| s.id.clone()).collect()
     }
 
+    /// A folder step and a module requiring it, declared the way the
+    /// library declares its own (`helios_library::init::SET`).
+    const LIBRARY_FOLDER: &str = "library.folder";
+    const LIBRARY_FOLDER_SETTING: &str = "library.folder";
+    const LIBRARY_OWNER: &str = "library";
+    const IMPORT: &str = "import";
+
+    fn library() -> Vec<Step> {
+        vec![step(LIBRARY_FOLDER, &[]).command("init.libraryFolder")]
+    }
+
+    const LIBRARY: Set = Set {
+        owner: LIBRARY_OWNER,
+        steps: library,
+        requires: &[(IMPORT, &[LIBRARY_FOLDER])],
+    };
+
+    fn builtin() -> Registry {
+        Registry::from_sets(&[LIBRARY])
+    }
+
     #[test]
-    fn helios_own_steps_are_sound() {
-        let r = Registry::builtin();
+    fn a_set_registers_its_steps_and_requirements() {
+        let r = builtin();
         for s in library() {
             assert_eq!(s.problems(), Vec::<String>::new(), "{}", s.id);
         }
@@ -631,7 +645,7 @@ mod tests {
 
     #[test]
     fn status_follows_the_setting_set_and_cleared() {
-        let r = Registry::builtin();
+        let r = builtin();
         let done = |v: &BTreeMap<String, Value>| r.status(v).unwrap()[0].done;
         assert!(!done(&values(&[])));
         assert!(done(&values(&[(
@@ -644,7 +658,7 @@ mod tests {
 
     #[test]
     fn a_requirement_resolves_to_its_missing_steps() {
-        let mut r = Registry::builtin();
+        let mut r = builtin();
         r.add("backup", step("backup.disk", &[LIBRARY_FOLDER]))
             .unwrap();
         r.require("backup", &["backup.disk"]);
@@ -679,7 +693,7 @@ mod tests {
 
     #[test]
     fn a_partial_run_asks_the_steps_and_their_dependencies_and_answers_its_caller() {
-        let mut r = Registry::builtin();
+        let mut r = builtin();
         r.add("backup", step("backup.disk", &[LIBRARY_FOLDER]))
             .unwrap();
         r.add("ai", step("ai.provider", &[]).optional()).unwrap();
