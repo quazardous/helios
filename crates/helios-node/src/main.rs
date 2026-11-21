@@ -83,7 +83,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use helios_config::{Config, Layer, Schema};
+use helios_config::{Config, Layer};
 use helios_core::jobs::{Jobs, Report as JobReport, Start};
 use helios_core::{
     Bus, Context, Describe, Engine, Event, FactDecl, Graph, JobId, JobState, Message, NodeId,
@@ -1846,7 +1846,7 @@ fn vault_layer(layer: Layer, path: &Path) -> Option<String> {
 /// The node's settings, from the layers it was given; with a `vault`,
 /// the user and project layers are kept in it.
 fn config(args: &Args, vault: Option<&Vault>) -> Result<Config, String> {
-    let mut config = Config::new(Schema::core());
+    let mut config = Config::new(helios_node_core::settings::schema());
     // Lowest layer first: a value equal to what it inherits leaves its layer,
     // so what it inherits must be known when it is set.
     let mut layers: Vec<_> = args.layers.iter().collect();

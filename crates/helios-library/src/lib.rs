@@ -55,6 +55,7 @@ pub mod map;
 pub mod map_job;
 pub mod pairs;
 pub mod rename;
+pub mod settings;
 pub mod signals;
 pub mod stacks;
 pub mod thumb_check;

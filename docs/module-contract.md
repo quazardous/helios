@@ -459,7 +459,7 @@ On the desktop the host is the Settings app's wizard kit, which fills
 its whole page while it runs: one step per page, Back / Next / Finish,
 the stepper as the progress line, "Later" (Skip) on optional steps only.
 Each step's fields are the settings it fills, declared once
-(`helios_config::KEPT_ELSEWHERE` for those a component keeps, such as
+(`helios_library::settings::KEPT_ELSEWHERE` for those a component keeps, such as
 the library folder). It opens on the first launch and whenever a
 required step is not done, from the Helios menu ("Set up Helios…"), and
 in partial runs: opening the import window with no library folder asks
