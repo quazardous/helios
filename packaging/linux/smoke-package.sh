@@ -66,10 +66,13 @@ exec_line="$(sed -n 's/^Exec=//p' "/usr/share/applications/$id.desktop")"
 command -v "${exec_line%% *}" >/dev/null || fail "the desktop entry's program ${exec_line%% *} is not on the PATH"
 
 echo "== libraries loaded at run time"
+# Read once into a file: `ldconfig -p | grep -q` fails under pipefail when
+# grep stops reading early.
+ldconfig -p >/tmp/helios-ldconfig.txt
 missing=""
 for so in $loaded; do
-  if ldconfig -p | grep -q "^[[:space:]]$so "; then
-    echo "$so: $(ldconfig -p | grep -m1 "^[[:space:]]$so " | sed 's/.*=> //')"
+  if grep -q "^[[:space:]]$so " /tmp/helios-ldconfig.txt; then
+    echo "$so: $(grep -m1 "^[[:space:]]$so " /tmp/helios-ldconfig.txt | sed 's/.*=> //')"
   else
     missing="$missing $so"
   fi
