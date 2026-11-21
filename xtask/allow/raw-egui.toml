@@ -4,5 +4,3 @@
 # none. Written by `cargo xtask raw-egui --update`, which only lowers it.
 
 [files]
-"params.rs" = 7
-"shell/import_window.rs" = 1

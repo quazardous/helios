@@ -24,9 +24,9 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use egui::{Sense, Ui};
-use egui_pop::core::icon::{Icon, Tone};
-use egui_pop::core::ui::UiPop as _;
+use egui::Ui;
+use egui_pop::core::fold::Fold;
+use egui_pop::core::ui::{Space, UiPop as _};
 use helios_controls::ContextKeys;
 use helios_controls::commands::SharedContexts;
 use helios_core::{Message, Value};
@@ -251,45 +251,51 @@ impl Params {
                 .collect()
         };
         if paths.is_empty() {
-            ui.weak("No parameters: nothing is shown yet");
+            let none = crate::i18n::text(
+                ui.ctx(),
+                Message::new("gui-params-none", "No parameters: nothing is shown yet"),
+            );
+            ui.muted(none);
             return;
         }
-        ui.scroll_area(
-            egui::ScrollArea::vertical().id_salt("helios.params"),
-            |ui| {
-                let keys = self.rack.keys(ui, true);
-                let mut start = 0;
-                while start < paths.len() {
-                    let node = &paths[start].0;
-                    let end = paths[start..]
-                        .iter()
-                        .position(|(n, _, _)| n != node)
-                        .map_or(paths.len(), |i| start + i);
-                    ui.add_space(4.0);
-                    header_ui(ui, node, marks.changed(node));
-                    // A module's own header (the chart profile's choice).
-                    crate::calibrate::header_ui(ui, store, node);
-                    // The Camera look entry's (fit, switch, scores).
-                    crate::calibrate::look_header_ui(ui, store, node);
-                    let rows: Vec<(&str, Option<&str>)> = paths[start..end]
-                        .iter()
-                        .map(|(_, p, g)| (p.as_str(), g.as_deref()))
-                        .collect();
-                    for (group, paths) in sections(&rows) {
-                        if let Some(group) = group
-                            && !section_row(ui, node, group)
-                        {
-                            continue;
-                        }
-                        // The node's own card keeps the node's name (what
-                        // `controls.*` resolves); a section's is named after it.
-                        let id = group.map_or_else(|| node.clone(), |g| format!("{node}#{g}"));
-                        self.card_ui(ui, store, node, &id, &paths, members, keys.clone());
-                    }
-                    start = end;
+        helios_ui::scroll(ui, PANEL, helios_ui::Scroll::Region, |ui| {
+            let keys = self.rack.keys(ui, true);
+            let mut start = 0;
+            while start < paths.len() {
+                let node = &paths[start].0;
+                let end = paths[start..]
+                    .iter()
+                    .position(|(n, _, _)| n != node)
+                    .map_or(paths.len(), |i| start + i);
+                ui.space_role(Space::Inline);
+                header_ui(ui, node, marks.changed(node));
+                // A module's own header (the chart profile's choice).
+                crate::calibrate::header_ui(ui, store, node);
+                // The Camera look entry's (fit, switch, scores).
+                crate::calibrate::look_header_ui(ui, store, node);
+                let rows: Vec<(&str, Option<&str>)> = paths[start..end]
+                    .iter()
+                    .map(|(_, p, g)| (p.as_str(), g.as_deref()))
+                    .collect();
+                for (group, paths) in sections(&rows) {
+                    // The node's own card keeps the node's name (what
+                    // `controls.*` resolves); a section's is named after it.
+                    let Some(group) = group else {
+                        self.card_ui(ui, store, node, node, &paths, members, keys.clone());
+                        continue;
+                    };
+                    let id = format!("{node}#{group}");
+                    // A section folds under its heading, open at first.
+                    Fold::new(("helios.params.section", node.as_str(), group), group)
+                        .default_open(true)
+                        .indent(false)
+                        .show(ui, |ui| {
+                            self.card_ui(ui, store, node, &id, &paths, members, keys.clone());
+                        });
                 }
-            },
-        );
+                start = end;
+            }
+        });
     }
 }
 
@@ -335,44 +341,6 @@ pub fn sections<'a>(rows: &[(&'a str, Option<&'a str>)]) -> Vec<(Option<&'a str>
         }
     }
     out
-}
-
-/// A section's heading: a chevron and the group's name, a click on
-/// either folds or unfolds it (open at first). Returns whether it is
-/// open.
-fn section_row(ui: &mut Ui, node: &str, group: &str) -> bool {
-    let ctx = ui.ctx().clone();
-    let id = egui::Id::unique(("helios.params.section", node, group));
-    let open = ctx.data(|m| m.get_temp::<bool>(id)).unwrap_or(true);
-    let hint = crate::i18n::text(
-        &ctx,
-        if open {
-            Message::new("gui-params-fold-section", "Fold { $group }")
-        } else {
-            Message::new("gui-params-unfold-section", "Unfold { $group }")
-        }
-        .with("group", group),
-    );
-    let icon = if open {
-        Icon::ChevronDown
-    } else {
-        Icon::ChevronRight
-    };
-    let clicked = ui
-        .horizontal(|ui| {
-            let chevron = ui
-                .add(icon.tone(Tone::Muted).label(&hint).sense_click())
-                .on_hover_text(&hint);
-            let title = ui
-                .add(egui::Label::new(egui::RichText::new(group).strong()).sense(Sense::click()))
-                .on_hover_text(&hint);
-            chevron.clicked() || title.clicked()
-        })
-        .inner;
-    if clicked {
-        ctx.data_mut(|m| m.insert_temp(id, !open));
-    }
-    open
 }
 
 /// A mask group's per-port list (opacities or inversions) as lines, one

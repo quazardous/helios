@@ -402,6 +402,10 @@ fn a_mask_handle_edits_its_parameter_and_the_image_only_navigates() {
 /// declared as navigate, fails it; the same write from an edit area
 /// passes.
 #[test]
+#[expect(
+    clippy::disallowed_types,
+    reason = "a bare egui slider is the undeclared area under test"
+)]
 fn an_edit_from_an_undeclared_area_fails_the_audit() {
     for declared in [None, Some(AreaKind::Navigate), Some(AreaKind::Edit)] {
         let mut store = Store::new();
