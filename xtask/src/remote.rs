@@ -4,9 +4,12 @@
 //! 1. `box`: is the box there and serving? Unreachable or in maintenance,
 //!    the run stops there.
 //! 2. With `--push`, the working tree (tracked and untracked files, not the
-//!    ignored ones) goes to the box with `push helios-local-<id>`, one name
-//!    per checkout so parallel worktrees never overwrite each other, and the
-//!    job runs on it (`src=helios-local-<id>`) instead of the pushed branch.
+//!    ignored ones) goes to the box with `push helios-local-<id>-<submit>`,
+//!    one name per checkout and per submit, so neither parallel worktrees
+//!    nor two runs of one worktree touch each other's tree, and the job
+//!    runs on it (`src=helios-local-<id>-<submit>`) instead of the pushed
+//!    branch; the tree is removed once its job has ended. egui-pop's jobs
+//!    build egui-pop (`egui_pop=`), not this checkout: they get no `src=`.
 //! 3. `run <job> [key=value...]`, its log followed; `branch=` defaults to
 //!    the current branch (refused when it is `main`: a job sent from the
 //!    main checkout by mistake; `branch=main` says it is meant),
@@ -14,7 +17,10 @@
 //!    a hash of the job's own parameters when it has some (see
 //!    `default_ext_job_id`: a resubmission replaces the stale job), and
 //!    `priority=` to `high` for egui-pop's jobs (`--priority` sets it). On a
-//!    dropped connection, `wait <id>` reattaches.
+//!    dropped connection, `wait <id>` reattaches. The job followed is the
+//!    one its submit line names (`mcu-job: job <id> (job <name> ...)
+//!    queued`), and its exit is read from `status <id>` on the box, never
+//!    from a job of the same name or another run's output.
 //!    Once the job has its id, `health` gives one line on the box (its
 //!    capacity, what is in use, the job's own request), then, while the job
 //!    waits, its place in the queue: polled at most once a minute, printed
@@ -82,10 +88,59 @@ fn fnv1a(text: &str) -> u32 {
 }
 
 /// The name local code is pushed under, at `/work/<name>` on the box: one
-/// per checkout (a hash of its path), so two worktrees pushing at once do not
-/// overwrite each other's code.
-fn pushed_name(root: &Path) -> String {
-    format!("helios-local-{:08x}", fnv1a(&root.to_string_lossy()))
+/// per checkout (a hash of its path) and per submit (`submit`, from
+/// `submit_token`), so two worktrees pushing at once do not overwrite each
+/// other's code, and a run that ends (or is replaced) removes its own tree,
+/// never the one a newer run of the same worktree still waits to copy.
+/// At most 30 characters: the box takes names up to 31.
+fn pushed_name(root: &Path, submit: &str) -> String {
+    format!(
+        "helios-local-{:08x}-{:08x}",
+        fnv1a(&root.to_string_lossy()),
+        fnv1a(submit)
+    )
+}
+
+/// What tells one submit from another: the time, the process and a count
+/// within it, so two submits never share a pushed tree.
+fn submit_token() -> String {
+    static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "{nanos}-{}-{}",
+        std::process::id(),
+        COUNT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Whether the job builds egui-pop (its `egui-pop-*` jobs and their chain,
+/// on `egui_pop=`'s branch) rather than this Helios checkout. Their
+/// Benchfile jobs read `src=` as a pushed egui-pop tree: a Helios tree
+/// there replaced egui-pop's code with Helios's (2026-11-21).
+pub fn builds_egui_pop(req: &Request) -> bool {
+    req.job.starts_with(EGUI_POP_JOB) || req.chain == Some(Chain::EguiPop)
+}
+
+/// `--push` on a job that builds egui-pop sends nothing: this checkout is
+/// not what it builds. Says so and turns `push` off; `true` when it did.
+pub fn drop_foreign_push(req: &mut Request) -> bool {
+    if !(req.push && builds_egui_pop(req)) {
+        return false;
+    }
+    eprintln!(
+        "bench-remote: --push ignored: this job builds egui-pop's branch (egui_pop=), \
+         not this Helios checkout; push that branch to GitHub instead"
+    );
+    req.push = false;
+    true
+}
+
+/// The `src=` a submit passes: the tree pushed for it, for a `--push` run
+/// of a job that builds this checkout; none otherwise.
+pub fn pushed_src(req: &Request, root: &Path, submit: &str) -> Option<String> {
+    (req.push && !builds_egui_pop(req)).then(|| pushed_name(root, submit))
 }
 
 /// The prefix of egui-pop's jobs in the Benchfile.
@@ -443,6 +498,70 @@ pub fn queued_id(line: &str) -> Option<&str> {
     valid_id(id).then_some(id)
 }
 
+/// The id of the job a `run <job>` submitted, from the box's submit
+/// line `mcu-job: job <id> (job <job> ...) queued`: the first line naming
+/// that job. A `first` prerequisite's line (another job name) is passed
+/// over, and so is anything the job's own log prints later.
+pub fn submitted_id<'a>(lines: &'a [String], job: &str) -> Option<&'a str> {
+    lines.iter().find_map(|l| submit_line_id(l, job))
+}
+
+/// The id in one submit line, when it names `job`.
+fn submit_line_id<'a>(line: &'a str, job: &str) -> Option<&'a str> {
+    let id = queued_id(line)?;
+    let rest = job_line(line)?.strip_prefix("job ")?.strip_prefix(id)?;
+    let named = rest.trim_start().strip_prefix("(job ")?;
+    let name = named.split([' ', ')']).next()?;
+    (name == job).then_some(id)
+}
+
+/// The exit code `status <id> --json` gives a job that ended (`"state":
+/// "exit 1"`, `"exit 130 (cancelled)"`); `None` while it waits or runs,
+/// or for an answer about another job.
+pub fn status_exit(status: &Value, id: &str) -> Option<i32> {
+    if status["id"].as_str().is_some_and(|s| s != id) {
+        return None;
+    }
+    status["state"]
+        .as_str()?
+        .strip_prefix("exit ")?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// What the client concludes about a job it followed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// The job ended, with this outcome.
+    Ended(Outcome),
+    /// The box says the job has not ended: follow it again.
+    Pending,
+}
+
+/// A followed job's result, by its id: the box's `status <id>` when it
+/// answered (`status`), else the `mcu-job: <id> exit <n>` line its
+/// follower printed, else the exit code of that follower (`code`, never
+/// lost here). Another job's exit line, of the same name or not, counts
+/// for nothing.
+pub fn job_verdict(
+    id: &str,
+    status: Option<&Value>,
+    lines: &[String],
+    code: Option<i32>,
+) -> Verdict {
+    let ended = |c: i32| match c {
+        75 => Outcome::Unavailable,
+        c => Outcome::Exit(u8::try_from(c).unwrap_or(1)),
+    };
+    if let Some(status) = status.filter(|s| s["state"].is_string()) {
+        return status_exit(status, id).map_or(Verdict::Pending, |c| Verdict::Ended(ended(c)));
+    }
+    let line = lines.iter().rev().find_map(|l| final_exit(l, id));
+    Verdict::Ended(line.map_or_else(|| classify(code), ended))
+}
+
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
@@ -719,8 +838,8 @@ fn warn_unpushed(root: &Path, branch: &str) {
     }
 }
 
-/// Sends the working tree, or an empty tar to remove it.
-fn push(b: &Bench, root: &Path, empty: bool) -> Result<(), String> {
+/// Sends the working tree under `name`, or an empty tar to remove it.
+fn push(b: &Bench, root: &Path, name: &str, empty: bool) -> Result<(), String> {
     let mut files = Vec::new();
     if !empty {
         let list = git(root, &["ls-files", "-z", "-co", "--exclude-standard"])
@@ -746,7 +865,7 @@ fn push(b: &Bench, root: &Path, empty: bool) -> Result<(), String> {
         }
     });
     let out = b
-        .ssh(10, &["push", &pushed_name(root)])
+        .ssh(10, &["push", name])
         .stdin(tar.stdout.take().expect("piped"))
         .output()
         .map_err(|e| format!("cannot run ssh: {e}"))?;
@@ -1322,11 +1441,11 @@ fn prepare(root: &Path, b: &Bench, req: &mut Request) -> Option<u8> {
             }
         }
     }
-    if req.push {
-        if let Err(e) = push(b, root, false) {
+    if let Some(name) = pushed_src(req, root, &submit_token()) {
+        if let Err(e) = push(b, root, &name, false) {
             return Some(unavailable(&e));
         }
-        req.params.push(("src".into(), pushed_name(root)));
+        req.params.push(("src".into(), name));
     } else {
         warn_unpushed(root, &branch);
     }
@@ -1334,6 +1453,7 @@ fn prepare(root: &Path, b: &Bench, req: &mut Request) -> Option<u8> {
 }
 
 fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
+    drop_foreign_push(req);
     let b = Bench::configure(root)?;
     if let Err(why) = check_box(&b) {
         return Ok(unavailable(&why));
@@ -1376,8 +1496,9 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     let watching = {
         let (b, stop) = (b.clone(), Arc::clone(&stop));
         let started = AtomicBool::new(false);
+        let job = req.job.clone();
         let hook: OnLine = Arc::new(move |line: &str| {
-            if let Some(id) = queued_id(line)
+            if let Some(id) = submit_line_id(line, &job)
                 && !started.swap(true, Ordering::Relaxed)
             {
                 watch_queue(b.clone(), id.to_string(), Arc::clone(&stop));
@@ -1387,23 +1508,26 @@ fn remote(root: &Path, req: &mut Request) -> Result<u8, String> {
     };
     let (code, lines) = follow(b.ssh(10, &words).stdin(Stdio::null()), &watching);
     // with a Benchfile `first`, the prerequisite is queued first: the job
-    // followed is the last one queued
-    let Some(id) = lines
-        .iter()
-        .rev()
-        .find_map(|l| queued_id(l))
-        .map(str::to_string)
-    else {
+    // followed is the one its own submit line names, by id
+    let Some(id) = submitted_id(&lines, &req.job).map(str::to_string) else {
         stop.store(true, Ordering::Relaxed);
+        remove_pushed(&b, root, req);
         return Ok(refused(&b, code, &lines));
     };
     let Some(code) = finish(&b, root, req, &id, started, (code, lines), &stop) else {
         return Ok(EX_TEMPFAIL);
     };
-    if req.push {
-        let _ = push(&b, root, true);
-    }
+    remove_pushed(&b, root, req);
     Ok(code)
+}
+
+/// Removes the tree this run pushed (its `src=`), once its job has ended.
+fn remove_pushed(b: &Bench, root: &Path, req: &Request) {
+    if req.push
+        && let Some(name) = req.param("src")
+    {
+        let _ = push(b, root, name, true);
+    }
 }
 
 /// The exit code of a submission the box did not queue.
@@ -1433,29 +1557,38 @@ fn finish(
     let (mut code, mut lines) = followed;
     let quiet: OnLine = Arc::new(|_: &str| {});
     let mut attempts = 0;
-    while classify(code) == Outcome::Lost && attempts < REATTACH {
+    // the result is the box's word on this id (`status <id>`): a follower
+    // that printed another job's log and exit is never taken for it
+    let exit = loop {
+        if classify(code) == Outcome::Lost {
+            eprintln!("bench-remote: lost the connection to job {id}");
+        } else {
+            let status = query_json(b, &format!("status {id} --json"));
+            match job_verdict(id, status.as_ref(), &lines, code) {
+                Verdict::Ended(outcome) => break Some(outcome),
+                Verdict::Pending => {
+                    eprintln!("bench-remote: the box says job {id} has not ended");
+                }
+            }
+        }
+        if attempts >= REATTACH {
+            break None;
+        }
         attempts += 1;
-        eprintln!(
-            "bench-remote: lost the connection to job {id}; reattaching ({attempts}/{REATTACH})"
-        );
+        eprintln!("bench-remote: following job {id} again ({attempts}/{REATTACH})");
         std::thread::sleep(REATTACH_PAUSE);
         let (c, more) = follow(b.ssh(10, &["wait", id]).stdin(Stdio::null()), &quiet);
         code = c;
         lines.extend(more);
-    }
+    };
     stop.store(true, Ordering::Relaxed);
-    if classify(code) == Outcome::Lost {
+    let Some(exit) = exit else {
         unavailable(&format!(
-            "lost the connection during job {id}; it may still run: reattach later with `wait {id}`"
+            "lost job {id}; it may still run: reattach later with `wait {id}`"
         ));
         return None;
-    }
+    };
     let took = started.elapsed();
-    let exit = lines
-        .iter()
-        .rev()
-        .find_map(|l| final_exit(l, id))
-        .map_or_else(|| classify(code), |c| classify(Some(c)));
     let dir = match fetch(b, root, id) {
         Ok(dir) => Some(dir),
         Err(e) => {
@@ -1484,7 +1617,10 @@ fn finish(
             }
             c
         }
-        Outcome::Lost => unreachable!("handled above"),
+        Outcome::Lost => {
+            summary(req, id, EX_TEMPFAIL, took, dir.as_deref());
+            unavailable(&format!("the connection to job {id} was lost"))
+        }
     })
 }
 
@@ -1629,6 +1765,7 @@ fn with_input(cmd: &mut Command, input: &str) -> (Option<i32>, Vec<String>) {
 /// for a step skipped because one before it failed), else 75 when a step
 /// could not be served, else 0.
 fn chain(root: &Path, req: &mut Request, kind: Chain) -> Result<u8, String> {
+    drop_foreign_push(req);
     let b = Bench::configure(root)?;
     if let Err(why) = check_box(&b) {
         return Ok(unavailable(&why));
@@ -1653,9 +1790,7 @@ fn chain(root: &Path, req: &mut Request, kind: Chain) -> Result<u8, String> {
             .all(|s| ids.iter().any(|(name, _)| name == s.name))
     });
     let Some(ids) = ids else {
-        if req.push {
-            let _ = push(&b, root, true);
-        }
+        remove_pushed(&b, root, req);
         return Ok(refused(&b, code, &lines));
     };
     let high = steps[0].req.param("priority") == Some("high");
@@ -1683,8 +1818,8 @@ fn chain(root: &Path, req: &mut Request, kind: Chain) -> Result<u8, String> {
         lost = code.is_none();
         results.push((step, id, code));
     }
-    if req.push && !lost {
-        let _ = push(&b, root, true);
+    if !lost {
+        remove_pushed(&b, root, req);
     }
     println!("\nbench-remote: --chain results");
     for (step, id, code) in &results {
@@ -2713,10 +2848,112 @@ mod tests {
 
     #[test]
     fn each_checkout_pushes_under_its_own_name() {
-        let a = pushed_name(Path::new("/w/helios"));
-        assert_eq!(a, pushed_name(Path::new("/w/helios")), "stable");
-        assert_ne!(a, pushed_name(Path::new("/w/helios/.claude/worktrees/x")));
+        let a = pushed_name(Path::new("/w/helios"), "s");
+        assert_eq!(a, pushed_name(Path::new("/w/helios"), "s"), "stable");
+        assert_ne!(
+            a,
+            pushed_name(Path::new("/w/helios/.claude/worktrees/x"), "s")
+        );
         assert!(a.starts_with("helios-local-") && valid_value(&a));
+        // the box's name rule: [a-z][a-z0-9-]{0,30}
+        assert!(
+            a.len() <= 31
+                && a.bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+        );
+    }
+
+    #[test]
+    fn two_submits_from_one_worktree_push_under_different_names() {
+        // removing one run's tree must never take the tree a newer run of
+        // the same worktree still waits to copy
+        let root = Path::new("/w/helios-5420");
+        let push = req("test-crate", &[("crate", "x")], true);
+        let first = pushed_src(&push, root, &submit_token()).unwrap();
+        let second = pushed_src(&push, root, &submit_token()).unwrap();
+        assert_ne!(first, second);
+        let prefix = format!("helios-local-{:08x}-", fnv1a(&root.to_string_lossy()));
+        assert!(first.starts_with(&prefix) && second.starts_with(&prefix));
+        assert_eq!(pushed_src(&req("test-crate", &[], false), root, "s"), None);
+    }
+
+    #[test]
+    fn an_egui_pop_job_pushed_from_helios_carries_no_helios_src() {
+        let root = Path::new("/w/helios");
+        for job in ["egui-pop-gate", "egui-pop-test", "egui-pop-check"] {
+            let mut r = parse_args(&[job, "egui_pop=fix/x", "--push"]).unwrap();
+            assert!(builds_egui_pop(&r), "{job}");
+            assert_eq!(pushed_src(&r, root, "s"), None, "{job}");
+            assert!(drop_foreign_push(&mut r), "{job}");
+            assert!(!r.push && r.param("src").is_none(), "{job}");
+        }
+        let mut chain = chain_req(Chain::EguiPop, &[("egui_pop", "fix/x")]);
+        chain.push = true;
+        assert_eq!(pushed_src(&chain, root, "s"), None);
+        assert!(drop_foreign_push(&mut chain));
+        assert!(
+            chain_steps(Chain::EguiPop, &chain)
+                .iter()
+                .all(|s| !s.req.push && s.req.param("src").is_none())
+        );
+        // Helios's own jobs still run the pushed tree
+        let mut helios = parse_args(&["journey", "--push"]).unwrap();
+        assert!(!drop_foreign_push(&mut helios) && helios.push);
+        assert!(pushed_src(&helios, root, "s").is_some());
+    }
+
+    #[test]
+    fn the_follower_takes_its_own_submit_line_and_the_box_status_of_that_id() {
+        let lines = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        let mine = "20261121-105929-fa73";
+        let other = "20261121-105354-efc1";
+        let out = lines(&[
+            // the `first` check is queued before the job
+            "mcu-job: job 20261121-105929-aaaa (job check branch=b) queued",
+            "mcu-job: job 20261121-105929-fa73 (job journey branch=b after_ok=20261121-105929-aaaa ext_job_id=helios-b-journey) queued",
+            // another journey's lines, ending first and green
+            "mcu-job: job 20261121-105354-efc1 (job journey branch=c) queued",
+            "mcu-job: 20261121-105354-efc1 exit 0",
+        ]);
+        assert_eq!(submitted_id(&out, "journey"), Some(mine));
+        assert_eq!(submitted_id(&out, "check"), Some("20261121-105929-aaaa"));
+        assert_eq!(submitted_id(&out, "test-crate"), None);
+        // the box says the submitted job failed: that is the exit
+        let failed = parse_json(&format!(r#"{{"id": "{mine}", "state": "exit 101"}}"#)).unwrap();
+        assert_eq!(
+            job_verdict(mine, Some(&failed), &out, Some(0)),
+            Verdict::Ended(Outcome::Exit(101))
+        );
+        // still queued on the box: followed again, never green
+        let queued = parse_json(&format!(r#"{{"id": "{mine}", "state": "queued"}}"#)).unwrap();
+        assert_eq!(
+            job_verdict(mine, Some(&queued), &out, Some(0)),
+            Verdict::Pending
+        );
+        // an answer about another job is not this job's
+        let theirs = parse_json(&format!(r#"{{"id": "{other}", "state": "exit 0"}}"#)).unwrap();
+        assert_eq!(
+            job_verdict(mine, Some(&theirs), &out, Some(0)),
+            Verdict::Pending
+        );
+        // no answer from the box: this id's exit line, not another's
+        let mut with_mine = out.clone();
+        with_mine.push(format!("mcu-job: {mine} exit 1"));
+        assert_eq!(
+            job_verdict(mine, None, &with_mine, Some(0)),
+            Verdict::Ended(Outcome::Exit(1))
+        );
+        let cancelled = parse_json(&format!(
+            r#"{{"id": "{mine}", "state": "exit 130 (cancelled)"}}"#
+        ))
+        .unwrap();
+        assert_eq!(status_exit(&cancelled, mine), Some(130));
+        let unavailable =
+            parse_json(&format!(r#"{{"id": "{mine}", "state": "exit 75"}}"#)).unwrap();
+        assert_eq!(
+            job_verdict(mine, Some(&unavailable), &out, Some(0)),
+            Verdict::Ended(Outcome::Unavailable)
+        );
     }
 
     fn req(job: &str, params: &[(&str, &str)], push: bool) -> Request {

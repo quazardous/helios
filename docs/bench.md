@@ -228,9 +228,16 @@ out from GitHub (its Benchfile, its target cache), so a branch origin
 lacks is pushed there first (`git push -u origin <branch>`). The box's own
 `check` before the job gets `src=` too (each `first` passes it), so it
 type-checks the code sent, not the branch as GitHub has it. Each
-checkout pushes under its own name (`helios-local-<id>`, a hash of its
-path), so worktrees can push at the same time; two `--push` runs from the
-same checkout still share it.
+submit pushes under its own name (`helios-local-<checkout>-<submit>`: a
+hash of the checkout's path, then one of the submit), so worktrees can
+push at the same time, and a run that ends or is replaced removes its own
+tree, never the one a newer run of the same checkout still needs. Each
+run removes its tree once its job has ended. egui-pop's jobs (and
+`--chain egui-pop`) build `egui_pop=`'s branch, not this checkout:
+`--push` sends nothing for them and says so; push the egui-pop branch.
+The job followed is the one the box's submit line names (`mcu-job: job
+<id> (job <name> ...) queued`), and its result is the box's `status
+<id>`, never another job's log or exit.
 `check-commits` needs the git history, so it runs on a branch, not on
 pushed code. `test-affected` needs it too, to diff against its base: with
 `--push`, `bench-remote` computes the selection here, where git is, and
@@ -704,6 +711,10 @@ Every agent follows them.
   jobs. A timeout now stops the container too.
 - One job of yours per branch at a time; never push to a branch while a job
   of yours on it is queued.
+- `--push` is safe again (2026-11-21): each submit pushes its own tree, an
+  egui-pop job never gets the Helios tree, and the result `bench-remote`
+  prints is that of the job id it submitted (read with `status <id>`).
+  Reading a result by hand, still use the id: `ssh … status <id>`.
 
 **Waiting**
 - Wait with one blocking `ssh … wait <id>` per job. Never poll in a loop,
