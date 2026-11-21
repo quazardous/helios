@@ -1601,8 +1601,6 @@ gui-library-keyword-rename-title = Rename “{ $name }”
 
 gui-library-keyword-rename-verb = Rename
 
-gui-library-keyword-toggle = Show or hide the keywords below { $name }
-
 gui-library-keywords = Keywords
 
 gui-library-keywords-none = No keyword yet: write levels with | (Animals|Dog)
@@ -1781,8 +1779,6 @@ gui-library-set-none = No album set to move it to: make one with New set…
 
 gui-library-set-tip = Album set: its albums' photos together
 
-gui-library-set-toggle = Show or hide the albums of { $name }
-
 gui-library-set-top = No set (the top)
 
 gui-library-sort-ascending = Ascending: oldest, smallest or A first
@@ -1839,7 +1835,7 @@ gui-library-view-per-row = Thumbnails, { $count } per row
 
 gui-library-view-tip = Show the results as thumbnails so many per row, as a list, or as details in columns
 
-gui-library-volume-offline = { $volume } { $count }, offline, last seen { $date }
+gui-library-volume-offline-line = Offline, last seen { $date }
 
 gui-library-window = Library
 
