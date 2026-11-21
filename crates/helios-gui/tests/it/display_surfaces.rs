@@ -8,8 +8,6 @@
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_pop::model::ids::PanelId;
-use egui_pop::model::layout::Auxiliary;
 use helios_gui::dialogs::MenuItem;
 use helios_gui::display_surfaces::{COMPARE, IMAGE, SHOW_COMMAND, STRATEGY_SETTING};
 use helios_gui::library::Entry;
@@ -55,10 +53,10 @@ fn set_strategy(h: &mut Harness<'_, Shell>, word: &str) {
     h.run_steps(2);
 }
 
-fn run(h: &mut Harness<'_, Shell>, args: Value, origin: Origin) -> Value {
-    let out = h.state_mut().run(SHOW_COMMAND, args, origin).unwrap();
+/// Runs `photo.show`: a shell command, done in the next frame.
+fn run(h: &mut Harness<'_, Shell>, args: Value, origin: Origin) {
+    let _ = h.state_mut().run(SHOW_COMMAND, args, origin);
     h.run_steps(2);
-    out
 }
 
 /// Where the last `photo.show` went: the photo the Image is asked to
@@ -83,12 +81,21 @@ fn open_compare(h: &mut Harness<'_, Shell>) {
 
 /// A double click's route: what the shell's `show_activated` sends, from
 /// the gallery `from`.
-fn double_click(h: &mut Harness<'_, Shell>, photo: &str, from: &str) -> Value {
+fn double_click(h: &mut Harness<'_, Shell>, photo: &str, from: &str) {
     run(
         h,
         json!({ "photo": photo, "origin": "double_click", "from": from }),
         Origin::User,
-    )
+    );
+}
+
+/// Compares exactly `images`, the effects read since cleared.
+fn compare_only(h: &mut Harness<'_, Shell>, images: &[&str]) {
+    h.state_mut()
+        .run("compare.set", json!({ "images": images }), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    shown(h);
 }
 
 #[test]
@@ -97,61 +104,35 @@ fn each_double_click_strategy_routes_the_photo_as_set() {
     open_compare(&mut h);
 
     // Primary (the default): the Image, as before surfaces.
-    let out = double_click(&mut h, "b", "helios.vault");
-    assert_eq!(out["surface"], IMAGE);
-    assert_eq!(shown(&mut h).0.as_deref(), Some("b"));
+    double_click(&mut h, "b", "helios.vault");
+    assert_eq!(shown(&mut h), (Some("b".to_string()), vec![]));
     assert_eq!(h.state().library().double_click_target(), Some(IMAGE));
+
+    // Same window: a gallery of the main window shows on the Image
+    // there (the rule across windows: `display_surfaces`'s unit test,
+    // headless runs keeping one window).
+    set_strategy(&mut h, "same_window");
+    double_click(&mut h, "a", "helios.vault");
+    assert_eq!(shown(&mut h), (Some("a".to_string()), vec![]));
 
     // Last focused: Compare once the focus went to it.
     set_strategy(&mut h, "last_focused");
-    let out = double_click(&mut h, "c", "helios.vault");
-    assert_eq!(out["surface"], IMAGE, "no surface focused yet: the primary");
-    shown(&mut h);
     h.state_mut()
         .run("helios.compare.focus", json!(null), Origin::User)
         .unwrap();
     h.run_steps(3);
-    assert_eq!(h.state().library().double_click_target(), Some(COMPARE));
-    let out = double_click(&mut h, "d", "helios.vault");
-    assert_eq!(out["surface"], COMPARE);
+    double_click(&mut h, "d", "helios.vault");
     let (image, compare) = shown(&mut h);
     assert_eq!(image, None);
     assert_eq!(compare, ["d"], "Compare as a loupe: a comparison of one");
 
-    // Same window: Compare in a window of its own with a second gallery;
-    // a double click there shows on Compare, one in the main window on
-    // the Image.
-    set_strategy(&mut h, "same_window");
-    let mut layout = h.state().app().handle().layout();
-    let compare = PanelId::new(COMPARE).unwrap();
-    layout.remove(&compare);
-    layout.hidden.retain(|p| p != &compare);
-    layout.auxiliary.push(Auxiliary::window(
-        compare.clone(),
-        "main",
-        [0.0, 0.0, 800.0, 600.0],
-    ));
-    let gallery = PanelId::new("helios.vault#2").unwrap();
-    layout.join_window(&gallery, &compare).unwrap();
-    h.state_mut().set_layout(layout);
-    h.run_steps(3);
-    assert_eq!(
-        double_click(&mut h, "e", "helios.vault#2")["surface"],
-        COMPARE
-    );
-    assert_eq!(shown(&mut h), (None, vec!["e".to_string()]));
-    assert_eq!(double_click(&mut h, "a", "helios.vault")["surface"], IMAGE);
-    assert_eq!(shown(&mut h).0.as_deref(), Some("a"));
-
     // Ask: nothing shown until a surface is chosen; the choice runs
     // `photo.show` with the surface, for the photo asked about.
     set_strategy(&mut h, "ask");
-    let out = double_click(&mut h, "b", "helios.vault");
-    assert_eq!(out["asked"], true);
-    assert_eq!(shown(&mut h).0, None);
+    double_click(&mut h, "b", "helios.vault");
+    assert_eq!(shown(&mut h), (None, vec!["d".to_string()]), "asked first");
     assert_eq!(h.state().library().double_click_target(), None);
-    let out = run(&mut h, json!({ "surface": IMAGE }), Origin::User);
-    assert_eq!(out, json!({ "photo": "b", "surface": IMAGE }));
+    run(&mut h, json!({ "surface": IMAGE }), Origin::User);
     assert_eq!(shown(&mut h).0.as_deref(), Some("b"));
 }
 
@@ -171,21 +152,21 @@ fn an_agents_photo_show_equals_the_show_in_menus() {
     let surfaces: Vec<&str> = shows.iter().filter_map(|a| a["surface"].as_str()).collect();
     assert_eq!(surfaces, [IMAGE, COMPARE], "both open surfaces offered");
     for args in shows {
-        let by_menu = run(&mut h, args.clone(), Origin::User);
-        let menu_effect = shown(&mut h);
-        let by_agent = run(&mut h, args.clone(), Origin::Agent("test".into()));
-        let agent_effect = shown(&mut h);
+        compare_only(&mut h, &["a"]);
+        run(&mut h, args.clone(), Origin::User);
+        let by_menu = shown(&mut h);
+        compare_only(&mut h, &["a"]);
+        run(&mut h, args.clone(), Origin::Agent("test".into()));
+        let by_agent = shown(&mut h);
         assert_eq!(by_menu, by_agent, "{args}");
-        assert_eq!(menu_effect, agent_effect, "{args}");
+        assert_ne!(by_menu, (None, vec!["a".to_string()]), "{args}: shown");
     }
-    // A surface that is not one is refused.
-    assert!(
-        h.state_mut()
-            .run(
-                SHOW_COMMAND,
-                json!({ "photo": "c", "surface": "helios.graph" }),
-                Origin::Agent("test".into())
-            )
-            .is_err()
+    // A surface that is not one shows nothing.
+    compare_only(&mut h, &["a"]);
+    run(
+        &mut h,
+        json!({ "photo": "c", "surface": "helios.graph" }),
+        Origin::Agent("test".into()),
     );
+    assert_eq!(shown(&mut h), (None, vec!["a".to_string()]));
 }

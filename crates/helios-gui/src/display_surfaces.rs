@@ -189,6 +189,72 @@ mod tests {
         assert_eq!(Strategy::parse("nonsense"), Strategy::Primary);
     }
 
+    /// The Image docked in the main window; Compare in a window of its
+    /// own, with a second gallery.
+    fn two_windows() -> Layout {
+        use egui_pop::model::layout::{Auxiliary, Node};
+        use egui_pop::model::panels::Area;
+        let id = |s: &str| PanelId::new(s).unwrap();
+        let mut layout = Layout::default();
+        layout.areas.push((Area::Center, Node::tab(id(IMAGE))));
+        layout
+            .areas
+            .push((Area::StartSide, Node::tab(id("helios.vault"))));
+        layout.auxiliary.push(Auxiliary::window(
+            id(COMPARE),
+            "main",
+            [0.0, 0.0, 800.0, 600.0],
+        ));
+        layout
+            .join_window(&id("helios.vault#2"), &id(COMPARE))
+            .unwrap();
+        layout
+    }
+
+    #[test]
+    fn each_strategy_routes_by_its_rule() {
+        let layout = two_windows();
+        assert_eq!(open(&layout), [IMAGE, COMPARE]);
+        let mut s = Surfaces::default();
+        let route = |s: &Surfaces, k, from| s.route(k, &layout, from);
+        // Primary: the Image, wherever the click.
+        assert_eq!(
+            route(&s, Strategy::Primary, Some("helios.vault#2")),
+            Route::Surface(IMAGE)
+        );
+        // Same window: the surface beside the gallery clicked.
+        assert_eq!(
+            route(&s, Strategy::SameWindow, Some("helios.vault")),
+            Route::Surface(IMAGE)
+        );
+        assert_eq!(
+            route(&s, Strategy::SameWindow, Some("helios.vault#2")),
+            Route::Surface(COMPARE)
+        );
+        // Last focused: the primary until a surface had the focus.
+        assert_eq!(
+            route(&s, Strategy::LastFocused, None),
+            Route::Surface(IMAGE)
+        );
+        s.follow(Some(COMPARE));
+        s.follow(Some("helios.vault"));
+        assert_eq!(
+            route(&s, Strategy::LastFocused, None),
+            Route::Surface(COMPARE)
+        );
+        assert_eq!(
+            s.target(Strategy::LastFocused, &layout, None),
+            Some(COMPARE)
+        );
+        // Ask: a question, and no target mark.
+        assert_eq!(route(&s, Strategy::Ask, None), Route::Ask);
+        assert_eq!(s.target(Strategy::Ask, &layout, None), None);
+        // One surface open: no mark.
+        let mut one = layout.clone();
+        one.auxiliary.clear();
+        assert_eq!(s.target(Strategy::Primary, &one, None), None);
+    }
+
     #[test]
     fn a_surface_is_known_by_its_panel() {
         assert_eq!(surface("helios.compare"), Some(COMPARE));
