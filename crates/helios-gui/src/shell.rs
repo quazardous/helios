@@ -6919,10 +6919,11 @@ impl Shell {
             return Err(format!("the library has no photo `{photo}`"));
         }
         let layout = self.core.app.handle().layout();
-        let surface = match args.get("surface").and_then(Value::as_str) {
-            Some(s) => ds::surface(s)
-                .ok_or_else(|| format!("`surface`: {} or {}, not `{s}`", ds::IMAGE, ds::COMPARE))?,
-            None => {
+        let surface = if let Some(s) = args.get("surface").and_then(Value::as_str) {
+            ds::surface(s)
+                .ok_or_else(|| format!("`surface`: {} or {}, not `{s}`", ds::IMAGE, ds::COMPARE))?
+        } else {
+            {
                 let from = args.get("from").and_then(Value::as_str);
                 match self
                     .focus

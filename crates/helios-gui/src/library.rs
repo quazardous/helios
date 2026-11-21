@@ -5838,6 +5838,23 @@ fn back_to_grid_action(ui: &mut Ui) {
     }
 }
 
+/// The small mark a display surface wears while a double click reaches
+/// it ([`crate::display_surfaces`]).
+pub fn target_mark(ui: &mut Ui) {
+    let text = crate::i18n::text(
+        ui.ctx(),
+        Message::new("gui-surface-target", "◎ Double-click target"),
+    );
+    let tip = crate::i18n::text(
+        ui.ctx(),
+        Message::new(
+            "gui-surface-target-tip",
+            "A double click in a gallery shows the photo here (Settings: Double click shows the photo in)",
+        ),
+    );
+    ui.meta(text).tip(tip);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6015,21 +6032,4 @@ mod tests {
             ]
         );
     }
-}
-
-/// The small mark a display surface wears while a double click reaches
-/// it ([`crate::display_surfaces`]).
-pub fn target_mark(ui: &mut Ui) {
-    let text = crate::i18n::text(
-        ui.ctx(),
-        Message::new("gui-surface-target", "◎ Double-click target"),
-    );
-    let tip = crate::i18n::text(
-        ui.ctx(),
-        Message::new(
-            "gui-surface-target-tip",
-            "A double click in a gallery shows the photo here (Settings: Double click shows the photo in)",
-        ),
-    );
-    ui.meta(text).tip(tip);
 }
