@@ -1757,30 +1757,36 @@ fn quick_drop(
     id: &str,
     photos: &DraggedPhotos,
 ) -> Option<(&'static str, serde_json::Value)> {
-    match quick_drop_moves(ctx, id, photos)? {
-        Some(from) => Some((
+    match quick_drop_kind(ctx, id, photos) {
+        QuickDrop::Move(from) => Some((
             QUICK_MOVE_COMMAND,
             serde_json::json!({ "from": from, "id": id, "images": photos.0 }),
         )),
-        None => Some((
+        QuickDrop::Add => Some((
             QUICK_ADD_COMMAND,
             serde_json::json!({ "id": id, "images": photos.0 }),
         )),
+        QuickDrop::Stay => None,
     }
 }
 
-/// Whether photos dropped on the quick collection `id` move (the one
-/// they leave), are added (`Some(None)`), or stay (`None`: dropped back
-/// where they came from).
-fn quick_drop_moves(
-    ctx: &egui::Context,
-    id: &str,
-    photos: &DraggedPhotos,
-) -> Option<Option<String>> {
+/// What a drop of photos on a quick collection does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum QuickDrop {
+    /// They leave this quick collection for the one dropped on.
+    Move(String),
+    /// They are added (Ctrl, or not from a quick collection).
+    Add,
+    /// Dropped back where they came from: nothing.
+    Stay,
+}
+
+/// What photos dropped on the quick collection `id` do.
+fn quick_drop_kind(ctx: &egui::Context, id: &str, photos: &DraggedPhotos) -> QuickDrop {
     match photos.1.as_deref() {
-        Some(from) if from == id => None,
-        Some(from) if !ctx.input(|i| i.modifiers.command) => Some(Some(from.to_string())),
-        _ => Some(None),
+        Some(from) if from == id => QuickDrop::Stay,
+        Some(from) if !ctx.input(|i| i.modifiers.command) => QuickDrop::Move(from.to_string()),
+        _ => QuickDrop::Add,
     }
 }
 
@@ -1827,7 +1833,7 @@ fn hover_over(
                 .with("count", photos.0.len())
                 .with("keyword", path.as_str()),
             ),
-            DropOn::Quick(id) if matches!(quick_drop_moves(ctx, id, photos), Some(Some(_))) => {
+            DropOn::Quick(id) if matches!(quick_drop_kind(ctx, id, photos), QuickDrop::Move(_)) => {
                 crate::i18n::text(
                     ctx,
                     Message::new(
