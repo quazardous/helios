@@ -1,7 +1,7 @@
 //! Drawn masks on the viewport: the selected mask's shapes outlined over
 //! the image, the selected shape's handles dragged, shapes created.
 //!
-//! - **What is drawn** comes from `helios_module_masks::outline` for each
+//! - **What is drawn** comes from `helios_modules::masks::outline` for each
 //!   shape member of the mask edited (a `mask_combine` node): its edge and
 //!   the end of its feather, in image pixels, mapped to the screen by the
 //!   viewport. Every one is egui-pop's overlay: the selected shape's
@@ -43,8 +43,9 @@ use egui_pop::viewport::tokens::ViewportTokens;
 use egui_pop::viewport::{Cause, Mapping, Phase, Signal, Verdict, ViewChange};
 use helios_controls::render::overlay_kind;
 use helios_core::{Graph, Message, ModuleRef, NodeId, Params, Value};
-use helios_module_masks::shape::{Outline, PATH_POINT_VALUES, PathPoint, path_points, path_values};
-use helios_module_masks::{MaskCircle, MaskEllipse, MaskGradient, MaskPath};
+use helios_modules::masks::shape::{
+    Outline, PATH_POINT_VALUES, PathPoint, path_points, path_values,
+};
 use helios_rack::handle::{
     self as hud, Centre, Handle as HudHandle, HandleKind as HudKind, HandleMaths, Look,
     Snap as HudSnap,
@@ -98,7 +99,7 @@ pub fn declare(store: &mut Store) {
             name: "path being drawn".into(),
             description: "x, y of each point clicked so far".into(),
             kind: helios_core::ParamKind::Floats {
-                count: 2 * helios_module_masks::shape::MAX_PATH_POINTS as u32,
+                count: 2 * helios_modules::masks::shape::MAX_PATH_POINTS as u32,
                 min: -1e9,
                 max: 1e9,
                 default: Vec::new(),
@@ -170,15 +171,12 @@ pub fn module_of(kind: &str) -> Option<&'static str> {
     KINDS.iter().find(|(k, _)| *k == kind).map(|(_, m)| *m)
 }
 
+/// The members a mask adds: the drawn shapes ([`KINDS`]) and the
+/// parametric range, from the module catalogue; the others are added
+/// otherwise (combine, feather) or not by hand (the AI object).
 fn module_ref(module: &str) -> Option<ModuleRef> {
-    Some(match module {
-        "mask_parametric" => ModuleRef::new(helios_module_masks::MaskParametric),
-        "mask_circle" => ModuleRef::new(MaskCircle),
-        "mask_ellipse" => ModuleRef::new(MaskEllipse),
-        "mask_gradient" => ModuleRef::new(MaskGradient),
-        "mask_path" => ModuleRef::new(MaskPath),
-        _ => return None,
-    })
+    let addable = module == "mask_parametric" || KINDS.iter().any(|(_, m)| *m == module);
+    addable.then(|| helios_modules::module(module)).flatten()
 }
 
 fn module_name(graph: &Graph, id: NodeId) -> Option<String> {
@@ -239,7 +237,7 @@ pub fn members(graph: &Graph, store: &Store, mask: &str) -> Vec<Member> {
                 return None;
             }
             let params = params_of(graph, store, src);
-            let outline = helios_module_masks::outline(&module, &params).ok()?;
+            let outline = helios_modules::masks::outline(&module, &params).ok()?;
             Some(Member {
                 node: graph.name(src).ok()?.to_string(),
                 module,
@@ -1364,7 +1362,7 @@ impl Masks {
             {
                 return None;
             }
-            if points.len() < helios_module_masks::shape::MAX_PATH_POINTS {
+            if points.len() < helios_modules::masks::shape::MAX_PATH_POINTS {
                 points.push(at);
                 set_draft(store, &points);
             }
@@ -1488,10 +1486,10 @@ pub fn removed(params: &Params, n: usize) -> Result<Value, String> {
 pub fn inserted(params: &Params, at: [f64; 2]) -> Result<(Value, usize), String> {
     let values = params.get("points").and_then(Value::as_list).unwrap_or(&[]);
     let points = path_points(values)?;
-    if points.len() >= helios_module_masks::shape::MAX_PATH_POINTS {
+    if points.len() >= helios_modules::masks::shape::MAX_PATH_POINTS {
         return Err(format!(
             "a path holds {} points at most",
-            helios_module_masks::shape::MAX_PATH_POINTS
+            helios_modules::masks::shape::MAX_PATH_POINTS
         ));
     }
     let (i, t, _) = nearest(&points, at).ok_or("the path has no points")?;

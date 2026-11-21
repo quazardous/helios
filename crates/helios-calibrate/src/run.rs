@@ -25,7 +25,7 @@
 //! profile is the caller's, on a later slice.
 
 use helios_colour::OutputSpace;
-use helios_module_channelmixerrgb::{Plan, close_to_daylight, illuminant_from_neutral};
+use helios_modules::channelmixerrgb::{Plan, close_to_daylight, illuminant_from_neutral};
 use helios_photo::color::{Mat3, apply};
 
 use crate::chart::Chart;

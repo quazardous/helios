@@ -502,7 +502,7 @@ fn high_bound(v: f32) -> f64 {
 /// zone stays an AI junction (rule 4). A zone missing on a case is an
 /// error.
 pub fn generalise_zones(cases: &[Case], ai: &[String]) -> Result<Vec<ZoneRow>, String> {
-    use helios_module_masks::{Channel, Range as Band, jzczhz, luminance};
+    use helios_modules::masks::{Channel, Range as Band, jzczhz, luminance};
 
     if cases.is_empty() {
         return Err("no test photo to generalise from".into());
@@ -683,7 +683,7 @@ pub fn generalise_zones(cases: &[Case], ai: &[String]) -> Result<Vec<ZoneRow>, S
 
 /// The bounds of a fit, as a note reads them: `luminance 0.4 to open`.
 fn bounds(params: &Params) -> String {
-    let span = f64::from(helios_module_masks::Channel::Luminance.span());
+    let span = f64::from(helios_modules::masks::Channel::Luminance.span());
     let one = |name: &str, open: f64| {
         let v = params.get(name).and_then(Value::as_list)?;
         let lo = if v[0] <= 0.0 {

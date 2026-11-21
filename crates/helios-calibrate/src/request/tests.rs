@@ -4,7 +4,7 @@
 use super::*;
 use crate::run::tests::{CHART, CORNERS, H, W, adaptation_from, draw, lit};
 use crate::solver::Orientation;
-use helios_module_channelmixerrgb::daylight_xy;
+use helios_modules::channelmixerrgb::daylight_xy;
 
 /// The chart under 6500 K as a decoded picture would hold it: linear
 /// working RGB at 80 % exposure (the white patch's blue would reach the

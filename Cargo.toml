@@ -61,6 +61,7 @@ helios-node-core = { path = "crates/helios-node-core" }
 helios-cache = { path = "crates/helios-cache" }
 helios-extract = { path = "crates/helios-extract" }
 helios-controls = { path = "crates/helios-controls" }
+helios-modules = { path = "crates/helios-modules" }
 helios-ui = { path = "crates/helios-ui" }
 helios-rack = { path = "crates/helios-rack" }
 # MIT: the UI library and application framework Helios is built on.

@@ -623,10 +623,14 @@ mod tests {
     fn catalogue() -> Catalogue {
         let mut c = Catalogue::new()
             .module(helios_core::ModuleRef::new(
-                helios_module_exposure::Exposure,
+                helios_modules::exposure::Exposure,
             ))
-            .module(helios_core::ModuleRef::new(helios_module_sigmoid::Sigmoid))
-            .module(helios_core::ModuleRef::new(helios_module_masks::MaskBlend));
+            .module(helios_core::ModuleRef::new(
+                helios_modules::sigmoid::Sigmoid,
+            ))
+            .module(helios_core::ModuleRef::new(
+                helios_modules::masks::MaskBlend,
+            ));
         for file in crate::shipped::composites() {
             c.add_composite(file);
         }

@@ -40,7 +40,7 @@ use egui_pop::core::widgets::ToggleChip;
 use egui_pop::model::ids::MenuId;
 use egui_pop::views::tree::{Node, Position, Signal, Sink, TreeSource, TreeState, TreeView};
 use helios_core::{Graph, Message, NodeId, Value};
-use helios_module_masks::{Operator, fold};
+use helios_modules::masks::{Operator, fold};
 use helios_shell::commands::Origin;
 use helios_ui::Action;
 use helios_values::{Change, Descriptor, Set, Store, node_path};
@@ -340,7 +340,7 @@ impl Item {
 
 /// What a group's operator does with its members, as its row says it:
 /// darktable's union, intersection, difference and exclusion, by their
-/// effect rather than their formula (see `helios_module_masks::Operator`).
+/// effect rather than their formula (see `helios_modules::masks::Operator`).
 pub fn operator_effect(operator: &str) -> Message {
     match operator {
         "maximum" => Message::new("gui-masks-op-maximum", "union"),
@@ -987,14 +987,14 @@ pub fn drop_place(
         .map(|c| c.iter().filter(|k| *k != key).collect())
         .unwrap_or_default();
     if item.group.as_deref() != Some(group.as_str())
-        && others.len() >= helios_module_masks::MAX_MEMBERS
+        && others.len() >= helios_modules::masks::MAX_MEMBERS
     {
         return Err(Message::new(
             "gui-masks-group-full",
             "the group `{ $group }` holds { $count } members already",
         )
         .with("group", &group)
-        .with("count", helios_module_masks::MAX_MEMBERS));
+        .with("count", helios_modules::masks::MAX_MEMBERS));
     }
     let index = match position {
         Position::Inside => others.len(),
@@ -1128,10 +1128,10 @@ pub fn move_member(
         return Ok(vec![to]);
     }
     let mut into: Vec<Slot> = slots(graph, to)?.into_iter().map(|(_, s)| s).collect();
-    if into.len() >= helios_module_masks::MAX_MEMBERS {
+    if into.len() >= helios_modules::masks::MAX_MEMBERS {
         return Err(format!(
             "the group `{group}` holds {} members already",
-            helios_module_masks::MAX_MEMBERS
+            helios_modules::masks::MAX_MEMBERS
         ));
     }
     into.insert(index.min(into.len()), moved);
@@ -1239,7 +1239,7 @@ pub fn toggle_invert(
             let path = node_path(g, "invert");
             let mut v = match store.get(&path).map(|e| &e.value) {
                 Some(Value::Ints(v)) => v.clone(),
-                _ => vec![0; helios_module_masks::MAX_MEMBERS],
+                _ => vec![0; helios_modules::masks::MAX_MEMBERS],
             };
             v.resize(v.len().max(item.port + 1), 0);
             v[item.port] = i64::from(on);
@@ -1272,7 +1272,7 @@ pub fn set_opacity(
                 .get(&path)
                 .and_then(|e| e.value.as_list())
                 .map_or_else(
-                    || vec![1.0; helios_module_masks::MAX_MEMBERS],
+                    || vec![1.0; helios_modules::masks::MAX_MEMBERS],
                     <[f64]>::to_vec,
                 );
             v.resize(v.len().max(item.port + 1), 1.0);

@@ -32,21 +32,21 @@ fn files() -> Vec<(PathBuf, String)> {
 
 /// The modules the shipped composites use.
 fn catalogue() -> Catalogue {
-    use helios_module_masks as m;
+    use helios_modules::masks as m;
     let mut c = Catalogue::new()
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
-        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
+        .module(ModuleRef::new(helios_modules::exposure::Exposure))
+        .module(ModuleRef::new(helios_modules::sigmoid::Sigmoid))
         .module(ModuleRef::new(m::MaskCombine))
         .module(ModuleRef::new(m::MaskFeather))
         .module(ModuleRef::new(m::MaskBlur))
         .module(ModuleRef::new(m::MaskLevels))
         .module(ModuleRef::new(m::MaskBlend))
         // The raw front's chain.
-        .module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
-        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
-        .module(ModuleRef::new(helios_module_highlights::Highlights))
-        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
-        .module(ModuleRef::new(helios_module_colorin::ColorIn));
+        .module(ModuleRef::new(helios_modules::rawprepare::RawPrepare))
+        .module(ModuleRef::new(helios_modules::whitebalance::WhiteBalance))
+        .module(ModuleRef::new(helios_modules::highlights::Highlights))
+        .module(ModuleRef::new(helios_modules::demosaic::Demosaic))
+        .module(ModuleRef::new(helios_modules::colorin::ColorIn));
     for (_, text) in files() {
         c.add_composite(parse_composite(&text).unwrap());
     }

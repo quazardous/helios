@@ -3,8 +3,8 @@
 //! the `chartprofile` module renders it as fitted.
 
 use helios_core::{Context, Image, Module, Params, Region, Value};
-use helios_module_channelmixerrgb::daylight_xy;
-use helios_module_chartprofile::ChartProfile;
+use helios_modules::channelmixerrgb::daylight_xy;
+use helios_modules::chartprofile::ChartProfile;
 use helios_photo::color::{apply, inverse, mul};
 use helios_photo::compare::delta_e_2000;
 

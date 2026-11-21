@@ -1345,7 +1345,7 @@ mod tests {
         let exp = g
             .add_module(
                 "exposure",
-                helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+                helios_core::ModuleRef::new(helios_modules::exposure::Exposure),
                 &helios_core::Params::new(),
             )
             .unwrap();

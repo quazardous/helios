@@ -705,6 +705,13 @@ One crate lists the processing modules and what each ships (its
 `helios-template` and `helios-calibrate` read it; a new module edits
 one list. A typed contract: no kernel needed.
 
+Done (2026-11-21): `crates/helios-modules` lists each module once (id,
+`ModuleRef`, whether the desktop's templates may name it, control
+patches) and re-exports the module crates; the node, the desktop,
+templates and calibration read it, calibration filtering it by its
+chain's step ids. A test fails when a crate under `modules/` has no
+entry.
+
 ### Slice 4: declarations by owner
 
 `settings.declare` and `init.steps` points; `helios-config`'s `SETTINGS`

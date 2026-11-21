@@ -14,8 +14,8 @@ use serde_json::{Value as Json, json};
 
 fn catalogue() -> Catalogue {
     Catalogue::new()
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
-        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
+        .module(ModuleRef::new(helios_modules::exposure::Exposure))
+        .module(ModuleRef::new(helios_modules::sigmoid::Sigmoid))
 }
 
 /// `exp → tone`, with `exposed` as its interface.
@@ -191,12 +191,16 @@ fn the_macro_renders_as_the_flat_chain_with_the_same_content_key() {
     e.set("exposure", Value::Float(0.8));
     e.set("black", Value::Float(-0.01));
     let exp = flat
-        .add_module("exp", ModuleRef::new(helios_module_exposure::Exposure), &e)
+        .add_module(
+            "exp",
+            ModuleRef::new(helios_modules::exposure::Exposure),
+            &e,
+        )
         .unwrap();
     let mut t = Params::new();
     t.set("contrast", Value::Float(1.35));
     let tone = flat
-        .add_module("tone", ModuleRef::new(helios_module_sigmoid::Sigmoid), &t)
+        .add_module("tone", ModuleRef::new(helios_modules::sigmoid::Sigmoid), &t)
         .unwrap();
     flat.connect(src, "image", exp, "input").unwrap();
     flat.connect(exp, "output", tone, "input").unwrap();

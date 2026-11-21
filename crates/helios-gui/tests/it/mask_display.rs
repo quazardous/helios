@@ -27,7 +27,7 @@ fn module(g: &mut Graph, name: &str, m: ModuleRef, p: &Params) -> NodeId {
 /// `inner` (a circle `dot`), a circle `spot` and an ellipse `oval`, all on
 /// the row y = 200.
 fn graph() -> (Graph, NodeId) {
-    use helios_module_masks::{MaskBlend, MaskCircle, MaskCombine, MaskEllipse};
+    use helios_modules::masks::{MaskBlend, MaskCircle, MaskCombine, MaskEllipse};
     let mut g = Graph::new();
     let src = g.add_source(
         "source",
@@ -41,7 +41,7 @@ fn graph() -> (Graph, NodeId) {
     let exp = module(
         &mut g,
         "exposure",
-        ModuleRef::new(helios_module_exposure::Exposure),
+        ModuleRef::new(helios_modules::exposure::Exposure),
         &Params::new().with("exposure", Value::Float(1.0)),
     );
     g.connect(src, "image", exp, "input").unwrap();
@@ -367,7 +367,7 @@ fn a_module_without_a_mask_shows_nothing_and_the_mode_stays() {
     let exp = module(
         &mut g,
         "exposure",
-        ModuleRef::new(helios_module_exposure::Exposure),
+        ModuleRef::new(helios_modules::exposure::Exposure),
         &Params::new(),
     );
     g.connect(src, "image", exp, "input").unwrap();

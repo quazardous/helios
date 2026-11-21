@@ -29,10 +29,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use helios_core::{Bus, Engine, Graph, Image, ModuleRef, NodeId, Params, Region, Value};
-use helios_module_demosaic::Demosaic;
-use helios_module_highlights::Highlights;
-use helios_module_rawprepare::RawPrepare;
-use helios_module_whitebalance::{CAMERA_REFERENCE, WhiteBalance};
+use helios_modules::demosaic::Demosaic;
+use helios_modules::highlights::Highlights;
+use helios_modules::rawprepare::RawPrepare;
+use helios_modules::whitebalance::{CAMERA_REFERENCE, WhiteBalance};
 use helios_photo::CameraInfo;
 use helios_photo::color::{Mat3, camera_to_working};
 

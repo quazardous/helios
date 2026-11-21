@@ -6,7 +6,7 @@ use super::*;
 use crate::chart::XRITE_CC24_2014;
 use crate::sampler::{PICTURE_CLIP_LEVEL, Warning};
 use crate::solver::{normalise, orthogonal_basis};
-use helios_module_channelmixerrgb::{blackbody_xy, daylight_xy, rec2020_to_xyz_d50};
+use helios_modules::channelmixerrgb::{blackbody_xy, daylight_xy, rec2020_to_xyz_d50};
 use helios_photo::color::{IDENTITY, camera_to_working, inverse, mul};
 
 pub(crate) const CHART: &Chart = &XRITE_CC24_2014;
