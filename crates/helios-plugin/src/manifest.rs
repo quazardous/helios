@@ -68,7 +68,13 @@
 //! ```toml
 //! [ui]
 //! pages = ["ui/settings.json"]
+//! rack = ["ui/controls.json"]
 //! ```
+//!
+//! `rack` lists its rack declarations: its own values (`plugin/<id>/<key>`)
+//! and the card of controls the host shows for them, checked by
+//! `helios-rack`'s `plugin` module. The plugin hears each committed
+//! change as a `ui/changed` notification.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -94,6 +100,9 @@ pub const INTERFACES: &[(&str, &[u32])] = &[
 
 /// The most page files a plugin may declare (`[ui] pages`).
 pub const MAX_PAGES: usize = 8;
+
+/// The most rack declaration files a plugin may declare (`[ui] rack`).
+pub const MAX_RACKS: usize = 8;
 
 /// The services a plugin may provide; each is also an interface.
 pub const SERVICES: &[&str] = &["metadata.read", "device", "importer", "import.source"];
@@ -237,11 +246,15 @@ pub struct UiDecl {
     /// Its pages: admin manifests in JSON, relative to its directory.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pages: Vec<String>,
+    /// Its rack declarations (its own values and their card of
+    /// controls): JSON, relative to its directory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rack: Vec<String>,
 }
 
 impl UiDecl {
     fn is_empty(&self) -> bool {
-        self.pages.is_empty()
+        self.pages.is_empty() && self.rack.is_empty()
     }
 }
 
@@ -679,9 +692,10 @@ impl Manifest {
         p
     }
 
-    /// What keeps its declared pages from being read: the `ui` interface
-    /// given, at most [`MAX_PAGES`] files, each a `.json` path inside the
-    /// plugin's directory, each once.
+    /// What keeps its declared pages and rack declarations from being
+    /// read: the `ui` interface given, at most [`MAX_PAGES`] and
+    /// [`MAX_RACKS`] files, each a `.json` path inside the plugin's
+    /// directory, each once.
     fn ui_problems(&self) -> Vec<String> {
         let mut p = Vec::new();
         if self.ui.is_empty() {
@@ -690,26 +704,31 @@ impl Manifest {
         if !self.compat.interfaces.contains_key("ui") {
             p.push("`[ui]` without the `ui` interface version in `compat.interfaces`".into());
         }
-        if self.ui.pages.len() > MAX_PAGES {
-            p.push(format!(
-                "`[ui] pages`: {} files, at most {MAX_PAGES}",
-                self.ui.pages.len()
-            ));
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        for page in &self.ui.pages {
-            let path = Path::new(page);
-            let inside = !path.is_absolute()
-                && path
-                    .components()
-                    .all(|c| matches!(c, std::path::Component::Normal(_)));
-            if !inside || path.extension().and_then(|e| e.to_str()) != Some("json") {
+        for (key, files, most) in [
+            ("pages", &self.ui.pages, MAX_PAGES),
+            ("rack", &self.ui.rack, MAX_RACKS),
+        ] {
+            if files.len() > most {
                 p.push(format!(
-                    "`[ui] pages`: `{page}` is not a `.json` file inside the plugin's directory"
+                    "`[ui] {key}`: {} files, at most {most}",
+                    files.len()
                 ));
             }
-            if !seen.insert(page.as_str()) {
-                p.push(format!("`[ui] pages`: `{page}` is listed twice"));
+            let mut seen = std::collections::BTreeSet::new();
+            for file in files {
+                let path = Path::new(file);
+                let inside = !path.is_absolute()
+                    && path
+                        .components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_)));
+                if !inside || path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    p.push(format!(
+                        "`[ui] {key}`: `{file}` is not a `.json` file inside the plugin's directory"
+                    ));
+                }
+                if !seen.insert(file.as_str()) {
+                    p.push(format!("`[ui] {key}`: `{file}` is listed twice"));
+                }
             }
         }
         p
@@ -1086,9 +1105,15 @@ kind = "form"
         }
         let p = with("[ui]\npages = [\"a.json\", \"a.json\"]", ok);
         assert!(p.iter().any(|e| e.contains("listed twice")), "{p:?}");
-        let p = with("[ui]\nrack = [\"ui/tools.json\"]", ok);
+        assert_eq!(
+            with("[ui]\nrack = [\"ui/controls.json\"]", ok),
+            Vec::<String>::new()
+        );
+        let p = with("[ui]\nrack = [\"../controls.json\"]", ok);
+        assert!(p.iter().any(|e| e.contains("`[ui] rack`")), "{p:?}");
+        let p = with("[ui]\ntools = [\"ui/tools.json\"]", ok);
         assert!(
-            p.iter().any(|e| e.contains("unknown field `rack`")),
+            p.iter().any(|e| e.contains("unknown field `tools`")),
             "{p:?}"
         );
     }

@@ -80,6 +80,8 @@ pub struct PluginSettings {
     pub contract: Contract,
     /// Its declared pages (`[ui] pages`), read and checked.
     pub page: super::plugin_pages::Page,
+    /// Its declared controls (`[ui] rack`), read and checked.
+    pub rack: helios_rack::plugin::Declared,
 }
 
 /// The plugins' settings shared between the shell's builder, which
@@ -109,6 +111,7 @@ impl PluginSettings {
                     description: m.description.clone(),
                     contract: m.settings.clone(),
                     page,
+                    rack: crate::plugin_controls::read(broker, id).unwrap_or_default(),
                 })
             })
             .collect();
@@ -330,6 +333,7 @@ pub fn section(s: &mut SectionBuilder<'_>, p: &PluginSettings, t: &dyn Fn(Messag
         return;
     }
     page(s, p, t);
+    controls(s, p, t);
     // The keys its declared page does not place keep their generated
     // fields, so no setting becomes unreachable.
     let placed = p.page.placed();
@@ -364,6 +368,39 @@ pub fn section(s: &mut SectionBuilder<'_>, p: &PluginSettings, t: &dyn Fn(Messag
             f = f.when(&c);
         }
         s.field(f);
+    }
+}
+
+/// A plugin's declared controls (`[ui] rack`): their card, drawn by the
+/// host ([`crate::plugin_controls::WIDGET`]), and what was left out of
+/// it, said in a callout.
+fn controls(s: &mut SectionBuilder<'_>, p: &PluginSettings, t: &dyn Fn(Message) -> String) {
+    let d = &p.rack;
+    if d.parts.is_empty() && d.problems.is_empty() {
+        return;
+    }
+    let title = d.title.as_ref().map_or_else(
+        || t(Message::new("gui-settings-plugin-controls", "Controls")),
+        |id| t(Message::new(id, id)),
+    );
+    s.group("plugin-controls", &title);
+    if !d.problems.is_empty() {
+        s.callout(Callout::new(
+            "plugin-controls-refused",
+            Tone::Warning,
+            &t(Message::new(
+                "gui-settings-plugin-controls-refused",
+                "Part of this plugin's controls is not shown: { $problems }",
+            )
+            .with("problems", d.problems.join("; "))),
+        ));
+    }
+    if !d.parts.is_empty() {
+        s.widget(
+            "plugin-controls",
+            crate::plugin_controls::WIDGET,
+            serde_json::json!({ "plugin": p.id }),
+        );
     }
 }
 
@@ -960,6 +997,7 @@ mod tests {
             description: "A fake plugin".into(),
             contract: serde_json::from_str(contract).unwrap(),
             page: crate::config::plugin_pages::Page::default(),
+            rack: helios_rack::plugin::Declared::default(),
         }
     }
 

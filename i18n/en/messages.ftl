@@ -2699,6 +2699,10 @@ gui-settings-imports = Imports
 
 gui-settings-library = Library
 
+gui-settings-plugin-controls = Controls
+
+gui-settings-plugin-controls-refused = Part of this plugin's controls is not shown: { $problems }
+
 gui-settings-plugin-granted = Allowed
 
 gui-settings-plugin-no-capability = It asks for no permission.

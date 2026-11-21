@@ -10,11 +10,13 @@ port=""
 filename=""
 action=""
 number=""
+config=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) port="$2"; shift 2 ;;
         --filename) filename="$2"; shift 2 ;;
         --get-file) action="get"; number="$2"; shift 2 ;;
+        --set-config) action="set"; config="$2"; shift 2 ;;
         --auto-detect|--summary|--capture-image|--list-files) action="$1"; shift ;;
         *) echo "fake gphoto2: unknown argument $1" >&2; exit 2 ;;
     esac
@@ -66,6 +68,10 @@ case "$action" in
         fi
         cp "$state/$f" "${filename:-$f}"
         echo "Saving file as ${filename:-$f}"
+        ;;
+    set)
+        # The settings made, one per line, beside the pictures.
+        echo "$config" >> "$state.config"
         ;;
     *)
         echo "fake gphoto2: nothing to do" >&2

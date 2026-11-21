@@ -274,6 +274,70 @@ The official Google Photos plugin declares its settings page this way
 address, a status saying whether the address answers, and a Test
 connection button, both through its `google-photos.api-check` command.
 
+## Declared controls
+
+A plugin also declares **controls**: values of its own and a card of
+controls for them, drawn by the host through `helios-rack` and
+`egui_hud`, never by the plugin. They are rack declarations in JSON
+beside its manifest (`[ui] rack`, the same `ui` interface, at most 8
+files), read and checked before anything of the plugin runs.
+
+```toml
+[compat]
+interfaces = { protocol = 1, device = 1, ui = 1 }
+
+[ui]
+rack = ["ui/controls.json"]
+```
+
+```json
+{
+  "version": 1,
+  "title": "io-github-quazardous-helios-gphoto2-camera-capture",
+  "values": {
+    "iso": {"type": "choice", "label": "…-iso", "choices": ["auto", "100", "200"], "default": "auto"},
+    "shutter": {"type": "float", "label": "…-shutter", "min": 0.000125, "max": 30,
+                "default": 0.008, "unit": "s", "logarithmic": true}
+  },
+  "case": {"items": [
+    {"part": {"name": "iso", "control": "implicit"}},
+    {"part": {"name": "shutter", "control": "implicit"}}
+  ]}
+}
+```
+
+- **Values.** Each key (lowercase letters, digits, `-`, `_`) is a value
+  of the store at `plugin/<plugin id>/<key>`, declared when the plugin is
+  enabled with its type (`float`, `int`, `bool`, `choice`, `text`), its
+  range, step, unit, precision and default. Its label and description
+  are message ids of the plugin's own catalogue. Their steps are the
+  plugins' history scope, kept when another photo opens.
+- **The card** is an `egui_hud` case: each part names a value and the
+  control it is edited by, a control of Helios's catalogue (its type
+  checked against the value) or `implicit`, the value's own managed
+  control (a slider for a number, a menu for a choice). `egui_hud`
+  patches (`{module: <plugin id>, param, control, jack}`) add parts too.
+  A plugin adds no control of its own, and the card's chrome is the
+  host's. It shows in the plugin's section of Settings > Plugins.
+- **Checks.** A part naming a value not declared, a control not in the
+  catalogue or one whose type does not fit, a value badly typed, a text
+  that is not the plugin's message id, a patch of another plugin's
+  values: each is left out with its reason, said on the plugin's section
+  and in the log, and the rest of the card stays. A file is at most
+  256 KB, 200 values and parts in all; a newer format is refused whole.
+- **The values stay on the host's side.** A drag is one undo step and
+  Escape gives it up without a trace, as for any parameter. A plugin
+  never writes its values over the protocol (`ui` 1); it hears each
+  committed change as the notification `ui/changed` (`{paths, values,
+  cause}`: the store paths, the values by key, `edit`, `undo` or
+  `redo`), once per step, once per undo or redo, never for a drag's
+  frames or a drag given up. A stopped plugin is not started for it: it
+  is handed its values at `initialize` (`ui.values`, by key).
+
+The gphoto2-camera example declares its capture controls this way (ISO
+as a choice, the shutter speed as a number of seconds) and sets each
+change on the camera with `gphoto2 --set-config`.
+
 ## Packaging and trust
 
 - A signed archive: the manifest, the plugin's code, its modules.

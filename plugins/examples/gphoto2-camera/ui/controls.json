@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "title": "io-github-quazardous-helios-gphoto2-camera-capture",
+  "values": {
+    "iso": {
+      "type": "choice",
+      "label": "io-github-quazardous-helios-gphoto2-camera-iso",
+      "description": "io-github-quazardous-helios-gphoto2-camera-iso-about",
+      "choices": ["auto", "100", "200", "400", "800", "1600", "3200", "6400"],
+      "default": "auto"
+    },
+    "shutter": {
+      "type": "float",
+      "label": "io-github-quazardous-helios-gphoto2-camera-shutter",
+      "description": "io-github-quazardous-helios-gphoto2-camera-shutter-about",
+      "min": 0.000125,
+      "max": 30,
+      "default": 0.008,
+      "step": 0.0001,
+      "precision": 4,
+      "unit": "s",
+      "logarithmic": true
+    }
+  },
+  "case": {
+    "items": [
+      { "part": { "name": "iso", "control": "implicit" } },
+      { "part": { "name": "shutter", "control": "implicit" } }
+    ]
+  }
+}

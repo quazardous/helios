@@ -3133,6 +3133,7 @@ dependencies = [
  "helios-module-masks",
  "helios-shell",
  "helios-values",
+ "serde",
  "serde_json",
 ]
 
