@@ -2736,6 +2736,7 @@ dependencies = [
  "blake3",
  "dirs",
  "egui-pop-model",
+ "helios-config",
  "helios-connect",
  "helios-core",
  "helios-decision",
@@ -2988,8 +2989,10 @@ dependencies = [
  "egui-pop-hooks",
  "helios-cache",
  "helios-calibrate",
+ "helios-config",
  "helios-connect",
  "helios-core",
+ "helios-decision",
  "helios-export",
  "helios-health",
  "helios-init",
@@ -3001,6 +3004,7 @@ dependencies = [
  "helios-shell",
  "helios-storage",
  "helios-testkit",
+ "helios-thumbs",
  "helios-vault",
  "helios-vault-sqlite",
  "helios-xmp",
@@ -3149,6 +3153,7 @@ dependencies = [
 name = "helios-shell"
 version = "0.92.0"
 dependencies = [
+ "helios-config",
  "serde",
  "serde_json",
 ]
@@ -3158,6 +3163,7 @@ name = "helios-storage"
 version = "0.92.0"
 dependencies = [
  "blake3",
+ "helios-config",
  "helios-core",
  "helios-health",
  "helios-vault",
@@ -3219,6 +3225,7 @@ version = "0.92.0"
 dependencies = [
  "blake3",
  "helios-cache",
+ "helios-config",
  "helios-load",
  "image",
  "rawler",

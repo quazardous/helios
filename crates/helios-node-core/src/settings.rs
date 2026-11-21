@@ -17,12 +17,54 @@
 //! live in each machine's file, and the interface's own (display, input,
 //! window geometry) in the client's interface settings. The node refuses
 //! any other layer name ([`is_node_layer`]).
+//!
+//! **The schema.** Every setting is declared by the crate that owns it, as
+//! its own set; [`SETS`] gathers them in one place and [`schema`] builds
+//! the one schema both the node and the desktop read the layers with (the
+//! node keeps the person's layer, which the desktop writes, so both must
+//! know every key in it).
 
 use std::sync::Arc;
 
+use helios_config::{Schema, Setting};
 use helios_core::{Bus, Event};
 use helios_vault::{Store, Vault};
 use serde::Serialize;
+
+mod declared;
+
+pub use declared::SETTINGS;
+
+/// Every set of settings Helios knows, each declared by the crate that
+/// owns it. `helios_config::SETTINGS` holds the only ones declared apart
+/// from their owner (the render cache's size, read by
+/// `helios_config::Config::cache_budget` for the engine below it).
+pub const SETS: &[&[Setting]] = &[
+    helios_config::SETTINGS,
+    helios_thumbs::settings::SETTINGS,
+    helios_shell::settings::SETTINGS,
+    helios_storage::settings::SETTINGS,
+    helios_library::settings::SETTINGS,
+    SETTINGS,
+    helios_decision::settings::SETTINGS,
+];
+
+/// Settings another component keeps rather than the layers, declared by
+/// that component so a form draws them; never in the [`schema`].
+pub const KEPT_ELSEWHERE: &[&[Setting]] = &[helios_library::settings::KEPT_ELSEWHERE];
+
+/// The settings the node and the desktop know: every set of [`SETS`].
+pub fn schema() -> Schema {
+    Schema::new(SETS)
+}
+
+/// A setting declared in [`KEPT_ELSEWHERE`].
+pub fn kept_elsewhere(key: &str) -> Option<&'static Setting> {
+    KEPT_ELSEWHERE
+        .iter()
+        .flat_map(|set| set.iter())
+        .find(|s| s.key == key)
+}
 
 /// The source the node's settings events are published under.
 pub const SOURCE: &str = "node.settings";
@@ -127,6 +169,70 @@ fn refuse_others(name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    /// Every key the settings held when they were all declared in
+    /// `helios-config`, before each moved to the crate that owns it: a
+    /// saved layer still loads only if none is lost or renamed.
+    const BEFORE_THE_MOVE: &[&str] = &[
+        "system.cache.budget",
+        "system.cache.share",
+        "system.cache.states",
+        "system.cache.thumbnails",
+        "system.cache.textures",
+        "system.map.exclude",
+        "system.map.defaults",
+        "system.map.record",
+        "system.map.limit",
+        "system.map.keepMissing",
+        "system.scheduler.workers",
+        "system.ai.calls",
+        "system.events.journal",
+        "system.workflow.keep_days",
+        "project.decisions.mode",
+        "interface.panels.queue_when_empty",
+        "interface.graph.zoom",
+        "import.automatic.paused",
+        "import.automatic.ask_files",
+        "import.automatic.ask_gb",
+        "import.show_in_library",
+        "interface.experimental.workshops",
+    ];
+
+    #[test]
+    fn every_setting_is_declared_once_by_one_set() {
+        for key in BEFORE_THE_MOVE {
+            let sets = super::SETS
+                .iter()
+                .filter(|set| set.iter().any(|s| s.key == *key))
+                .count();
+            let times = super::SETS
+                .iter()
+                .flat_map(|set| set.iter())
+                .filter(|s| s.key == *key)
+                .count();
+            assert_eq!((sets, times), (1, 1), "`{key}`");
+        }
+        let mut now: Vec<&str> = super::schema().iter().map(|s| s.key).collect();
+        let mut before = BEFORE_THE_MOVE.to_vec();
+        now.sort_unstable();
+        before.sort_unstable();
+        assert_eq!(now, before, "the schema holds exactly the keys it held");
+    }
+
+    #[test]
+    fn kept_settings_do_not_collide_with_the_schema() {
+        let schema = super::schema();
+        let kept: Vec<&str> = super::KEPT_ELSEWHERE
+            .iter()
+            .flat_map(|set| set.iter())
+            .map(|s| s.key)
+            .collect();
+        assert_eq!(kept, ["library.folder"]);
+        for key in kept {
+            assert!(schema.get(key).is_none(), "`{key}` is in the schema");
+            assert!(super::kept_elsewhere(key).is_some());
+        }
+    }
+
     use super::*;
     use crate::node::LocalNode;
     use helios_vault_sqlite::SqliteStore;

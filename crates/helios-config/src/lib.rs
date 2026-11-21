@@ -204,8 +204,14 @@ impl Setting {
     }
 }
 
-/// The settings of the framework itself. Other crates declare theirs the
-/// same way and add them to a [`Schema`].
+/// The settings declared here rather than by a crate that owns them:
+/// the render cache's size. [`Config::cache_budget`] reads them, for the
+/// engine in `helios-core`, which sits below this crate and so cannot
+/// declare them.
+///
+/// Every other setting is declared by the crate that owns it, as its own
+/// `&[Setting]` set; a program gathers the sets into one [`Schema`]
+/// (Helios's node and desktop: `helios_node_core::settings::schema`).
 pub const SETTINGS: &[Setting] = &[
     Setting {
         key: "system.cache.budget",
@@ -233,262 +239,7 @@ pub const SETTINGS: &[Setting] = &[
             integer: false,
         },
     },
-    Setting {
-        key: "system.cache.states",
-        concern: Concern::Machine,
-        label: "Kept photo states",
-        about: "Memory the photos' computed states may hold (the shown photo's full-size step, kept so the fit and a zoom do not compute it again, and the recent photos'); 0 means 12.5 % of the machine's memory, between 1 and 4 GiB.",
-        kind: Kind::Number {
-            min: 0.0,
-            max: 1_048_576.0,
-            default: 0.0,
-            unit: "MiB",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.cache.thumbnails",
-        concern: Concern::Machine,
-        label: "Thumbnail cache",
-        about: "Disk space the library's thumbnail cache (.helios/thumbs beside the catalogue) may use before evicting the thumbnails used least recently.",
-        kind: Kind::Number {
-            min: 16.0,
-            max: 1_048_576.0,
-            default: 2048.0,
-            unit: "MiB",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.cache.textures",
-        concern: Concern::Machine,
-        label: "Thumbnail textures",
-        about: "Graphics memory the grids' thumbnails may hold; beyond it, the thumbnails out of view are freed, those seen longest ago first, and read back from the thumbnail cache when they come back.",
-        kind: Kind::Number {
-            min: 16.0,
-            max: 65_536.0,
-            default: 512.0,
-            unit: "MiB",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.map.exclude",
-        concern: Concern::Machine,
-        label: "Places never recorded",
-        about: "Rules added to the image map's blacklist, as a JSON list: each `{\"glob\": \"**/Private/**\"}` matches the absolute path, or with `\"volume\": \"<id>\"` the path inside that volume; a glob starting with `!` re-includes what a default excludes. The last rule that matches wins.",
-        kind: Kind::Text { default: "" },
-    },
-    Setting {
-        key: "system.map.defaults",
-        concern: Concern::Machine,
-        label: "Default blacklist",
-        about: "Whether the image map leaves out the system's folders, Helios's own data, caches, build trees, hidden folders, trash and other photo applications' libraries; off keeps only the rules above.",
-        kind: Kind::Toggle {
-            default: true,
-            on: "on",
-            off: "off",
-        },
-    },
-    Setting {
-        key: "system.map.record",
-        concern: Concern::Machine,
-        label: "Image map records",
-        about: "What the image map records: everywhere (every listing, and background scans of known volumes), listings (what Helios is shown, plus scans of volumes with a role) or import (only what is imported).",
-        kind: Kind::Choice {
-            options: &["everywhere", "listings", "import"],
-            default: "listings",
-        },
-    },
-    Setting {
-        key: "system.map.limit",
-        concern: Concern::Machine,
-        label: "Files seen kept",
-        about: "How many files seen but not in the Library the image map keeps; past it, those seen longest ago are forgotten first. Library files are never counted.",
-        kind: Kind::Number {
-            min: 1000.0,
-            max: 100_000_000.0,
-            default: 1_000_000.0,
-            unit: "files",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.map.keepMissing",
-        concern: Concern::Machine,
-        label: "Missing files kept",
-        about: "How long a file seen but not in the Library stays in the image map once it is missing from its place.",
-        kind: Kind::Number {
-            min: 0.0,
-            max: 3650.0,
-            default: 30.0,
-            unit: "days",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.scheduler.workers",
-        concern: Concern::Machine,
-        label: "Worker threads",
-        about: "How many jobs run at once on this machine; 0 means one per CPU.",
-        kind: Kind::Number {
-            min: 0.0,
-            max: 1024.0,
-            default: 0.0,
-            unit: "threads",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.ai.calls",
-        concern: Concern::Machine,
-        label: "Model calls at once",
-        about: "How many calls to AI models (decision nodes) run at the same time.",
-        kind: Kind::Number {
-            min: 1.0,
-            max: 64.0,
-            default: 2.0,
-            unit: "calls",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.events.journal",
-        concern: Concern::Machine,
-        label: "Event journal",
-        about: "How many recent events the bus keeps for inspection and waits.",
-        kind: Kind::Number {
-            min: 16.0,
-            max: 1_000_000.0,
-            default: 1024.0,
-            unit: "events",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "system.workflow.keep_days",
-        concern: Concern::Project,
-        label: "Finished batches kept",
-        about: "How long a finished batch (a run of the workflow level) stays in the vault, failures included, before it is removed whole; 0 removes it when the node next starts.",
-        kind: Kind::Number {
-            min: 0.0,
-            max: 3650.0,
-            default: 30.0,
-            unit: "days",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "project.decisions.mode",
-        concern: Concern::Project,
-        label: "Decision nodes",
-        about: "How decision nodes are resolved by default in this project.",
-        kind: Kind::Choice {
-            options: &["full_ai", "ai_assisted", "human"],
-            default: "ai_assisted",
-        },
-    },
-    Setting {
-        key: "interface.panels.queue_when_empty",
-        concern: Concern::User,
-        label: "Queue panel without a queue",
-        about: "What the queue panel does when the selected node has no queue.",
-        kind: Kind::Toggle {
-            default: true,
-            on: "shown, empty",
-            off: "hidden",
-        },
-    },
-    Setting {
-        key: "interface.graph.zoom",
-        concern: Concern::User,
-        label: "Graph view opens on",
-        about: "Whether the graph view opens on the overview or the full detail.",
-        kind: Kind::Choice {
-            options: &["overview", "detail"],
-            default: "detail",
-        },
-    },
-    Setting {
-        key: "import.automatic.paused",
-        concern: Concern::User,
-        label: "Pause automatic imports",
-        about: "While on, no source imports on its own: cards plugged in and new files in watched folders wait until it is off again.",
-        kind: Kind::Toggle {
-            default: false,
-            on: "paused",
-            off: "running",
-        },
-    },
-    Setting {
-        key: "import.automatic.ask_files",
-        concern: Concern::User,
-        label: "Ask before importing more photos than",
-        about: "An automatic import of more photos than this asks first, in a notice that opens the import window. 0: never asks.",
-        kind: Kind::Number {
-            min: 0.0,
-            max: 100_000.0,
-            default: 500.0,
-            unit: "photos",
-            integer: true,
-        },
-    },
-    Setting {
-        key: "import.automatic.ask_gb",
-        concern: Concern::User,
-        label: "Ask before importing more than",
-        about: "An automatic import larger than this asks first, in a notice that opens the import window. 0: never asks.",
-        kind: Kind::Number {
-            min: 0.0,
-            max: 10_000.0,
-            default: 20.0,
-            unit: "GB",
-            integer: false,
-        },
-    },
-    Setting {
-        key: "import.show_in_library",
-        concern: Concern::User,
-        label: "After an import, show it in the Library",
-        about: "When an import you started ends, the Library shows its photos, all of them selected. Never for automatic imports; while you edit a photo, its notice offers it instead.",
-        kind: Kind::Toggle {
-            default: true,
-            on: "on",
-            off: "off",
-        },
-    },
-    Setting {
-        key: "interface.experimental.workshops",
-        concern: Concern::User,
-        label: "Workshops",
-        about: "Experimental: the Workshops panel and commands, to find, apply and aim macros by what they are for. May change; what it saves stays a macro. Takes effect at the next start.",
-        kind: Kind::Toggle {
-            default: false,
-            on: "on",
-            off: "off",
-        },
-    },
 ];
-
-/// Settings another component keeps rather than the layers: declared here
-/// so a form draws them (their label, why, kind), written through their
-/// keeper. Not in [`Schema::core`]: the layers never hold them.
-///
-/// - `library.folder`: where imports copy photos, kept by the library in
-///   its catalogue (`helios_library::import::library_root`); the first
-///   run's library folder step fills it.
-pub const KEPT_ELSEWHERE: &[Setting] = &[Setting {
-    key: "library.folder",
-    concern: Concern::Project,
-    label: "Library folder",
-    about: "Where imports copy photos, and where picked photos go.",
-    kind: Kind::Text { default: "" },
-}];
-
-/// A setting declared in [`KEPT_ELSEWHERE`].
-pub fn kept_elsewhere(key: &str) -> Option<&'static Setting> {
-    KEPT_ELSEWHERE.iter().find(|s| s.key == key)
-}
 
 /// The declared settings a program knows.
 #[derive(Clone, Debug, Default)]
@@ -513,11 +264,6 @@ impl Schema {
             "a setting is declared twice"
         );
         Self { settings }
-    }
-
-    /// The framework's own settings.
-    pub fn core() -> Self {
-        Self::new(&[SETTINGS])
     }
 
     pub fn get(&self, key: &str) -> Option<&'static Setting> {
@@ -955,8 +701,75 @@ impl Describe for Config {
 mod tests {
     use super::*;
 
+    /// Settings in the shape of real ones (each concern, each kind), for
+    /// the framework's own tests: the real ones are declared by the
+    /// crates that own them, which depend on this one.
+    const FIXTURE: &[Setting] = &[
+        Setting {
+            key: "system.cache.thumbnails",
+            concern: Concern::Machine,
+            label: "Thumbnail cache",
+            about: "Disk space the library's thumbnail cache (.helios/thumbs beside the catalogue) may use before evicting the thumbnails used least recently.",
+            kind: Kind::Number {
+                min: 16.0,
+                max: 1_048_576.0,
+                default: 2048.0,
+                unit: "MiB",
+                integer: true,
+            },
+        },
+        Setting {
+            key: "system.events.journal",
+            concern: Concern::Machine,
+            label: "Event journal",
+            about: "How many recent events the bus keeps for inspection and waits.",
+            kind: Kind::Number {
+                min: 16.0,
+                max: 1_000_000.0,
+                default: 1024.0,
+                unit: "events",
+                integer: true,
+            },
+        },
+        Setting {
+            key: "project.decisions.mode",
+            concern: Concern::Project,
+            label: "Decision nodes",
+            about: "How decision nodes are resolved by default in this project.",
+            kind: Kind::Choice {
+                options: &["full_ai", "ai_assisted", "human"],
+                default: "ai_assisted",
+            },
+        },
+        Setting {
+            key: "interface.panels.queue_when_empty",
+            concern: Concern::User,
+            label: "Queue panel without a queue",
+            about: "What the queue panel does when the selected node has no queue.",
+            kind: Kind::Toggle {
+                default: true,
+                on: "shown, empty",
+                off: "hidden",
+            },
+        },
+        Setting {
+            key: "interface.graph.zoom",
+            concern: Concern::User,
+            label: "Graph view opens on",
+            about: "Whether the graph view opens on the overview or the full detail.",
+            kind: Kind::Choice {
+                options: &["overview", "detail"],
+                default: "detail",
+            },
+        },
+    ];
+
+    fn schema() -> Schema {
+        Schema::new(&[SETTINGS, FIXTURE])
+    }
+
     fn config() -> Config {
-        Config::new(Schema::core())
+        Config::new(schema())
     }
 
     #[test]
@@ -1143,7 +956,7 @@ mod tests {
 
     #[test]
     fn pages_and_groups_come_from_the_names() {
-        let schema = Schema::core();
+        let schema = schema();
         let zoom = schema.get("interface.graph.zoom").unwrap();
         assert_eq!((zoom.page(), zoom.group()), ("interface", "graph"));
         assert_eq!(zoom.input()["type"], "choice");

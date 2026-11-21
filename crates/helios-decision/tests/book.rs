@@ -392,7 +392,7 @@ fn an_answer_holds_for_its_question_and_replays_with_it() {
 
 #[test]
 fn a_project_or_a_run_overrides_the_node_mode() {
-    let mut config = Config::new(Schema::core());
+    let mut config = Config::new(Schema::new(&[helios_decision::settings::SETTINGS]));
     // Nothing set: the node's own mode, else the default (AI-assisted).
     assert_eq!(effective_mode(Some(Mode::Human), &config), Ok(Mode::Human));
     assert_eq!(effective_mode(None, &config), Ok(Mode::AiAssisted));

@@ -27,7 +27,7 @@ use egui_pop::api::admin::model::ValueScope;
 use egui_pop::api::admin::store::{
     Changes, CompositeStore, FileStore, OnChange, SettingsStore, Values, diff,
 };
-use helios_config::{Concern, Layer, Schema};
+use helios_config::{Concern, Layer};
 
 /// The interface's own settings (egui-pop's, not Helios's), in the
 /// configuration folder.
@@ -103,7 +103,10 @@ impl NodeSettingsStore {
                 settings: Mutex::new(settings),
                 node,
                 machine: config_dir.join(GLOBAL_FILE),
-                keys: Schema::core().iter().map(|s| s.key).collect(),
+                keys: helios_node_core::settings::schema()
+                    .iter()
+                    .map(|s| s.key)
+                    .collect(),
                 watchers: Mutex::new(BTreeMap::new()),
             }),
         }
@@ -224,7 +227,7 @@ impl SettingsStore for NodeSettingsStore {
     }
 
     fn save(&self, scope: ValueScope, changes: &Changes) -> Result<(), String> {
-        let schema = Schema::core();
+        let schema = helios_node_core::settings::schema();
         let mut settings = lock(&self.inner.settings);
         let mut errors = Vec::new();
         for (key, value) in changes {
@@ -320,7 +323,7 @@ mod tests {
 
     /// A setting's value in a Helios layer, as JSON.
     fn layer_value(settings: &Settings, layer: Layer, key: &str) -> Option<Json> {
-        let s = Schema::core().get(key)?;
+        let s = helios_node_core::settings::schema().get(key)?;
         Some(to_json(&s.kind, &settings.config().value_in(layer, key)?))
     }
 
