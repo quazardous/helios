@@ -243,7 +243,7 @@ fn the_folders_tree_counts_as_the_vault_and_a_click_scopes_the_grid() {
     let volumes = h.state().library().folder_tree().unwrap();
     assert_eq!(volumes.len(), 1, "on no known volume: {volumes:?}");
     assert_eq!((volumes[0].id.as_deref(), volumes[0].count), (None, 3));
-    h.get_by_label("Other folders 3");
+    h.get_by_label("Other folders, 3");
     let tree = &volumes[0].folders;
     let top = root.to_string_lossy().into_owned();
     let raw = root.join("raw").to_string_lossy().into_owned();
@@ -270,12 +270,12 @@ fn the_folders_tree_counts_as_the_vault_and_a_click_scopes_the_grid() {
     }
 
     // A click scopes the grid to the folder; again, to the whole Library.
-    h.get_by_label(&format!("{top} 3"));
-    h.get_by_label("raw 1").click();
+    h.get_by_label(&format!("{top}, 3"));
+    h.get_by_label("raw, 1").click();
     settle(&mut h, &mut persist, 5.0);
     assert_eq!(grid(&h), ["c.nef"]);
     assert_eq!(h.state().library().folder(), Some(raw.clone()));
-    h.get_by_label("raw 1").click();
+    h.get_by_label("raw, 1").click();
     settle(&mut h, &mut persist, 9.0);
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
     assert_eq!(h.state().library().folder(), None);
@@ -336,17 +336,30 @@ fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() 
         .map(|v| (v.name.as_str(), v.count, v.online))
         .collect();
     assert_eq!(tops, [("System", 2, true), ("EOS_CARD", 1, false)]);
-    h.get_by_label("System 2");
+    h.get_by_label("System, 2");
     // The offline one says so and when it was last seen.
     let day = helios_gui::library::day_text(seen as i64).unwrap();
     assert_eq!(volumes[1].last_seen, Some(seen));
-    h.get_by_label(&format!("EOS_CARD 1, offline, last seen {day}"));
+    // Dimmed, said unavailable, its line saying when it was last seen.
+    let said = |h: &Harness<'_, Shell>, label: &str| {
+        h.get_by_label(label)
+            .accesskit_node()
+            .description()
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        said(&h, "EOS_CARD, 1"),
+        format!("Unavailable, Offline, last seen {day}")
+    );
+    assert_eq!(said(&h, "System, 2"), "", "a volume at hand is not dimmed");
 
     // Its folder still filters the grid: the photo is offline, its
     // thumbnail cached.
     let dcim = card.to_string_lossy().into_owned();
     assert_eq!(volumes[1].folders[0].path, dcim);
-    let row = format!("{} 1", volumes[1].folders[0].name);
+    let row = format!("{}, 1", volumes[1].folders[0].name);
+    // Its folders dimmed too, still choosable.
+    assert_eq!(said(&h, &row), "Unavailable");
     h.get_by_label(&row).click();
     settle(&mut h, &mut persist, 5.0);
     {
@@ -366,7 +379,7 @@ fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() 
     row_menu(&mut h, &row);
     assert!(menu_greyed(&h).iter().all(|(_, greyed)| *greyed));
     // A volume at hand's: its mount point, shown, scanned, imported.
-    row_menu(&mut h, "System 2");
+    row_menu(&mut h, "System, 2");
     assert!(menu_greyed(&h).iter().all(|(_, greyed)| !*greyed));
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
@@ -421,7 +434,7 @@ fn the_folder_chosen_is_the_workspace_s_and_its_menu_imports_there() {
     h.get_by_label("Folders").click();
     settle(&mut h, &mut persist, 1.0);
     assert_eq!(kept_folder(&config, &ws), None);
-    h.get_by_label("raw 1").click();
+    h.get_by_label("raw, 1").click();
     settle(&mut h, &mut persist, 5.0);
     assert_eq!(grid(&h), ["c.nef"]);
     assert_eq!(kept_folder(&config, &ws), Some(raw.clone()));
@@ -458,7 +471,7 @@ fn the_folder_chosen_is_the_workspace_s_and_its_menu_imports_there() {
     // The row's menu: its three commands, at hand.
     h.get_by_label("Folders").click();
     settle(&mut h, &mut persist, 25.0);
-    row_menu(&mut h, "raw 1");
+    row_menu(&mut h, "raw, 1");
     assert_eq!(
         menu_greyed(&h),
         [
@@ -550,7 +563,7 @@ fn an_album_made_from_the_selection_scopes_the_grid_and_each_change_undoes() {
     );
 
     // A click scopes the grid to it, kept with the workspace.
-    h.get_by_label("Trip 2024 2").click();
+    h.get_by_label("Trip 2024, 2").click();
     settle(&mut h, &mut persist, 5.0);
     assert_eq!(grid(&h), ["a.jpg", "c.nef"]);
     assert_eq!(
@@ -686,7 +699,7 @@ fn a_smart_album_made_through_its_form_scopes_the_grid_and_its_rules_undo() {
     );
 
     // A click on it (marked as smart) scopes the grid, as an album's.
-    h.get_by_label("⚙ Best 1").click();
+    h.get_by_label("⚙ Best, 1").click();
     settle(&mut h, &mut persist, 5.0);
     assert_eq!(h.state().library().collection().as_deref(), Some("best"));
     assert_eq!(kept_collection(&config, &ws).as_deref(), Some("best"));
@@ -941,7 +954,7 @@ fn a_nested_tree_is_built_in_the_rule_editor_each_edit_undone() {
 /// The first quick collection's row in the Albums section, the target
 /// ("+"), by its count.
 fn quick_row(count: usize) -> String {
-    format!("⚡ Quick collection + {count}")
+    format!("⚡ Quick collection, + {count}")
 }
 
 /// The steps of the library's history, newest last.
@@ -1178,9 +1191,9 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
         ],
         "{listed}"
     );
-    h.get_by_label("⚡ Quick collection 0");
-    h.get_by_label("⚡ Maybe + 0");
-    h.get_by_label("⚡ Picks 1");
+    h.get_by_label("⚡ Quick collection, 0");
+    h.get_by_label("⚡ Maybe, + 0");
+    h.get_by_label("⚡ Picks, 1");
     assert!(answer_err(
         &mut h,
         "library.quick.create",
@@ -1195,8 +1208,8 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
     h.run();
     h.key_press(Key::B);
     settle(&mut h, &mut persist, 3.0);
-    h.get_by_label("⚡ Maybe + 2");
-    h.get_by_label("⚡ Quick collection 0");
+    h.get_by_label("⚡ Maybe, + 2");
+    h.get_by_label("⚡ Quick collection, 0");
     assert_eq!(
         steps(&h).last().unwrap(),
         "Add 2 photos to the quick collection “Maybe”"
@@ -1206,7 +1219,7 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
     // goes in.
     let (from, to) = (
         cell_at(&h, "c.nef"),
-        h.get_by_label("⚡ Picks 1").rect().center(),
+        h.get_by_label("⚡ Picks, 1").rect().center(),
     );
     drag_onto(&mut h, from, to, |h| {
         assert_eq!(
@@ -1215,14 +1228,14 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
         );
     });
     settle(&mut h, &mut persist, 4.0);
-    h.get_by_label("⚡ Picks 3");
+    h.get_by_label("⚡ Picks, 3");
     assert_eq!(
         steps(&h).last().unwrap(),
         "Add 2 photos to the quick collection “Picks”"
     );
     undo(&history);
     settle(&mut h, &mut persist, 5.0);
-    h.get_by_label("⚡ Picks 1");
+    h.get_by_label("⚡ Picks, 1");
 
     // Renamed, targeted back to the first, removed from: one step each.
     agent(
@@ -1231,21 +1244,21 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
         json!({ "id": "picks", "name": "Keepers" }),
     );
     settle(&mut h, &mut persist, 6.0);
-    h.get_by_label("⚡ Keepers 1");
+    h.get_by_label("⚡ Keepers, 1");
     agent(&mut h, "library.quick.target", json!({ "id": "quick" }));
     settle(&mut h, &mut persist, 7.0);
     h.get_by_label(&quick_row(0));
-    h.get_by_label("⚡ Maybe 2");
+    h.get_by_label("⚡ Maybe, 2");
     run(
         &mut h,
         "library.quick.remove",
         json!({ "id": "maybe", "images": [id(2).hex()] }),
     );
     settle(&mut h, &mut persist, 8.0);
-    h.get_by_label("⚡ Maybe 1");
+    h.get_by_label("⚡ Maybe, 1");
     undo(&history);
     settle(&mut h, &mut persist, 9.0);
-    h.get_by_label("⚡ Maybe 2");
+    h.get_by_label("⚡ Maybe, 2");
 
     // The target deleted: the first one is the target again; undone, it
     // comes back as the target with its photos.
@@ -1258,7 +1271,7 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
     ));
     run(&mut h, "library.quick.delete", json!({ "id": "maybe" }));
     settle(&mut h, &mut persist, 11.0);
-    assert!(h.query_by_label("⚡ Maybe + 2").is_none());
+    assert!(h.query_by_label("⚡ Maybe, + 2").is_none());
     h.get_by_label(&quick_row(0));
     assert_eq!(
         steps(&h).last().unwrap(),
@@ -1266,11 +1279,11 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
     );
     undo(&history);
     settle(&mut h, &mut persist, 12.0);
-    h.get_by_label("⚡ Maybe + 2");
+    h.get_by_label("⚡ Maybe, + 2");
     assert_eq!(h.state().library().quick_target(), "maybe");
 
     // A click on a named one scopes the grid to it.
-    h.get_by_label("⚡ Maybe + 2").click();
+    h.get_by_label("⚡ Maybe, + 2").click();
     settle(&mut h, &mut persist, 13.0);
     assert_eq!(h.state().library().collection().as_deref(), Some("maybe"));
     assert_eq!(grid(&h), ["b.jpg", "c.nef"]);
@@ -1477,10 +1490,10 @@ fn album_sets_nest_count_the_union_and_move_with_undo() {
         history.line().undo.last().unwrap().label.text,
         "Move “Trip” into a set"
     );
-    h.get_by_label("Travel 2");
-    h.get_by_label("Inner 2");
-    h.get_by_label("Trip 2");
-    h.get_by_label("Show or hide the albums of Travel");
+    h.get_by_label("Travel, 2");
+    h.get_by_label("Inner, 2");
+    h.get_by_label("Trip, 2");
+    h.get_by_label("Show or hide Travel");
     // A second album in the outer set: its count is the union.
     run(
         &mut h,
@@ -1488,16 +1501,16 @@ fn album_sets_nest_count_the_union_and_move_with_undo() {
         json!({ "id": "home", "set": "travel" }),
     );
     settle(&mut h, &mut persist, 5.0);
-    h.get_by_label("Travel 3");
-    h.get_by_label("Travel 3").click();
+    h.get_by_label("Travel, 3");
+    h.get_by_label("Travel, 3").click();
     settle(&mut h, &mut persist, 6.0);
     assert_eq!(h.state().library().collection().as_deref(), Some("travel"));
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
     // Closed: its members hidden.
-    h.get_by_label("Show or hide the albums of Travel").click();
+    h.get_by_label("Show or hide Travel").click();
     settle(&mut h, &mut persist, 7.0);
-    assert!(h.query_by_label("Inner 2").is_none());
-    h.get_by_label("Show or hide the albums of Travel").click();
+    assert!(h.query_by_label("Inner, 2").is_none());
+    h.get_by_label("Show or hide Travel").click();
     settle(&mut h, &mut persist, 8.0);
 
     // A set never inside itself, nor inside a set below it.
@@ -1524,8 +1537,8 @@ fn album_sets_nest_count_the_union_and_move_with_undo() {
 
     // Undone: Home out of the set again.
     undo(&mut h, &mut persist, 10.0);
-    h.get_by_label("Travel 2");
-    h.get_by_label("Home 2");
+    h.get_by_label("Travel, 2");
+    h.get_by_label("Home, 2");
 
     // Moved out, then the set deleted: its albums move up.
     run(
@@ -1538,9 +1551,9 @@ fn album_sets_nest_count_the_union_and_move_with_undo() {
         history.line().undo.last().unwrap().label.text,
         "Move “Trip” out of its set"
     );
-    h.get_by_label("Travel 0");
+    h.get_by_label("Travel, 0");
     undo(&mut h, &mut persist, 12.0);
-    h.get_by_label("Travel 2");
+    h.get_by_label("Travel, 2");
     run(
         &mut h,
         "library.collection.delete",
@@ -1563,10 +1576,10 @@ fn album_sets_nest_count_the_union_and_move_with_undo() {
             ("trip".to_string(), Some("travel".to_string())),
         ]
     );
-    h.get_by_label("Travel 2");
+    h.get_by_label("Travel, 2");
     // Undone: the nested set is back, its album in it.
     undo(&mut h, &mut persist, 14.0);
-    h.get_by_label("Inner 2");
+    h.get_by_label("Inner, 2");
     assert_eq!(
         albums(&h),
         [
@@ -1655,7 +1668,7 @@ fn photos_dragged_onto_an_album_or_the_quick_collection_go_in_a_smart_album_refu
         .select_ids(&[id(1).hex(), id(2).hex()]);
     settle(&mut h, &mut persist, 3.0);
     let before = steps(&h).len();
-    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "Trip 1"));
+    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "Trip, 1"));
     drag_onto(&mut h, from, to, |h| {
         assert_eq!(
             h.state().library().drop_hover(),
@@ -1665,7 +1678,7 @@ fn photos_dragged_onto_an_album_or_the_quick_collection_go_in_a_smart_album_refu
     });
     settle(&mut h, &mut persist, 4.0);
     assert_eq!(h.state().library().drop_hover(), None);
-    h.get_by_label("Trip 3");
+    h.get_by_label("Trip, 3");
     let s = steps(&h);
     assert_eq!(s.len(), before + 1, "{s:?}");
     assert_eq!(s.last().unwrap(), "Add 2 photos to “Trip”");
@@ -1683,13 +1696,13 @@ fn photos_dragged_onto_an_album_or_the_quick_collection_go_in_a_smart_album_refu
         "{undone:?}"
     );
     settle(&mut h, &mut persist, 5.0);
-    h.get_by_label("Trip 1");
+    h.get_by_label("Trip, 1");
 
     // Onto a smart album: refused while over it, with the reason, and
     // nothing changes once dropped.
     let before = steps(&h).len();
     let reason = "Not here: a smart album's rules choose its photos";
-    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "⚙ Best 1"));
+    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "⚙ Best, 1"));
     drag_onto(&mut h, from, to, |h| {
         assert_eq!(
             h.state().library().drop_hover(),
@@ -1700,10 +1713,10 @@ fn photos_dragged_onto_an_album_or_the_quick_collection_go_in_a_smart_album_refu
     settle(&mut h, &mut persist, 6.0);
     assert_eq!(steps(&h).len(), before);
     assert!(warnings(&h).contains(reason), "{}", warnings(&h));
-    h.get_by_label("⚙ Best 1");
+    h.get_by_label("⚙ Best, 1");
 
     // Onto a set: refused the same way.
-    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "Travel 0"));
+    let (from, to) = (cell_at(&h, "a.jpg"), row(&h, "Travel, 0"));
     drag_onto(&mut h, from, to, |h| {
         assert_eq!(
             h.state().library().drop_hover(),
@@ -2772,6 +2785,56 @@ fn tags_of(persist: &Persist<SqliteStore>, n: u8) -> Value {
 }
 
 #[test]
+fn the_sources_fold_by_keyboard_and_keep_one_choice_per_section() {
+    let root = temp("sources");
+    let path = vault_file(&root);
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .set_field(&id(1), "tags", Some(&json!(["Animals|Dog", "sea"])))
+            .unwrap();
+    }
+    let (mut h, mut persist) = window(&root, &path);
+    let selected = |h: &Harness<'_, Shell>, label: &str| {
+        let node = h.get_by_label(label).accesskit_node();
+        node.toggled() == Some(egui::accesskit::Toggled::True) || node.is_selected() == Some(true)
+    };
+
+    // A branch of the keyword tree opens with Right and folds with Left
+    // while its row has the keyboard.
+    h.get_by_label("Keywords").click();
+    settle(&mut h, &mut persist, 1.0);
+    assert!(h.query_by_label("Dog, 1").is_none(), "closed at first");
+    h.get_by_label("Animals, 1").focus();
+    h.run();
+    h.key_press(Key::ArrowRight);
+    settle(&mut h, &mut persist, 2.0);
+    h.get_by_label("Dog, 1");
+    h.key_press(Key::ArrowLeft);
+    settle(&mut h, &mut persist, 3.0);
+    assert!(h.query_by_label("Dog, 1").is_none(), "folded again");
+
+    // A folder and a keyword chosen together: both scopes hold, each
+    // row highlighted in its section.
+    h.get_by_label("Folders").click();
+    settle(&mut h, &mut persist, 4.0);
+    let top = root.to_string_lossy().into_owned();
+    let folder = format!("{top}, 3");
+    h.get_by_label(&folder).click();
+    settle(&mut h, &mut persist, 5.0);
+    h.get_by_label("sea, 1").click();
+    settle(&mut h, &mut persist, 6.0);
+    assert_eq!(h.state().library().folder(), Some(top.clone()));
+    assert_eq!(h.state().library().keyword().as_deref(), Some("sea"));
+    assert_eq!(grid(&h), ["a.jpg"]);
+    assert!(selected(&h, &folder), "the folder stays highlighted");
+    assert!(selected(&h, "sea, 1"), "beside the keyword");
+    assert!(!selected(&h, "Animals, 1"));
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo() {
     use egui_pop::api::history::{Answer, Request};
     use helios_gui::library::DropOn;
@@ -2806,28 +2869,27 @@ fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo(
     // under Animals; a branch opens on its own branches.
     h.get_by_label("Keywords").click();
     settle(&mut h, &mut persist, 1.0);
-    h.get_by_label("Animals 2");
-    h.get_by_label("sea 1");
-    assert!(h.query_by_label("Dog 1").is_none(), "closed");
-    h.get_by_label("Show or hide the keywords below Animals")
-        .click();
+    h.get_by_label("Animals, 2");
+    h.get_by_label("sea, 1");
+    assert!(h.query_by_label("Dog, 1").is_none(), "closed");
+    h.get_by_label("Show or hide Animals").click();
     settle(&mut h, &mut persist, 2.0);
-    h.get_by_label("Dog 1");
-    h.get_by_label("Cat 1");
+    h.get_by_label("Dog, 1");
+    h.get_by_label("Cat, 1");
 
     // A click scopes the grid to a branch, with the other filters; again,
     // to the whole Library.
-    h.get_by_label("Dog 1").click();
+    h.get_by_label("Dog, 1").click();
     settle(&mut h, &mut persist, 3.0);
     assert_eq!(grid(&h), ["a.jpg"]);
     assert_eq!(
         h.state().library().keyword().as_deref(),
         Some("Animals|Dog")
     );
-    h.get_by_label("Dog 1").click();
+    h.get_by_label("Dog, 1").click();
     settle(&mut h, &mut persist, 4.0);
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
-    h.get_by_label("Animals 2").click();
+    h.get_by_label("Animals, 2").click();
     settle(&mut h, &mut persist, 5.0);
     assert_eq!(grid(&h), ["a.jpg", "b.jpg"], "the branch and below");
     let listed = answer(&mut h, "library.keyword.list", json!({}));
@@ -2842,14 +2904,14 @@ fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo(
 
     // A branch dragged onto a photo tags it; photos dragged onto a
     // branch take it.
-    let (from, to) = (row(&h, "sea 1"), cell_at(&h, "c.nef"));
+    let (from, to) = (row(&h, "sea, 1"), cell_at(&h, "c.nef"));
     drag_onto(&mut h, from, to, |h| {
         h.get_by_label("Tag 1 photos with sea");
     });
     settle(&mut h, &mut persist, 7.0);
     assert_eq!(tags_of(&persist, 3), json!(["sea"]));
-    h.get_by_label("sea 2");
-    let (from, to) = (cell_at(&h, "c.nef"), row(&h, "Cat 1"));
+    h.get_by_label("sea, 2");
+    let (from, to) = (cell_at(&h, "c.nef"), row(&h, "Cat, 1"));
     drag_onto(&mut h, from, to, |h| {
         assert_eq!(
             h.state().library().drop_hover(),
@@ -2859,7 +2921,7 @@ fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo(
     });
     settle(&mut h, &mut persist, 8.0);
     assert_eq!(tags_of(&persist, 3), json!(["Animals|Cat", "sea"]));
-    h.get_by_label("Animals 3");
+    h.get_by_label("Animals, 3");
     // Taken off through the branch's command (its menu's).
     let out = answer(
         &mut h,
@@ -2891,7 +2953,7 @@ fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo(
         steps(&h).last().map(String::as_str),
         Some("Rename keyword Animals to Fauna")
     );
-    h.get_by_label("Fauna 2");
+    h.get_by_label("Fauna, 2");
     let out = answer(
         &mut h,
         "library.keyword.merge",
@@ -2921,7 +2983,7 @@ fn the_keyword_tree_counts_scopes_tags_by_drag_and_renames_and_merges_with_undo(
     for at in [14.0, 16.0, 18.0] {
         settle(&mut h, &mut persist, at);
     }
-    h.get_by_label("Fauna 2");
+    h.get_by_label("Fauna, 2");
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -3521,16 +3583,16 @@ fn photos_dragged_from_the_main_window_onto_an_album_of_the_library_window_go_in
     settle(&mut h, &mut persist, 1.0);
     let mut w = LibraryWindow::open(&mut h, &mut persist);
     w.click(&mut h, &mut persist, "Albums");
-    w.at("Trip 1");
+    w.at("Trip, 1");
     let from = cell_at(&h, "a.jpg");
-    drag_into_window(&mut h, &mut persist, &mut w, from, |w| w.at("Trip 1"));
+    drag_into_window(&mut h, &mut persist, &mut w, from, |w| w.at("Trip, 1"));
     assert_eq!(albums(&h), [("Trip".to_string(), 3)]);
     assert_eq!(
         steps(&h).last().map(String::as_str),
         Some("Add 2 photos to “Trip”")
     );
     w.pass(&h, Vec::new());
-    w.at("Trip 3");
+    w.at("Trip, 3");
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -3550,7 +3612,7 @@ fn a_keyword_dragged_from_the_main_window_onto_a_photo_of_the_library_window_tag
     let (mut h, mut persist) = window(&root, &path);
     h.get_by_label("Keywords").click();
     settle(&mut h, &mut persist, 1.0);
-    let from = h.get_by_label("sea 1").rect().center();
+    let from = h.get_by_label("sea, 1").rect().center();
     let mut w = LibraryWindow::open(&mut h, &mut persist);
     w.at("c.nef");
     drag_into_window(&mut h, &mut persist, &mut w, from, |w| w.at("c.nef"));
