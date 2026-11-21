@@ -78,7 +78,9 @@ fn undo(h: &mut Harness<'static, Shell>) {
         .values()
         .lock()
         .unwrap()
-        .undo_newest(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.undo(&Origin::User)
+        })
         .unwrap();
     h.run();
 }
@@ -554,7 +556,13 @@ fn an_undo_made_while_the_panels_draw_puts_the_state_in_place_in_the_same_pass()
     let (values, arm) = (h.state().values().clone(), armed.clone());
     h.state_mut().set_content("helios.params", move |_ui| {
         if arm.take() {
-            values.lock().unwrap().undo_newest(&Origin::User).unwrap();
+            values
+                .lock()
+                .unwrap()
+                .in_history(helios_values::HistoryScope::Workspace, |s| {
+                    s.undo(&Origin::User)
+                })
+                .unwrap();
         }
     });
     run(&mut h, "helios.params.focus", json!(null));
@@ -581,7 +589,9 @@ fn an_undo_made_outside_the_pass_or_on_another_thread_is_put_in_place_at_the_nex
         .values()
         .lock()
         .unwrap()
-        .undo_newest(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.undo(&Origin::User)
+        })
         .unwrap();
     assert_eq!(h.state().window_title(), "Faces — Helios");
     h.step();

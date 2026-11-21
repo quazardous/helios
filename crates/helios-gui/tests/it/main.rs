@@ -133,6 +133,7 @@ mod thumb_budget;
 mod thumbnails;
 mod tips;
 mod values_changed;
+mod view_undo;
 mod viewport;
 mod wall_clock;
 mod window_close;

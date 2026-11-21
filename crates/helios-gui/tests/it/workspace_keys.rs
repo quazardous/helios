@@ -101,7 +101,9 @@ fn keys_changed_for_the_workspace_are_its_own_and_say_where_they_come_from() {
         .values()
         .lock()
         .unwrap()
-        .undo_newest(&Origin::User)
+        .in_history(helios_values::HistoryScope::Workspace, |s| {
+            s.undo(&Origin::User)
+        })
         .unwrap();
     h.run();
     assert_eq!(
