@@ -574,7 +574,7 @@ mod tests {
 
     fn checker() -> Checker {
         Checker::new(Blacklist::new(
-            Os::Linux,
+            Os::current(),
             &Places::default(),
             true,
             Vec::new(),
@@ -659,9 +659,10 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].2, Verdict::ChangedOutside(true));
         assert!(
-            w.fake
-                .reads()
-                .contains(&"full /media/disk/b.jpg".to_string()),
+            w.fake.reads().contains(&format!(
+                "full {}",
+                Path::new(MOUNT).join("b.jpg").display()
+            )),
             "its new content is hashed"
         );
         let s = sighting(&w, "b");
@@ -750,7 +751,11 @@ mod tests {
         let new = Key::provisional(500, &h(50).to_string());
         assert_eq!(
             *w.cache.made.lock().unwrap(),
-            [format!("make /media/disk/q.jpg {}", new.image)]
+            [format!(
+                "make {} {}",
+                Path::new(MOUNT).join("q.jpg").display(),
+                new.image
+            )]
         );
         assert!(
             w.cache.has(&Key::preview(h(5).to_string())),

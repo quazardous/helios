@@ -237,17 +237,45 @@ pub fn paths_in(text: &str) -> Vec<PathBuf> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .filter_map(|l| {
             if let Some(rest) = l.strip_prefix("file://") {
-                // `file:///p` and `file://localhost/p`; another host's
-                // file is not ours to read.
-                let path = rest.strip_prefix("localhost").unwrap_or(rest);
-                path.starts_with('/')
-                    .then(|| PathBuf::from(percent_decoded(path)))
+                file_uri_path(rest, cfg!(windows)).map(PathBuf::from)
             } else {
                 let p = PathBuf::from(l);
                 p.is_absolute().then_some(p)
             }
         })
         .collect()
+}
+
+/// The path a `file://` URI names, `rest` being what follows `file://`:
+/// `file:///p` and `file://localhost/p`. On Windows, `file:///C:/p` is
+/// `C:\p` and `file://server/share/p` the network path
+/// `\\server\share\p`; elsewhere another host's file is not ours to read.
+fn file_uri_path(rest: &str, windows: bool) -> Option<String> {
+    let (host, path) = match rest.find('/') {
+        Some(at) => rest.split_at(at),
+        None => (rest, ""),
+    };
+    let path = percent_decoded(path);
+    let local = host.is_empty() || host.eq_ignore_ascii_case("localhost");
+    if !windows {
+        return (local && path.starts_with('/')).then_some(path);
+    }
+    if !local {
+        let share = path.trim_start_matches('/');
+        return (!share.is_empty()).then(|| format!(r"\\{host}\{}", share.replace('/', r"\")));
+    }
+    // `/C:/p` (or `/C|/p`, an old spelling) is the drive's path.
+    let b = path.as_bytes();
+    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && matches!(b[2], b':' | b'|') {
+        let rest = path[3..].replace('/', r"\");
+        let rest = if rest.is_empty() {
+            r"\".to_string()
+        } else {
+            rest
+        };
+        return Some(format!("{}:{rest}", char::from(b[1])));
+    }
+    path.starts_with('/').then(|| path.replace('/', r"\"))
 }
 
 /// A URI's path with its `%XX` escapes decoded (left as they are when
@@ -460,13 +488,21 @@ mod tests {
 
     #[test]
     fn text_from_other_applications_names_files_by_path_or_uri() {
-        let text = "# copied\n/photos/a b.jpg\nfile:///photos/caf%C3%A9.jpg\n\
-                    file://localhost/photos/c.jpg\nfile://other/photos/d.jpg\n\
-                    https://example.org/e.jpg\nrelative/f.jpg\n";
+        // A plain line is an absolute path the platform's way.
+        #[cfg(not(windows))]
+        const ABSOLUTE: &str = "/photos/a b.jpg";
+        #[cfg(windows)]
+        const ABSOLUTE: &str = r"C:\photos\a b.jpg";
+        let text = format!(
+            "# copied\n{ABSOLUTE}\nfile:///photos/caf%C3%A9.jpg\n\
+             file://localhost/photos/c.jpg\n\
+             https://example.org/e.jpg\nrelative/f.jpg\n"
+        );
+        let text = text.as_str();
         assert_eq!(
             paths_in(text),
             [
-                PathBuf::from("/photos/a b.jpg"),
+                PathBuf::from(ABSOLUTE),
                 PathBuf::from("/photos/café.jpg"),
                 PathBuf::from("/photos/c.jpg"),
             ]
@@ -477,6 +513,32 @@ mod tests {
         let p = plan_files(paths_in(text), |p| p.ends_with("c.jpg"));
         assert_eq!(p.import, [PathBuf::from("/photos/c.jpg")]);
         assert_eq!(p.missing.len(), 2);
+    }
+
+    #[test]
+    fn file_uris_name_unix_and_windows_paths() {
+        let unix = |rest| file_uri_path(rest, false);
+        assert_eq!(
+            unix("/photos/a%20b.jpg").as_deref(),
+            Some("/photos/a b.jpg")
+        );
+        assert_eq!(
+            unix("localhost/photos/c.jpg").as_deref(),
+            Some("/photos/c.jpg")
+        );
+        assert_eq!(unix("other/photos/d.jpg"), None);
+        let windows = |rest| file_uri_path(rest, true);
+        assert_eq!(
+            windows("/C:/Users/ann/Pictures/caf%C3%A9.jpg").as_deref(),
+            Some(r"C:\Users\ann\Pictures\café.jpg")
+        );
+        assert_eq!(windows("localhost/d|/a.jpg").as_deref(), Some(r"d:\a.jpg"));
+        assert_eq!(windows("/E:").as_deref(), Some(r"E:\"));
+        assert_eq!(
+            windows("nas/photos/2026/a.jpg").as_deref(),
+            Some(r"\\nas\photos\2026\a.jpg")
+        );
+        assert_eq!(windows("nas"), None);
     }
 
     #[test]

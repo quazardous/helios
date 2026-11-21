@@ -84,9 +84,7 @@ pub struct Scan {
 /// The picked source, absolute, when it is what the importer reads: a
 /// folder holding what it must, or a file whose name it accepts.
 pub fn check_source(decl: &ImporterDecl, source: &Path) -> Result<PathBuf, String> {
-    let path = source
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", source.display()))?;
+    let path = real_path(source).map_err(|e| format!("{}: {e}", source.display()))?;
     match decl.source {
         SourceKind::Folder => {
             if !path.is_dir() {
@@ -128,6 +126,32 @@ pub fn check_source(decl: &ImporterDecl, source: &Path) -> Result<PathBuf, Strin
 /// The folder relative paths are read from, and what the images of an
 /// importer that is not a catalogue must lie under: the source, or the
 /// folder of a source file.
+/// `path` resolved through its links (`canonicalize`), written the way
+/// the rest of Helios writes paths: on Windows, without the `\\?\`
+/// prefix `canonicalize` adds, so the same file has one path in the vault.
+fn real_path(path: &Path) -> std::io::Result<PathBuf> {
+    let real = path.canonicalize()?;
+    if cfg!(windows)
+        && let Some(plain) = real.to_str().and_then(without_verbatim)
+    {
+        return Ok(PathBuf::from(plain));
+    }
+    Ok(real)
+}
+
+/// A Windows path without its verbatim prefix, when it has one that a
+/// plain path can say: `\\?\C:\x` is `C:\x`, `\\?\UNC\server\share\x` is
+/// `\\server\share\x`.
+fn without_verbatim(path: &str) -> Option<String> {
+    let rest = path.strip_prefix(r"\\?\")?;
+    if let Some(unc) = rest.strip_prefix(r"UNC\") {
+        return Some(format!(r"\\{unc}"));
+    }
+    let b = rest.as_bytes();
+    (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\')
+        .then(|| rest.to_string())
+}
+
 fn base(decl: &ImporterDecl, source: &Path) -> PathBuf {
     match decl.source {
         SourceKind::Folder => source.to_path_buf(),
@@ -197,7 +221,7 @@ impl Pages {
                 scan.refused.push(refuse("no path"));
                 continue;
             }
-            let path = match self.base.join(given).canonicalize() {
+            let path = match real_path(&self.base.join(given)) {
                 Ok(p) => p,
                 Err(e) => {
                     scan.refused.push(refuse(&e.to_string()));
@@ -319,6 +343,20 @@ fn fields(item: &Json, path: PathBuf, warnings: &mut Vec<String>) -> Found {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_verbatim_path_is_written_plain() {
+        assert_eq!(
+            without_verbatim(r"\\?\C:\Users\ann\a.jpg").as_deref(),
+            Some(r"C:\Users\ann\a.jpg")
+        );
+        assert_eq!(
+            without_verbatim(r"\\?\UNC\nas\photos\a.jpg").as_deref(),
+            Some(r"\\nas\photos\a.jpg")
+        );
+        assert_eq!(without_verbatim(r"\\?\Volume{1234}\a.jpg"), None);
+        assert_eq!(without_verbatim(r"C:\a.jpg"), None);
+    }
     use serde_json::json;
 
     fn decl(source: SourceKind, anywhere: bool) -> ImporterDecl {

@@ -1291,18 +1291,31 @@ fn facets_sql(query: &Query, backups: Option<&Backups>) -> Result<(String, Vec<S
 /// `UNION` keeps one row per photo, volume and folder, so a count is the
 /// photos on that volume there or below.
 fn folders_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
+    folders_sql_with(query, std::path::MAIN_SEPARATOR)
+}
+
+/// [`folders_sql`] for paths whose separator is `sep`.
+fn folders_sql_with(query: &Query, sep: char) -> Result<(String, Vec<Sql>), String> {
     let (ctes, from, args) = matched_sql(query, None)?;
-    let sep = std::path::MAIN_SEPARATOR;
     // The path up to its last separator, kept: what `rtrim` leaves once
     // it took every trailing character but the separator.
     let dir = |x: &str| format!("rtrim({x}, replace({x}, '{sep}', ''))");
     let up = "substr(dir, 1, length(dir) - 1)";
+    // A root keeps its separator and has nothing above it: `/`; on
+    // Windows also a drive's (`C:\`) and a network share's
+    // (`\\server\share\`), as `Path::parent` sees them.
+    let root = if sep == '\\' {
+        "(length(dir) = 1 OR dir GLOB '[A-Za-z]:\\' \
+         OR (dir LIKE '\\\\%' AND length(dir) - length(replace(dir, '\\', '')) = 4))"
+    } else {
+        "length(dir) = 1"
+    };
     let matched = format!(
         "m AS (SELECT i.id AS id {from}),
          dirs(id, vol, dir) AS (
              SELECT s.image, s.volume, {} FROM m JOIN sightings s ON s.image = m.id
              UNION
-             SELECT id, vol, {} FROM dirs WHERE length(dir) > 1)",
+             SELECT id, vol, {} FROM dirs WHERE NOT {root})",
         dir("s.path"),
         dir(up)
     );
@@ -1314,7 +1327,7 @@ fn folders_sql(query: &Query) -> Result<(String, Vec<Sql>), String> {
     Ok((
         format!(
             "WITH RECURSIVE {ctes}
-             SELECT vol, CASE WHEN length(dir) > 1 THEN {up} ELSE dir END, COUNT(*)
+             SELECT vol, CASE WHEN {root} THEN dir ELSE {up} END, COUNT(*)
              FROM dirs WHERE dir <> '' GROUP BY vol, dir"
         ),
         args,
@@ -2336,5 +2349,59 @@ impl Drop for SqliteStore {
         // Nothing to tell anyone at this point: a vault whose marker could
         // not be written is checked at its next opening.
         let _ = self.mark_clean();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The folders of Windows paths, read the way a Windows build reads
+    /// them: a drive's root and a share's are tops, `C:\` not `C:`.
+    #[test]
+    fn windows_folders_stop_at_the_drive_and_the_share() {
+        let mut store = SqliteStore::in_memory().unwrap();
+        for (n, path) in [
+            r"C:\Users\ann\Pictures\a.jpg",
+            r"C:\Users\ann\Pictures\raw\b.cr3",
+            r"\\nas\photos\2026\c.jpg",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let n = u8::try_from(n).unwrap() + 1;
+            let image = Image {
+                id: ImageId(ContentHash([n; 32])),
+                size: 100,
+                partial: ContentHash([n + 10; 32]),
+            };
+            store.add_to_library(&image).unwrap();
+            let mut s = Sighting::seen(PathBuf::from(path), 100, 1, 1, "import");
+            s.image = Some(image.id);
+            store.put_sighting(&s).unwrap();
+        }
+        let (sql, args) = folders_sql_with(&Query::default(), '\\').unwrap();
+        let mut statement = store.db.prepare(&sql).unwrap();
+        let mut rows: Vec<(String, i64)> = statement
+            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                Ok((r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        rows.sort();
+        let want: Vec<(String, i64)> = [
+            (r"C:\", 2),
+            (r"C:\Users", 2),
+            (r"C:\Users\ann", 2),
+            (r"C:\Users\ann\Pictures", 2),
+            (r"C:\Users\ann\Pictures\raw", 1),
+            (r"\\nas\photos\", 1),
+            (r"\\nas\photos\2026", 1),
+        ]
+        .into_iter()
+        .map(|(d, n)| (d.to_string(), n))
+        .collect();
+        assert_eq!(rows, want);
     }
 }

@@ -178,14 +178,11 @@ mod tests {
     #[test]
     fn files_sit_beside_the_vault_named_after_it() {
         let files = files(Path::new("/photos/library.db"));
-        assert_eq!(
-            files.rendezvous,
-            Path::new("/photos/.helios/library.db.node.json")
-        );
-        assert_eq!(
-            files.lock,
-            Path::new("/photos/.helios/library.db.node.lock")
-        );
+        // `/photos` is made absolute the platform's way (on Windows, on the
+        // current drive).
+        let dir = std::path::absolute("/photos").unwrap().join(".helios");
+        assert_eq!(files.rendezvous, dir.join("library.db.node.json"));
+        assert_eq!(files.lock, dir.join("library.db.node.lock"));
     }
 
     #[test]

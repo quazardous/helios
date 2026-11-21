@@ -28,7 +28,7 @@ fn temp(name: &str) -> PathBuf {
 
 /// A card's folder at `root`, with one photo in `DCIM`.
 fn card_dir(root: &Path) {
-    let dcim = root.join("DCIM/100CANON");
+    let dcim = root.join("DCIM").join("100CANON");
     std::fs::create_dir_all(&dcim).unwrap();
     let jpeg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../helios-plugin/tests/fixtures/rated-photos/a.jpg");
@@ -164,8 +164,8 @@ fn sources_until(
 fn the_same_card_at_another_mount_point_is_the_same_source_and_imports_by_its_volume() {
     let dir = temp("moved");
     let (first, second) = (
-        dir.join("media/EOS_DIGITAL"),
-        dir.join("media/EOS_DIGITAL1"),
+        dir.join("media").join("EOS_DIGITAL"),
+        dir.join("media").join("EOS_DIGITAL1"),
     );
     card_dir(&first);
     card_dir(&second);
@@ -182,7 +182,7 @@ fn the_same_card_at_another_mount_point_is_the_same_source_and_imports_by_its_vo
     assert_eq!(imports.len(), 1, "{imports:?}");
     assert_eq!(
         imports[0]["paths"],
-        serde_json::json!([second.join("DCIM/100CANON/IMG_0001.JPG")])
+        serde_json::json!([second.join("DCIM").join("100CANON").join("IMG_0001.JPG")])
     );
     assert_eq!(imports[0]["rename"], "{stem}-kept", "its own choices");
     // Still one source, now where the card is, its label recorded.
@@ -206,7 +206,7 @@ fn the_same_card_at_another_mount_point_is_the_same_source_and_imports_by_its_vo
 #[test]
 fn another_card_mounted_at_the_same_path_is_another_source() {
     let dir = temp("other");
-    let root = dir.join("media/EOS_DIGITAL");
+    let root = dir.join("media").join("EOS_DIGITAL");
     card_dir(&root);
     let doc = Doc::of(&saved(&root, Some("uuid:aaaa-1111")));
     let slot = Arc::new(Slot::default());
@@ -247,7 +247,10 @@ fn another_card_mounted_at_the_same_path_is_another_source() {
 #[test]
 fn a_source_saved_by_path_takes_the_cards_volume_the_first_time_it_is_seen() {
     let dir = temp("migrate");
-    let (root, later) = (dir.join("media/CARD"), dir.join("run/media/CARD"));
+    let (root, later) = (
+        dir.join("media").join("CARD"),
+        dir.join("run").join("media").join("CARD"),
+    );
     card_dir(&root);
     card_dir(&later);
     let doc = Doc::of(&saved(&root, None));
@@ -288,7 +291,7 @@ fn a_source_saved_by_path_takes_the_cards_volume_the_first_time_it_is_seen() {
     assert_eq!(imports.len(), 1, "{imports:?}");
     assert_eq!(
         imports[0]["paths"],
-        serde_json::json!([later.join("DCIM/100CANON/IMG_0001.JPG")])
+        serde_json::json!([later.join("DCIM").join("100CANON").join("IMG_0001.JPG")])
     );
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
@@ -297,7 +300,10 @@ fn a_source_saved_by_path_takes_the_cards_volume_the_first_time_it_is_seen() {
 #[test]
 fn a_card_without_a_uuid_is_known_by_its_label_and_size() {
     let dir = temp("weak");
-    let (root, other) = (dir.join("media/NIKON"), dir.join("media/NIKON1"));
+    let (root, other) = (
+        dir.join("media").join("NIKON"),
+        dir.join("media").join("NIKON1"),
+    );
     card_dir(&root);
     card_dir(&other);
     let doc = Doc::of(&saved(&root, None));
@@ -328,8 +334,8 @@ fn a_card_is_one_favourite_and_one_history_entry_wherever_it_is_mounted() {
     use helios_library::import_history::{Place, Record};
     let dir = temp("panels");
     let (first, second) = (
-        dir.join("media/EOS_DIGITAL"),
-        dir.join("media/EOS_DIGITAL1"),
+        dir.join("media").join("EOS_DIGITAL"),
+        dir.join("media").join("EOS_DIGITAL1"),
     );
     card_dir(&first);
     card_dir(&second);

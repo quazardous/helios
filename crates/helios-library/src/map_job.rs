@@ -1233,14 +1233,14 @@ mod tests {
             self.reads
                 .lock()
                 .unwrap()
-                .push(format!("partial {}", path.display()));
+                .push(format!("partial {}", slashed(path)));
             Ok(ContentHash([9; 32]))
         }
         fn full(&self, path: &Path) -> Result<ContentHash, String> {
             self.reads
                 .lock()
                 .unwrap()
-                .push(format!("full {}", path.display()));
+                .push(format!("full {}", slashed(path)));
             Ok(self.files[path].2)
         }
     }
@@ -1341,8 +1341,9 @@ mod tests {
     /// A job whose card is an ingest volume (a role: scanned when
     /// plugged under the default setting).
     fn job_with(w: &World, settings: Settings) -> Job<Vault<MemoryStore>> {
+        // The running system's rules, so its separators are read.
         let checker = Checker::new(Blacklist::new(
-            Os::Linux,
+            Os::current(),
             &Places::default(),
             true,
             Vec::new(),
@@ -1368,18 +1369,29 @@ mod tests {
         loop {
             match job.next_read() {
                 Next::Read(stage, s) => {
-                    let name = s.path.display().to_string();
+                    let name = slashed(&s.path);
                     if job.read(stage, *s).unwrap() {
                         read.push((stage, name));
                     }
                 }
                 Next::List(volume, folder) => {
                     job.list(&volume, &folder).unwrap();
-                    read.push((Stage::Plugged, format!("list {}", folder.display())));
+                    read.push((Stage::Plugged, format!("list {}", slashed(&folder))));
                 }
                 Next::Idle => return read,
                 Next::Paused(why) => panic!("paused: {why}"),
             }
+        }
+    }
+
+    /// `path` with `/` between its parts, as the tests write them (the
+    /// paths built by joining have `\\` between some on Windows).
+    fn slashed(path: &Path) -> String {
+        let text = path.display().to_string();
+        if cfg!(windows) {
+            text.replace('\\', "/")
+        } else {
+            text
         }
     }
 
@@ -1481,7 +1493,7 @@ mod tests {
                     .sightings_under(Some(&VolumeId(v.into())), Path::new(""))
                     .unwrap()
                     .into_iter()
-                    .map(|s| s.rel_path.unwrap().display().to_string()),
+                    .map(|s| slashed(&s.rel_path.unwrap())),
             );
         }
         left.sort();
