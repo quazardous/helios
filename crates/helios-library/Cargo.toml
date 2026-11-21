@@ -17,6 +17,8 @@ helios-export.workspace = true
 helios-load.workspace = true
 # Its health checks answer the health report (folder, integrity, pairs).
 helios-health.workspace = true
+# Its init step (the library folder) is declared here.
+helios-init.workspace = true
 # Volumes, roles and backup strategies: the backup job and safe to format.
 helios-storage.workspace = true
 # The shared thumbnail cache's re-check (`thumb_check`).

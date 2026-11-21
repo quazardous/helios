@@ -45,9 +45,8 @@ use egui_pop::api::admin::ADMIN;
 use egui_pop::api::files::{self, FILES, FileRequest};
 use egui_pop::api::host::Pending;
 use helios_core::Message;
-use helios_init::{
-    IMPORT, LIBRARY_FOLDER, LIBRARY_FOLDER_SETTING, Outcome, Plan, Registry, Reply, Request,
-};
+use helios_init::{Outcome, Plan, Reply, Request};
+use helios_library::init::{IMPORT, LIBRARY_FOLDER, LIBRARY_FOLDER_SETTING};
 use serde_json::{Map, Value, json};
 
 use helios_node_core::reset::Reimport;
@@ -174,7 +173,7 @@ impl helios_init::Host for SettingsHost<'_> {
             [(LIBRARY_FOLDER_SETTING.to_owned(), json!(suggested))].into();
         // A partial run: the steps out of the plan hidden (the stepper
         // lists the run's alone).
-        for id in Registry::builtin()
+        for id in helios_node_core::init::registry()
             .ordered()
             .unwrap_or_default()
             .iter()
@@ -305,7 +304,7 @@ impl Shell {
         let values = DesktopValues {
             folder: folder.clone(),
         };
-        let registry = Registry::builtin();
+        let registry = helios_node_core::init::registry();
         let heard = self.core.init.heard.clone();
         let done = {
             let then = then.clone();
@@ -362,7 +361,7 @@ impl Shell {
         let Some(values) = self.init_values() else {
             return false;
         };
-        let registry = Registry::builtin();
+        let registry = helios_node_core::init::registry();
         let missing = registry.missing(IMPORT, &values).unwrap_or_default();
         let Some(first) = missing.first() else {
             self.import.get_mut().not_set_up = None;
@@ -488,7 +487,7 @@ impl Shell {
             && let Some(values) = self.init_values()
         {
             self.core.init.checked = true;
-            let status = Registry::builtin().status(&values);
+            let status = helios_node_core::init::registry().status(&values);
             let not_done: Vec<String> = status
                 .as_ref()
                 .map(|s| {

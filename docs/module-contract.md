@@ -443,6 +443,9 @@ as data, like its settings and health checks (`helios-init`):
 - a module declares the steps it **requires** before it runs (import
   requires `library.folder`), so what it still misses is read from the
   contract, not checked by hand;
+- each crate declares its own steps and requirements as one set (the
+  library's in `helios_library::init`), and `helios_node_core::init::SETS`
+  gathers them: the init crate names no module;
 - one registry orders every step after its dependencies; a step coming
   after an unknown step, or steps in a loop, are refused.
 

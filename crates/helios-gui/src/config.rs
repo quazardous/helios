@@ -651,7 +651,7 @@ pub fn manifest(
     .wizard(helios_storage_ui::settings::backup_wizard(t))
     .wizard(crate::reset::wizard(t))
     .wizard(crate::forget::wizard(t))
-    .wizard(init_wizard(&helios_init::Registry::builtin(), t));
+    .wizard(init_wizard(&helios_node_core::init::registry(), t));
     plugins::sections(m, plugins, t)
 }
 
@@ -693,21 +693,21 @@ pub fn init_wizard(registry: &helios_init::Registry, t: &dyn Fn(Message) -> Stri
                     Some(Kind::Toggle { .. }) => FieldKind::Toggle,
                     Some(Kind::Number { .. }) => FieldKind::Number,
                     Some(Kind::Choice { .. }) => FieldKind::Choice,
-                    _ if key == helios_init::LIBRARY_FOLDER_SETTING => FieldKind::Path,
+                    _ if key == helios_library::init::LIBRARY_FOLDER_SETTING => FieldKind::Path,
                     _ => FieldKind::Text,
                 };
                 let mut field = Field::draft(WIZARD, key, &t(step.title.clone()), kind);
                 if step.required {
                     field = field.required();
                 }
-                if key == helios_init::LIBRARY_FOLDER_SETTING {
+                if key == helios_library::init::LIBRARY_FOLDER_SETTING {
                     field = field.validate(CHECK_FOLDER).help(&t(Message::new(
                         "gui-init-library-folder-help",
                         "A folder on a disk with room for your photos; it is made if missing.",
                     )));
                 }
                 s.field(field);
-                if key == helios_init::LIBRARY_FOLDER_SETTING {
+                if key == helios_library::init::LIBRARY_FOLDER_SETTING {
                     s.action(Action::command(CHOOSE).title(&t(Message::new(
                         "gui-init-library-folder-choose",
                         "Choose…",
@@ -773,7 +773,7 @@ fn check_library_folder(
     use egui_pop::api::admin::model::Tone;
     use egui_pop::api::admin::model::hooks::{Hook, Problem};
     Hook::Validate(Box::new(move |values| {
-        let key = helios_init::LIBRARY_FOLDER_SETTING;
+        let key = helios_library::init::LIBRARY_FOLDER_SETTING;
         let Some(path) = values
             .get(key)
             .and_then(Json::as_str)
