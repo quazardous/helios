@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::accesskit::Role;
-use egui::{Key, Modifiers, PointerButton, Pos2, vec2};
+use egui::{Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
 use helios_gui::{Shell, headless, helios_panels};
@@ -219,12 +219,28 @@ fn the_camera_s_controls_are_drawn_by_the_host_and_told_once_per_change() {
     assert_eq!(t[0]["params"]["values"]["shutter"], json!(moved));
     assert_eq!(t[0]["params"]["cause"], "edit");
 
-    // A drag given up with Escape: no step, nothing told.
-    let to = drag_start(&mut h, 3);
-    h.key_press(Key::Escape);
-    h.run();
-    press(&h, to, false);
-    h.run();
+    // A drag given up (Escape, which the rack turns into the store's
+    // cancel, as `params::escape_gives_a_drag_up_without_a_trace` shows):
+    // its frames and its cancel tell nothing. Pressed inside the Settings
+    // app, Escape is that app's own (it dismisses the page), so the
+    // gesture is driven here as the rack drives it.
+    {
+        let values = h.state().values().clone();
+        let mut s = values.lock().unwrap();
+        let g = s.begin_gesture(Origin::User, "drag shutter");
+        for x in [0.5, 1.0] {
+            s.set(
+                helios_values::Set::new(
+                    SHUTTER,
+                    helios_values::Change::To(helios_core::Value::Float(x)),
+                    Origin::User,
+                )
+                .gesture(g),
+            )
+            .unwrap();
+        }
+        s.cancel(g);
+    }
     assert_eq!(shutter(&h), moved, "put back");
     assert_eq!(plugin_steps(&h), 1, "no step");
     told_n(&mut h, &plugin, 1);
