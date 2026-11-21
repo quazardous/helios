@@ -85,11 +85,38 @@ pub type Apply = Arc<dyn Fn(&Changes, bool) -> Result<Replayed, String> + Send +
 
 /// A `command.batch`'s group: its library changes are one step, made
 /// by `origin` (`crate::window_commands`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Group {
     /// The batch's, unique in the process.
     pub id: u64,
     pub origin: PopOrigin,
+    /// The step's label when one command makes several changes as one
+    /// (a move between quick collections); none: [`batch_label`].
+    pub label: Option<Label>,
+}
+
+/// The process's batch ids: a `command.batch`'s, or one command's that
+/// makes several library changes as one step ([`Group::one_step`]).
+static GROUPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+impl Group {
+    /// A new batch, by `origin`, labelled as [`batch_label`] says.
+    pub fn new(origin: PopOrigin) -> Group {
+        Group {
+            id: GROUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            origin,
+            label: None,
+        }
+    }
+
+    /// One command's several library changes as one step labelled
+    /// `label`, by the user.
+    pub fn one_step(label: Label) -> Group {
+        Group {
+            label: Some(label),
+            ..Group::new(PopOrigin::User)
+        }
+    }
 }
 
 thread_local! {
@@ -183,6 +210,35 @@ pub fn import_label(photos: u64) -> Label {
         text: m.english.clone(),
         key: Some(m.key),
         args: [("count".to_string(), photos.to_string())].into(),
+    }
+}
+
+/// A move between quick collections' label: "Move 3 photos to the
+/// quick collection “Picks”" (`name`: where they go, empty for the
+/// first one).
+pub fn quick_move_label(name: &str, count: usize) -> Label {
+    let m = if name.is_empty() {
+        Message::new(
+            "gui-history-quick-move",
+            "Move { $count } photos to the quick collection",
+        )
+    } else {
+        Message::new(
+            "gui-history-quick-move-named",
+            "Move { $count } photos to the quick collection “{ $name }”",
+        )
+        .with("name", name)
+    }
+    .with("count", count);
+    let mut args: std::collections::BTreeMap<String, String> =
+        [("count".to_string(), count.to_string())].into();
+    if !name.is_empty() {
+        args.insert("name".to_string(), name.to_string());
+    }
+    Label {
+        text: m.english.clone(),
+        key: Some(m.key),
+        args: args.into_iter().collect(),
     }
 }
 
@@ -600,14 +656,20 @@ impl LibraryHistory {
             && top.group == Some(g.id)
         {
             top.changes.push(changes);
-            top.info.label = batch_label(&g.origin, top.changes.len());
+            top.info.label = g
+                .label
+                .clone()
+                .unwrap_or_else(|| batch_label(&g.origin, top.changes.len()));
             top.info.at = at;
             return Some(top.info.id);
         }
         inner.next += 1;
         let id = FIRST_ID + inner.next;
         let (label, origin) = match group {
-            Some(g) => (batch_label(&g.origin, 1), g.origin.clone()),
+            Some(g) => (
+                g.label.clone().unwrap_or_else(|| batch_label(&g.origin, 1)),
+                g.origin.clone(),
+            ),
             None => (label, PopOrigin::User),
         };
         let mut info = StepInfo::new(id, LIBRARY, label, origin);
@@ -1014,6 +1076,7 @@ mod tests {
         let batch = Group {
             id: 7,
             origin: agent.clone(),
+            label: None,
         };
         for n in 1..=3 {
             h.record_in(Some(&batch), import_label(1), changes_of(n), f64::from(n));
@@ -1166,6 +1229,7 @@ mod tests {
         let batch = Group {
             id: 4,
             origin: PopOrigin::User,
+            label: None,
         };
         h.record_in(Some(&batch), import_label(1), changes_of(1), 1.0);
         h.record_in(Some(&batch), import_label(1), changes_of(2), 2.0);

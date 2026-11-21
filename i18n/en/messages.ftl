@@ -819,6 +819,10 @@ gui-history-quick-clear-named = Clear the quick collection “{ $name }”
 
 gui-history-quick-delete = Delete the quick collection “{ $name }”
 
+gui-history-quick-move = Move { $count } photos to the quick collection
+
+gui-history-quick-move-named = Move { $count } photos to the quick collection “{ $name }”
+
 gui-history-quick-new = New quick collection “{ $name }”
 
 gui-history-quick-remove = Remove { $count } photos from the quick collection
@@ -1517,6 +1521,8 @@ gui-library-delete-rejected = Delete Rejected…
 
 gui-library-drop-add = Add { $count } photos
 
+gui-library-drop-move = Move { $count } photos here (Ctrl copies)
+
 gui-library-drop-set = Not here: drop the photos on one of the set's albums
 
 gui-library-drop-smart = Not here: a smart album's rules choose its photos
@@ -1716,6 +1722,12 @@ gui-library-quick-delete = Delete the quick collection
 gui-library-quick-new = New quick collection…
 
 gui-library-quick-new-title = New quick collection
+
+gui-library-quick-open = Open in a panel
+
+gui-library-quick-panel-count = { $count } photos
+
+gui-library-quick-panel-gone = This quick collection was deleted
 
 gui-library-quick-rename = Rename…
 
