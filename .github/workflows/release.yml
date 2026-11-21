@@ -151,6 +151,83 @@ jobs:
           "$app" helios --version | tee cli.txt
           grep -q '^helios [0-9]' cli.txt
 
+  # The .deb and the .rpm (packaging/linux/packages.sh): the tarball's
+  # folder in /opt/helios, links in /usr/bin, the desktop entry, icons and
+  # metainfo in /usr/share, built by nfpm from packaging/linux/nfpm.yaml.
+  # nfpm comes from its GitHub release, pinned by version and SHA-256.
+  linux-packages:
+    needs: build-linux
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.build-linux.outputs.version }}
+      NFPM_VERSION: 2.48.0
+      NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: helios-${{ needs.build-linux.outputs.version }}-linux-x86_64
+          path: dist
+      - name: nfpm
+        run: |
+          archive="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/$archive"
+          echo "$NFPM_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/nfpm"
+          tar -C "$RUNNER_TEMP/nfpm" -xzf "$RUNNER_TEMP/$archive" nfpm
+          echo "NFPM=$RUNNER_TEMP/nfpm/nfpm" >> "$GITHUB_ENV"
+      - name: package
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          packaging/linux/packages.sh "$VERSION" "dist/helios-$VERSION-linux-x86_64.tar.gz" dist-packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ needs.build-linux.outputs.version }}-linux-packages
+          path: dist-packages/
+          if-no-files-found: error
+
+  # Each package installed in a clean container of the distributions it is
+  # for, with the distribution's apt or dnf (its dependencies must resolve
+  # there), smoke-tested from /opt/helios, then removed with nothing left
+  # behind (packaging/linux/smoke-package.sh).
+  smoke-linux-packages:
+    needs: [build-linux, linux-packages]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:13", package: deb }
+          - { image: "ubuntu:22.04", package: deb }
+          - { image: "ubuntu:24.04", package: deb }
+          - { image: "fedora:44", package: rpm }
+          - { image: "rockylinux/rockylinux:9", package: rpm }
+    env:
+      VERSION: ${{ needs.build-linux.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PUBLISH == 'true' && env.TAG || '' }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: helios-${{ needs.build-linux.outputs.version }}-linux-packages
+          path: dist
+      - name: checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS-packages
+      - name: install, smoke test, remove in ${{ matrix.image }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          KIND: ${{ matrix.package }}
+        run: |
+          if [ "$KIND" = deb ]; then pkg="helios_${VERSION}_amd64.deb"; else pkg="helios-${VERSION}-1.x86_64.rpm"; fi
+          docker run --rm -v "$PWD:/work:ro" "$IMAGE" \
+            bash /work/packaging/linux/smoke-package.sh "/work/dist/$pkg" \
+              /work/crates/helios-plugin/tests/fixtures/rated-photos/a.jpg
+
   # The Flatpak, built from source with no network inside the build
   # (packaging/flatpak/build.sh), as a single-file bundle, then installed
   # and smoke-tested as a user gets it. It runs in Flathub's builder image
@@ -403,10 +480,11 @@ jobs:
   # Publishes when every Linux and Windows job passed; the macOS image is
   # attached when its job passed too.
   publish:
-    needs: [build-linux, smoke-linux, flatpak, build-windows, smoke-windows, macos]
+    needs: [build-linux, smoke-linux, linux-packages, smoke-linux-packages, flatpak, build-windows, smoke-windows, macos]
     if: >-
       ${{ !cancelled()
       && needs.build-linux.result == 'success' && needs.smoke-linux.result == 'success'
+      && needs.linux-packages.result == 'success' && needs.smoke-linux-packages.result == 'success'
       && needs.flatpak.result == 'success'
       && needs.build-windows.result == 'success' && needs.smoke-windows.result == 'success'
       && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.publish == true) }}
@@ -420,6 +498,10 @@ jobs:
         with:
           name: helios-${{ needs.build-linux.outputs.version }}-linux-x86_64
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: helios-${{ needs.build-linux.outputs.version }}-linux-packages
+          path: dist-packages
       - uses: actions/download-artifact@v4
         with:
           name: helios-${{ needs.build-windows.outputs.version }}-windows-x86_64
@@ -436,6 +518,8 @@ jobs:
       # One SHA256SUMS for every file attached.
       - name: checksums
         run: |
+          mv dist-packages/helios_"$VERSION"_amd64.deb dist-packages/helios-"$VERSION"-1.x86_64.rpm dist/
+          cat dist-packages/SHA256SUMS-packages >> dist/SHA256SUMS
           mv dist-windows/helios-"$VERSION"-windows-x86_64.zip dist/
           mv dist-windows/helios-"$VERSION"-windows-x86_64-setup.exe dist/
           cat dist-windows/SHA256SUMS-windows >> dist/SHA256SUMS
@@ -455,6 +539,8 @@ jobs:
           files=(
             dist/helios-"$VERSION"-linux-x86_64.tar.gz
             dist/Helios-"$VERSION"-x86_64.AppImage
+            dist/helios_"$VERSION"_amd64.deb
+            dist/helios-"$VERSION"-1.x86_64.rpm
             dist/helios-"$VERSION"-windows-x86_64.zip
             dist/helios-"$VERSION"-windows-x86_64-setup.exe
             dist/io.github.quazardous.Helios-"$VERSION"-x86_64.flatpak

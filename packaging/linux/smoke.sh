@@ -3,9 +3,11 @@
 # bare Ubuntu container (no Vulkan loader, no GPU):
 #
 #   packaging/linux/smoke.sh helios-VERSION-linux-x86_64.tar.gz PICTURE.jpg
+#   packaging/linux/smoke.sh /opt/helios PICTURE.jpg
 #
-# Unpacks it, says what each program links to, then runs the command line:
-# its version, an import of the picture into a new vault, and a batch that
+# Unpacks it (or takes the folder the .deb and .rpm install, see
+# packaging/linux/smoke-package.sh), says what each program links to, then
+# runs the command line: its version, an import of the picture into a new vault, and a batch that
 # exports it as a JPEG through a network with one module (the processing
 # runs on the CPU, as there is no GPU).
 set -euo pipefail
@@ -15,8 +17,12 @@ picture="$2"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-tar -C "$work" -xzf "$tarball"
-bin="$(echo "$work"/helios-*/bin)"
+if [ -d "$tarball" ]; then
+  bin="$tarball/bin"
+else
+  tar -C "$work" -xzf "$tarball"
+  bin="$(echo "$work"/helios-*/bin)"
+fi
 
 echo "== libraries"
 for p in "$bin"/*; do

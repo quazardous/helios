@@ -176,13 +176,21 @@ The release workflow checks the tag against the workspace version, then:
    says its version, imports a picture into a new vault and exports it as
    a JPEG through a network on the CPU; the AppImage starts and says its
    version;
-4. builds the same programs for Windows x86_64 (MSVC, `windows-latest`)
+4. builds `helios_X.Y.Z_amd64.deb` and `helios-X.Y.Z-1.x86_64.rpm` from
+   the tarball (`packaging/linux/packages.sh`, with nfpm, pinned by
+   version and SHA-256; see "The .deb and the .rpm" below), then installs
+   each in clean containers (Debian 13, Ubuntu 22.04 and 24.04 for the
+   .deb; Fedora 44 and Rocky Linux 9 for the .rpm) with the distribution's
+   apt or dnf, which must resolve the declared dependencies, runs the
+   tarball's smoke test from `/opt/helios`, removes the package and checks
+   nothing is left behind (`packaging/linux/smoke-package.sh`);
+5. builds the same programs for Windows x86_64 (MSVC, `windows-latest`)
    and packages them (`packaging/windows/release.ps1`):
    `helios-X.Y.Z-windows-x86_64.zip`, a folder that runs where it is
    unpacked, with `COPYING`, `THIRD-PARTY-LICENSES.txt` and `README.md`,
    and `helios-X.Y.Z-windows-x86_64-setup.exe`, an installer of the same
    folder (see "The Windows installer" below);
-5. tests the zip (`packaging/windows/smoke.ps1`) on a Windows runner,
+6. tests the zip (`packaging/windows/smoke.ps1`) on a Windows runner,
    which has no GPU: `helios.exe` and `helios-gui.exe` say their version,
    `helios.exe` imports a picture into a new vault and exports it as a
    JPEG on the CPU; then the installer
@@ -190,7 +198,7 @@ The release workflow checks the tag against the workspace version, then:
    temporary folder, the same tests from the installed folder, a silent
    uninstall, and a check that the files, the Start menu entry and the
    entry in Settings are gone;
-6. builds the Flatpak (`packaging/flatpak/build.sh`) from the same
+7. builds the Flatpak (`packaging/flatpak/build.sh`) from the same
    source, as a single-file bundle
    `io.github.quazardous.Helios-X.Y.Z-x86_64.flatpak`, and tests it in
    the same job (`packaging/flatpak/smoke.sh`), with no GPU and no
@@ -201,10 +209,10 @@ The release workflow checks the tag against the workspace version, then:
    the tag of the manifest's runtime), which brings flatpak-builder and
    everything the script needs, so it installs nothing from Ubuntu's
    archive;
-7. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
+8. creates the GitHub Release, titled "Helios X.Y.Z", with that version's
    CHANGELOG.md section as its notes, and attaches the files, with one
    `SHA256SUMS` for all of them;
-8. opens the winget-pkgs pull request for the new installer (see "winget"
+9. opens the winget-pkgs pull request for the new installer (see "winget"
    below), when the `WINGET_TOKEN` secret is set.
 
 Nothing else is needed at run time: the catalogues, templates, module
@@ -225,7 +233,8 @@ gh workflow run release.yml -R quazardous/helios --ref next -f tag=v0.0.0-dry
 ```
 
 Each package's files, the Flatpak bundle among them (artefact
-`helios-X.Y.Z-flatpak-x86_64`), are then the run's artefacts.
+`helios-X.Y.Z-flatpak-x86_64`) and the .deb and .rpm (artefact
+`helios-X.Y.Z-linux-packages`), are then the run's artefacts.
 
 ## When GitHub's CI is down
 
@@ -234,6 +243,36 @@ release branch=next`): survival, the CHANGELOG section, the bump and
 Cargo.lock, tested, as `out/release.patch`, which is committed as
 "Release X.Y.Z" on a branch from `next` and merged into it. The release
 workflow can also run by hand, as above, once Actions is back.
+
+## The .deb and the .rpm
+
+`helios_X.Y.Z_amd64.deb` (Debian, Ubuntu) and `helios-X.Y.Z-1.x86_64.rpm`
+(Fedora, RHEL and its rebuilds) hold the tarball's folder as it is, built
+by [nfpm](https://nfpm.goreleaser.com) from `packaging/linux/nfpm.yaml`:
+
+- `/opt/helios`: the programs in `bin/`, `COPYING`,
+  `THIRD-PARTY-LICENSES.txt`, `README.md`;
+- `/usr/bin/helios` and `/usr/bin/helios-gui`: links to them;
+- `/usr/share/applications`, `/usr/share/icons/hicolor` and
+  `/usr/share/metainfo`: the desktop entry, the icons and the AppStream
+  metainfo.
+
+The package is named `helios`, conflicts with nothing and installs beside
+the Flatpak and the AppImage. Helios links no library of darktable's, so
+nothing clashes with the distribution's darktable.
+
+The programs link only the C library and libgcc_s; the window's program
+loads the rest when it starts: the Vulkan and EGL loaders, the Wayland and
+X11 client libraries, xkbcommon. The packages require them, by package
+name in the .deb, by soname in the .rpm (the same on Fedora and RHEL), and
+require glibc at least the newest symbol version the programs use (read
+from them when packaging). They recommend `xdg-desktop-portal` (the file
+dialogs) and `mesa-vulkan-drivers`. The smoke test checks each library is
+present once the package is installed in a clean container.
+
+There is no apt or dnf repository yet: a new version is installed by
+downloading it again (`sudo apt install ./helios_X.Y.Z_amd64.deb`,
+`sudo dnf install ./helios-X.Y.Z-1.x86_64.rpm`).
 
 ## The Windows installer
 
