@@ -16,8 +16,8 @@ use serde_json::json;
 
 fn catalogue() -> Catalogue {
     Catalogue::new()
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
-        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
+        .module(ModuleRef::new(helios_modules::exposure::Exposure))
+        .module(ModuleRef::new(helios_modules::sigmoid::Sigmoid))
 }
 
 /// `source → exp → tone → lift`, the view on `lift`, and `side` reading

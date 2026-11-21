@@ -119,8 +119,8 @@ pub fn distorted(from: [f64; 2], to: [f64; 2]) -> Option<String> {
 /// radius, a hardness and a density.
 fn point_layout(module: &str) -> Option<(usize, usize)> {
     match module {
-        "mask_path" => Some((helios_module_masks::shape::PATH_POINT_VALUES, 6)),
-        "mask_brush" => Some((helios_module_masks::shape::BRUSH_POINT_VALUES, 6)),
+        "mask_path" => Some((helios_modules::masks::shape::PATH_POINT_VALUES, 6)),
+        "mask_brush" => Some((helios_modules::masks::shape::BRUSH_POINT_VALUES, 6)),
         _ => None,
     }
 }

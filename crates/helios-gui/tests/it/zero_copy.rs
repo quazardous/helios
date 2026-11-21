@@ -44,7 +44,7 @@ fn chain() -> (Arc<Graph>, NodeId, NodeId) {
         let n = g
             .add_module(
                 name,
-                ModuleRef::new(helios_module_exposure::Exposure),
+                ModuleRef::new(helios_modules::exposure::Exposure),
                 &Params::new().with("exposure", Value::Float(ev)),
             )
             .unwrap();

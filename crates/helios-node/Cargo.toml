@@ -33,21 +33,8 @@ blake3.workspace = true
 bus-contract.workspace = true
 bus-contract-crossing.workspace = true
 egui-pop-hooks.workspace = true
-helios-module-exposure = { path = "../../modules/exposure" }
-helios-module-rawprepare = { path = "../../modules/rawprepare" }
-helios-module-demosaic = { path = "../../modules/demosaic" }
-helios-module-whitebalance = { path = "../../modules/whitebalance" }
-helios-module-highlights = { path = "../../modules/highlights" }
-helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
-helios-module-colorin = { path = "../../modules/colorin" }
-helios-module-chartprofile = { path = "../../modules/chartprofile" }
-helios-module-cameracolour = { path = "../../modules/cameracolour" }
-helios-module-cameratone = { path = "../../modules/cameratone" }
-helios-module-flip = { path = "../../modules/flip" }
-helios-module-sigmoid = { path = "../../modules/sigmoid" }
-helios-module-blur = { path = "../../modules/blur" }
-helios-module-vkdt = { path = "../../modules/vkdt" }
-helios-module-masks = { path = "../../modules/masks" }
+# The processing modules, from the one module catalogue.
+helios-modules.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # MIT OR Apache-2.0: the `log` facade, its logger installed by each binary.

@@ -64,35 +64,7 @@ pub fn add_module(module: ModuleRef) {
 /// demosaicing, camera colours), the tools on a picture, the masks; and
 /// those added ([`add_module`]).
 pub fn modules() -> Catalogue {
-    use helios_module_masks as m;
-    let mut c = Catalogue::new()
-        .module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
-        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
-        .module(ModuleRef::new(helios_module_highlights::Highlights))
-        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
-        .module(ModuleRef::new(helios_module_colorin::ColorIn))
-        .module(ModuleRef::new(helios_module_chartprofile::ChartProfile))
-        .module(ModuleRef::new(helios_module_cameracolour::CameraColour))
-        .module(ModuleRef::new(
-            helios_module_channelmixerrgb::ChannelMixerRgb,
-        ))
-        .module(ModuleRef::new(helios_module_flip::Flip))
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
-        .module(ModuleRef::new(helios_module_cameratone::CameraTone))
-        .module(ModuleRef::new(helios_module_sigmoid::Sigmoid))
-        .module(ModuleRef::new(m::MaskCombine))
-        .module(ModuleRef::new(m::MaskFeather))
-        .module(ModuleRef::new(m::MaskBlur))
-        .module(ModuleRef::new(m::MaskLevels))
-        .module(ModuleRef::new(m::MaskBlend))
-        .module(ModuleRef::new(m::MaskFromLuma))
-        .module(ModuleRef::new(m::MaskParametric))
-        .module(ModuleRef::new(m::MaskRaster))
-        .module(ModuleRef::new(m::MaskCircle))
-        .module(ModuleRef::new(m::MaskEllipse))
-        .module(ModuleRef::new(m::MaskGradient))
-        .module(ModuleRef::new(m::MaskPath))
-        .module(ModuleRef::new(m::MaskBrush));
+    let mut c = helios_modules::desktop().fold(Catalogue::new(), Catalogue::module);
     for module in ADDED
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -284,4 +256,39 @@ pub fn read_json(path: &Path) -> Json {
         .and_then(|t| serde_json::from_str::<Json>(&t).ok())
         .filter(Json::is_object)
         .unwrap_or_else(|| json!({}))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    /// The desktop's templates see exactly the catalogue's desktop modules
+    /// (plus those a test adds), under the catalogue's ids.
+    #[test]
+    fn modules_are_the_catalogues_desktop_ones() {
+        let desktop: BTreeSet<String> = helios_modules::desktop()
+            .map(|m| m.manifest().name.clone())
+            .collect();
+        let ids: BTreeSet<&str> = helios_modules::ids().collect();
+        let added: BTreeSet<String> = super::ADDED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|m| m.manifest().name.clone())
+            .collect();
+        let seen: BTreeSet<String> = super::modules().module_names().map(String::from).collect();
+        for id in &desktop {
+            assert!(
+                seen.contains(id),
+                "{id} missing from the desktop's catalogue"
+            );
+            assert!(ids.contains(id.as_str()));
+        }
+        for name in &seen {
+            assert!(
+                desktop.contains(name) || added.contains(name),
+                "{name} not in the module catalogue"
+            );
+        }
+    }
 }

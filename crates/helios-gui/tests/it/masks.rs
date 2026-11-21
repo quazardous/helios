@@ -12,7 +12,7 @@ use egui_pop_test::{at_scales, double_click_at};
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
 use helios_gui::masks::{self, POINT, SHAPE, TOOL, distance_to};
 use helios_gui::{Shell, headless, helios_panels};
-use helios_module_masks::shape::path_points;
+use helios_modules::masks::shape::path_points;
 use helios_shell::commands::Origin;
 use serde_json::json;
 
@@ -32,7 +32,7 @@ fn graph() -> (Graph, helios_core::NodeId) {
     let exp = g
         .add_module(
             "exposure",
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             &Params::new().with("exposure", Value::Float(1.0)),
         )
         .unwrap();
@@ -40,14 +40,14 @@ fn graph() -> (Graph, helios_core::NodeId) {
     let mask = g
         .add_module(
             "mask",
-            ModuleRef::new(helios_module_masks::MaskCombine),
+            ModuleRef::new(helios_modules::masks::MaskCombine),
             &Params::new(),
         )
         .unwrap();
     let blend = g
         .add_module(
             "blend",
-            ModuleRef::new(helios_module_masks::MaskBlend),
+            ModuleRef::new(helios_modules::masks::MaskBlend),
             &Params::new(),
         )
         .unwrap();

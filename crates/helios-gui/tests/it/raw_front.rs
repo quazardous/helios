@@ -640,7 +640,7 @@ fn develop_one_image_3_renders_version_2_s_bits_while_its_chart_profile_is_off()
     // On, with a profile's matrix, the colours move.
     let bend = [1.08, -0.05, -0.03, -0.02, 1.01, 0.01, 0.0, -0.04, 1.04];
     let standard =
-        helios_module_chartprofile::standard(new.context(profile).unwrap().unwrap()).unwrap();
+        helios_modules::chartprofile::standard(new.context(profile).unwrap().unwrap()).unwrap();
     let m_c = helios_photo::color::mul(
         &[
             [bend[0], bend[1], bend[2]],
@@ -652,7 +652,7 @@ fn develop_one_image_3_renders_version_2_s_bits_while_its_chart_profile_is_off()
     new.set_param(
         profile,
         "matrix",
-        Value::List(helios_module_chartprofile::flat(&m_c)),
+        Value::List(helios_modules::chartprofile::flat(&m_c)),
     )
     .unwrap();
     new.set_bypass(profile, false).unwrap();

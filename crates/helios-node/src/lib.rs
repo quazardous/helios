@@ -296,114 +296,10 @@ impl ExportDesc {
     }
 }
 
-/// The modules this node can instantiate, by name.
+/// The modules this node can instantiate, by name: every module of the
+/// catalogue (`helios-modules`).
 pub fn registry() -> BTreeMap<&'static str, ModuleRef> {
-    BTreeMap::from([
-        (
-            "rawprepare",
-            ModuleRef::new(helios_module_rawprepare::RawPrepare),
-        ),
-        (
-            "whitebalance",
-            ModuleRef::new(helios_module_whitebalance::WhiteBalance),
-        ),
-        (
-            "highlights",
-            ModuleRef::new(helios_module_highlights::Highlights),
-        ),
-        ("demosaic", ModuleRef::new(helios_module_demosaic::Demosaic)),
-        ("colorin", ModuleRef::new(helios_module_colorin::ColorIn)),
-        (
-            "chartprofile",
-            ModuleRef::new(helios_module_chartprofile::ChartProfile),
-        ),
-        (
-            "cameracolour",
-            ModuleRef::new(helios_module_cameracolour::CameraColour),
-        ),
-        (
-            "cameratone",
-            ModuleRef::new(helios_module_cameratone::CameraTone),
-        ),
-        ("flip", ModuleRef::new(helios_module_flip::Flip)),
-        (
-            "channelmixerrgb",
-            ModuleRef::new(helios_module_channelmixerrgb::ChannelMixerRgb),
-        ),
-        ("exposure", ModuleRef::new(helios_module_exposure::Exposure)),
-        (
-            "decide_exposure",
-            ModuleRef::new(helios_module_exposure::DecideExposure),
-        ),
-        ("sigmoid", ModuleRef::new(helios_module_sigmoid::Sigmoid)),
-        ("blur", ModuleRef::new(helios_module_blur::Blur)),
-        (
-            "vkdt_exposure",
-            ModuleRef::new(helios_module_vkdt::VkdtExposure),
-        ),
-        ("vkdt_usm", ModuleRef::new(helios_module_vkdt::VkdtUsm)),
-        (
-            "vkdt_contrast",
-            ModuleRef::composite(helios_module_vkdt::VkdtContrast),
-        ),
-        ("vkdt_grade", ModuleRef::new(helios_module_vkdt::VkdtGrade)),
-        (
-            "vkdt_llap",
-            ModuleRef::composite(helios_module_vkdt::VkdtLlap),
-        ),
-        (
-            "vkdt_filmcurv",
-            ModuleRef::new(helios_module_vkdt::VkdtFilmcurv),
-        ),
-        (
-            "vkdt_colour",
-            ModuleRef::new(helios_module_vkdt::VkdtColour),
-        ),
-        (
-            "mask_combine",
-            ModuleRef::new(helios_module_masks::MaskCombine),
-        ),
-        ("mask_blend", ModuleRef::new(helios_module_masks::MaskBlend)),
-        (
-            "mask_feather",
-            ModuleRef::new(helios_module_masks::MaskFeather),
-        ),
-        ("mask_blur", ModuleRef::new(helios_module_masks::MaskBlur)),
-        (
-            "mask_levels",
-            ModuleRef::new(helios_module_masks::MaskLevels),
-        ),
-        (
-            "mask_from_luma",
-            ModuleRef::new(helios_module_masks::MaskFromLuma),
-        ),
-        (
-            "mask_parametric",
-            ModuleRef::new(helios_module_masks::MaskParametric),
-        ),
-        (
-            "mask_raster",
-            ModuleRef::new(helios_module_masks::MaskRaster),
-        ),
-        (
-            "mask_circle",
-            ModuleRef::new(helios_module_masks::MaskCircle),
-        ),
-        (
-            "mask_ellipse",
-            ModuleRef::new(helios_module_masks::MaskEllipse),
-        ),
-        (
-            "mask_gradient",
-            ModuleRef::new(helios_module_masks::MaskGradient),
-        ),
-        ("mask_path", ModuleRef::new(helios_module_masks::MaskPath)),
-        ("mask_brush", ModuleRef::new(helios_module_masks::MaskBrush)),
-        (
-            "mask_object",
-            ModuleRef::new(helios_module_masks::MaskObject),
-        ),
-    ])
+    helios_modules::registry()
 }
 
 /// A network ready to evaluate.
@@ -650,6 +546,15 @@ mod tests {
 
     fn parse(text: &str) -> Description {
         serde_json::from_str(text).unwrap()
+    }
+
+    /// The node instantiates every module of the catalogue, under its id.
+    #[test]
+    fn registry_is_the_module_catalogue() {
+        let ids: Vec<_> = helios_modules::ids().collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(registry().keys().copied().collect::<Vec<_>>(), sorted);
     }
 
     #[test]

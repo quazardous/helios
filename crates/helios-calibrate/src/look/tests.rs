@@ -789,8 +789,8 @@ fn two_runs_with_a_table_are_bit_identical() {
 /// `cameratone`) at their fitted parameters, in single precision.
 fn rendered_by_the_modules(look: &Look, pixels: &[[f64; 3]]) -> Vec<[f64; 3]> {
     use helios_core::{Context, Image, Module, Region};
-    use helios_module_cameracolour::CameraColour;
-    use helios_module_cameratone::CameraTone;
+    use helios_modules::cameracolour::CameraColour;
+    use helios_modules::cameratone::CameraTone;
     let w = pixels.len() as u32;
     let data: Vec<f32> = pixels
         .iter()

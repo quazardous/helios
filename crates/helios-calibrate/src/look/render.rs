@@ -81,18 +81,11 @@ pub fn from_edit(edit: &BTreeMap<String, Params>) -> Chain {
     chain
 }
 
+/// A step's module, from the catalogue (`helios-modules`): [`STEPS`] is
+/// the filter, the develop chain a look is fitted through, not every
+/// module.
 fn module(id: &str) -> Option<ModuleRef> {
-    Some(match id {
-        "rawprepare" => ModuleRef::new(helios_module_rawprepare::RawPrepare),
-        "whitebalance" => ModuleRef::new(helios_module_whitebalance::WhiteBalance),
-        "highlights" => ModuleRef::new(helios_module_highlights::Highlights),
-        "demosaic" => ModuleRef::new(helios_module_demosaic::Demosaic),
-        "colorin" => ModuleRef::new(helios_module_colorin::ColorIn),
-        "channelmixerrgb" => ModuleRef::new(helios_module_channelmixerrgb::ChannelMixerRgb),
-        "exposure" => ModuleRef::new(helios_module_exposure::Exposure),
-        "sigmoid" => ModuleRef::new(helios_module_sigmoid::Sigmoid),
-        _ => return None,
-    })
+    helios_modules::module(id)
 }
 
 /// The chain on `mosaic`, each step's node by its module id.
@@ -377,4 +370,17 @@ pub fn for_chain(look: &Look, gain: f64) -> Look {
         k[0] *= gain;
     }
     look
+}
+
+#[cfg(test)]
+mod catalogue_tests {
+    /// Every step of the look chain is a module of the catalogue, under
+    /// the same id.
+    #[test]
+    fn steps_come_from_the_module_catalogue() {
+        for id in super::STEPS {
+            let m = super::module(id).unwrap_or_else(|| panic!("{id} not in helios-modules"));
+            assert_eq!(m.manifest().name, id);
+        }
+    }
 }

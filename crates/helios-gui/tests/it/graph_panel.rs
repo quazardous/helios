@@ -279,7 +279,7 @@ fn a_node_header_carries_the_engine_status() {
     let exp = g
         .add_module(
             "exposure",
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             &Params::new(),
         )
         .unwrap();
@@ -418,10 +418,10 @@ fn within_budget(what: &str, mean: std::time::Duration) {
 /// workspace's network: its nodes named without dots (a dot names an
 /// opened composite's inner node), its source the workspace's.
 fn stress_network() -> Value {
-    use helios_module_masks::stress;
+    use helios_modules::masks::stress;
     let built = stress::build(stress::picture(Region::sized(8, 6)), 3, |k| {
         (
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             Params::new().with("exposure", helios_core::Value::Float(0.5 - k as f64 * 0.4)),
         )
     })
@@ -820,7 +820,7 @@ fn photo() -> (Graph, helios_core::NodeId) {
     let exp = g
         .add_module(
             "exposure",
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             &Params::new(),
         )
         .unwrap();

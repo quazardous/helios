@@ -199,7 +199,7 @@ fn network() -> (helios_core::Graph, helios_core::NodeId) {
     let exp = g
         .add_module(
             "exposure",
-            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+            helios_core::ModuleRef::new(helios_modules::exposure::Exposure),
             &helios_core::Params::new(),
         )
         .unwrap();
@@ -505,7 +505,7 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
 /// what the viewport shows.
 fn masked_network() -> (helios_core::Graph, helios_core::NodeId) {
     use helios_core::{ModuleRef, Params, Value as V};
-    use helios_module_masks::{MaskBlend, MaskCircle, MaskCombine};
+    use helios_modules::masks::{MaskBlend, MaskCircle, MaskCombine};
     let (mut g, exp) = network();
     let src = g.find("source").unwrap();
     let mask = g
@@ -786,7 +786,7 @@ fn a_network_changed_in_place_is_saved_with_its_new_nodes_and_without_the_old() 
     let lift = next
         .add_module(
             "lift",
-            helios_core::ModuleRef::new(helios_module_exposure::Exposure),
+            helios_core::ModuleRef::new(helios_modules::exposure::Exposure),
             &helios_core::Params::new(),
         )
         .unwrap();

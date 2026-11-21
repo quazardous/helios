@@ -24,7 +24,7 @@ fn module(g: &mut Graph, name: &str, m: ModuleRef, p: &Params) -> NodeId {
 /// An exposure through a mask: the group `mask` folds a nested group
 /// `inner` (a circle `dot`), a circle `spot` and an ellipse `oval`.
 fn graph() -> (Graph, NodeId) {
-    use helios_module_masks::{MaskBlend, MaskCircle, MaskCombine, MaskEllipse};
+    use helios_modules::masks::{MaskBlend, MaskCircle, MaskCombine, MaskEllipse};
     let mut g = Graph::new();
     let src = g.add_source(
         "source",
@@ -36,7 +36,7 @@ fn graph() -> (Graph, NodeId) {
     let exp = module(
         &mut g,
         "exposure",
-        ModuleRef::new(helios_module_exposure::Exposure),
+        ModuleRef::new(helios_modules::exposure::Exposure),
         &Params::new().with("exposure", Value::Float(1.0)),
     );
     g.connect(src, "image", exp, "input").unwrap();
@@ -205,7 +205,7 @@ fn drag(h: &mut Harness<'_, Shell>, from: Pos2, to: Pos2) {
 
 #[test]
 fn an_ai_object_member_shows_with_its_icon_and_its_question() {
-    use helios_module_masks::{MaskObject, object};
+    use helios_modules::masks::{MaskObject, object};
     let (mut g, blend) = graph();
     let sky = module(&mut g, "sky", ModuleRef::new(MaskObject), &Params::new());
     g.connect(g.find("source").unwrap(), "image", sky, "input")
@@ -230,7 +230,7 @@ fn an_ai_object_member_shows_with_its_icon_and_its_question() {
 
 #[test]
 fn a_brush_member_shows_with_its_icon() {
-    use helios_module_masks::MaskBrush;
+    use helios_modules::masks::MaskBrush;
     let (mut g, blend) = graph();
     let stroke = module(&mut g, "stroke", ModuleRef::new(MaskBrush), &Params::new());
     g.connect(stroke, "mask", g.find("mask").unwrap(), "in3")
@@ -887,7 +887,7 @@ fn every_row_keeps_its_eye_and_lock_whole_in_a_narrow_panel() {
 /// The network of [`graph`] with refinements: a blur between the module's
 /// mask and its blend, a feather between the spot and its group.
 fn refined() -> (Graph, NodeId) {
-    use helios_module_masks::{MaskBlur, MaskFeather};
+    use helios_modules::masks::{MaskBlur, MaskFeather};
     let (mut g, blend) = graph();
     let (mask, spot) = (g.find("mask").unwrap(), g.find("spot").unwrap());
     let blur = module(&mut g, "soft", ModuleRef::new(MaskBlur), &Params::new());
@@ -1060,7 +1060,7 @@ fn a_member_wired_to_two_ports_shows_once_per_port() {
 
 /// The exposure through a mask with no member yet, as `--image` opens.
 fn empty() -> (Graph, NodeId) {
-    use helios_module_masks::{MaskBlend, MaskCombine};
+    use helios_modules::masks::{MaskBlend, MaskCombine};
     let mut g = Graph::new();
     let src = g.add_source(
         "source",
@@ -1072,7 +1072,7 @@ fn empty() -> (Graph, NodeId) {
     let exp = module(
         &mut g,
         "exposure",
-        ModuleRef::new(helios_module_exposure::Exposure),
+        ModuleRef::new(helios_modules::exposure::Exposure),
         &Params::new(),
     );
     g.connect(src, "image", exp, "input").unwrap();

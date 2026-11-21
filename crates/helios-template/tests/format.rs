@@ -52,7 +52,7 @@ fn panels() -> Vec<PanelSpec> {
 
 fn catalogue() -> Catalogue {
     Catalogue::new()
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(helios_modules::exposure::Exposure))
         .composite(twice(1))
         .panels(panels())
         .commands(["test.draw".to_string(), "test.erase".to_string()])
@@ -269,7 +269,7 @@ fn a_bundle_is_written_and_read_back_with_its_composites_and_texts() {
     let read = Bundle::load(&dir).unwrap();
     assert_eq!(read, b);
     // Its bundled composite builds it without the catalogue's.
-    let bare = Catalogue::new().module(ModuleRef::new(helios_module_exposure::Exposure));
+    let bare = Catalogue::new().module(ModuleRef::new(helios_modules::exposure::Exposure));
     assert!(read.build(&bare).is_ok());
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -344,7 +344,7 @@ fn raw_template() -> Json {
 }
 
 fn raw_catalogue() -> Catalogue {
-    catalogue().module(ModuleRef::new(helios_module_rawprepare::RawPrepare))
+    catalogue().module(ModuleRef::new(helios_modules::rawprepare::RawPrepare))
 }
 
 #[test]
@@ -457,10 +457,10 @@ fn image_template() -> Json {
 /// The raw modules and the raw front Helios ships.
 fn image_catalogue() -> Catalogue {
     let mut c = raw_catalogue()
-        .module(ModuleRef::new(helios_module_whitebalance::WhiteBalance))
-        .module(ModuleRef::new(helios_module_highlights::Highlights))
-        .module(ModuleRef::new(helios_module_demosaic::Demosaic))
-        .module(ModuleRef::new(helios_module_colorin::ColorIn));
+        .module(ModuleRef::new(helios_modules::whitebalance::WhiteBalance))
+        .module(ModuleRef::new(helios_modules::highlights::Highlights))
+        .module(ModuleRef::new(helios_modules::demosaic::Demosaic))
+        .module(ModuleRef::new(helios_modules::colorin::ColorIn));
     for file in helios_template::shipped::composites() {
         c.add_composite(file);
     }
@@ -471,7 +471,7 @@ fn image_catalogue() -> Catalogue {
 fn a_raw_through_the_raw_front_gets_darktables_colour_calibration() {
     use helios_core::{Image, Value};
     let catalogue = image_catalogue().module(ModuleRef::new(
-        helios_module_channelmixerrgb::ChannelMixerRgb,
+        helios_modules::channelmixerrgb::ChannelMixerRgb,
     ));
     let b = bundle(&image_template());
     // A Nikon D750 (its XYZ to camera matrix), shot under a warm light.
@@ -560,9 +560,9 @@ fn a_raw_through_the_raw_front_gets_darktables_colour_calibration() {
 #[test]
 fn the_raw_front_has_a_bypassed_chart_profile_that_changes_colours_once_on() {
     use helios_core::{Image, Value};
-    use helios_module_chartprofile::{ChartProfile, flat, standard};
+    use helios_modules::chartprofile::{ChartProfile, flat, standard};
     let without = image_catalogue().module(ModuleRef::new(
-        helios_module_channelmixerrgb::ChannelMixerRgb,
+        helios_modules::channelmixerrgb::ChannelMixerRgb,
     ));
     let with = without.clone().module(ModuleRef::new(ChartProfile));
     let b = bundle(&image_template());
@@ -829,7 +829,7 @@ fn workshop(targets: Json) -> Json {
 fn built(file: &Json) -> Result<(), String> {
     let file = parse_composite(&file.to_string())?;
     let catalogue = Catalogue::new()
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(helios_modules::exposure::Exposure))
         .composite(file.clone());
     catalogue.build_composite(&file.reference(), 0).map(|_| ())
 }
@@ -936,11 +936,11 @@ fn a_workshop_target_is_on_one_exposed_number() {
 #[test]
 fn the_raw_front_has_a_bypassed_camera_look_colour_half_after_colour_calibration() {
     use helios_core::Image;
-    use helios_module_cameracolour::CameraColour;
-    use helios_module_chartprofile::ChartProfile;
+    use helios_modules::cameracolour::CameraColour;
+    use helios_modules::chartprofile::ChartProfile;
     let without = image_catalogue()
         .module(ModuleRef::new(
-            helios_module_channelmixerrgb::ChannelMixerRgb,
+            helios_modules::channelmixerrgb::ChannelMixerRgb,
         ))
         .module(ModuleRef::new(ChartProfile));
     let with = without.clone().module(ModuleRef::new(CameraColour));
@@ -1009,7 +1009,7 @@ fn the_raw_front_has_a_bypassed_camera_look_colour_half_after_colour_calibration
 #[test]
 fn a_raw_shown_through_sigmoid_gets_a_bypassed_camera_look_tone_half_before_it() {
     use helios_core::Image;
-    use helios_module_cameratone::CameraTone;
+    use helios_modules::cameratone::CameraTone;
     // A template with a display transform and no `cameratone`: built
     // with a raw, the tone half goes on sigmoid's input, so an edit with
     // a look (sigmoid off, cameratone on) never renders scene-linear.
@@ -1033,7 +1033,7 @@ fn a_raw_shown_through_sigmoid_gets_a_bypassed_camera_look_tone_half_before_it()
         }
     });
     let b = bundle(&t);
-    let without = image_catalogue().module(ModuleRef::new(helios_module_sigmoid::Sigmoid));
+    let without = image_catalogue().module(ModuleRef::new(helios_modules::sigmoid::Sigmoid));
     let with = without.clone().module(ModuleRef::new(CameraTone));
     let camera = helios_photo::CameraInfo {
         maker: "Nikon".into(),

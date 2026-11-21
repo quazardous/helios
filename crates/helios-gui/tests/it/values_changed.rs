@@ -26,7 +26,7 @@ fn shell() -> Shell {
     let exp = g
         .add_module(
             "exposure",
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             &Params::new(),
         )
         .unwrap();

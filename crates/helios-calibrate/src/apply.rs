@@ -52,7 +52,7 @@ impl Rule {
 /// balance coefficients, as `channelmixerrgb`'s "as shot in camera".
 /// `None` where it finds none.
 pub fn as_shot_light(xyz_to_camera: &[f64], white_balance: &[f64]) -> Option<[f64; 2]> {
-    helios_module_channelmixerrgb::as_shot_illuminant_xy(xyz_to_camera, white_balance)
+    helios_modules::channelmixerrgb::as_shot_illuminant_xy(xyz_to_camera, white_balance)
         .map(|xy| xy.map(f64::from))
 }
 

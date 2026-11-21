@@ -21,7 +21,7 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
     let exp = g
         .add_module(
             "exposure",
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             &Params::new(),
         )
         .unwrap();
@@ -450,7 +450,7 @@ fn a_path_s_points_fold_into_a_summary_that_opens() {
     let path = g
         .add_module(
             "path",
-            ModuleRef::new(helios_module_masks::MaskPath),
+            ModuleRef::new(helios_modules::masks::MaskPath),
             &Params::new(),
         )
         .unwrap();
@@ -492,7 +492,7 @@ fn a_choice_s_list_opens_and_picks() {
     let ramp = g
         .add_module(
             "ramp",
-            ModuleRef::new(helios_module_masks::MaskGradient),
+            ModuleRef::new(helios_modules::masks::MaskGradient),
             &Params::new(),
         )
         .unwrap();

@@ -1,5 +1,5 @@
 //! The controls the desktop uses (`helios_controls`): Helios's catalogue
-//! with the modules' patches (exposure's `exposure` is the exposure
+//! with the modules' patches, from the module catalogue (exposure's `exposure` is the exposure
 //! control; every other parameter keeps its implicit control, the row
 //! `params` draws from its descriptor), and the `controls.change` step's
 //! hooks. One of each for the process: the panel, the `controls.*`
@@ -12,7 +12,7 @@ use helios_controls::{HeliosRegistry, Registry};
 
 static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(|| {
     let mut r = Registry::standard();
-    let errors = r.patch(helios_module_exposure::patches());
+    let errors = r.patch(helios_modules::patches());
     debug_assert!(errors.is_empty(), "{errors:?}");
     Arc::new(r)
 });

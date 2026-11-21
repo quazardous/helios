@@ -16,9 +16,9 @@ use helios_template::{Bundle, Catalogue, SOURCE_PORT, parse_template};
 use serde_json::{Value as Json, json};
 
 fn catalogue() -> Catalogue {
-    use helios_module_masks as m;
+    use helios_modules::masks as m;
     Catalogue::new()
-        .module(ModuleRef::new(helios_module_exposure::Exposure))
+        .module(ModuleRef::new(helios_modules::exposure::Exposure))
         .module(ModuleRef::new(m::MaskParametric))
         .module(ModuleRef::new(m::MaskBlend))
 }

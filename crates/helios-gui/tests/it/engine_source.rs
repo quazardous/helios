@@ -59,7 +59,7 @@ fn turned() -> Shown {
     let flip = g
         .add_module(
             "flip",
-            helios_core::ModuleRef::new(helios_module_flip::Flip),
+            helios_core::ModuleRef::new(helios_modules::flip::Flip),
             &helios_core::Params::new().with("orientation", helios_core::Value::Int(5)),
         )
         .unwrap();

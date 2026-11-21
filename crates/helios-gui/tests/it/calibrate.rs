@@ -288,7 +288,7 @@ fn the_module_header_lists_the_camera_s_profiles_and_a_switch_is_one_edit_step()
     let node = g
         .add_module(
             "chartprofile",
-            ModuleRef::new(helios_module_chartprofile::ChartProfile),
+            ModuleRef::new(helios_modules::chartprofile::ChartProfile),
             &Params::new(),
         )
         .unwrap();
@@ -491,7 +491,7 @@ fn look_shell(
     let chart = g
         .add_module(
             "chartprofile",
-            ModuleRef::new(helios_module_chartprofile::ChartProfile),
+            ModuleRef::new(helios_modules::chartprofile::ChartProfile),
             &Params::new(),
         )
         .unwrap();
@@ -500,7 +500,7 @@ fn look_shell(
     let colour = g
         .add_module(
             "cameracolour",
-            ModuleRef::new(helios_module_cameracolour::CameraColour),
+            ModuleRef::new(helios_modules::cameracolour::CameraColour),
             &Params::new(),
         )
         .unwrap();
@@ -508,7 +508,7 @@ fn look_shell(
     let tone = g
         .add_module(
             "cameratone",
-            ModuleRef::new(helios_module_cameratone::CameraTone),
+            ModuleRef::new(helios_modules::cameratone::CameraTone),
             &Params::new(),
         )
         .unwrap();
@@ -516,7 +516,7 @@ fn look_shell(
     let sigmoid = g
         .add_module(
             "sigmoid",
-            ModuleRef::new(helios_module_sigmoid::Sigmoid),
+            ModuleRef::new(helios_modules::sigmoid::Sigmoid),
             &Params::new(),
         )
         .unwrap();

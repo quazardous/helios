@@ -22,7 +22,7 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
     let exp = g
         .add_module(
             "exposure",
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             &Params::new(),
         )
         .unwrap();
@@ -361,7 +361,7 @@ fn the_rendered_image_is_copied_whole_for_other_applications() {
     let exp = g
         .add_module(
             "exposure",
-            ModuleRef::new(helios_module_exposure::Exposure),
+            ModuleRef::new(helios_modules::exposure::Exposure),
             &Params::new(),
         )
         .unwrap();

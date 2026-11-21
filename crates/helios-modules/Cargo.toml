@@ -1,0 +1,31 @@
+[package]
+name = "helios-modules"
+description = "Helios's module catalogue: every processing module listed once, with what each provides (its node entry, whether the desktop's templates may name it, its control patches)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+helios-core.workspace = true
+# The control patches modules declare (the model only, no egui).
+helios-controls.workspace = true
+# Every crate under modules/, once (a test checks none is missing).
+helios-module-blur = { path = "../../modules/blur" }
+helios-module-cameracolour = { path = "../../modules/cameracolour" }
+helios-module-cameratone = { path = "../../modules/cameratone" }
+helios-module-channelmixerrgb = { path = "../../modules/channelmixerrgb" }
+helios-module-chartprofile = { path = "../../modules/chartprofile" }
+helios-module-colorin = { path = "../../modules/colorin" }
+helios-module-demosaic = { path = "../../modules/demosaic" }
+helios-module-exposure = { path = "../../modules/exposure" }
+helios-module-flip = { path = "../../modules/flip" }
+helios-module-highlights = { path = "../../modules/highlights" }
+helios-module-masks = { path = "../../modules/masks" }
+helios-module-rawprepare = { path = "../../modules/rawprepare" }
+helios-module-sigmoid = { path = "../../modules/sigmoid" }
+helios-module-vkdt = { path = "../../modules/vkdt" }
+helios-module-whitebalance = { path = "../../modules/whitebalance" }
+
+[lints]
+workspace = true

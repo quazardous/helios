@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::run::tests::{CAMERA, CHART, CORNERS, H, W, adaptation_from, correction, draw, lit};
-use helios_module_channelmixerrgb::blackbody_xy;
-use helios_module_whitebalance::d65_coefficients;
+use helios_modules::channelmixerrgb::blackbody_xy;
+use helios_modules::whitebalance::d65_coefficients;
 use helios_photo::Cfa;
 use helios_photo::color::{apply, inverse, mul};
 
