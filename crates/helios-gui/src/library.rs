@@ -102,8 +102,8 @@ pub use batch::{
 pub use batch::{DUPLICATE_COMMAND, DUPLICATE_ORIGINAL_COMMAND};
 pub use gallery::{
     EXPLORER, Explorer, FILTERS_PANEL, Gallery, GalleryOptions, MAIN_GALLERY, Parts, RESULTS_PANEL,
-    SearchMode, SourcesPlace, WINDOW_GALLERY, auto_advance_of, explorer_of, set_auto_advance,
-    set_view, view_of,
+    SearchMode, SourcesPlace, WINDOW_GALLERY, auto_advance_of, explorer_of, gallery_of,
+    set_auto_advance, set_view, view_of,
 };
 pub use grouping::{GROUP_COMMAND, STACK_TOP_COMMAND, StackAsk, UNGROUP_COMMAND};
 pub use keywords::{
@@ -5037,17 +5037,51 @@ impl Library {
     /// sources, the sort and count, the view options and the current
     /// photo's marks each drawn when the options ask, then the grid.
     pub fn show(&mut self, ui: &mut Ui, options: &GalleryOptions) {
+        self.show_as(ui, options, options.id);
+    }
+
+    /// [`Library::show`], drawing the gallery `id` in place of the
+    /// options' own: a Library view opened as a panel instance draws the
+    /// gallery named after it (`helios.vault#2`).
+    pub fn show_as(&mut self, ui: &mut Ui, options: &GalleryOptions, id: &str) {
         // Each host draws its own gallery; a pass with input makes it the
         // one commands act on, a pass without leaves that as it was.
         let input = ui
             .ctx()
             .input(|i| !i.events.is_empty() || i.pointer.any_down());
         if input {
-            self.focused = options.id.to_string();
+            self.focused = id.to_string();
         }
-        self.activate(options.id);
+        self.activate(id);
         self.show_view(ui, options);
         self.activate_focused();
+    }
+
+    /// Forgets the gallery `id` (a Library view closed): its search,
+    /// filter, selection and cursor go; the others keep theirs. The one
+    /// in force or focused is the main gallery's after.
+    pub fn forget_gallery(&mut self, id: &str) {
+        if id == MAIN_GALLERY {
+            return;
+        }
+        if self.focused == id {
+            self.focused = MAIN_GALLERY.to_string();
+        }
+        if self.view_id == id {
+            self.activate(MAIN_GALLERY);
+        }
+        self.parked.retain(|(g, _)| g != id);
+    }
+
+    /// Whether a gallery `id` was made (drawn or set) since the Library
+    /// started or it was forgotten.
+    pub fn has_gallery(&self, id: &str) -> bool {
+        self.view_id == id || self.parked.iter().any(|(g, _)| g == id)
+    }
+
+    /// The photo under the cursor of the gallery in force, by id.
+    pub fn cursor(&self) -> Option<String> {
+        self.view.state.selection().cursor().cloned()
     }
 
     /// [`Library::show`], its gallery in force: the parts its host asks.
@@ -5094,7 +5128,7 @@ impl Library {
     /// the facets, the sources and (until they move to the metadata
     /// panel) the current photo's marks. No photos.
     fn filters_part(&mut self, ui: &mut Ui, options: &GalleryOptions) {
-        let id = format!("helios.library.filters.{}", options.id);
+        let id = format!("helios.library.filters.{}", self.view_id);
         helios_ui::scroll(ui, &id, Scroll::Region, |ui| {
             if options.has_search() {
                 self.search_bar(ui);

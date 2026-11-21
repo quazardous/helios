@@ -297,6 +297,8 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.importSession" => object(&[], &[("id", any()), ("select", boolean())]),
         "library.importAutomatic.pause" => object(&[], &[("on", boolean())]),
         "library.select.similar" => object(&[], &[("by", any())]),
+        "library.view.open" => object(&[], &[("place", string_or_null())]),
+        "library.view.close" => object(&["view"], &[("view", string())]),
         // The network (destructive).
         "node.reset" => object(&[], &[("node", any())]),
         "mask.member.delete" => object(&[], &[("member", any())]),

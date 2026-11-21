@@ -54,6 +54,7 @@ pub mod keys;
 pub mod library;
 pub mod library_changed;
 pub mod library_history;
+pub mod library_views;
 pub mod library_write;
 pub mod log_panel;
 #[cfg(target_os = "macos")]
@@ -122,7 +123,7 @@ pub use shell::{Shell, headless, name_rect};
 pub use workbench::{IMAGE_FIRST, area_named, beside_the_end_side, gather_palettes, image_first};
 
 use egui_pop::model::ids::PanelId;
-use egui_pop::model::panels::{Area, PanelKind, PanelSpec};
+use egui_pop::model::panels::{Area, Instances, PanelKind, PanelSpec};
 
 /// Every fact kind the desktop's buses carry, by the table of the crate
 /// that publishes it: what `main` declares on them ([`helios_core::Bus::declare`]).
@@ -211,6 +212,11 @@ pub const PANEL_KINDS: &[(&str, PanelKind)] = &[
     (workshops::PANEL, PanelKind::Control),
 ];
 
+/// The panels that open as many times as asked (egui-pop's panel
+/// instances, `<panel>#<n>`): the Library's Results, each new one a
+/// Library view of its own ([`library_views`]). The others are single.
+pub const MULTIPLE: &[&str] = &[library::RESULTS_PANEL];
+
 /// The panels Helios declares today, with the areas each may be moved to
 /// (egui-pop's placement rules); each shows a placeholder until its
 /// widget lands. Every panel may be detached into a window of its own;
@@ -272,6 +278,7 @@ pub fn helios_panels_with(experimental: Experimental) -> Vec<PanelSpec> {
     .map(|(id, title, area, areas, open)| {
         let id = PanelId::new(id).expect("Helios's panel ids are valid");
         let floats = FLOATABLE.contains(&id.as_str());
+        let multiple = MULTIPLE.contains(&id.as_str());
         let icon = PANEL_ICONS.iter().find(|(p, _)| *p == id.as_str());
         let kind = PANEL_KINDS
             .iter()
@@ -286,6 +293,9 @@ pub fn helios_panels_with(experimental: Experimental) -> Vec<PanelSpec> {
         }
         if !open {
             spec = spec.closed();
+        }
+        if multiple {
+            spec = spec.instances(Instances::Multiple);
         }
         // The sizes Helios's areas open at.
         match area {

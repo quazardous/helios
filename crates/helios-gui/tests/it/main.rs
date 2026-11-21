@@ -78,6 +78,7 @@ mod library_gallery;
 mod library_imports;
 mod library_scale;
 mod library_sort;
+mod library_views;
 mod library_window;
 mod local_node_jobs;
 mod macros_desk;

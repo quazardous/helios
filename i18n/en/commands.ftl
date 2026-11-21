@@ -544,6 +544,12 @@ command-library-storage =
 command-library-trash =
     .title = Move to Trash…: the photos' files to the system trash (`images`: ids, else the selection), asked first unless `confirmed`; refused on cards and backup volumes, the photos taken out of the Library; the system trash undoes it, not Ctrl+Z
 
+command-library-view-close =
+    .title = Close a Library view (`view`: its id); the other views keep their filter and cursor
+
+command-library-view-open =
+    .title = Open another Library view (`place`: last, here or an area): its own filter and cursor, kept with the layout. Answers its id (`view`)
+
 command-library-window =
     .title = Library
 

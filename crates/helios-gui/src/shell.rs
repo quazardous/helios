@@ -427,6 +427,8 @@ enum Action {
     /// Scopes the library to a folder (`path`; null: none), as whom;
     /// without `path`, says the folder.
     Folder(Value, Origin),
+    /// `library.view.open` or `library.view.close`.
+    LibraryView(&'static str, Value),
     /// The Library's import sessions and Run Workshop… (`library_imports`).
     LibraryImports(&'static str, Value, Origin),
     /// The Library's keyword commands (`library_keywords`).
@@ -1736,7 +1738,14 @@ impl Shell {
                 let library = shell.focus.library.clone();
                 let comparison = shell.focus.comparison.clone();
                 let window = shell.library_focus.state.clone();
-                shell.set_content(panel, move |ui| {
+                let views = std::rc::Rc::new(RefCell::new(crate::library_views::Views::default()));
+                shell.set_instance_content(panel, move |ui, app, drawn| {
+                    // Another Library view (a Results instance): its own
+                    // gallery, its Filters inside it.
+                    if view == 0 && crate::library_views::is_view(drawn.as_str()) {
+                        let mut library = library.borrow_mut();
+                        return views.borrow_mut().draw(ui, app, drawn, &mut library);
+                    }
                     if (view == 0 || view == 3) && library_focus::in_main_window(&window, ui.ctx())
                     {
                         return library_focus::elsewhere_ui(ui);
@@ -2432,7 +2441,18 @@ impl Shell {
     }
 
     /// Gives a panel its content; panels without one show a placeholder.
-    pub fn set_content(&mut self, panel: &str, content: impl FnMut(&mut Ui) + 'static) {
+    pub fn set_content(&mut self, panel: &str, mut content: impl FnMut(&mut Ui) + 'static) {
+        self.set_instance_content(panel, move |ui, _, _| content(ui));
+    }
+
+    /// Gives a panel its content, told the application and the panel it
+    /// draws: for a panel declared with several ([`crate::MULTIPLE`]),
+    /// each instance's id (`<panel>#<n>`), the panel's own for the first.
+    pub fn set_instance_content(
+        &mut self,
+        panel: &str,
+        content: impl FnMut(&mut Ui, &egui_pop::api::AppHandle, &PanelId) + 'static,
+    ) {
         self.focus
             .contents
             .borrow_mut()
@@ -3554,6 +3574,32 @@ impl Shell {
                 "Library",
             ),
             Box::new(|a, origin| Ok(Action::Sort(a.clone(), origin.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                crate::library_views::OPEN_COMMAND,
+                "Open another Library view (`place`: last, here or an area): its own filter and cursor, kept with the layout. Answers its id (`view`)",
+                "Library",
+            ),
+            Box::new(|a, _| {
+                Ok(Action::LibraryView(
+                    crate::library_views::OPEN_COMMAND,
+                    a.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                crate::library_views::CLOSE_COMMAND,
+                "Close a Library view (`view`: its id); the other views keep their filter and cursor",
+                "Library",
+            ),
+            Box::new(|a, _| {
+                Ok(Action::LibraryView(
+                    crate::library_views::CLOSE_COMMAND,
+                    a.clone(),
+                ))
+            }),
         );
         add(
             CommandSpec::new(
@@ -7364,6 +7410,14 @@ impl Shell {
             Action::CompareLeave => return self.leave_comparison(),
             Action::Sort(args, origin) => return self.sort_library(&args, &origin),
             Action::Folder(args, origin) => return self.folder_library(&args, &origin),
+            Action::LibraryView(command, args) => {
+                let app = self.core.app.handle();
+                return if command == crate::library_views::OPEN_COMMAND {
+                    crate::library_views::open_command(app, &args)
+                } else {
+                    crate::library_views::close_command(app, &args)
+                };
+            }
             Action::LibraryImports(id, args, origin) => {
                 return self.library_imports_command(id, &args, &origin);
             }

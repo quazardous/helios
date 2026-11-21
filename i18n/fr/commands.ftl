@@ -883,6 +883,12 @@ command-library-show =
 command-library-runWorkshop =
     .title = Lancer l’atelier sur la sélection…
 
+command-library-view-close =
+    .title = Fermer une vue de la bibliothèque (`view` : son id) ; les autres vues gardent leur filtre et leur curseur
+
+command-library-view-open =
+    .title = Ouvrir une autre vue de la bibliothèque (`place` : last, here ou une zone) : son propre filtre et son propre curseur, gardés avec la disposition. Répond son id (`view`)
+
 command-library-window =
     .title = Bibliothèque
 command-library-keyword =

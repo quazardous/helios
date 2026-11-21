@@ -12,16 +12,18 @@ use std::rc::Rc;
 
 use egui::Ui;
 use egui_pop::api::history_view::PANEL_HISTORY;
-use egui_pop::api::{Ctx, Plugin, PluginError};
+use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::core::ui::UiPop as _;
 use egui_pop::model::ids::{PanelId, PluginId};
 use egui_pop::model::layout::{Anchor, AnchorEdge, Arrangement, FloatingGroup, Layout, Node};
-use egui_pop::model::panels::{Area, PanelSpec};
+use egui_pop::model::panels::{Area, Instances, PanelSpec};
 
 use crate::name_rect;
 
-/// Draws a panel's content.
-pub type Content = Box<dyn FnMut(&mut Ui)>;
+/// Draws a panel's content: told the application and the panel it
+/// draws, the instance's id for a panel declared with several
+/// (`<panel>#<n>`, see [`crate::MULTIPLE`]).
+pub type Content = Box<dyn FnMut(&mut Ui, &AppHandle, &PanelId)>;
 
 /// Each panel's content, by panel id; a panel without one shows a
 /// placeholder.
@@ -74,12 +76,12 @@ impl Plugin for Panels {
         for spec in &self.specs {
             let contents = self.contents.clone();
             let (id, title) = (spec.id.to_string(), spec.title.clone());
-            ctx.panel(spec.clone(), move |ui, _| {
+            let draw = move |ui: &mut Ui, app: &AppHandle, drawn: &PanelId| {
                 // Named for pictures (`gui.snapshot`) and tests.
-                name_rect(ui.ctx(), &id, ui.max_rect());
+                name_rect(ui.ctx(), drawn.as_str(), ui.max_rect());
                 let before = ui.memory(egui::Memory::focused);
                 match contents.borrow_mut().get_mut(&id) {
-                    Some(c) => c(ui),
+                    Some(c) => c(ui, app, drawn),
                     None => placeholder(ui, &id, &title),
                 }
                 // A widget of the panel took the keyboard: kept through
@@ -90,7 +92,15 @@ impl Plugin for Panels {
                     ui.ctx()
                         .data_mut(|d| d.insert_temp(focus_taken_id(), (window, taken)));
                 }
-            })?;
+            };
+            if spec.instances == Instances::Multiple {
+                ctx.instance_panel(spec.clone(), move |ui, app, instance| {
+                    draw(ui, app, &instance.id);
+                })?;
+            } else {
+                let panel = spec.id.clone();
+                ctx.panel(spec.clone(), move |ui, app| draw(ui, app, &panel))?;
+            }
         }
         ctx.arrangement(IMAGE_FIRST, image_first(&self.specs));
         ctx.arrangement(LIBRARY, library(&self.specs));

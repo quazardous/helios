@@ -2899,6 +2899,11 @@ impl<S: Store + 'static> Persist<S> {
         // size): kept with that view in the workspace.
         let changes = shell.library_mut().take_results_changes();
         for (gallery, results) in changes {
+            // Another Library view keeps them in its own state, with
+            // the layout (`library_views`).
+            if crate::library_views::is_view(&gallery) {
+                continue;
+            }
             if let Err(e) = shell.keep_library_results(&gallery, results) {
                 log::warn!(target: "helios", "library results not kept: {e}");
             }
