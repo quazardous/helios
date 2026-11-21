@@ -2705,11 +2705,13 @@ gui-settings-plugin-granted = Allowed
 
 gui-settings-plugin-no-capability = It asks for no permission.
 
+gui-settings-plugin-page = Declared page
+
+gui-settings-plugin-page-refused = Part of this plugin's page is not shown: { $problems }
+
 gui-settings-plugin-reason = Why
 
 gui-settings-plugin-refused = This plugin's settings are not shown: { $problems }
-gui-settings-plugin-page = Declared page
-gui-settings-plugin-page-refused = Part of this plugin's page is not shown: { $problems }
 
 gui-settings-plugin-settings = Settings
 
