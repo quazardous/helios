@@ -19,17 +19,12 @@
 
 use std::collections::BTreeMap;
 
-use egui::Ui;
 use egui_pop::api::bus::drag::{self, Seen};
-use egui_pop::core::fold::{Fold, TreeRow};
-use egui_pop::core::tooltip::TooltipExt as _;
 use egui_pop::core::ui::{TextRole, UiPop as _};
-use egui_pop::core::widgets;
 use helios_core::Message;
-use helios_ui::Scroll;
 use helios_vault::keywords::{self, SEPARATOR};
 
-use super::{DraggedPhotos, DropOn, Library, drop_target, quoted, tokens};
+use super::{DraggedPhotos, Library, quoted, tokens};
 use crate::library_write::WriteAsk;
 
 /// Scopes the library to a keyword branch (`path`; null: none).
@@ -249,141 +244,6 @@ impl Library {
         ));
     }
 
-    /// The Keywords section: the keyword tree with each branch's count; a
-    /// click scopes the grid to a branch, a click on it again drops the
-    /// scope; a branch with branches below it opens and closes; each
-    /// row's menu tags or untags the selection, renames or merges it.
-    /// Rows are dragged onto photos or other rows, and take photos.
-    pub(super) fn keywords_section(&mut self, ui: &mut Ui) {
-        if self.entries.is_empty() {
-            return;
-        }
-        let ctx = ui.ctx().clone();
-        let word = |m: Message| crate::i18n::text(&ctx, m);
-        let selected = self.keyword();
-        let selection = self.targets().is_ok();
-        let mut chosen = None;
-        let mut runs: Vec<(&'static str, serde_json::Value)> = Vec::new();
-        Fold::new(
-            "helios.library.keywords",
-            word(Message::new("gui-library-keywords", "Keywords")),
-        )
-        .show(ui, |ui| {
-            let counts = self.keyword_counts().clone();
-            if counts.is_empty() {
-                ui.muted(word(Message::new(
-                    "gui-library-keywords-none",
-                    "No keyword yet: write levels with | (Animals|Dog)",
-                )));
-                return;
-            }
-            helios_ui::scroll(
-                ui,
-                "helios.library.keywords.scroll",
-                Scroll::Section,
-                |ui| {
-                    self.keyword_rows(
-                        ui,
-                        &counts,
-                        None,
-                        selected.as_deref(),
-                        selection,
-                        &mut chosen,
-                        &mut runs,
-                    );
-                },
-            );
-        });
-        if let Some(path) = chosen {
-            let same = selected.as_deref() == Some(path.as_str());
-            runs.push((
-                KEYWORD_COMMAND,
-                serde_json::json!({ "path": (!same).then_some(path) }),
-            ));
-        }
-        for (command, args) in runs {
-            crate::dialogs::request(
-                ui.ctx(),
-                crate::dialogs::Request::Run(
-                    command.into(),
-                    args,
-                    helios_shell::commands::Origin::User,
-                ),
-            );
-        }
-    }
-
-    /// The rows of the branches below `parent` (none: the top), a branch
-    /// with branches below it as a group that opens and closes.
-    #[allow(clippy::too_many_arguments)]
-    fn keyword_rows(
-        &self,
-        ui: &mut Ui,
-        counts: &BTreeMap<String, u64>,
-        parent: Option<&str>,
-        selected: Option<&str>,
-        selection: bool,
-        chosen: &mut Option<String>,
-        runs: &mut Vec<(&'static str, serde_json::Value)>,
-    ) {
-        let ctx = ui.ctx().clone();
-        for (path, count) in children(counts, parent) {
-            let below = !children(counts, Some(path)).is_empty();
-            let key = ui.make_persistent_id(("helios.library.keyword", path));
-            let mut row = TreeRow::new(key, keywords::leaf(path)).leaf(!below);
-            if below {
-                row = row.toggle_name(crate::i18n::text(
-                    &ctx,
-                    Message::new(
-                        "gui-library-keyword-toggle",
-                        "Show or hide the keywords below { $name }",
-                    )
-                    .with("name", path),
-                ));
-            }
-            row.show(ui, |ui| {
-                let text = format!("{} {count}", keywords::leaf(path));
-                let r = widgets::selectable_label(ui, selected == Some(path), text)
-                    .interact(egui::Sense::drag())
-                    .tip(path);
-                if r.drag_started() {
-                    drag::start(&ctx, "keyword", DraggedKeyword(path.to_string()));
-                }
-                keyword_menu(&r, path, selection);
-                drop_target(
-                    &r,
-                    DropOn::Keyword(path.to_string()),
-                    None,
-                    &self.drop_hover,
-                );
-                // Another branch let go on it merges into it; the branch
-                // carried is no target of its own (a drop on itself is
-                // neither taken nor refused).
-                let own = drag::payload::<DraggedKeyword>(&ctx).is_some_and(|d| d.0 == path);
-                if !own
-                    && let Seen::Dropped(dragged) = drag::target::<DraggedKeyword>(
-                        &ctx,
-                        &format!("library.keyword-merge:{path}"),
-                        r.rect,
-                        |_| None,
-                    )
-                    && dragged.0 != path
-                {
-                    runs.push((
-                        KEYWORD_MERGE_COMMAND,
-                        serde_json::json!({ "from": dragged.0, "into": path }),
-                    ));
-                }
-                if r.clicked() {
-                    *chosen = Some(path.to_string());
-                }
-            })
-            .body(ui, |ui| {
-                self.keyword_rows(ui, counts, Some(path), selected, selection, chosen, runs);
-            });
-        }
-    }
-
     /// A keyword branch let go over a photo of the grid, in whichever
     /// window it was dragged from (egui-pop's drag session): the photo
     /// takes it (the selection, when the photo is in it), as a mark of
@@ -450,7 +310,7 @@ impl Library {
 
 /// A keyword row's context menu: tag or untag the selected photos
 /// (greyed with none), rename or merge the branch.
-fn keyword_menu(row: &egui::Response, path: &str, selection: bool) {
+pub(super) fn keyword_menu(row: &egui::Response, path: &str, selection: bool) {
     use crate::dialogs::MenuItem;
     if !row.secondary_clicked() {
         return;

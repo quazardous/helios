@@ -1151,7 +1151,6 @@ gui-library-keyword-remove 934528c56c8da9f0
 gui-library-keyword-rename d18d5eae53db6fcd
 gui-library-keyword-rename-title e266210071ee809b
 gui-library-keyword-rename-verb 81224e15032bac73
-gui-library-keyword-toggle bfafd2c64d010b5a
 gui-library-keywords 3a2949d46a7b5995
 gui-library-keywords-none 43f670bbd66a8ef3
 gui-library-label-blue-tip 64bf2c9bb1f3ebc7
@@ -1241,7 +1240,6 @@ gui-library-set-new-in 4bc8d375e6b3d9d5
 gui-library-set-new-title 30d6aabca091aacc
 gui-library-set-none 875269ca5dbfacef
 gui-library-set-tip 82ccdab8aad311a2
-gui-library-set-toggle 3e0ce2ede9209ad2
 gui-library-set-top 61492e70a628cc85
 gui-library-sort-ascending a45193d290e560eb
 gui-library-sort-captured 9d016c2456a256d8
@@ -1270,7 +1268,7 @@ gui-library-view-details 6b7485aa06c674c5
 gui-library-view-list 52d27082aa325209
 gui-library-view-per-row d8afb42eb5d373ba
 gui-library-view-tip 0f0d790fc91d9686
-gui-library-volume-offline 5f2b93239dade10c
+gui-library-volume-offline-line 99b0fe0a31f045a5
 gui-library-window 6d7e88ea6aaf5346
 gui-library-window-elsewhere b1b3b086f19f7352
 gui-log-clear 238f7a82e564b550
