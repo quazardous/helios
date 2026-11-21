@@ -258,6 +258,8 @@ command-library-stack-top.title 86d66aed75468b70
 command-library-stack-ungroup.title 9c5161dff0696632
 command-library-storage.title 5a2f966a38856217
 command-library-trash.title 6fb6defb78678f5c
+command-library-view-close.title f42b8c4fbf8a72bd
+command-library-view-open.title 5abffaad8e7430f1
 command-library-window.title 6d7e88ea6aaf5346
 command-macro-dissolve.title e472cc526f105a70
 command-macro-fold.title 33ae65c670fa307a
@@ -1701,6 +1703,8 @@ gui-settings-imports cfdb4501fe960455
 gui-settings-library 6d7e88ea6aaf5346
 gui-settings-plugin-granted 2c8c84258a75df83
 gui-settings-plugin-no-capability f2a2f96d1902f843
+gui-settings-plugin-page 96342b5b65c70118
+gui-settings-plugin-page-refused 2a2a9440d2ac368b
 gui-settings-plugin-reason b548901a66fbd4b1
 gui-settings-plugin-refused 79efaad4cbe227a7
 gui-settings-plugin-settings 3b5b172596a8843e

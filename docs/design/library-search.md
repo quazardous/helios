@@ -578,8 +578,17 @@ Each slice is one PR with its tests; the order matters.
    the others; an older workspace's auto-advance goes to every view).
    `vault.autoAdvance` acts on the view the user works in. Later: a
    details mode (columns, egui-pop's `DataTable`), the filters laid out
-   in a bar above the results (an option per Filters panel), a second
-   explorer (gallery instances).
+   in a bar above the results (an option per Filters panel).
+   **Several views** (2026-11-21): the Results panel opens as many
+   times as asked (egui-pop panel instances, `helios.vault#<n>`; View ›
+   New Library, `library.view.open` / `library.view.close`). Each new
+   one is a view of its own: its gallery is named after it, its Filters
+   drawn beside its photos, and its filter, cursor and results' mode
+   are its instance's payload, kept in the layout (so with the
+   workspace's layout copy and at quit) and dropped when it closes
+   (`helios-gui/src/library_views.rs`). The main explorer stays as it
+   is. Keys and undo routing scoped to `helios.vault` do not reach an
+   instance yet (quazardous/egui-pop#647).
 3. **G3. One grammar.** `rules::parse_text` and `rules::to_text` in
    `helios-vault`, aliases, `-`, `OR`, ranges, relative dates;
    `presence`, `backup`, `cull` as rule fields; the search text, the

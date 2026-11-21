@@ -59,7 +59,8 @@ pub struct Explorer {
     pub results: &'static str,
 }
 
-/// The main window's explorer (more come with gallery instances).
+/// The main window's explorer. The other Library views are Results
+/// instances, each drawing its own gallery ([`gallery_of`]).
 pub const EXPLORER: Explorer = Explorer {
     gallery: MAIN_GALLERY,
     filters: FILTERS_PANEL,
@@ -72,6 +73,18 @@ pub fn explorer_of(panel: &str) -> Option<Explorer> {
     [EXPLORER]
         .into_iter()
         .find(|e| e.filters == panel || e.results == panel)
+}
+
+/// The gallery a panel of the main window draws: the main explorer's
+/// for its Filters and Results panels, its own for a Library view opened
+/// as another Results instance (`helios.vault#2` draws the gallery
+/// `helios.vault#2`, its Filters inside it).
+pub fn gallery_of(panel: &str) -> Option<String> {
+    if let Some(e) = explorer_of(panel) {
+        return Some(e.gallery.to_string());
+    }
+    let (kind, n) = panel.split_once('#')?;
+    (kind == RESULTS_PANEL && n.parse::<u32>().is_ok_and(|n| n > 1)).then(|| panel.to_string())
 }
 
 /// What the workspace keeps for the gallery `id`: the main panel's at the
@@ -264,6 +277,20 @@ impl GalleryOptions {
         sort_count: true,
         view_options: true,
         marks: true,
+    };
+
+    /// A Library view opened as another Results instance
+    /// ([`crate::library_views`]): its Filters inside it, beside its
+    /// photos, as the Library window draws them. Drawn with the
+    /// instance's own gallery ([`super::Library::show_as`]).
+    pub const VIEW: GalleryOptions = GalleryOptions {
+        id: RESULTS_PANEL,
+        parts: Parts::Both,
+        search: SearchMode::Compact,
+        sources: SourcesPlace::Header,
+        sort_count: true,
+        view_options: true,
+        marks: false,
     };
 
     /// A grid with nothing around it: no search, no sources, no options.
