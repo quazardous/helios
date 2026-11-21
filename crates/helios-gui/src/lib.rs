@@ -28,6 +28,7 @@ pub mod decisions;
 pub mod destructive;
 pub mod dialogs;
 pub mod display;
+pub mod display_surfaces;
 pub mod duplicates;
 pub mod edit_marks;
 pub mod edit_snapshots;

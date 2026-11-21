@@ -473,7 +473,11 @@ pub const QUICK: &[&str] = &[
 pub const PLACES: &[(&str, &[&str])] = &[
     (
         "interface/workbench",
-        &["interface.panels.queue_when_empty", "interface.graph.zoom"],
+        &[
+            "interface.panels.queue_when_empty",
+            "interface.graph.zoom",
+            crate::display_surfaces::STRATEGY_SETTING,
+        ],
     ),
     (
         "interface/experimental",

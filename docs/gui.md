@@ -395,6 +395,22 @@ node status), never from the GUI:
 `helios inspect describe node` already returns these headers for the
 renders a node was asked for.
 
+## Display surfaces
+
+A photo is shown on a display surface: the **Image** (the darkroom's
+viewport) or **Compare** (the loupe, a comparison of one, and the survey).
+One bus request shows it, `photo.show {photo, surface?, from?}`
+(`crates/helios-gui/src/display_surfaces.rs`). A double click or Enter in
+a gallery, the photo menu's **Show in ▸** and an agent all send it, so
+they do the same.
+
+Without a `surface`, the setting **Double click shows the photo in**
+(`library.double_click`) chooses: the primary surface (the Image, as
+before), the surface focused last, the surface in the same window as the
+gallery, or ask (a list of the surfaces). With two surfaces open, the one
+a double click reaches wears a target mark. More surfaces of one kind
+(Compare as panel instances, "New surface", "New window") come later.
+
 ## Queue panel
 
 When a node has a queue (workflow level, see

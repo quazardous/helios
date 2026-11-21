@@ -700,6 +700,9 @@ command-param-undo =
 command-param-undoAgent =
     .title = Undo an agent's last changes alone (`agent`, `group`)
 
+command-photo-show =
+    .title = Show a photo on a display surface (`photo`: its id; `surface`: helios.viewport or helios.compare, else the double-click strategy chooses; `from`: the panel asking)
+
 command-profile-export =
     .title = Export the profile (all parts, or `parts`; `this_machine` flattens its variants)
 

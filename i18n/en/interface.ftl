@@ -208,6 +208,18 @@ setting-interface-panels-queue-when-empty =
     .description = What the queue panel does when the selected node has no queue.
     .label = Queue panel without a queue
 
+setting-library-double-click =
+    .description = Where a double click or Enter in a gallery shows the photo: the primary surface (the Image), the surface you used last, the surface in the same window as the gallery, or ask each time. With two surfaces open, the one it reaches wears a target mark.
+    .label = Double click shows the photo in
+
+setting-library-double-click-choice-ask = ask
+
+setting-library-double-click-choice-last-focused = last_focused
+
+setting-library-double-click-choice-primary = primary
+
+setting-library-double-click-choice-same-window = same_window
+
 setting-notifications-jobs =
     .description = Shows a desktop notification when a long job (an export, a batch, an import, a backup, a health check) finishes or fails while no Helios window has the focus, whoever started it.
     .label = Notify when a long job ends

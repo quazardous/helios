@@ -107,6 +107,13 @@ pub(super) struct Focus {
     /// The library's image being opened in the viewport, while its large
     /// thumbnail is awaited (the loupe's first frame).
     pub(super) opening: Option<String>,
+    /// The display surfaces: the one focused last
+    /// ([`crate::display_surfaces`]).
+    pub(super) surfaces: crate::display_surfaces::Surfaces,
+    /// A photo `photo.show` sends to the Image, for the host to open.
+    pub(super) show_in_image: Option<String>,
+    /// The photo a "Show in" question is about (the `ask` strategy).
+    pub(super) show_asked: Option<String>,
     /// A small render of what the viewport shows, for the scopes and the
     /// navigator.
     pub(super) preview: Rc<crate::preview::Preview>,
@@ -213,6 +220,9 @@ impl Focus {
             menu: None,
             viewport: seed.viewport,
             opening: None,
+            surfaces: crate::display_surfaces::Surfaces::default(),
+            show_in_image: None,
+            show_asked: None,
             preview,
             photo_panels: crate::photo_panels::PhotoPanels::default(),
             image_surface: crate::display::ImageSurfaceSwitch::default(),

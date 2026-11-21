@@ -293,6 +293,9 @@ fn report_plugin(late: crate::agent_state::Late) -> egui_pop::api::about::AboutP
 /// running until then (see `host::Later`).
 enum Action {
     Palette,
+    /// `photo.show`: a photo shown on a display surface
+    /// ([`crate::display_surfaces`]).
+    ShowPhoto(Value),
     /// Quick open's list of modules, images and workspaces.
     QuickOpen,
     /// Goes to what quick open offers.
@@ -1511,13 +1514,18 @@ impl Shell {
             });
         }
         if has(&shell, "helios.viewport") {
-            let (viewport, values, app) = (
+            let (viewport, values, app, library) = (
                 shell.focus.viewport.clone(),
                 shell.core.values.clone(),
                 shell.core.app.handle().clone(),
+                shell.focus.library.clone(),
             );
             shell.set_content("helios.viewport", move |ui| {
                 let area = ui.max_rect();
+                // The double click's target, marked at the image's top
+                // right while another surface is open.
+                let marked =
+                    library.borrow().double_click_target() == Some(crate::display_surfaces::IMAGE);
                 let leave = {
                     // What the image wants in the window it is drawn
                     // in, from the screen that window is on.
@@ -1527,6 +1535,18 @@ impl Shell {
                     viewport.ui(ui, &values);
                     viewport.take_leave()
                 };
+                if marked {
+                    let at = egui::Rect::from_min_size(
+                        area.right_top() + egui::vec2(-200.0, 4.0),
+                        egui::vec2(196.0, 20.0),
+                    );
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(at)
+                            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                        crate::library::target_mark,
+                    );
+                }
                 // While the image has the focus, the Edit commands copy
                 // its mask's shapes and paste into it.
                 if let Some(id) = crate::clipboard::focused_within(ui.ctx(), area) {
@@ -3830,6 +3850,14 @@ impl Shell {
                 Box::new(move |a, _| Ok(Action::CompareList(id, a.clone()))),
             );
         }
+        add(
+            CommandSpec::new(
+                crate::display_surfaces::SHOW_COMMAND,
+                "Show a photo on a display surface (`photo`: its id; `surface`: helios.viewport or helios.compare, else the double-click strategy chooses; `from`: the panel asking)",
+                "Library",
+            ),
+            Box::new(|a, _| Ok(Action::ShowPhoto(a.clone()))),
+        );
         add(
             CommandSpec::new(
                 "subworkspace.enter",
@@ -6817,6 +6845,126 @@ impl Shell {
         Ok(done)
     }
 
+    /// The double-click strategy the user picked
+    /// ([`crate::display_surfaces::STRATEGY_SETTING`]).
+    pub fn double_click_strategy(&self) -> crate::display_surfaces::Strategy {
+        let store = self.core.app.handle().store();
+        let store = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = format!("settings/{}", crate::display_surfaces::STRATEGY_SETTING);
+        crate::display_surfaces::Strategy::parse(
+            store
+                .get(&key)
+                .and_then(|e| e.value.as_choice().map(String::from))
+                .as_deref()
+                .unwrap_or_default(),
+        )
+    }
+
+    /// Follows the focused surface, and tells the Library the open
+    /// surfaces and the one a double click reaches (its "Show in ▸" and
+    /// the target mark).
+    fn follow_surfaces(&mut self) {
+        let app = self.core.app.handle();
+        let focused = app.focused_panel();
+        self.focus
+            .surfaces
+            .follow(focused.as_ref().map(PanelId::as_str));
+        let layout = app.layout();
+        let strategy = self.double_click_strategy();
+        let seen = crate::display_surfaces::Seen {
+            open: crate::display_surfaces::open(&layout)
+                .into_iter()
+                .map(|s| (s, crate::display_surfaces::window_of(&layout, s).is_some()))
+                .collect(),
+            target: self.focus.surfaces.target(strategy, &layout, None),
+        };
+        self.focus.library.borrow_mut().set_surfaces(seen);
+    }
+
+    /// A photo the user opened in a gallery (Enter, a double click):
+    /// shown through `photo.show`, where the double-click strategy
+    /// chooses the surface.
+    pub fn show_activated(&mut self, id: &str) {
+        let from = self
+            .core
+            .app
+            .handle()
+            .focused_panel()
+            .map(|p| p.as_str().to_string());
+        let args = json!({ "photo": id, "origin": "double_click", "from": from });
+        let _ = self.run(crate::display_surfaces::SHOW_COMMAND, args, Origin::User);
+    }
+
+    /// The photo `photo.show` sent to the Image, once: the host opens it.
+    pub fn take_show_in_image(&mut self) -> Option<String> {
+        self.focus.show_in_image.take()
+    }
+
+    /// `photo.show`: the photo shown on the surface asked, else on the
+    /// one the double-click strategy chooses (`ask`: a menu of the open
+    /// surfaces, whose choice runs `photo.show` again with the surface).
+    fn show_photo(&mut self, args: &Value) -> Result<Value, String> {
+        use crate::display_surfaces as ds;
+        let photo = match args.get("photo").and_then(Value::as_str) {
+            Some(p) => p.to_string(),
+            None => self
+                .focus
+                .show_asked
+                .take()
+                .ok_or("`photo`: the id of the photo to show")?,
+        };
+        if !self.focus.library.borrow().holds(&photo) {
+            return Err(format!("the library has no photo `{photo}`"));
+        }
+        let layout = self.core.app.handle().layout();
+        let surface = match args.get("surface").and_then(Value::as_str) {
+            Some(s) => ds::surface(s)
+                .ok_or_else(|| format!("`surface`: {} or {}, not `{s}`", ds::IMAGE, ds::COMPARE))?,
+            None => {
+                let from = args.get("from").and_then(Value::as_str);
+                match self
+                    .focus
+                    .surfaces
+                    .route(self.double_click_strategy(), &layout, from)
+                {
+                    ds::Route::Surface(s) => s,
+                    ds::Route::Ask => {
+                        self.focus.show_asked = Some(photo.clone());
+                        let t = |m: Message| self.text(m);
+                        let choices = ds::SURFACES
+                            .iter()
+                            .map(|s| crate::dialogs::Choice {
+                                value: (*s).to_string(),
+                                label: t(surface_name(s)),
+                                detail: None,
+                            })
+                            .collect();
+                        let picker = crate::dialogs::Picker {
+                            title: t(Message::new("gui-show-in-title", "Show in")),
+                            choices,
+                            command: ds::SHOW_COMMAND.to_string(),
+                            arg: "surface".to_string(),
+                        };
+                        self.pick(picker);
+                        return Ok(json!({ "photo": photo, "asked": true }));
+                    }
+                }
+            }
+        };
+        if surface == ds::COMPARE {
+            // The loupe: a comparison of this one photo.
+            self.compare_list(
+                crate::comparison::SET_COMMAND,
+                &json!({ "images": [photo.clone()] }),
+            )?;
+        } else {
+            self.focus.show_in_image = Some(photo.clone());
+        }
+        Ok(json!({ "photo": photo, "surface": surface }))
+    }
+
     /// The `compare.*` list commands: the comparison's photos edited by
     /// id, the Compare place's payload written so the workspace keeps
     /// them; a gallery's selection and cursor are never written.
@@ -7512,6 +7660,7 @@ impl Shell {
                 }
             }
             Action::CompareList(id, args) => return self.compare_list(id, &args),
+            Action::ShowPhoto(args) => return self.show_photo(&args),
             Action::CompareSync(on) => {
                 let mut cmp = self.focus.comparison.borrow_mut();
                 cmp.synced = on.unwrap_or(!cmp.synced);
@@ -8080,6 +8229,7 @@ impl Shell {
         // (their listeners); written while drawing, they are heard after
         // the drawing.
         self.follow_opening(&ctx);
+        self.follow_surfaces();
         self.status_bar(&ctx);
         self.status_items(&ctx);
         self.health_tick(&ctx);
@@ -9094,5 +9244,14 @@ fn images_arg(args: &Value) -> Result<Option<Vec<String>>, String> {
                 .collect(),
         )),
         Some(other) => Err(format!("`images`: {other} is not a list of ids")),
+    }
+}
+
+/// A display surface's name, as the "Show in ▸" menu says it.
+pub(crate) fn surface_name(surface: &str) -> Message {
+    if surface == crate::display_surfaces::COMPARE {
+        Message::new("gui-surface-compare", "Compare")
+    } else {
+        Message::new("gui-surface-image", "Image")
     }
 }

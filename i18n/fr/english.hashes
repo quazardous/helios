@@ -310,6 +310,7 @@ command-param-reset.title 225055afbb01f94e
 command-param-set.title 43e5ca08eccc2a87
 command-param-undo.title fb070b9aa7a7570d
 command-param-undoAgent.title 6f2d76b85524eb96
+command-photo-show.title 18446ce445d75964
 command-profile-export.title 78a1531db3f76382
 command-profile-import-apply.title 2f55078c13a14207
 command-profile-import.title 4c47e69f46a12beb
@@ -1743,6 +1744,9 @@ gui-settings-volumes-none 1d573fa103c12c8a
 gui-settings-volumes-seen 04123e2c8eccdf72
 gui-settings-workbench a936c8db52b45324
 gui-settings-workers bf81b7210d6b861a
+gui-show-in 6da0b6571e2f1c5b
+gui-show-in-title 6da0b6571e2f1c5b
+gui-show-in-window c3a356cb9f66d54f
 gui-size-bytes f7153bf939a9449c
 gui-size-gib 05df2d85b96c6970
 gui-size-kib 053b6d255ce6ae14
@@ -1840,6 +1844,10 @@ gui-storage-role-scratch 15a0679c4a4c55c5
 gui-storage-strategy-none 4863336455443275
 gui-storage-summary ed59fe2c05620589
 gui-subworkspace-gone 25a07085ab9e56ac
+gui-surface-compare 0b2cb0ac030421c2
+gui-surface-image 4b07fc2a14723e58
+gui-surface-target 90350c7608a28781
+gui-surface-target-tip 261ddd8ed0922267
 gui-template-keys-error 79b6acf6ef87110a
 gui-theme-exported bd511001e8a42de3
 gui-theme-problem 96dfd71611027a04
@@ -2561,6 +2569,12 @@ setting-interface-graph-zoom.description 688135d0621fb172
 setting-interface-graph-zoom.label bbb3070740ca9a1c
 setting-interface-panels-queue-when-empty.description fa43c9b2cebc6cde
 setting-interface-panels-queue-when-empty.label 3720a27dcba4de2c
+setting-library-double-click-choice-ask 739ccca321e44ce0
+setting-library-double-click-choice-last-focused 7b3fafea2f1628ff
+setting-library-double-click-choice-primary 7af42ffd6cdc6b01
+setting-library-double-click-choice-same-window b2aa172ccf182106
+setting-library-double-click.description 26ef2d4843a54a7c
+setting-library-double-click.label 492606fa9eed8b22
 setting-notifications-jobs.description 6cba8e76fe09f324
 setting-notifications-jobs.label fffc31760e483d40
 setting-project-decisions-mode-choice-ai-assisted d73d5e707a83f33c
