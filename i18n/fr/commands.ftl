@@ -808,6 +808,12 @@ command-library-quick-clear =
     .title = Vider une collection rapide (`id` ; sans : la cible) ; ses photos restent dans la bibliothèque
 command-library-quick-saveAs =
     .title = Enregistrer une collection rapide (`id` ; sans : la cible) comme album (`name` ; `clear` : la vider aussi) ; sans `name`, le demande. Répond l’`id` de l’album
+command-library-quick-move =
+    .title = Déplacer des photos vers une collection rapide (`id` ; sans : la cible) depuis une autre (`from`) : `images`, identifiants, sinon la sélection ; une seule étape. Un glisser d’une collection rapide à une autre le fait, Ctrl copie
+
+command-library-quick-open =
+    .title = Ouvrir une collection rapide (`id` ; sans : la cible) dans son propre panneau (`place` : last, here ou une zone) : ses photos, celles qu’on y dépose y entrent. Répond l’id du panneau (`view`)
+
 command-library-quick-add =
     .title = Ajouter des photos à une collection rapide (`id` ; sans : la cible ; `images` : identifiants, sinon la sélection)
 command-library-quick-create =

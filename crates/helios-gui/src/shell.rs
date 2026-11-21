@@ -3716,6 +3716,14 @@ impl Shell {
                 crate::library::QUICK_LIST_COMMAND,
                 "List the quick collections, the first one first: `id`, `name` (none for the first until renamed), `count`, `target` (true for the target of B)",
             ),
+            (
+                crate::library::QUICK_MOVE_COMMAND,
+                "Move photos to a quick collection (`id`; none: the target) out of another (`from`): `images`, ids, else the selection; one step. A drag between two quick collections does it, Ctrl copies",
+            ),
+            (
+                crate::library_views::QUICK_OPEN_COMMAND,
+                "Open a quick collection (`id`; none: the target) in a panel of its own (`place`: last, here or an area): its photos, photos dropped on it go in. Answers the panel's id (`view`)",
+            ),
         ] {
             add(
                 CommandSpec::new(id, title, "Library"),
@@ -6143,8 +6151,8 @@ impl Shell {
     ) -> Result<Value, String> {
         use crate::library::{
             AlbumEdit, QUICK_ADD_COMMAND, QUICK_CLEAR_COMMAND, QUICK_CREATE_COMMAND,
-            QUICK_DELETE_COMMAND, QUICK_LIST_COMMAND, QUICK_REMOVE_COMMAND, QUICK_RENAME_COMMAND,
-            QUICK_SAVE_COMMAND, QUICK_TARGET_COMMAND, QUICK_TOGGLE_COMMAND,
+            QUICK_DELETE_COMMAND, QUICK_LIST_COMMAND, QUICK_MOVE_COMMAND, QUICK_REMOVE_COMMAND,
+            QUICK_RENAME_COMMAND, QUICK_SAVE_COMMAND, QUICK_TARGET_COMMAND, QUICK_TOGGLE_COMMAND,
         };
         use helios_vault::collections::QUICK;
         let text = |a: &Value, key: &str| a.get(key).and_then(Value::as_str).map(String::from);
@@ -6228,6 +6236,61 @@ impl Shell {
                 quick.images.contains(i)
             }
         };
+        if command == crate::library_views::QUICK_OPEN_COMMAND {
+            drop(lib);
+            return crate::library_views::open_quick_command(self.core.app.handle(), args, &id);
+        }
+        if command == QUICK_MOVE_COMMAND {
+            let from = text(args, "from").ok_or("`from`: the quick collection they leave")?;
+            if from == id {
+                return Err(format!("`from`: the photos are in “{id}” already"));
+            }
+            let held: Vec<String> = if from == lib.quick_target() {
+                lib.quick().to_vec()
+            } else if let Some(q) = lib.quick_collection(&from) {
+                q.images.clone()
+            } else if from == QUICK {
+                Vec::new()
+            } else {
+                return Err(format!("`from`: no quick collection `{from}`"));
+            };
+            let images = match images_arg(args)? {
+                Some(images) => images,
+                None => lib.targets()?,
+            };
+            if images.is_empty() {
+                return Err("no image selected".into());
+            }
+            // All go in; those `from` held leave it: one step.
+            let missing: Vec<String> = images.iter().filter(|i| !in_it(&lib, i)).cloned().collect();
+            let leaving: Vec<String> = images
+                .iter()
+                .filter(|i| held.contains(i))
+                .cloned()
+                .collect();
+            let count = images.len();
+            let name = quick.name.clone().unwrap_or_default();
+            let group = crate::library_history::current_batch().unwrap_or_else(|| {
+                crate::library_history::Group::one_step(crate::library_history::quick_move_label(
+                    &name, count,
+                ))
+            });
+            crate::library_history::within_batch(Some(group), || {
+                if !missing.is_empty() {
+                    lib.edit_album(AlbumEdit::QuickAdd {
+                        id: id.clone(),
+                        images: missing,
+                    });
+                }
+                if !leaving.is_empty() {
+                    lib.edit_album(AlbumEdit::QuickRemove {
+                        id: from.clone(),
+                        images: leaving,
+                    });
+                }
+            });
+            return Ok(json!({ "id": id, "from": from, "images": count }));
+        }
         match command {
             QUICK_TOGGLE_COMMAND | QUICK_ADD_COMMAND | QUICK_REMOVE_COMMAND => {
                 let images = match images_arg(args)? {

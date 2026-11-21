@@ -293,6 +293,19 @@ impl GalleryOptions {
         marks: false,
     };
 
+    /// A quick-collection panel ([`crate::library_views`]): its photos
+    /// and their bar, no search or sources (its source is the
+    /// collection). Drawn with the instance's own gallery.
+    pub const QUICK: GalleryOptions = GalleryOptions {
+        id: RESULTS_PANEL,
+        parts: Parts::Results,
+        search: SearchMode::None,
+        sources: SourcesPlace::None,
+        sort_count: true,
+        view_options: true,
+        marks: false,
+    };
+
     /// A grid with nothing around it: no search, no sources, no options.
     pub const BARE: GalleryOptions = GalleryOptions {
         id: "bare",

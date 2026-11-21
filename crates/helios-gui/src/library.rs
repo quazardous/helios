@@ -1304,6 +1304,11 @@ pub const QUICK_ADD_COMMAND: &str = "library.quick.add";
 pub const QUICK_REMOVE_COMMAND: &str = "library.quick.remove";
 /// Lists the quick collections: `id`, `name`, `count`, `target`.
 pub const QUICK_LIST_COMMAND: &str = "library.quick.list";
+/// Moves photos from one quick collection (`from`) to another (`id`;
+/// `images`, else the selection): in the one, out of the other, one
+/// step. A drag between two quick collections does it; Ctrl copies
+/// ([`QUICK_ADD_COMMAND`]).
+pub const QUICK_MOVE_COMMAND: &str = "library.quick.move";
 
 /// Whether something is to be read again by the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1556,8 +1561,9 @@ pub fn quick_label(
 
 /// A quick collection's context menu in the Albums section: put the
 /// selected photos in or out (greyed with none), make it the target
-/// (greyed when it is), rename it, save it as an album or empty it
-/// (greyed when empty), delete it (greyed for the first one).
+/// (greyed when it is), open it in a panel, rename it, save it as an
+/// album or empty it (greyed when empty), delete it (greyed for the
+/// first one).
 fn quick_menu(
     row: &egui::Response,
     quick: &helios_vault::collections::QuickCollection,
@@ -1590,6 +1596,10 @@ fn quick_menu(
                 Message::new("gui-library-quick-set-target", "Set as target"),
             )
             .enabled(!target),
+            item(
+                crate::library_views::QUICK_OPEN_COMMAND,
+                Message::new("gui-library-quick-open", "Open in a panel"),
+            ),
             MenuItem::Separator,
             item(
                 QUICK_RENAME_COMMAND,
@@ -1616,17 +1626,28 @@ fn quick_menu(
 
 /// Photos dragged out of the grid or the filmstrip (image ids): the
 /// payload the Albums section's rows take (`docs/design/library.md`, L6).
+/// The second field is the quick collection they were dragged out of,
+/// when the view showed one: dropped on another quick collection, they
+/// move there (Ctrl copies).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DraggedPhotos(pub Vec<String>);
+pub struct DraggedPhotos(pub Vec<String>, pub Option<String>);
+
+impl DraggedPhotos {
+    /// Photos dragged out of no quick collection.
+    pub fn of(keys: Vec<String>) -> DraggedPhotos {
+        DraggedPhotos(keys, None)
+    }
+}
 
 /// Starts egui-pop's drag session (`bus::drag`, which carries it to the
 /// window it is let go over) when a library view starts carrying photos
-/// out; while photos or a keyword are carried, the grabbing hand, unless
-/// a drop target set its own cursor.
-fn carry_out(ctx: &egui::Context, signals: &[Signal<String>]) {
+/// out (`from`: the quick collection the view shows, if one); while
+/// photos or a keyword are carried, the grabbing hand, unless a drop
+/// target set its own cursor.
+fn carry_out(ctx: &egui::Context, signals: &[Signal<String>], from: Option<String>) {
     for s in signals {
         if let Signal::DragOut { keys } = s {
-            drag::start(ctx, "photos", DraggedPhotos(keys.clone()));
+            drag::start(ctx, "photos", DraggedPhotos(keys.clone(), from.clone()));
         }
     }
     let carried = drag::payload::<DraggedPhotos>(ctx).is_some()
@@ -1711,10 +1732,10 @@ fn drop_target(
         _ => return,
     };
     let (command, args) = match target {
-        DropOn::Quick(id) => (
-            QUICK_ADD_COMMAND,
-            serde_json::json!({ "id": id, "images": photos.0 }),
-        ),
+        DropOn::Quick(id) => match quick_drop(ctx, &id, &photos) {
+            Some(drop) => drop,
+            None => return,
+        },
         DropOn::Album(id) => (
             COLLECTION_ADD_COMMAND,
             serde_json::json!({ "id": id, "images": photos.0 }),
@@ -1725,6 +1746,42 @@ fn drop_target(
         ctx,
         crate::dialogs::Request::Run(command.into(), args, helios_shell::commands::Origin::User),
     );
+}
+
+/// What photos dropped on the quick collection `id` run: dragged out of
+/// another quick collection, a move (Ctrl, or Cmd, copies: an add);
+/// from anywhere else, an add. Dropped back on the one they came from,
+/// nothing.
+fn quick_drop(
+    ctx: &egui::Context,
+    id: &str,
+    photos: &DraggedPhotos,
+) -> Option<(&'static str, serde_json::Value)> {
+    match quick_drop_moves(ctx, id, photos)? {
+        Some(from) => Some((
+            QUICK_MOVE_COMMAND,
+            serde_json::json!({ "from": from, "id": id, "images": photos.0 }),
+        )),
+        None => Some((
+            QUICK_ADD_COMMAND,
+            serde_json::json!({ "id": id, "images": photos.0 }),
+        )),
+    }
+}
+
+/// Whether photos dropped on the quick collection `id` move (the one
+/// they leave), are added (`Some(None)`), or stay (`None`: dropped back
+/// where they came from).
+fn quick_drop_moves(
+    ctx: &egui::Context,
+    id: &str,
+    photos: &DraggedPhotos,
+) -> Option<Option<String>> {
+    match photos.1.as_deref() {
+        Some(from) if from == id => None,
+        Some(from) if !ctx.input(|i| i.modifiers.command) => Some(Some(from.to_string())),
+        _ => Some(None),
+    }
 }
 
 /// Photos hovering a row of the Albums section: its outline, and beside
@@ -1770,6 +1827,16 @@ fn hover_over(
                 .with("count", photos.0.len())
                 .with("keyword", path.as_str()),
             ),
+            DropOn::Quick(id) if matches!(quick_drop_moves(ctx, id, photos), Some(Some(_))) => {
+                crate::i18n::text(
+                    ctx,
+                    Message::new(
+                        "gui-library-drop-move",
+                        "Move { $count } photos here (Ctrl copies)",
+                    )
+                    .with("count", photos.0.len()),
+                )
+            }
             _ => crate::i18n::text(
                 ctx,
                 Message::new("gui-library-drop-add", "Add { $count } photos")
@@ -2743,6 +2810,33 @@ impl Library {
             ..self.view.filter.clone()
         };
         self.set_filter(filter);
+    }
+
+    /// The quick collection the view in force shows (its `collection:`
+    /// term names one): what photos dragged out of it leave, dropped on
+    /// another.
+    pub fn shown_quick(&self) -> Option<String> {
+        let id = self.collection()?;
+        (id == helios_vault::collections::QUICK || self.quick_collection(&id).is_some())
+            .then_some(id)
+    }
+
+    /// Makes the panel's `rect` a drop target for photos, as the quick
+    /// collection `id`'s row in the Albums section is: photos dragged out
+    /// of another quick collection move in (Ctrl copies), others are
+    /// added; photos dragged out of this one are not taken.
+    pub fn quick_drop_target(&self, ui: &mut Ui, id: &str, rect: egui::Rect) {
+        let from_here =
+            drag::payload::<DraggedPhotos>(ui.ctx()).is_some_and(|p| p.1.as_deref() == Some(id));
+        if from_here {
+            return;
+        }
+        let area = ui.interact(
+            rect,
+            egui::Id::unique(("helios.library.quick.drop", id)),
+            egui::Sense::hover(),
+        );
+        drop_target(&area, DropOn::Quick(id.to_string()), None, &self.drop_hover);
     }
 
     /// The import session the filter is scoped to (its `import:` term).
@@ -5245,7 +5339,7 @@ impl Library {
         self.after_pass(ui.ctx());
         let in_view = self.in_view.borrow().clone();
         self.feed_in_view(in_view, true);
-        carry_out(ui.ctx(), &out.signals);
+        carry_out(ui.ctx(), &out.signals, self.shown_quick());
         self.drop_keyword_on_grid(&out.response);
         crate::name_rect(ui.ctx(), "helios.library.grid", out.response.rect);
         self.presence_hover(ui, "grid");
@@ -5555,7 +5649,7 @@ impl Library {
             strip.show(ui, &mut self.view.state, &items, &thumbs)
         };
         self.after_pass(ui.ctx());
-        carry_out(ui.ctx(), &out.signals);
+        carry_out(ui.ctx(), &out.signals, self.shown_quick());
         crate::name_rect(ui.ctx(), "helios.library.strip", out.response.rect);
         self.presence_hover(ui, "strip");
         self.photo_menu(ui, out.response.rect);
@@ -5661,7 +5755,7 @@ impl Library {
                 .active(cmp.active(&keys).cloned())
                 .max_panes(crate::comparison::MAX_PANES)
                 .removable(true)
-                .carry("photos", DraggedPhotos, |p: &DraggedPhotos| {
+                .carry("photos", DraggedPhotos::of, |p: &DraggedPhotos| {
                     (!p.0.is_empty()).then(|| p.0.clone())
                 })
                 .show(ui, &mut cmp.view, &panes, &thumbs)

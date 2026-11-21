@@ -168,6 +168,8 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.quick.create", "plus"),
     ("library.quick.delete", "delete"),
     ("library.quick.list", "phosphor:list"),
+    ("library.quick.move", "phosphor:arrow-right"),
+    ("library.quick.open", "phosphor:plus-square"),
     ("library.quick.remove", "minus"),
     ("library.quick.rename", "phosphor:pencil-simple"),
     ("library.quick.saveAs", "phosphor:floppy-disk"),
