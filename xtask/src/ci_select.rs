@@ -537,11 +537,10 @@ fn affected_file(input: &Input, change: &Change, s: &mut Selection) {
             }
             ["snapshots", file]
                 if name == GUI
-                    && file.ends_with(".png")
-                    && !snapshot_modules(file.trim_end_matches(".png"), &input.gui_suites)
-                        .is_empty() =>
+                    && let Some(stem) = file.strip_suffix(".png")
+                    && !snapshot_modules(stem, &input.gui_suites).is_empty() =>
             {
-                for module in snapshot_modules(file.trim_end_matches(".png"), &input.gui_suites) {
+                for module in snapshot_modules(stem, &input.gui_suites) {
                     s.add(
                         src,
                         Scope::Module {
