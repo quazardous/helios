@@ -8,6 +8,10 @@ name: ci-history
 # - It reads the runs of the last two days: a run still going at the last
 #   night, or a night that did not run, is caught up. A run already in the
 #   history is left out, so the overlap counts nothing twice.
+# - The runs read: ci.yml's pushes to `next` (most run the CI broker's
+#   selection) and its nightly and manual full runs, which test `next`
+#   whatever their own head is: their commit comes from the run's `ci-run`
+#   artifact.
 # - A run with no `junit` artifact (it stopped before the tests: lint,
 #   build) is skipped.
 # - Beside it, the run's `broker-shadow` artifact (the broker's shadow
@@ -66,6 +70,13 @@ jobs:
             --event push --status completed --created ">=$since" --limit 50 --json databaseId \
             --jq ".[].databaseId | select(. > $last)") \
             || go "the run list failed"
+          for event in schedule workflow_dispatch; do
+            more=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --event "$event" --status completed --created ">=$since" --limit 10 --json databaseId \
+              --jq ".[].databaseId | select(. > $last)") \
+              || go "the run list failed"
+            newer="$newer $more"
+          done
           for id in $newer; do
             # A run without `junit` (stopped before its tests) has nothing
             # to ingest.
@@ -106,16 +117,27 @@ jobs:
       - name: ingest the last two days of next's runs
         run: |
           since=$(date -u -d '2 days ago' +%F)
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch next \
-            --event push --status completed --created ">=$since" --limit 200 \
-            --json databaseId,headSha,createdAt \
-            --jq 'sort_by(.createdAt) | .[] | "\(.databaseId) \(.headSha) \(.createdAt)"' > runs.txt
+          # next's pushes, and the full runs (nightly, manual) that test next
+          {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch next \
+              --event push --status completed --created ">=$since" --limit 200 \
+              --json databaseId,headSha,createdAt --jq '.[]'
+            for event in schedule workflow_dispatch; do
+              gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+                --event "$event" --status completed --created ">=$since" --limit 20 \
+                --json databaseId,headSha,createdAt --jq '.[]'
+            done
+          } | jq -rs 'sort_by(.createdAt) | .[] | "\(.databaseId) \(.headSha) \(.createdAt)"' > runs.txt
           echo "$(wc -l < runs.txt) completed runs since $since"
           while read -r id sha created; do
             dir="junit/$id"
             if ! gh run download "$id" --repo "$GITHUB_REPOSITORY" --name junit --dir "$dir" 2>/dev/null; then
               echo "run $id: no junit artifact, skipped"
               continue
+            fi
+            # The commit the run tested: a nightly run's head is main's.
+            if gh run download "$id" --repo "$GITHUB_REPOSITORY" --name ci-run --dir "ci-run/$id" 2>/dev/null; then
+              sha=$(jq -r .commit "ci-run/$id/ci-run.json")
             fi
             # The broker's shadow (B3), when the run uploaded one: a run
             # without it is ingested all the same, its shadow skipped.

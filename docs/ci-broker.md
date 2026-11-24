@@ -6,7 +6,11 @@ choosing which tests a run needs, from what earlier runs saw:
 - tests near the change, new tests, and tests that failed or flaked lately
   always run;
 - tests that have stayed green for a long time come back at a rhythm;
-- full runs stay nightly, before every release and on demand.
+- full runs stay nightly, before every release (only a full run
+  promotes) and on demand.
+
+Pushes to `next` run the selection instead of the whole suite: see "On
+next".
 
 It is built in steps:
 
@@ -14,7 +18,8 @@ It is built in steps:
 |---|---|---|
 | B1 | The per-test history, written nightly to the `ci-history` branch | done |
 | B2 | The always-run set: file-level `affected`, new or changed tests, recent failures, a smoke set | done |
-| B3 | A shadow week: the broker records its choice and skips nothing, to measure what it would have missed | in place; the week runs |
+| B3 | A shadow week: the broker records its choice and skips nothing, to measure what it would have missed | done: 64 runs, every first failure caught |
+| B3+ | Pushes to `next` run the selection; the full suite nightly; only full runs promote; recent failures read by days | done |
 | B4 | Confidence rhythm, seeded per commit | after the shadow week |
 | B5 | A time budget per pull request | |
 | B6 | Full runs nightly, at release and on demand; bisect-back tickets | |
@@ -151,10 +156,12 @@ These lists are the input for B2's always-run set and B3's shadow week.
 
 `cargo xtask ci-broker select` prints the tests a change always runs, as
 one nextest filter expression on stdout, and per source what it chose and
-why on stderr. It changes no CI yet: B3 runs it beside the full suite.
+why on stderr. Pushes to `next` run it (see "On next").
 
 ```sh
-cargo xtask ci-broker select [--base origin/next] [--history DIR] [--runs 20]
+cargo xtask ci-broker select [--base origin/next] [--history DIR] [--days 7] [--runs 20]
+cargo xtask ci-broker select --failed-junit earlier-run/junit.xml   # repeatable
+cargo xtask ci-broker select --list tests.txt --summary-md summary.md
 cargo nextest run --workspace -E "$(cargo xtask ci-broker select)"
 cargo xtask ci-broker select --explain 'helios-gui::it import::a_card_imports'
 # a past commit, read from git alone (the map and the suites are today's)
@@ -242,11 +249,20 @@ The set is the union of four sources:
 2. **changed tests**: the `#[test]` functions whose lines the diff adds or
    edits (`git diff -U0`), all of them for a new file. Mostly inside
    source 1 already; listed so `--explain` says it.
-3. **recent failures**: the tests whose last failure or last flake is
-   among the last `--runs` runs (20) of the history's `summary.json`, read
-   from `origin/ci-history` or `--history DIR`. With no history yet the
-   source is skipped and the summary says so. A history that doesn't read
-   runs every test.
+3. **recent failures**: every test that failed or flaked lately runs.
+   - From the history's `summary.json` (`origin/ci-history` or `--history
+     DIR`): the tests whose last failure or last flake is within the last
+     `--days` days (7), counted back from the summary's newest run, or
+     among its last `--runs` runs (20), whichever reaches further. Reading
+     20 runs alone missed 6 tests in the shadow study: they had failed on
+     an earlier commit of a red `next`, more than 20 runs (a few hours of
+     `next`) before.
+   - From runs the nightly history has not folded yet, `--failed-junit
+     FILE` (repeatable): their JUnit reports' failed and flaky tests. CI
+     passes `next`'s latest push runs and its last nightly run.
+     A report that doesn't read is left out, and said.
+   - With no history yet the summary part is skipped and the notes say so.
+     A history that doesn't read runs every test.
 4. **smoke**: `ci/smoke.txt`, about twenty fast, broad tests: `affected`'s
    critical set (a render, an export, round trips, survival) and a short
    journey through the desktop (first start, import, library, edit,
@@ -260,6 +276,68 @@ map. The full suite still runs on `next` after every merge.
 The policy (`xtask/src/ci_broker/select.rs`) knows nothing of Helios:
 scopes, the filter, `--explain`, the history and smoke sources. The
 Helios map lives in `xtask/src/ci_select.rs`.
+
+## On next
+
+A push to `next` runs the selection, not the whole suite; the whole suite
+runs nightly. Only a full run promotes `next` to `main` and releases. Our
+own pull requests still run `pr-lint` alone, and their tests on the bench
+box; a contributor's pull request from a fork runs the whole suite.
+
+| Run | Tests | Promotes |
+|---|---|---|
+| A push to `next` | the broker's selection since the push's previous commit | no, unless it ran every test |
+| A push to `next` whose commits carry the trailer `CI: full` | every test | yes |
+| Nightly (`schedule`, 01:15 UTC), on `next`'s head | every test; skipped when a nightly run already tested that commit | yes |
+| Manual (`workflow_dispatch`), on `next`'s head | every test | yes |
+| A push to `main`, a pull request from a fork | every test | no |
+
+The `test` job of `.github/workflows/ci.yml` decides in its step "full
+suite or selection". On a push to `next`, it:
+
+1. downloads the `junit` artifacts of `next`'s last 3 completed push runs
+   and of the last nightly run, for the recent failures the nightly
+   history has not folded yet;
+2. lists every test of the workspace (`cargo nextest list --message-format
+   oneline`), the run's denominator;
+3. runs `cargo xtask ci-broker select --base <the push's previous commit>
+   --committed --failed-junit … --list tests.txt --summary-md
+   broker-summary.md`;
+4. runs nextest with the filter it printed.
+
+The job summary says what ran: "**N of M tests selected** (affected: …,
+changed tests: …, recent failures: …, smoke: …)", with each source's notes
+(which window of the history was read), and how to run everything. The
+survival step is skipped: the smoke set holds the survival scenarios. Doc
+tests and the GPU diffstat run as before: the selection does not cover them.
+
+Every test runs instead, and the job summary says why, when:
+
+- the run is not a push to `next` (nightly, manual, `main`, a fork's pull
+  request);
+- a pushed commit carries the trailer **`CI: full`** (a line of its own in
+  the commit message, any case): the way to ask for a full run, and so a
+  promotion, from a merge;
+- there is no previous commit to compare with (a first or forced push);
+- the tests do not list, the broker fails, or it selects everything
+  (`all()`: a change to `Cargo.lock`, the toolchain, xtask, `.github/`, …).
+
+Each run uploads a `ci-run` artifact, `{"format":1,"mode":"full"|"select",
+"commit":…,"event":…}`: `commit` is the commit tested (a nightly run's own
+head is `main`'s; it checks out `next`). promote.yml reads it: only a
+green run whose `mode` is `full` promotes (`cargo xtask promote --run`,
+docs/releases.md). ci-history.yml reads it for the nightly runs' commit.
+
+The nightly run is skipped when `next` has not moved since the last nightly
+run, as windows-tests.yml does: its `mark` job saves a cache entry
+`ci-full-tested-<sha>` once it tested a commit, pass or fail, and its
+`gate` job looks for it. A full run made by a push or by hand does not
+count: the nightly run tests that commit again. Scheduled runs use
+`main`'s copy of ci.yml: the nightly run starts once this reaches `main`.
+
+A test the selection skips that breaks is caught by the next full run: the
+nightly one at the latest, which then holds `main` back until it is green.
+It then fails in the history, and every push selects it for 7 days.
 
 ## The nightly job
 
@@ -275,8 +353,10 @@ dispatch.
    `skipped: no run on next to ingest since run <id>`. No branch yet, no
    `last_run`, or any API error: it ingests (the gate fails open). A manual
    run always ingests.
-1. It lists the completed ci.yml push runs on `next` from the last two days,
-   oldest first.
+1. It lists the completed ci.yml push runs on `next` and its nightly and
+   manual runs from the last two days, oldest first. A run's commit is its
+   `ci-run` artifact's when it has one (a nightly run tests `next`, its own
+   head is `main`'s).
 2. For each run, it downloads the `junit` artifact that ci.yml's `test` job
    uploads. Failed runs upload one too. A run that stopped before its tests
    has none and is skipped.
@@ -296,10 +376,18 @@ the workflow by hand on `next` if it is needed sooner.
 
 ## Shadow week
 
-Before the broker skips anything, it runs in shadow (step B3): CI still
-runs the full suite on every push to `next`, and records beside it what
-`ci-broker select` would have chosen. A week of these runs shows what the
-selection would have missed.
+Before the broker skipped anything, it ran in shadow (step B3): CI ran
+the full suite on every push to `next`, and recorded beside it what
+`ci-broker select` would have chosen. The step and its `broker-shadow`
+artifact stay on pushes to `next`; on a selective run every test it ran
+is selected, so misses are now seen by the nightly full run instead.
+
+The study of 64 runs (2026-11-19 to 11-21) found every one of the 20 first
+failures selected. The 6 tests failing outside the selection had all
+failed on an earlier commit already, and were missed only because recent
+failures were read from the last 20 runs: they are now read over 7 days
+and from runs not folded yet. Selective runs saved 29 % of test time;
+`helios-gui::it` is most of what remains.
 
 ### On each push to next
 
@@ -403,4 +491,6 @@ the rest by the full runs on `next`. Skipping goes live (B4) when, over
 - the selected share is low enough to be worth it: the report's saved
   test-seconds are the measure, read against today's test time.
 
-The owner reads the report and decides; until then nothing is skipped.
+The owner read the report on 2026-11-24 and turned the selection on for
+pushes to `next`, with the whole suite nightly and only full runs promoting
+(see "On next").

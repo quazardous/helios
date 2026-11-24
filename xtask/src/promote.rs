@@ -1,6 +1,14 @@
-//! `cargo xtask promote <SHA> [--remote NAME]`: promote a commit CI passed
-//! on `next` to `main`, the release of its changelog fragments included
-//! (`.github/workflows/promote.yml` runs it; see docs/releases.md).
+//! `cargo xtask promote <SHA> [--run full|select] [--remote NAME]`: promote
+//! a commit CI passed on `next` to `main`, the release of its changelog
+//! fragments included (`.github/workflows/promote.yml` runs it; see
+//! docs/releases.md).
+//!
+//! **Only a full run promotes** ([`run_promotes`]): a push to `next` runs
+//! the CI broker's selection of tests (docs/ci-broker.md), which may skip a
+//! test the commit breaks. `main`, and every release, so rest on a run of
+//! the whole suite: the nightly run, a manual one, or a push whose
+//! selection was everything. A selective green run promotes nothing; the
+//! next full run promotes `next`'s head, which holds it.
 //!
 //! It works on the exact commit CI validated, never on whatever `next`
 //! points to when it runs:
@@ -40,7 +48,23 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
-pub const USAGE: &str = "promote <SHA> [--remote NAME]";
+pub const USAGE: &str = "promote <SHA> [--run full|select] [--remote NAME]";
+
+/// Whether a green CI run of the given mode (its `ci-run` artifact's
+/// `mode`) may promote its commit: only a run of the whole suite may.
+/// Anything else, an unknown mode included, promotes nothing, and says why.
+pub fn run_promotes(mode: &str) -> Result<(), String> {
+    match mode {
+        "full" => Ok(()),
+        "select" => Err(
+            "the run tested the CI broker's selection, not every test: main and releases move on full runs only (nightly, manual, or a push that selected everything)"
+                .into(),
+        ),
+        other => Err(format!(
+            "the run's mode `{other}` is not `full`: main moves on full runs only"
+        )),
+    }
+}
 
 /// How long a user-facing fragment waits for a release asked for: past
 /// that, the next promotion releases whatever is pending.
@@ -78,12 +102,23 @@ pub enum Next {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
-    let (sha, remote) = match args {
-        [sha] => (*sha, "origin"),
-        [sha, "--remote", remote] => (*sha, *remote),
-        _ => return None,
+    let [sha, rest @ ..] = args else {
+        return None;
     };
-    let outcome = promote(root, remote, sha, &crate::today(), &refresh_lock);
+    // By hand, with no `--run`, the caller vouches for a full run.
+    let (mut remote, mut mode) = ("origin", "full");
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match *a {
+            "--remote" => remote = *it.next()?,
+            "--run" => mode = *it.next()?,
+            _ => return None,
+        }
+    }
+    let outcome = match run_promotes(mode) {
+        Ok(()) => promote(root, remote, sha, &crate::today(), &refresh_lock),
+        Err(why) => Ok(Outcome::Skipped(why)),
+    };
     let (text, ok) = match outcome {
         Ok(Outcome::AlreadyOnMain) => (format!("main already holds {sha}"), true),
         Ok(Outcome::Skipped(why)) => (format!("not promoted: {why}"), true),
@@ -681,6 +716,15 @@ mod tests {
 
     const ADDED: &str = "kind: added\nrelease: minor\n\nA new panel.\n";
     const FIXED: &str = "kind: fixed\nrelease: patch\n\nExports no longer stop.\n";
+
+    #[test]
+    fn only_a_full_run_promotes() {
+        assert_eq!(run_promotes("full"), Ok(()));
+        let why = run_promotes("select").unwrap_err();
+        assert!(why.contains("full runs only"), "{why}");
+        assert!(run_promotes("").is_err());
+        assert!(run_promotes("FULL").is_err());
+    }
 
     #[test]
     fn fragments_make_a_release_commit_on_the_validated_commit() {
