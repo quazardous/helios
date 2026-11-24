@@ -18,6 +18,7 @@ use egui_pop::api::menus::{ListItem, popup_at};
 use egui_pop::api::steps::Before;
 use egui_pop::api::zones::{self, Block};
 use egui_pop::api::{Ctx, Plugin, PluginError};
+use egui_pop::core::strings::StrKey;
 use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::{BlockId, CommandId, MenuId, PluginId};
 use egui_pop::model::keymap::Layer;
@@ -711,6 +712,17 @@ pub const WINDOW_MENU: PluginId = PluginId::from_static("helios.windowMenu");
 /// still there for them and for agents).
 pub struct WindowMenu;
 
+/// The Studio's words for egui-pop's arrangements (the owner's
+/// "Studio > panel > tool"): Window ▸ Studio's "Save the Studio layout
+/// as…", the save dialog's title and button, the name it suggests.
+pub const STUDIO_WORDS: egui_pop::api::arrangements::ArrangementStrings =
+    egui_pop::api::arrangements::ArrangementStrings::new(
+        StrKey::new("gui-studio-save-as", "Save the Studio layout as…"),
+        StrKey::new("gui-studio-save-title", "Save the Studio layout"),
+        StrKey::new("gui-studio-save-verb", "Save the layout"),
+        StrKey::new("gui-studio-suggested", "Studio layout { $n }"),
+    );
+
 /// Window ▸ Panels: the checklist of every panel.
 pub const MENU_PANELS: MenuId = MenuId::from_static("helios.window.panels");
 /// Its panels that show (view and mixed panels), by title.
@@ -838,6 +850,14 @@ impl Plugin for WindowMenu {
         for (group, list) in STUDIO_LISTS {
             ctx.menu_item(MenuItem::list(MENU_STUDIO, group, 0, list))?;
         }
+        // First, Open panel… (Ctrl+Shift+O): every panel in the palette,
+        // the one chosen opened where it was.
+        ctx.menu_item(MenuItem::command(
+            MENU_PANELS,
+            "0_pick",
+            0,
+            egui_pop::api::workbench::panel_menu::CMD_PANEL_PICK,
+        ))?;
         ctx.menu_item(MenuItem::list(MENU_PANELS, "1_views", 0, LIST_PANELS_VIEWS))?;
         ctx.menu_item(MenuItem::list(
             MENU_PANELS,

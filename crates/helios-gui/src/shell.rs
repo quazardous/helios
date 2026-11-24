@@ -1029,6 +1029,9 @@ impl Shell {
             // that tab group may take, opening the one chosen there
             // (`pop.panel.open`, `here`); Window > Panels lists them all.
             .dock_controls(egui_pop::api::workbench::DockControls::default().add_buttons(true))
+            // Window > Studio's saved layouts say "Studio layout", not
+            // egui-pop's "arrangement" (`plugins::STUDIO_WORDS`).
+            .arrangement_strings(crate::plugins::STUDIO_WORDS)
             // A detached panel's window is built transparent where an
             // image surface can sit below it (Wayland), so a detached
             // viewer gets its own, for the screen it is on; elsewhere it
