@@ -339,6 +339,47 @@ The gphoto2-camera example declares its capture controls this way (ISO
 as a choice, the shutter speed as a number of seconds) and sets each
 change on the camera with `gphoto2 --set-config`.
 
+## Declared tools on the image
+
+The same rack file declares **tools on the image**: handles over the
+open photo on the plugin's own number values, drawn by the viewport
+(egui-pop's overlays, `egui_hud`'s handle kinds), never by the plugin.
+
+```json
+"tools": [{
+  "name": "focus",
+  "label": "io-github-quazardous-helios-gphoto2-camera-focus",
+  "when": "focus-show",
+  "handles": {"format": "egui_hud-handles/1", "handles": [
+    {"name": "focus", "kind": "point", "centre": {"x": "focus-x", "y": "focus-y"}, "look": "move"}
+  ]},
+  "ranges": {}
+}]
+```
+
+- **Handles** are an `egui_hud` handles file: each a kind that carries
+  its maths (`point`, `radius`, `feather`, `angle`, `line`) with its
+  look, Shift snap, double-click reset and wheel. A handle writes `float`
+  values the plugin declares and may read a `bool` (a feather in
+  proportion). Its position is in the photo's pixels.
+- **`ranges`** holds, by handle, the tool's own `[min, max]` for the
+  first value it writes, inside the value's range (a feather no wider
+  than 200). `when` names a `bool` value: the tool shows while it is on;
+  without it, the tool shows whenever a photo is open.
+- **Checks.** A handle of a kind this Helios does not know is left out
+  with its reason, the tool's other handles kept; `custom` (code) never
+  comes from a file. A handle on a value not declared or not a number,
+  a label not in the plugin's catalogue: left out, said on the plugin's
+  section and in the log. A tool left with no handle is left out.
+- **Gestures stay on the host's side**, as for the card: a drag is one
+  undo step in the plugins' scope, Escape gives it up with no trace, a
+  double click resets, the wheel turns one step; the plugin hears the
+  committed change by `ui/changed`, never a drag's frames.
+
+The gphoto2-camera example's focus point is such a tool: a point on
+`focus-x`, `focus-y`, shown while its card's switch is on, which sets
+the camera's live-view zoom position when a drag ends.
+
 ## Packaging and trust
 
 - A signed archive: the manifest, the plugin's code, its modules.

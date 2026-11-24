@@ -103,6 +103,7 @@ mod plugin_commands;
 mod plugin_consent;
 mod plugin_controls;
 mod plugin_pages;
+mod plugin_tools;
 mod queue;
 mod quick_open;
 mod quick_settings;

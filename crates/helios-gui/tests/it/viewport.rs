@@ -392,6 +392,10 @@ fn undo_through_the_host_skips_the_view_and_takes_back_the_edit() {
         "param.set",
         json!({ "path": "node/exposure/exposure", "value": 1.0 }),
     );
+    // Ctrl+Z goes to the focused view's history (egui-pop's focus
+    // routing): with no view focused yet it goes nowhere, so the image's
+    // view takes the focus first, as a click in it does.
+    run(&mut h, "helios.viewport.focus", json!(null));
     run(&mut h, "viewport.zoom.100", json!(null));
     h.step();
     run(&mut h, "viewport.zoom.in", json!(null));
