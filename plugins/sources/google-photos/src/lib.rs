@@ -58,12 +58,15 @@ pub const API: &str = "https://photospicker.googleapis.com/v1";
 pub const API_CHECK: &str = "google-photos.api-check";
 
 /// What the connector asks of Google at most, as its manifest declares
-/// it (`[limits]`): the import window's read-ahead of glances pauses
-/// there. Every install shares the OAuth client's project quota, so
-/// these stay well under it.
+/// it (`[limits]`): an import's downloads and the import window's
+/// read-ahead of glances share one budget per account held to them, two
+/// requests at a time. Every install shares the OAuth client's project
+/// quota, so these stay well under it.
 pub const LIMITS: Limits = Limits {
+    per_second: None,
     per_minute: Some(120),
     per_day: Some(10_000),
+    parallel: Some(2),
 };
 
 /// The scope reading the items the person picks.

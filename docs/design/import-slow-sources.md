@@ -238,9 +238,11 @@ pub struct Caps {
 }
 
 pub struct Limits {
+    pub per_second: Option<u32>,
     pub per_minute: Option<u32>,
     pub per_day: Option<u32>,
-    /// Downloads at once the service tolerates (1 by default).
+    /// Requests at once the service tolerates, downloads and glances
+    /// together (no limit when absent).
     pub parallel: Option<u32>,
 }
 ```
@@ -335,11 +337,15 @@ token bucket per account.
    lazily and never gated Import. Left: a pick's pages streamed (Google
    lists 100 a page, seconds for a full pick; its session is ended by
    the import, so pages must stay one visit), the list view chosen from
-   a `thumbnail_cost` and the count, `Limits::parallel` with a bucket per
-   account shared by downloads and glances.
+   a `thumbnail_cost` and the count.
    Done: the quota and refused-refresh pauses. A rate limit or a quota
    met holds the import's promise (still `running`, with `paused`: why,
    and the time it goes on when the service gives a `Retry-After`) and
    it goes on by itself; a refused sign-in holds it until a sign-in or a
    `promises.retry`. Nothing imported is lost, the item at hand is
    fetched again. The Queue panel shows it paused, with its reason.
+   Done since: `Limits::parallel` (and `per_second`) in the manifest's
+   `[limits]`, with one budget per account (`helios_connect::budget`)
+   shared by an import's downloads and the window's glances; a waiting
+   download goes before every glance, and a wait the service asks for
+   holds both. Google Photos declares two requests at a time.

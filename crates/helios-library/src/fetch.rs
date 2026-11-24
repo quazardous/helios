@@ -46,6 +46,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use helios_connect::budget::{Budget, Use};
 use helios_connect::land::{Check, Landed, Landing};
 use helios_connect::{
     Access, Cancel, Caps, Connector, ConnectorError, HashAlgo, Item, ItemRef, Originals, SourceRef,
@@ -441,10 +442,18 @@ impl<S: Store> Run<'_, S> {
         let mut offset = if self.caps.resume { held } else { 0 };
         let (mut mismatches, mut cuts, mut wait) = (0u32, 0u32, BACKOFF);
         let name = &item.path;
+        // The account's budget, shared with the import window's glances:
+        // a download waits for its place, ahead of every glance.
+        let budget = Budget::of(&self.remote.source, self.caps.limits);
         loop {
             if self.stopped() {
                 return Err(format!("{name}: cancelled"));
             }
+            let Some(permit) =
+                budget.take(Use::Download, &std::time::Instant::now, &|| self.stopped())
+            else {
+                return Err(format!("{name}: cancelled"));
+            };
             let mut landing = Landing::open(part, offset, item.claim.as_ref())
                 .map_err(|e| format!("{}: {e}", part.display()))?;
             let start = landing.written();
@@ -455,6 +464,7 @@ impl<S: Store> Run<'_, S> {
                 .remote
                 .connector
                 .fetch(&item_ref, start, &mut landing, &cancel);
+            drop(permit);
             let got = landing.written();
             self.report.read += got - start;
             let Err(error) = fetched else {
@@ -522,6 +532,8 @@ impl<S: Store> Run<'_, S> {
                     cuts += 1;
                     let pause = retry_after.unwrap_or(wait).min(MAX_WAIT);
                     wait = (wait * 2).min(MAX_WAIT);
+                    // The glances wait it out too.
+                    budget.hold(std::time::Instant::now(), Some(pause));
                     self.log.push(format!(
                         "{}: asked to wait {} s",
                         self.remote.source.label,

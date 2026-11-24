@@ -56,6 +56,41 @@ pub struct AlbumsProvider {
     pub refusing: Arc<Mutex<Option<bool>>>,
     /// How many fetches were refused (a quota or a sign-in).
     pub refusals: Arc<AtomicUsize>,
+    /// Its declared limits (`caps.limits`).
+    pub limits: crate::Limits,
+    /// Every request to its service (thumbnails and fetches), as it
+    /// counts them: what a rate budget is checked against.
+    pub requests: Arc<Requests>,
+}
+
+/// The requests a fake service received: each one's kind and start, and
+/// the most under way at once.
+#[derive(Debug, Default)]
+pub struct Requests {
+    running: AtomicUsize,
+    pub most_at_once: AtomicUsize,
+    pub log: std::sync::Mutex<Vec<(crate::budget::Use, std::time::Instant)>>,
+}
+
+/// One request under way, ended when dropped.
+struct Request<'a>(&'a Requests);
+
+impl Requests {
+    fn start(&self, use_: crate::budget::Use) -> Request<'_> {
+        let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+        self.most_at_once.fetch_max(now, Ordering::SeqCst);
+        self.log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((use_, std::time::Instant::now()));
+        Request(self)
+    }
+}
+
+impl Drop for Request<'_> {
+    fn drop(&mut self) {
+        self.0.running.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl AlbumsProvider {
@@ -75,6 +110,8 @@ impl AlbumsProvider {
             refuse_after: None,
             refusing: Arc::default(),
             refusals: Arc::default(),
+            limits: crate::Limits::default(),
+            requests: Arc::default(),
         }
     }
 
@@ -165,6 +202,7 @@ impl ConnectorProvider for AlbumsProvider {
                 collections: true,
                 thumbnails: self.thumbnails,
                 originals: crate::Originals::Rendered,
+                limits: self.limits,
                 ..Caps::default()
             },
             needs: crate::Needs {
@@ -330,6 +368,7 @@ impl Connector for Albums {
             return Ok(None);
         }
         self.0.thumbnails_asked.fetch_add(1, Ordering::SeqCst);
+        let _request = self.0.requests.start(crate::budget::Use::Thumbnail);
         wait_while(&self.0.hold_thumbnails, None);
         self.0.thumbnails_given.fetch_add(1, Ordering::SeqCst);
         Ok(None)
@@ -350,6 +389,9 @@ impl Connector for Albums {
             self.0.refusals.fetch_add(1, Ordering::SeqCst);
             return Err(refused);
         }
+        let _request = self.0.requests.start(crate::budget::Use::Download);
+        // A download takes a moment: requests overlap when they can.
+        std::thread::sleep(Duration::from_millis(2));
         let bytes = b"photo!";
         sink.accept(bytes)
             .map_err(|e| ConnectorError::Transient(e.to_string()))?;

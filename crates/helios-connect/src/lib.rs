@@ -29,6 +29,7 @@ use helios_core::config::Contracts;
 use serde::{Deserialize, Serialize};
 
 pub mod account;
+pub mod budget;
 pub mod card;
 pub mod connect;
 pub mod contract;
@@ -219,15 +220,20 @@ pub struct Caps {
     pub limits: Limits,
 }
 
-/// How many requests a connector's service allows: the read-ahead of
-/// glances pauses at them. `None`: no limit declared.
+/// How many requests a connector's service allows, per account: an
+/// import's downloads and the read-ahead of glances share one
+/// [`budget::Budget`] held to them. `None`: no limit declared.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
+    /// Requests a second.
+    pub per_second: Option<u32>,
     /// Requests a minute.
     pub per_minute: Option<u32>,
     /// Requests a day: a hint of the service's daily quota.
     pub per_day: Option<u32>,
+    /// Requests under way at once, downloads and thumbnails together.
+    pub parallel: Option<u32>,
 }
 
 /// A hash algorithm a connector may claim.

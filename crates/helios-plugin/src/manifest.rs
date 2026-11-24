@@ -497,8 +497,9 @@ pub struct Manifest {
     /// Photos' Picker) says so.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub collections: bool,
-    /// What its service lets Helios ask (`[limits]`: `per_minute`,
-    /// `per_day`): the read-ahead of glances pauses there.
+    /// What its service lets Helios ask per account (`[limits]`:
+    /// `per_second`, `per_minute`, `per_day`, `parallel`): downloads and
+    /// the read-ahead of glances share one budget held to them.
     #[serde(default, skip_serializing_if = "no_limits")]
     pub limits: helios_connect::Limits,
     /// Its source is the account itself: one source per account is
@@ -766,7 +767,8 @@ impl Manifest {
                     .into(),
             );
         }
-        if self.limits.per_minute == Some(0) || self.limits.per_day == Some(0) {
+        let l = &self.limits;
+        if [l.per_second, l.per_minute, l.per_day, l.parallel].contains(&Some(0)) {
             p.push("a limit of 0 requests: leave it out for no limit".into());
         }
         for name in &self.browsers {
