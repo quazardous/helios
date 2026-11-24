@@ -20,10 +20,10 @@
 //!   library's [`crate::library_history::FOCUS`]), and Ctrl+Z and
 //!   Ctrl+Shift+Z go to the scope of the focused one, even when another
 //!   scope has a newer step. With the focus where no scope is named (the
-//!   menu bar, nothing clicked), they go to the scope focused last while
-//!   one of its panels is shown, then to the newest step. A scope is
-//!   active while one of its panels is shown. The History panel and
-//!   agents name the scope they walk.
+//!   menu bar, an empty spot), they go to the scope focused last in the
+//!   window, shown or not; with no view focused yet (at start-up) they do
+//!   nothing and say why, never the newest step of another scope. The
+//!   History panel and agents name the scope they walk.
 //!
 //! - **Steps** keep the id the store gave them
 //!   ([`helios_values::Step::id`]) while they are undone, redone or
