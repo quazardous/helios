@@ -198,8 +198,20 @@ The set is the union of four sources:
      - by the checked-in override table, `OVERRIDES` in
        `xtask/src/ci_select.rs`, and `affected`'s `GUI_SUITES`.
 
+     - by the crate's own users: a file no test names is mapped through
+       the helios-gui files that use it (`crate::privacy`, or
+       `super::dialog` beside it under `src/shell/`), up to three hops,
+       to the `it` modules those files map to (`gui_users` in
+       `xtask/src/ci_select.rs`). `lib.rs` and `main.rs` declare every
+       module, so they are not followed.
+
      When no module is found, or for `lib.rs` and `main.rs`, the whole
-     `it` binary runs. helios-gui's other tests (unit tests) and the crates
+     `it` binary runs.
+   - A reference image, `tests/snapshots/<name>.png`, selects the `it`
+     modules whose source names it: its name, a prefix of it before a
+     `-`, or a `format!` string whose text before the first `{` starts it
+     (`"import-window-{state}-pop-dark-{scale}x"`). An image no module
+     names selects the crate, as other test data does. helios-gui's other tests (unit tests) and the crates
      depending on it run too. A changed `it` module selects itself and the
      modules naming it (`crate::<module>`: shared helpers).
    - **A feature crate** cut out of helios-gui (`helios-storage-ui`; the
@@ -338,6 +350,21 @@ count: the nightly run tests that commit again. Scheduled runs use
 A test the selection skips that breaks is caught by the next full run: the
 nightly one at the latest, which then holds `main` back until it is green.
 It then fails in the history, and every push selects it for 7 days.
+
+### Measured on the shadow runs
+
+Replayed on 2026-11-24 over the 64 shadow runs of 2026-11-19 to 11-21
+(the changes of each run, today's map and test sources, no history):
+
+- 29 runs selected less than everything. They kept 77.9 % of
+  `helios-gui::it`'s time before these two rules, and keep 75.2 % with
+  them. One run (a queue file under `src/`) went from 3185 s to 1325 s.
+- No first failure is missed (17 tests failing in a run whose previous
+  run passed them, all of them selected).
+- Most of the time left is not in the map's reach: a change in a crate
+  helios-gui depends on (helios-core, helios-load, helios-node...),
+  `lib.rs` or `main.rs`, `tests/it/main.rs`, and the `i18n/` catalogues,
+  which every crate reading them embeds. These select the whole binary.
 
 ## The nightly job
 
