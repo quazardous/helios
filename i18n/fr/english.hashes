@@ -71,6 +71,7 @@ clip-application-x-helios-images-json.title cafd24c4eaef756b
 clip-application-x-helios-mask-json.title 2f3bd09547ac8967
 clip-application-x-helios-nodes-json.title 65bc64e9a42a73d8
 clip-application-x-helios-param-json.title bcd6c3b8b514812b
+command-activity-resume.title ef6e0299a9577d1d
 command-activity-show.title 5c53367934640074
 command-calibrate-open.title 55fe1b5697baf66d
 command-compare-active.title 7dadebc837b489b5
@@ -1037,6 +1038,7 @@ gui-jobs-elapsed 0b2f468ceb6ddadb
 gui-jobs-filter-kind b8f0171a1547e3b8
 gui-jobs-filter-state d1b7844581f1659b
 gui-jobs-folder 385fe1e894da806d
+gui-jobs-goes-on c24f97d594840e09
 gui-jobs-import-record 81b8ac971a4f357a
 gui-jobs-items-done 3570446200466199
 gui-jobs-items-failed f6df755a7ae7b232
@@ -1496,7 +1498,10 @@ gui-promise-cancelling a2953898d2ec73c5
 gui-promise-counts eecffc24673fc1a2
 gui-promise-done 3570446200466199
 gui-promise-failed e758ca0bd743bc76
+gui-promise-paused-quota c8cf3a9b74290ce5
+gui-promise-paused-sign-in 0394f30d230fd837
 gui-promise-pending 33295081e7fea1f9
+gui-promise-resume 1ac456f8743ad628
 gui-promise-retry 1da925989c6c1be1
 gui-promise-so-far 2138093a026ec676
 gui-queue-bottom e6f706260ebad648
@@ -1516,6 +1521,7 @@ gui-queue-on-node 2459cf2ab530b552
 gui-queue-paused-quota 2dcd7686e3cbef32
 gui-queue-paused-quota-until 04403999438dcf6e
 gui-queue-paused-sign-in 38367828feab9dcf
+gui-queue-resume 1ac456f8743ad628
 gui-queue-retry 1da925989c6c1be1
 gui-queue-seconds f307af2609bac350
 gui-queue-state-cancelled b9fdf5919d7526fa

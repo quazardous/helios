@@ -658,6 +658,9 @@ command-import-reconnect =
 command-import-signOut =
     .title = Déconnecter un compte d’import : ses clés et jetons sont oubliés, il reste dans la liste (`account`) ; un choix de photos en cours sur ce compte est d’abord annulé
 
+command-activity-resume =
+    .title = Reprendre maintenant une tâche en pause (`id` : une promesse de `promises.list` en pause sur le quota d’un service ou une connexion refusée)
+
 command-activity-show =
     .title = Activité… (`id` : la tâche sélectionnée, une promesse de `promises.list`)
 

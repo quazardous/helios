@@ -1375,6 +1375,8 @@ gui-jobs-filter-state = State shown
 
 gui-jobs-folder = Folder
 
+gui-jobs-goes-on = Goes on at
+
 gui-jobs-import-record = Import history
 
 gui-jobs-items-done = Done
@@ -2293,7 +2295,13 @@ gui-promise-done = Done
 
 gui-promise-failed = Failed: { $reason }
 
+gui-promise-paused-quota = Paused: the service asks to wait
+
+gui-promise-paused-sign-in = Paused: the service refused the sign-in
+
 gui-promise-pending = Waiting to start
+
+gui-promise-resume = Resume
 
 gui-promise-retry = Retry
 
@@ -2332,6 +2340,8 @@ gui-queue-paused-quota = The service asks to wait: going on by itself
 gui-queue-paused-quota-until = The service asks to wait: going on in { $time }
 
 gui-queue-paused-sign-in = The service refused the sign-in: sign in again to go on
+
+gui-queue-resume = Resume
 
 gui-queue-retry = Retry
 
