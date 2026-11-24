@@ -249,8 +249,8 @@ is going (`plugins::History` vetoes the `edit.undo`, `edit.redo` and
 panel (`egui_pop.history`). The darkroom's layout docks it as a tab
 beside the Modules, on the start side, where darktable and Lightroom
 keep their history (2026-11-17); elsewhere, and in a darkroom layout
-the user saved before, it is closed until asked for: Window > History,
-Ctrl+Shift+H or the palette (`egui_pop.history.toggle`). It lists the
+the user saved before, it is closed until asked for: Window > Panels >
+History, Ctrl+Shift+H or the palette (`egui_pop.history.toggle`). It lists the
 history's steps under a Start row, oldest first: the head selected, the
 steps a redo would make again muted under it, a step made by an agent
 or a script named with its origin ("Exposure (agent:mcp)"). A step that

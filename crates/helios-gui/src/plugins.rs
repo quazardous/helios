@@ -692,12 +692,92 @@ impl Plugin for Frame {
 
 pub const WINDOW_MENU: PluginId = PluginId::from_static("helios.windowMenu");
 
+/// The View and Window menus as Helios lays them out (the owner's
+/// structure, 2026-11-17): View holds what is shown (the palette, the
+/// activity, the theme and zoom, full screen); Window holds where things
+/// are: Panels ▸, a checklist of every panel, ticked while it shows, and
+/// Studio ▸ (egui-pop's layout menu: the areas, the saved studios, saving
+/// one, the side bars' sides), then the OS windows.
+///
+/// - A panel of the checklist opens through egui-pop's
+///   `workbench.panel.open` (`pop.panel.open`, `place: "last"`): where it
+///   was when it closed; ticked, it closes.
+/// - Its sections follow the panels' kind (`PanelSpec::kind`): those that
+///   show (view and mixed panels), then those that edit, then "New
+///   `<panel>`" for the panels opened many times.
+/// - egui-pop's area toggles, its layout submenu and its "New `<panel>`"
+///   entries leave View for Window.
+///
 /// egui-pop's window switcher, which Helios does not offer: Switch to
 /// window… (`window.pick`) leaves the Window menu, and it and
 /// `window.switch` leave the palette. The Window menu keeps Helios's
 /// windows and the list of open ones (whose entries run `window.switch`,
 /// still there for them and for agents).
 pub struct WindowMenu;
+
+/// Window ▸ Panels: the checklist of every panel.
+pub const MENU_PANELS: MenuId = MenuId::from_static("helios.window.panels");
+/// Its panels that show (view and mixed panels), by title.
+pub const LIST_PANELS_VIEWS: &str = "helios.panels.views";
+/// Its panels that edit (control panels), by title.
+pub const LIST_PANELS_CONTROLS: &str = "helios.panels.controls";
+/// Window ▸ Studio: the areas, the saved studios, saving the current one,
+/// the side bars' sides.
+pub const MENU_STUDIO: MenuId = MenuId::from_static("helios.window.studio");
+/// egui-pop's layout menu's lists (`layout_controls`), by group: the
+/// saved arrangements, saving the current one, the primary side bar's
+/// side, the bottom panel's width.
+const STUDIO_LISTS: [(&str, &str); 4] = [
+    ("2_studios", "workbench.layout.arrangements"),
+    ("3_save", "workbench.layout.save"),
+    ("4_side_bar", "workbench.layout.side_bar"),
+    ("5_panel", "workbench.layout.panel"),
+];
+/// The View menu's group egui-pop puts its layout entries in (the area
+/// toggles, Customize layout ▸, the arrangements), moved to Window.
+const VIEW_LAYOUT_GROUP: &str = "3_layout";
+
+/// The checklist's entries for the panels of one section: every declared
+/// panel but the bare ones, ticked while shown; a shown one closes, a
+/// closed one opens where it was.
+fn panel_entries(app: &egui_pop::api::app::AppHandle, controls: bool) -> Vec<ListItem> {
+    use egui_pop::api::workbench::panel_menu::{CMD_PANEL_CLOSE, CMD_PANEL_OPEN};
+    use egui_pop::model::panels::PanelKind;
+    let ctx = app.egui();
+    let layout = app.layout();
+    let mut out: Vec<(String, ListItem)> = app
+        .panels()
+        .into_iter()
+        .filter(|s| !s.bare && (s.kind == PanelKind::Control) == controls)
+        .map(|s| {
+            let title = if s.id.is_instance() {
+                match layout.instance(&s.id).and_then(|i| i.title.clone()) {
+                    Some(t) => t,
+                    None => format!(
+                        "{} {}",
+                        egui_pop::core::strings::panel_title(&ctx, s.id.kind().as_str(), &s.title),
+                        s.id.instance_number()
+                    ),
+                }
+            } else {
+                egui_pop::core::strings::panel_title(&ctx, s.id.as_str(), &s.title)
+            };
+            let shown = app.panel_visible(&s.id);
+            let item = if shown {
+                ListItem::new(&title, CMD_PANEL_CLOSE, json!({ "panel": s.id }))
+            } else {
+                ListItem::new(
+                    &title,
+                    CMD_PANEL_OPEN,
+                    json!({ "panel": s.id, "place": "last" }),
+                )
+            };
+            (title, item.checked(shown))
+        })
+        .collect();
+    out.sort_by_key(|(title, _)| title.to_lowercase());
+    out.into_iter().map(|(_, item)| item).collect()
+}
 
 /// The switcher's commands, kept out of Helios's menus and palette.
 pub const SWITCHER: [CommandId; 2] = [
@@ -719,10 +799,59 @@ impl Plugin for WindowMenu {
     }
 
     fn connect(&mut self, ctx: &mut Ctx<'_>) -> Result<(), PluginError> {
+        use egui_pop::api::app::MENU_VIEW;
         use egui_pop::api::hooks::Hook;
+        use egui_pop::api::layout_controls::TOGGLES;
         use egui_pop::api::windows::{CMD_PICK, MENU_WINDOW};
+        use egui_pop::api::workbench::panel_menu::LIST_NEW_INSTANCES;
         use egui_pop::model::ids::HookId;
         use egui_pop::model::menus::Item;
+        // View keeps what is shown; where the panels are goes to Window.
+        ctx.hook(Hook::menu(
+            HookId::from_static("helios.viewMenu.noLayout"),
+            MENU_VIEW,
+            |items| {
+                items.retain(|item| {
+                    item.group != VIEW_LAYOUT_GROUP
+                        && !matches!(&item.item, Item::List { name } if name == LIST_NEW_INSTANCES)
+                });
+            },
+        ))?;
+        ctx.menu_item(MenuItem::submenu(
+            MENU_WINDOW,
+            "0_panels",
+            0,
+            MENU_PANELS,
+            "Panels",
+        ))?;
+        ctx.menu_item(MenuItem::submenu(
+            MENU_WINDOW,
+            "0_panels",
+            1,
+            MENU_STUDIO,
+            "Studio",
+        ))?;
+        // Studio ▸ holds egui-pop's layout menu's entries (its submenu
+        // keeps egui-pop's own label, so Helios names its own): the
+        // areas, then its lists.
+        for (order, (_, command, key)) in TOGGLES.into_iter().enumerate() {
+            ctx.menu_item(
+                MenuItem::command(MENU_STUDIO, "1_areas", order as i32, command).checked(key),
+            )?;
+        }
+        for (group, list) in STUDIO_LISTS {
+            ctx.menu_item(MenuItem::list(MENU_STUDIO, group, 0, list))?;
+        }
+        ctx.menu_item(MenuItem::list(MENU_PANELS, "1_views", 0, LIST_PANELS_VIEWS))?;
+        ctx.menu_item(MenuItem::list(
+            MENU_PANELS,
+            "2_controls",
+            0,
+            LIST_PANELS_CONTROLS,
+        ))?;
+        ctx.menu_item(MenuItem::list(MENU_PANELS, "3_new", 0, LIST_NEW_INSTANCES))?;
+        ctx.list_provider(LIST_PANELS_VIEWS, |app, _| panel_entries(app, false));
+        ctx.list_provider(LIST_PANELS_CONTROLS, |app, _| panel_entries(app, true));
         ctx.hook(Hook::menu(
             HookId::from_static("helios.windowMenu.noSwitcher"),
             MENU_WINDOW,

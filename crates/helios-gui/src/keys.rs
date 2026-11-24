@@ -372,7 +372,7 @@ pub fn defaults() -> Vec<Binding> {
     // The Activity focus: the background jobs, as Ctrl+J opens a
     // browser's downloads.
     bind_in(INFERRED, "Ctrl+Shift+J", crate::activity::COMMAND, "");
-    // The History panel (Window > History): the edit's undo steps.
+    // The History panel (Window > Panels > History): the edit's undo steps.
     bind_in(
         INFERRED,
         "Ctrl+Shift+H",

@@ -143,6 +143,7 @@ mod wall_clock;
 mod window_close;
 mod window_commands;
 mod window_keys;
+mod window_menu;
 mod workshop_design;
 mod workshop_run;
 mod workshops;

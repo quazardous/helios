@@ -106,6 +106,12 @@ menu-helios-system-recent =
 menu-helios-system-themes =
     .label = Themes
 
+menu-helios-window-panels =
+    .label = Panels
+
+menu-helios-window-studio =
+    .label = Studio
+
 plugin-egui-pop-imaging =
     .title = Image tools
 
