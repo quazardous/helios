@@ -3750,6 +3750,8 @@ fn quick_holds(h: &Harness<'_, Shell>, quick: &str) -> Vec<String> {
 /// (one step, undone), Ctrl copies, a photo dragged from a panel onto
 /// Compare joins the comparison; the main view's cursor and selection
 /// never move; a restart from the saved layout gives both panels back.
+/// Each panel's tab is titled with its collection's name, and follows a
+/// rename.
 #[test]
 fn quick_collection_panels_move_copy_and_feed_compare_and_come_back() {
     use helios_gui::library_views::{QUICK_OPEN_COMMAND, quick_views};
@@ -3828,6 +3830,12 @@ fn quick_collection_panels_move_copy_and_feed_compare_and_come_back() {
     };
     assert_eq!(shown(&h, &picks), "collection:picks");
     assert_eq!(shown(&h, &maybe), "collection:maybe");
+    // Each tab is titled with its collection's name, not "Results 2".
+    let title = |h: &Harness<'_, Shell>, view: &str| {
+        h.state().app().handle().describe_panel(view).unwrap().title
+    };
+    assert_eq!(title(&h, &picks), "Picks");
+    assert_eq!(title(&h, &maybe), "Maybe");
 
     // a dragged from Picks to Maybe: it moves, one step.
     let to = h.state().target_rect(&maybe).unwrap().center();
@@ -3921,6 +3929,19 @@ fn quick_collection_panels_move_copy_and_feed_compare_and_come_back() {
     );
     assert_eq!(shown(&h, &picks), "collection:picks");
     assert_eq!(shown(&h, &maybe), "collection:maybe");
+    assert_eq!(
+        title(&h, &picks),
+        "Picks",
+        "the title comes back with the layout"
+    );
+    // Renamed: its panel's tab follows.
+    run(
+        &mut h,
+        "library.quick.rename",
+        json!({ "id": "maybe", "name": "Perhaps" }),
+    );
+    settle(&mut h, &mut persist, 9.0);
+    assert_eq!(title(&h, &maybe), "Perhaps");
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }

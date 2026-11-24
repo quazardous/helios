@@ -403,19 +403,20 @@ impl Calibration {
                 let c = &mut self.corners[i];
                 c[0] = (c[0] + f64::from(d.x) * k).clamp(0.0, size[0]);
                 c[1] = (c[1] + f64::from(d.y) * k).clamp(0.0, size[1]);
-                if ui.input(|inp| inp.key_pressed(egui::Key::Escape))
-                    && let Some((_, start)) = self.drag.take()
-                {
-                    self.corners = start;
-                }
             }
+            // Escape ends the drag as the pass begins, and egui-pop's focus
+            // plugin takes the press for it (the gesture before any host):
+            // the drag stops here, cancelled, and the corner goes back.
             if r.drag_stopped()
                 && let Some((at, start)) = self.drag.take()
                 && at == i
-                && start != self.corners
             {
-                self.undo.push(start);
-                self.events.push(Event::Solve);
+                if egui_pop::core::focus::cancel_pressed(ui.ctx(), egui::Key::Escape) {
+                    self.corners = start;
+                } else if start != self.corners {
+                    self.undo.push(start);
+                    self.events.push(Event::Solve);
+                }
             }
             let hot = r.hovered() || r.dragged();
             painter.circle(

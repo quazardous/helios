@@ -71,6 +71,7 @@ egui-pop in the lock: 0.21.0.
 | a small action in a list's row (Cancel beside a job) | **`helios_ui::row_action(..)`** (Helios preset)<br>`helios_ui::row_action` | A small button for `kind` of action in a list's row, labelled `label` (Cancel or Retry beside a job): egui-pop's compact row button in the action's tone, no taller than the row. |
 | a small frameless text button in a bar (a breadcrumb, a name in a title bar) | `widgets::bar_text_button(..)` (egui-pop)<br>`egui_pop::core::widgets::bar_text_button` | A frameless text button sized for a bar: small text, no box, as wide as its text, egui's hover look (its text brightens under the pointer) and the focus ring when it has the keyboard. |
 | an icon button | `IconWidget` (egui-pop)<br>`egui_pop::core::icon::IconWidget` | An icon as a widget. |
+| keys that work in every instance of a panel | `CONTEXT_FOCUSED_PANEL_KIND` (egui-pop)<br>`egui_pop::api::app::CONTEXT_FOCUSED_PANEL_KIND` | The context key holding the kind of the focused panel (`PanelId::kind`): the panel's own id, or `app.gallery` while its instance `app.gallery#2` has the focus, so one clause reaches every instance: `when: "focusedPanelKind == 'app.gallery'"`. |
 | the screen's primary or secondary action | **`helios_ui::action(..)`** (Helios preset)<br>`helios_ui::action` | A button for `kind` of action, labelled `label`: egui-pop's button in the action's tone. |
 
 ## Fields and choices
