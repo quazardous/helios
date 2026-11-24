@@ -164,8 +164,13 @@ needless_pass_by_value = "allow"
 
 # Decoding raw files in a debug build takes seconds: optimize the decoders
 # in every profile, so tests on real raws stay fast.
-# Dependencies build without debug info: the GPU and GUI stacks are large,
-# and Helios's own crates keep theirs.
+# Helios's own crates keep line tables only: enough for test backtraces,
+# and full debug info made every test executable large and slow to link
+# (164 of them). The same settings as egui-pop.
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies build without debug info: the GPU and GUI stacks are large.
 [profile.dev.package."*"]
 debug = false
 
