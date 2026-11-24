@@ -297,13 +297,18 @@ impl HeliosHistory {
     }
 }
 
-/// A step of the store as egui-pop sees it, in its scope.
-fn step_info(step: &Step) -> StepInfo {
-    let scope = match step.history_scope() {
+/// The egui-pop scope of a value store history.
+pub fn scope_id(scope: HistoryScope) -> ScopeId {
+    match scope {
         HistoryScope::Image => EDIT,
         HistoryScope::Workspace => WORKSPACE,
         HistoryScope::Plugin => PLUGINS,
-    };
+    }
+}
+
+/// A step of the store as egui-pop sees it, in its scope.
+fn step_info(step: &Step) -> StepInfo {
+    let scope = scope_id(step.history_scope());
     let mut info = StepInfo::new(step.id, scope, label_of(step), to_pop(&step.origin));
     info.group = step.group;
     info.place = step

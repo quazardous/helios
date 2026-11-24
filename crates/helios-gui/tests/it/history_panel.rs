@@ -146,6 +146,13 @@ fn the_darkroom_docks_the_history_beside_the_modules_and_its_rows_walk_the_edit(
         .map(|s| s["text"].as_str().unwrap())
         .collect();
     assert_eq!(texts, ["Exposure +0.30 EV", "Exposure +0.70 EV"], "{read}");
+    // The image's view was focused, as a click on the photo does: the
+    // History panel and Ctrl+Z walk the history of the view focused last
+    // (egui-pop's focus routing), not the newest step of any history.
+    h.state_mut()
+        .run("helios.viewport.focus", json!(null), Origin::User)
+        .unwrap();
+    h.step();
     // The panel in front: both steps under Start, the last one marked.
     h.state_mut()
         .run("egui_pop.history.focus", json!(null), Origin::User)

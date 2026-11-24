@@ -446,6 +446,16 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
     persist.frame_settled(&mut shell, 10.0);
     let mut h = helios_gui::headless::harness(shell, egui::vec2(1280.0, 800.0));
     h.run();
+    // Ctrl+Z goes to the focused view's history (egui-pop's focus
+    // routing), so the image's view takes the focus, as a click does.
+    h.state_mut()
+        .run(
+            "helios.viewport.focus",
+            serde_json::Value::Null,
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
     // Edit > Undo names the step it would take back.
     let undo = h
         .state()
