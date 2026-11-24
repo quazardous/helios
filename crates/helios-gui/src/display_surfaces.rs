@@ -20,7 +20,17 @@
 //! The conventions are those of catalogue apps with a loupe beside a
 //! darkroom (a second display, "open in" menus): one place decides where
 //! a photo goes, and the destination is shown.
+//!
+//! Zen mode (View ▸ Zen mode, `Ctrl+K Z`) shows the panel that matters
+//! alone: egui-pop asks the application on `pop.zen.panel` when no panel
+//! is named and the focused one is not a view, and Helios answers with
+//! the surface a double click reaches ([`zen_choice`]), a Compare while
+//! culling.
 
+use std::sync::{Arc, Mutex, PoisonError};
+
+use egui_pop::api::bus::ZenPanel;
+use egui_pop::api::bus::bus_contract::{Bus, ListenOpts, Point as _};
 use egui_pop::model::ids::PanelId;
 use egui_pop::model::layout::Layout;
 
@@ -252,6 +262,60 @@ impl Surfaces {
     }
 }
 
+/// The panel zen mode shows when none is named and the focused panel is
+/// not a view: while culling, a Compare (the one focused last, else the
+/// first open); otherwise the surface a double click reaches by
+/// `strategy`, when it is open. None (a new Compare each time, or ask):
+/// egui-pop shows the centre's active tab.
+pub fn zen_choice(
+    surfaces: &Surfaces,
+    strategy: Strategy,
+    layout: &Layout,
+    culling: bool,
+) -> Option<String> {
+    let open = open(layout);
+    if culling {
+        let last = surfaces
+            .last_focused()
+            .filter(|s| is_compare(s) && open.iter().any(|o| o == s));
+        if let Some(s) = last.or_else(|| open.iter().map(String::as_str).find(|s| is_compare(s))) {
+            return Some(s.to_string());
+        }
+    }
+    match surfaces.route(strategy, layout, None) {
+        Route::Surface(s) if open.contains(&s) => Some(s),
+        _ => None,
+    }
+}
+
+/// Helios's listener of egui-pop's `pop.zen.panel`.
+pub const ZEN_LISTENER: &str = "helios.zen";
+
+/// Registers [`ZEN_LISTENER`] on `bus`: it answers with `choice`, the
+/// panel [`zen_choice`] gave on the shell's last frame. One there already
+/// is replaced.
+///
+/// # Errors
+/// The bus refused it.
+pub fn listen_zen(bus: &dyn Bus, choice: Arc<Mutex<Option<String>>>) -> Result<(), String> {
+    bus.unlisten(&ZenPanel::ID, ZEN_LISTENER);
+    bus.listen::<ZenPanel>(
+        ZEN_LISTENER,
+        ListenOpts::new().owner(ZEN_LISTENER),
+        move |(), value| {
+            let chosen = choice
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if chosen.is_some() {
+                *value = chosen;
+            }
+            Ok(())
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// What the photo menu's "Show in ▸" and the target mark read of the
 /// surfaces, set by the shell each frame.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -383,6 +447,39 @@ mod tests {
         );
         // Closed: back to the first.
         assert_eq!(s.active_compare(None, None, &open[..1]), COMPARE);
+    }
+
+    #[test]
+    fn zen_picks_a_compare_while_culling_else_the_double_click_surface() {
+        let mut layout = two_windows();
+        let id = |s: &str| PanelId::new(s).unwrap();
+        layout
+            .join_window(&id("helios.compare#2"), &id(COMPARE))
+            .unwrap();
+        let mut s = Surfaces::default();
+        // Not culling: where a double click goes.
+        assert_eq!(
+            zen_choice(&s, Strategy::Primary, &layout, false).as_deref(),
+            Some(IMAGE)
+        );
+        assert_eq!(zen_choice(&s, Strategy::Ask, &layout, false), None);
+        // Culling: the first Compare, then the one focused last.
+        assert_eq!(
+            zen_choice(&s, Strategy::Primary, &layout, true).as_deref(),
+            Some(COMPARE)
+        );
+        s.follow(Some("helios.compare#2"));
+        assert_eq!(
+            zen_choice(&s, Strategy::Primary, &layout, true).as_deref(),
+            Some("helios.compare#2")
+        );
+        // No Compare open while culling: the double-click surface.
+        let mut image_only = layout.clone();
+        image_only.auxiliary.clear();
+        assert_eq!(
+            zen_choice(&s, Strategy::Primary, &image_only, true).as_deref(),
+            Some(IMAGE)
+        );
     }
 
     #[test]

@@ -113,6 +113,10 @@ pub(super) struct Focus {
     /// The display surfaces: the one focused last
     /// ([`crate::display_surfaces`]).
     pub(super) surfaces: crate::display_surfaces::Surfaces,
+    /// The panel zen mode shows when none is named, as the shell found it
+    /// last frame ([`crate::display_surfaces::zen_choice`]), read by
+    /// Helios's listener of `pop.zen.panel`.
+    pub(super) zen_choice: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     /// A photo `photo.show` sends to the Image, for the host to open.
     pub(super) show_in_image: Option<String>,
     /// The photo a "Show in" question is about (the `ask` strategy).
@@ -225,6 +229,7 @@ impl Focus {
             viewport: seed.viewport,
             opening: None,
             surfaces: crate::display_surfaces::Surfaces::default(),
+            zen_choice: std::sync::Arc::default(),
             show_in_image: None,
             show_asked: None,
             preview,

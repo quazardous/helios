@@ -1726,6 +1726,14 @@ impl Shell {
         if let Err(e) = crate::command_policy::listen(&*shell.core.app.handle().bus()) {
             log::error!(target: "helios", "{}: {e}", crate::command_policy::POLICY);
         }
+        // Zen mode's panel, when none is named: the display surface a
+        // double click reaches (`pop.zen.panel`).
+        if let Err(e) = crate::display_surfaces::listen_zen(
+            &*shell.core.app.handle().bus(),
+            shell.focus.zen_choice.clone(),
+        ) {
+            log::error!(target: "helios", "{}: {e}", crate::display_surfaces::ZEN_LISTENER);
+        }
         if has(&shell, crate::log_panel::PANEL) {
             let log = shell.core.log.clone();
             shell.set_content(crate::log_panel::PANEL, move |ui| {
@@ -6929,6 +6937,15 @@ impl Shell {
             target: self.focus.surfaces.target(strategy, &layout, None),
         };
         self.focus.library.borrow_mut().set_surfaces(seen);
+        // The panel zen mode shows when none is named.
+        let culling = crate::contexts::state(&app).mode_of(crate::contexts::ORIENTATION.as_str())
+            == Some(&crate::contexts::CULLING);
+        *self
+            .focus
+            .zen_choice
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            crate::display_surfaces::zen_choice(&self.focus.surfaces, strategy, &layout, culling);
     }
 
     /// A photo the user opened in a gallery (Enter, a double click):
