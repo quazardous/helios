@@ -720,12 +720,12 @@ mod tests {
         assert!(touched_tests(source, &[(1, 1)]).is_empty());
     }
 
-    fn stamp(run: &str, date: &str) -> Option<Stamp> {
-        Some(Stamp {
+    fn stamp(run: &str, date: &str) -> Stamp {
+        Stamp {
             run: run.into(),
             commit: "0123456789abcdef".into(),
             date: date.into(),
-        })
+        }
     }
 
     #[test]
@@ -733,20 +733,20 @@ mod tests {
         let mut summary = Summary {
             runs: 30,
             ingested: (1..=30).map(|i| i.to_string()).collect(),
-            last_run: stamp("30", "2026-11-21T18:00:00Z"),
+            last_run: Some(stamp("30", "2026-11-21T18:00:00Z")),
             ..Summary::default()
         };
         summary.tests.insert(
             "helios-gui::it a::flaky".into(),
             TestStats {
-                last_flake: stamp("29", "2026-11-21T09:00:00Z"),
+                last_flake: Some(stamp("29", "2026-11-21T09:00:00Z")),
                 ..TestStats::default()
             },
         );
         summary.tests.insert(
             "helios-core b::old".into(),
             TestStats {
-                last_failure: stamp("3", "2026-11-10T09:00:00Z"),
+                last_failure: Some(stamp("3", "2026-11-10T09:00:00Z")),
                 ..TestStats::default()
             },
         );
@@ -778,13 +778,13 @@ mod tests {
         let mut summary = Summary {
             runs: 88,
             ingested: (1..=88).map(|i| i.to_string()).collect(),
-            last_run: stamp("88", "2026-11-21T20:00:00Z"),
+            last_run: Some(stamp("88", "2026-11-21T20:00:00Z")),
             ..Summary::default()
         };
         summary.tests.insert(
             "helios-gui::it import::still_red".into(),
             TestStats {
-                last_failure: stamp("60", "2026-11-20T08:00:00Z"),
+                last_failure: Some(stamp("60", "2026-11-20T08:00:00Z")),
                 ..TestStats::default()
             },
         );
