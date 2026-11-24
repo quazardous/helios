@@ -820,14 +820,8 @@ command-vault-reject =
 command-vault-stack-toggle =
     .title = Expand or collapse the stack of the selected image
 
-command-view-bottomPanel-toggle =
-    .title = Fold the bottom panel
-
 command-view-culling =
     .title = Culling: flag, rate and label from anywhere, the image first (`on`; toggled when absent)
-
-command-view-endSideBar-toggle =
-    .title = Fold the end side bar
 
 command-view-library =
     .title = Go to the library: its photos to browse, rate and cull
@@ -868,14 +862,8 @@ command-window-maximize =
 command-window-minimize =
     .title = Minimize the window
 
-command-workbench-fullscreen =
-    .title = Toggle full screen
-
 command-workbench-keybindings =
     .title = Keyboard shortcuts
-
-command-workbench-palette =
-    .title = Show all commands
 
 command-workbench-quickOpen =
     .title = Go to a module, a sub-workspace, an image or a workspace
