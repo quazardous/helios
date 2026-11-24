@@ -343,12 +343,12 @@ impl Parser<'_> {
                 // written `"C:\Photos\\"`).
                 let mut quoted = String::new();
                 let mut run = 0usize;
-                while let Some((_, q)) = chars.next() {
+                for (_, q) in chars.by_ref() {
                     match q {
                         '\\' => run += 1,
                         '"' => {
                             quoted.extend(std::iter::repeat_n('\\', run / 2));
-                            if run % 2 == 0 {
+                            if run.is_multiple_of(2) {
                                 run = 0;
                                 break;
                             }
