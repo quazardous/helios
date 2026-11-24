@@ -45,6 +45,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "waits: egui-pop's `context.changed` as a local bus point",
     ),
     (
+        "follow_surfaces",
+        "waits: egui-pop's focused-panel and layout changes as local bus points (the open surfaces and the double-click target)",
+    ),
+    (
         "follow_workspace_keys",
         "waits: an egui-pop keymap-layer-changed event",
     ),
@@ -134,7 +138,9 @@ fn the_scan_finds_calls_named_or_listed() {
 /// 13 once the workspace's state, the workshop session and the edit's
 /// marks followed the values on `values.changed`; 11 now: the Decisions
 /// panel's cards and the Queue panel follow them there too, the Queue
-/// panel the jobs' events as well).
+/// panel the jobs' events as well; 12 since the display surfaces, whose
+/// follower waits on egui-pop's focus and layout changes like
+/// `follow_comparison`).
 #[test]
 fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
     let found = followers();
@@ -166,7 +172,7 @@ fn every_per_pass_follower_in_the_shell_is_listed_with_its_reason() {
         "listed but no longer called in `Shell::ui`: {gone:?}; take them off the list"
     );
     assert!(ALLOWED.iter().all(|(_, why)| !why.is_empty()));
-    assert_eq!(found.len(), 11, "{found:?}");
+    assert_eq!(found.len(), 12, "{found:?}");
 }
 
 /// The followers moved to events are not called each pass.
