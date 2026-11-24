@@ -428,14 +428,21 @@ fn a_quota_met_holds_the_import_which_goes_on_by_itself() {
     assert_eq!(held["state"], "running", "{held}");
     assert_eq!(held["paused"]["wait"], "quota", "{held}");
     assert!(held["paused"]["until"].as_u64().is_some(), "{held}");
-    assert_eq!(vault.images().unwrap().len(), 2, "what was imported stays");
+    // The service answers the same bytes for each photo: one image, and
+    // the two fetches before the hold are kept.
+    assert_eq!(provider.fetched.load(Ordering::SeqCst), 2);
+    assert_eq!(vault.images().unwrap().len(), 1, "what was imported stays");
     // It goes on by itself once the service's time has passed.
     let settled = wait(&client, &id);
     assert_eq!(settled["state"], "done", "{settled}");
     assert!(settled["paused"].is_null(), "{settled}");
-    assert_eq!(settled["result"]["report"]["added"], 4, "{settled}");
     assert_eq!(settled["result"]["failed"], json!([]), "{settled}");
-    assert_eq!(vault.images().unwrap().len(), 4);
+    assert_eq!(
+        provider.fetched.load(Ordering::SeqCst),
+        4,
+        "every photo fetched"
+    );
+    assert_eq!(vault.images().unwrap().len(), 1);
     assert!(provider.refusals.load(Ordering::SeqCst) >= 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -473,14 +480,21 @@ fn a_refused_sign_in_holds_the_import_until_a_sign_in() {
     }
     let held = until(&client, &id, |p| !p["paused"].is_null());
     assert_eq!(held["state"], "running", "{held}");
-    assert_eq!(vault.images().unwrap().len(), 2, "what was imported stays");
+    // The service answers the same bytes for each photo: one image, and
+    // the two fetches before the hold are kept.
+    assert_eq!(provider.fetched.load(Ordering::SeqCst), 2);
+    assert_eq!(vault.images().unwrap().len(), 1, "what was imported stays");
     // Signed in again: it goes on and ends.
     provider.sign_in();
     helios_node_core::promises::signed_in();
     let settled = wait(&client, &id);
     assert_eq!(settled["state"], "done", "{settled}");
-    assert_eq!(settled["result"]["report"]["added"], 4, "{settled}");
     assert_eq!(settled["result"]["failed"], json!([]), "{settled}");
-    assert_eq!(vault.images().unwrap().len(), 4);
+    assert_eq!(
+        provider.fetched.load(Ordering::SeqCst),
+        4,
+        "every photo fetched"
+    );
+    assert_eq!(vault.images().unwrap().len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
