@@ -4,7 +4,7 @@
 //! `per_page` entries whatever is asked, as a real service caps its pages.
 //! Its photos are fetched, a few bytes each. The import window's tests
 //! use it for the `collections` browser, and as a slow source
-//! ([`AlbumsProvider::slow`]): its pages after the first and its
+//! (`AlbumsProvider::slow`): its pages after the first and its
 //! thumbnails wait while held.
 
 use std::sync::Arc;
