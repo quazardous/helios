@@ -1208,7 +1208,12 @@ impl Viewport {
         let Some(m) = mapping else { return };
         let ctx = ui.ctx().clone();
         let locale = crate::i18n::locale(&ctx);
-        for h in self.masks.handle_areas() {
+        for h in self
+            .masks
+            .handle_areas()
+            .into_iter()
+            .chain(self.plugin_tools.handle_areas())
+        {
             let at = m.image_to_screen(h.at);
             if !response.rect.contains(at) {
                 continue;
@@ -1276,7 +1281,11 @@ impl Viewport {
                 self.state.mapping().as_ref(),
                 pointer,
             );
-            self.plugin_tools.prepare(&store, self.edited.is_some());
+            self.plugin_tools.prepare(
+                &store,
+                self.edited.as_ref().map(|e| &e.graph),
+                self.masks.snaps(),
+            );
             // The status line says a hovered handle's gestures: drawn
             // before the viewport, it shows them at the next frame.
             if self.masks.hovered() != hovered {

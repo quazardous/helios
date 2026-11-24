@@ -214,6 +214,39 @@ fn a_restriction_shows_its_text_and_lifts_by_its_remove_button() {
     assert!(*h.state(), "the removal is reported");
 }
 
+/// A folder's path far wider than its side bar.
+const LONG: &str = "Folder: C:\\Users\\someone\\AppData\\Local\\Temp\\a-rather-long-folder-name-for-a-side-bar\\raw";
+
+#[test]
+fn a_restriction_wider_than_its_line_is_cut_in_its_middle_and_stays_removable() {
+    let mut h = harness(false, |ui, removed| {
+        ui.set_max_width(200.0);
+        ui.horizontal_wrapped(|ui| {
+            if helios_ui::restriction(ui, LONG) {
+                *removed = true;
+            }
+        });
+    });
+    let right = h.ctx.content_rect().min.x + 200.0 + 1.0;
+    let chip = h
+        .query_all_by_label_contains("…")
+        .next()
+        .expect("the text cut");
+    let label = chip.accesskit_node().label().unwrap_or_default();
+    assert!(
+        label.starts_with("Folder: ") && label.ends_with("raw"),
+        "its start and end kept: {label}"
+    );
+    assert!(chip.rect().max.x <= right, "{:?} within 200", chip.rect());
+    // The remove button is named by the whole text, and at hand.
+    let name = format!("Remove {LONG}");
+    let remove = h.get_by_label(&name);
+    assert!(remove.rect().max.x <= right, "{:?}", remove.rect());
+    remove.click();
+    h.run();
+    assert!(*h.state(), "the removal is reported");
+}
+
 #[test]
 fn a_late_value_keeps_its_room_and_says_its_state() {
     let mut h = harness(

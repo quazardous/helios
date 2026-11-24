@@ -1056,6 +1056,13 @@ impl Broker {
             .collect()
     }
 
+    /// Whether the plugin may use a brokered capability the host holds it
+    /// to (`edit.controls`): it declares it and the user granted it. The
+    /// refusal says which, and where to allow it.
+    pub fn allowed(&self, id: &str, capability: &str) -> Result<(), String> {
+        self.require(id, capability)
+    }
+
     /// Refuses unless the plugin declares a brokered capability and the
     /// user granted it.
     fn require(&self, id: &str, capability: &str) -> Result<(), String> {

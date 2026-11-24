@@ -119,6 +119,12 @@ pub enum Enforcement {
     Ambient,
 }
 
+/// The capability a plugin's tools on the image need to move the
+/// photo's own module parameters (`node/<node>/<param>`), not only the
+/// plugin's values: brokered, the host checks it before it shows such a
+/// tool.
+pub const EDIT_CONTROLS: &str = "edit.controls";
+
 /// Every capability a manifest may ask for; any other is refused.
 pub const CAPABILITIES: &[(&str, Enforcement, &str)] = &[
     (
@@ -135,6 +141,11 @@ pub const CAPABILITIES: &[(&str, Enforcement, &str)] = &[
         "folder.write",
         Enforcement::Brokered,
         "write into a folder Helios hands over for one call",
+    ),
+    (
+        EDIT_CONTROLS,
+        Enforcement::Brokered,
+        "move the photo's own edit controls (its modules' parameters) with its tools on the image",
     ),
     ("process.spawn", Enforcement::Ambient, "run other programs"),
     (

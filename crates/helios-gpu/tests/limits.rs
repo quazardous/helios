@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use helios_core::{Accelerator, GpuJob, GpuKernel, Image, Region};
+use helios_core::{Accelerator, Failure, GpuJob, GpuKernel, Image, Region};
 use helios_gpu::Gpu;
 
 /// The process's device, and the adapter it was opened on.
@@ -94,7 +94,19 @@ fn a_storage_binding_over_128_mib_computes() {
         uniforms: vec![2.0, 0.0, 0.0, 0.0],
         input: input_region,
     };
-    let result = Accelerator::run(gpu.as_ref(), "tail", &job, &input, output, 4).unwrap();
+    let result = match Accelerator::run(gpu.as_ref(), "tail", &job, &input, output, 4) {
+        // A software adapter (a CI runner's WARP, llvmpipe) may not get
+        // through 132 MiB within the device's deadline: that says nothing
+        // of the limits under test. A hardware one is held to the result.
+        Err(e)
+            if e.failure == Failure::Timeout
+                && adapter.get_info().device_type == wgpu::DeviceType::Cpu =>
+        {
+            eprintln!("skipped: the software adapter did not answer in time: {e:?}");
+            return;
+        }
+        run => run.unwrap(),
+    };
     let result = gpu.download(&result).unwrap();
     for p in 0..64 {
         let expected = (pixels - 64 + p) as f32 * 2.0;

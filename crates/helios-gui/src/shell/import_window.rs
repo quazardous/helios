@@ -822,6 +822,9 @@ struct GridWords {
     /// "Reading <path>", the status bar's: the words before and after the
     /// path, and the path, while a source is read.
     reading: Option<(String, String, String)>,
+    /// "Listing… N photos so far", the status bar's while a source's
+    /// photos are still being listed page by page (an album's).
+    listing: Option<String>,
     empty: String,
     new_only: String,
     types: String,
@@ -1884,6 +1887,17 @@ impl ImportWindow {
                     path.display().to_string(),
                 )
             }),
+            listing: self
+                .album_shown()
+                .map(|(_, _, photos)| photos)
+                .filter(super::import_albums::Photos::listing)
+                .map(|photos| {
+                    t(Message::new(
+                        "gui-import-window-listing",
+                        "Listing… { $count } photos so far",
+                    )
+                    .with("count", photos.count()))
+                }),
             empty: t(Message::new(
                 "gui-import-window-empty",
                 "No photos in the sources ticked",
@@ -2202,7 +2216,9 @@ impl ImportWindow {
                 Shown::Albums => {
                     ui.divider();
                     match w.album_shown().map(|(_, _, p)| p) {
-                        Some(super::import_albums::Photos::Failed(why)) => {
+                        Some(super::import_albums::Photos {
+                            failed: Some(why), ..
+                        }) => {
                             ui.muted(format!("{} {why}", browse.album_failed));
                         }
                         Some(_) => {
@@ -2302,7 +2318,8 @@ impl ImportWindow {
 }
 
 /// The window's status bar: "Reading <path>" while the sources are read,
-/// the path shortened in its middle to the bar's width.
+/// the path shortened in its middle to the bar's width; "Listing… N
+/// photos so far" while a source's pages are still coming.
 fn status_bar_ui(ui: &mut egui::Ui, words: &GridWords, reading: bool) {
     egui::Panel::bottom("helios.import.status")
         .resizable(false)
@@ -2311,6 +2328,10 @@ fn status_bar_ui(ui: &mut egui::Ui, words: &GridWords, reading: bool) {
                 // The bar keeps its height, reading or not.
                 ui.set_min_height(ui.spacing().interact_size.y);
                 let Some((before, after, path)) = words.reading.as_ref().filter(|_| reading) else {
+                    if let Some(listing) = &words.listing {
+                        ui.add(Spinner::new());
+                        ui.muted(listing);
+                    }
                     return;
                 };
                 ui.add(Spinner::new());

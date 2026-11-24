@@ -4,7 +4,8 @@
 //! progresses item by item and settles with each one's outcome; a rate
 //! limit and an expired download address are waited out and gone on
 //! from; the pick imported again downloads nothing; a pick unknown to the
-//! process is refused at once.
+//! process is refused at once; a slow download cancelled mid-way leaves
+//! nothing half-imported.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -52,6 +53,9 @@ struct Service {
     /// Each fetch asked, by item.
     calls: Mutex<Vec<String>>,
     picks_ended: AtomicU32,
+    /// An item whose download sends half its bytes, then waits for the
+    /// fetch to be cancelled: a slow service.
+    slow: Option<String>,
 }
 
 impl Service {
@@ -134,9 +138,20 @@ impl Connector for Service {
         item: &ItemRef,
         offset: u64,
         sink: &mut dyn FetchSink,
-        _cancel: &Cancel,
+        cancel: &Cancel,
     ) -> Result<Fetched, ConnectorError> {
         self.calls.lock().unwrap().push(item.id.0.clone());
+        if self.slow.as_ref() == Some(&item.id.0) {
+            let bytes = &self.files[&item.id.0];
+            sink.accept(&bytes[..bytes.len() / 2])
+                .map_err(|e| ConnectorError::Fatal(e.to_string()))?;
+            let deadline = std::time::Instant::now() + DEADLINE;
+            while !cancel.is_cancelled() {
+                assert!(std::time::Instant::now() < deadline, "never cancelled");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            return Err(ConnectorError::Cancelled);
+        }
         if let Some(next) = self
             .refusals
             .lock()
@@ -309,4 +324,45 @@ fn a_pick_the_process_does_not_hold_is_refused_at_once() {
         )
         .unwrap_err();
     assert!(refused.message.contains("choose them again"), "{refused:?}");
+}
+
+#[test]
+fn a_slow_download_cancelled_mid_way_leaves_nothing_half_imported() {
+    let dir = scratch("cancel");
+    let (vault, client, _heard) = node();
+    let mut service = Service::new(4);
+    service.slow = Some("g02".into());
+    let service = Arc::new(service);
+    let answer = client
+        .request(
+            "library.import",
+            json!({ "remote": hand(&service), "rule": "all", "into": dir.join("lib"),
+                    "layout": "flat", "signals": false }),
+        )
+        .unwrap();
+    let id = answer["promise"]["id"].clone();
+    // The third download is under way, half its bytes landed.
+    let deadline = std::time::Instant::now() + DEADLINE;
+    while !service.calls.lock().unwrap().iter().any(|c| c == "g02") {
+        assert!(std::time::Instant::now() < deadline, "g02 never asked");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    client
+        .request("promises.cancel", json!({ "id": id }))
+        .unwrap();
+    let settled = wait(&client, &id);
+    assert_eq!(settled["state"], "cancelled", "{settled}");
+    // The two downloaded before stay; the one cut and the one after are
+    // not in the Library, and no file of theirs is in its folder.
+    assert_eq!(vault.images().unwrap().len(), 2);
+    assert!(!service.calls.lock().unwrap().iter().any(|c| c == "g03"));
+    let mut placed: Vec<String> = std::fs::read_dir(dir.join("lib"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    placed.sort();
+    assert_eq!(placed, ["g00.raf", "g01.raf"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }

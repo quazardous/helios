@@ -460,9 +460,12 @@ fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() 
     let dcim = card.to_string_lossy().into_owned();
     assert_eq!(volumes[1].folders[0].path, dcim);
     let row = format!("{}, 1", volumes[1].folders[0].name);
-    // Its folders dimmed too, still choosable.
+    // Its folders dimmed too, still choosable. The row is named by its
+    // whole path, wider than the side bar where the temporary folder's
+    // path is long (Windows): chosen as assistive technology does, not at
+    // its centre, which may lie past the bar.
     assert_eq!(said(&h, &row), "Unavailable");
-    h.get_by_label(&row).click();
+    h.get_by_label(&row).click_accesskit();
     settle(&mut h, &mut persist, 5.0);
     {
         // The offline photo alone (named by its id: its file is not at hand).
@@ -473,7 +476,7 @@ fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() 
         assert_eq!(entry.presence, Presence::Offline);
     }
     assert_eq!(h.state().library().folder(), Some(dcim));
-    h.get_by_label(&row).click();
+    h.get_by_label(&row).click_accesskit();
     settle(&mut h, &mut persist, 9.0);
     assert_eq!(grid(&h).len(), 3);
 
@@ -499,8 +502,21 @@ fn kept_folder(config: &Path, workspace: &Path) -> Option<String> {
 }
 
 /// A right click on a row of the folders tree: the shell's menu opens.
+/// Near the row's start, as a user would: a row named by a long path
+/// (the temporary folder's, on Windows) is wider than the side bar, and
+/// its centre may lie past it.
 fn row_menu(h: &mut Harness<'static, Shell>, row: &str) {
-    h.get_by_label(row).click_secondary();
+    let rect = h.get_by_label(row).rect();
+    let pos = egui::pos2((rect.min.x + 40.0).min(rect.center().x), rect.center().y);
+    h.hover_at(pos);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
     for _ in 0..3 {
         h.run();
     }
@@ -2922,7 +2938,10 @@ fn the_sources_fold_by_keyboard_and_keep_one_choice_per_section() {
     settle(&mut h, &mut persist, 4.0);
     let top = root.to_string_lossy().into_owned();
     let folder = format!("{top}, 3");
-    h.get_by_label(&folder).click();
+    // A row named by its whole path, wider than the side bar where the
+    // temporary folder's path is long (Windows): chosen as assistive
+    // technology does, not at its centre, which may lie past the bar.
+    h.get_by_label(&folder).click_accesskit();
     settle(&mut h, &mut persist, 5.0);
     h.get_by_label("sea, 1").click();
     settle(&mut h, &mut persist, 6.0);

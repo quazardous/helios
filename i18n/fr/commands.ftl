@@ -494,7 +494,7 @@ command-viewport-mask-display-off =
     .title = Image : ne plus afficher le masque
 
 command-viewport-zoom-100 =
-    .title = Image : pixels réels (100 %, 1 pixel de l’image = 1 pixel de l’écran)
+    .title = Image : pixels réels, 100 %
 
 command-viewport-zoom-fill =
     .title = Image : remplir la vue (en rognant le côté le plus long)

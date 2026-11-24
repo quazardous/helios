@@ -108,6 +108,12 @@ run = [
   # the flatpak jobs' user (tools/bench/as-flatpak-user): bwrap run by
   # root without CAP_SYS_ADMIN creates no namespace, by a user it does
   "useradd --system --no-create-home --home-dir /tmp/flatpak-home helios-flatpak",
+  # egui-pop's screen reader pass: Orca, the accessibility bus (at-spi2),
+  # speech-dispatcher (its dummy module speaks nowhere) and pyatspi for
+  # the focus listener; last, so the layers above stay cached
+  """dnf -y install --setopt=install_weak_deps=False orca at-spi2-core speech-dispatcher \
+      python3-pyatspi python3-speechd glib2 \
+ && dnf clean all""",
 ]
 # CARGO_HOME is the registry cache; the toolchain lives in /opt. Line
 # tables only and no incremental state keep the per-branch target small.
@@ -1197,6 +1203,34 @@ command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp
 cargo build --release --locked -p egui-pop-gallery && \
 mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
 "$WBOX_PYTHON" -I tools/wbox/window_smoke.py --out /out ${session:+--only ${session}}"""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
+timeout = "45m"
+
+# egui-pop's screen reader pass on Linux (its tools/wbox/screen_reader.py):
+# the gallery in release in a headless labwc with a private D-Bus session
+# and accessibility bus, Orca speaking to its debug log, real keys walking
+# the command palette, Settings, the tree, the data table and a dialog;
+# what Orca said and the focused node's role, name and states compared
+# with egui-pop's tools/wbox/screen_reader.json. One line per step in the
+# log; Orca's log, the focus lines and a screenshot per walk in /out.
+# `walk=` runs one walk, `record=yes` writes what it heard to
+# /out/screen_reader.json instead of comparing, `orca=no` reads the AT-SPI
+# tree alone. A pre-release check (egui-pop's docs/releasing.md), run by
+# hand, never on CI
+[jobs.egui-pop-screen-reader]
+about = "egui-pop: the screen reader pass (Orca, keys through five gallery pages) in a headless labwc"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
+checkouts = ["egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo build --release --locked -p egui-pop-gallery && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/wbox/screen_reader.py --out /out ${walk:+--only ${walk}} \
+  ${record:+--record /out/screen_reader.json} ${orca:+--no-orca}"""
 env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
 mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
 source_times = "/target"

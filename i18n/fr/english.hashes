@@ -357,7 +357,7 @@ command-viewport-compare.title 27a11d0c9daaf86f
 command-viewport-copyImage.title fbe483bc0b662eaa
 command-viewport-mask-display-off.title f8dcd04c9ed5d30a
 command-viewport-mask-display.title 0fce58839d419c9d
-command-viewport-zoom-100.title be6c10eb69bafd7c
+command-viewport-zoom-100.title b6d99a2cd0a6f99d
 command-viewport-zoom-fill.title 50f8c8159088d565
 command-viewport-zoom-fit.title 6042270d43060d0e
 command-viewport-zoom-in.title 7a24f601c24aad20
@@ -964,6 +964,7 @@ gui-import-window-layout-flat 60ad7e2150fbb745
 gui-import-window-layout-month e1786549d2001be0
 gui-import-window-layout-year e4b3f8f5e245d9fd
 gui-import-window-library-folder 983bbd97d3133fb5
+gui-import-window-listing 5c2c693f5ab0a0da
 gui-import-window-manage-profiles 07a96aed5b1950b6
 gui-import-window-name e8f800548ef8413c
 gui-import-window-name-custom 28739d2377e64b44

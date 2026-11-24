@@ -292,6 +292,11 @@ word      = text searched in name, title, description, tags, keywords
 - A date is a period of whole days (`2024`, `2024-06`, `2024-06-01`) or
   an instant (`2024-06-01T10:00:00`); `key>=3` (egui-pop's habit) reads
   as `key:>=3`.
+- Backslashes are typed as they are, so a Windows path needs no
+  escaping (`folder:C:\Photos\2024`, `folder:"C:\Photos\2024 trip"`).
+  In quotes, only a run of backslashes right before a `"` is an escape,
+  as on Windows command lines: halved, and an odd one out makes that `"`
+  a character (`"say \"hi\""`, `"C:\My Photos\\"`).
 - `#beach` is `tag:beach` (kept from egui-pop); `★3` is not typed, it
   is how a chip draws `rating:>=3`.
 

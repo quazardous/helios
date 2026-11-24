@@ -4293,7 +4293,7 @@ impl Shell {
             ),
             (
                 "viewport.zoom.100",
-                "Image: actual pixels (100 %, 1 image pixel = 1 screen pixel)",
+                "Image: actual pixels, 100 %",
                 ZoomTo::Actual,
             ),
             ("viewport.zoom.in", "Image: zoom in", ZoomTo::In),

@@ -373,8 +373,17 @@ open photo on the plugin's own number values, drawn by the viewport
   section and in the log. A tool left with no handle is left out.
 - **Gestures stay on the host's side**, as for the card: a drag is one
   undo step in the plugins' scope, Escape gives it up with no trace, a
-  double click resets, the wheel turns one step; the plugin hears the
+  double click resets, the wheel turns one step, Shift snaps as
+  the handle declares (the masks' rule); the plugin hears the
   committed change by `ui/changed`, never a drag's frames.
+- **On the host's own parameters**: a tool with `"module": "mask_circle"`
+  is drawn on each node of that module in the photo's graph, and its
+  handles read and write those nodes' parameters (`x`, `y`, `radius`…),
+  not the plugin's values. It needs the brokered `edit.controls`
+  capability, declared in the manifest and granted by the user: without
+  it the tool is not shown and the reason is on the plugin's section and
+  in the log; a grant or a revoke shows at once. A drag is one undo step
+  in the photo's own history, not the plugins' scope.
 
 The gphoto2-camera example's focus point is such a tool: a point on
 `focus-x`, `focus-y`, shown while its card's switch is on, which sets
@@ -462,6 +471,9 @@ own:
 - `folder.write` (brokered): a download goes to a fresh staging folder;
   the broker keeps only the plain files the plugin reports inside it,
   moves them into the destination itself and removes the rest.
+- `edit.controls` (brokered): a plugin's tools on the image may move
+  the photo's own module parameters; the host shows such a tool only
+  while the capability is granted.
 - `process.spawn`, `device.usb`, `network`, `secrets`, `gpu`, `ai.models`
   (ambient): the broker cannot police them, so it refuses to start the
   plugin until the user grants each one.
