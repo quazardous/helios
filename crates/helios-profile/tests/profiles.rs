@@ -176,7 +176,7 @@ command = "export.run"
 
 [[keymap]]
 keys = "Mod+shift+p"
-command = "workbench.palette"
+command = "app.palette"
 
 [on.macos]
 settings = """
@@ -193,7 +193,7 @@ overrides = { "font.size.body" = "15px" }
 
 [[on.machine.laptop.keymap]]
 keys = ""
-command = "workbench.palette"
+command = "app.palette"
 
 [on.machine.studio.theme]
 name = "helios-high-contrast"
@@ -231,7 +231,7 @@ fn a_profile_resolves_for_each_system_and_machine() {
         keys(&linux.profile),
         [
             ("export.run".into(), "Mod+e".into()),
-            ("workbench.palette".into(), "Mod+shift+p".into())
+            ("app.palette".into(), "Mod+shift+p".into())
         ]
     );
     assert!(linux.from.is_empty(), "{:?}", linux.from);
@@ -241,7 +241,7 @@ fn a_profile_resolves_for_each_system_and_machine() {
     assert_eq!(
         keys(&mac.profile),
         [
-            ("workbench.palette".into(), "Mod+shift+p".into()),
+            ("app.palette".into(), "Mod+shift+p".into()),
             ("export.run".into(), "meta+alt+e".into())
         ]
     );
@@ -274,11 +274,7 @@ fn a_profile_resolves_for_each_system_and_machine() {
         keys(&laptop.profile),
         [("export.run".into(), "meta+alt+e".into())]
     );
-    let palette = laptop
-        .from
-        .iter()
-        .find(|f| f.key == "workbench.palette")
-        .unwrap();
+    let palette = laptop.from.iter().find(|f| f.key == "app.palette").unwrap();
     assert!(palette.removed);
     assert_eq!(palette.selector, Selector::Machine("laptop".into()));
 }
@@ -337,7 +333,7 @@ fn an_import_shows_variants_per_selector() {
         keymap.changes,
         [
             "on macos: + export.run: meta+alt+e",
-            "on machine.laptop: + workbench.palette: "
+            "on machine.laptop: + app.palette: "
         ]
     );
     let theme = d.iter().find(|d| d.part == Part::Theme).unwrap();

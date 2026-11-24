@@ -292,7 +292,6 @@ fn report_plugin(late: crate::agent_state::Late) -> egui_pop::api::about::AboutP
 /// next frame, where the shell's state is at hand. The command shows as
 /// running until then (see `host::Later`).
 enum Action {
-    Palette,
     /// `photo.show`: a photo shown on a display surface
     /// ([`crate::display_surfaces`]).
     ShowPhoto(Value),
@@ -385,7 +384,6 @@ enum Action {
     Reimport,
     /// `helios.app.reimport.folders`: the folders it adds.
     ReimportFolders,
-    Fullscreen,
     Minimize,
     Maximize,
     /// Quit Helios, from any window (`lifetime`).
@@ -403,8 +401,6 @@ enum Action {
     /// cascaded.
     Float(String, Option<[f32; 2]>),
     MoveTo(String, Area),
-    /// Folds an area to its strip, or unfolds it.
-    Fold(Area),
     Zoom(crate::viewport::ZoomTo),
     /// Before and after side by side, or not.
     Compare,
@@ -3239,10 +3235,6 @@ impl Shell {
             }
         }
         add(
-            CommandSpec::new("workbench.palette", "Show all commands", "View"),
-            Box::new(|_, _| Ok(Action::Palette)),
-        );
-        add(
             CommandSpec::new(
                 crate::quick_open::COMMAND,
                 "Go to a module, a sub-workspace, an image or a workspace",
@@ -3358,21 +3350,12 @@ impl Shell {
         }
         for (id, title, action) in [
             (
-                "workbench.fullscreen",
-                "Toggle full screen",
-                (|| Action::Fullscreen) as fn() -> Action,
+                "window.minimize",
+                "Minimize the window",
+                (|| Action::Minimize) as fn() -> Action,
             ),
-            ("window.minimize", "Minimize the window", || {
-                Action::Minimize
-            }),
             ("window.maximize", "Maximize or restore the window", || {
                 Action::Maximize
-            }),
-            ("view.endSideBar.toggle", "Fold the end side bar", || {
-                Action::Fold(Area::EndSide)
-            }),
-            ("view.bottomPanel.toggle", "Fold the bottom panel", || {
-                Action::Fold(Area::Bottom)
             }),
         ] {
             add(
@@ -4474,9 +4457,6 @@ impl Shell {
         let mut d = w.declarations.borrow_mut();
         // The default map, every key with its `when` (see `keys`).
         d.keys.extend(crate::keys::defaults());
-        // egui-pop's palette is the palette; Helios's name for it stays
-        // for scripts.
-        d.hidden.insert("workbench.palette".into());
         d.hidden.insert(crate::quick_open::GO.into());
         d.icons.extend(
             crate::plugins::COMMAND_ICONS
@@ -7393,19 +7373,8 @@ impl Shell {
 
     fn apply(&mut self, ctx: &Egui, action: Action) -> Result<Value, String> {
         match action {
-            Action::Palette => {
-                return self.run(
-                    egui_pop::api::app::CMD_PALETTE.as_str(),
-                    Value::Null,
-                    Origin::User,
-                );
-            }
             Action::QuickOpen => self.quick_open(),
             Action::QuickOpenGo(item) => return self.quick_open_go(item),
-            Action::Fullscreen => {
-                let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
-            }
             // The frame's steps, which plugins may veto or replace.
             Action::Minimize => frame::request(self.core.app.handle(), ctx, FrameRequest::Minimize),
             Action::Maximize => {
@@ -7749,11 +7718,6 @@ impl Shell {
                     .map_err(|e| format!("{id}: {e}"));
             }
             Action::Zoom(z) => self.focus.viewport.borrow_mut().zoom(z, &self.core.values),
-            Action::Fold(area) => {
-                let h = self.core.app.handle();
-                let folded = h.layout().folded.contains(&area);
-                h.fold_area(area, !folded);
-            }
             Action::Mask(command, origin) => {
                 // A person taking out a group that holds members (the
                 // row's menu, the palette, a key) is asked first; agents

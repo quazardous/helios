@@ -220,7 +220,7 @@ fn a_menu_lists_commands_with_their_keys_and_greys_what_does_not_apply() {
         vec![
             MenuItem::command("test.palette_only"),
             MenuItem::Separator,
-            MenuItem::command("workbench.fullscreen"),
+            MenuItem::command("app.fullscreen"),
             MenuItem::run("helios.log.moveTo", json!({ "area": "center" })),
         ],
     );
@@ -329,7 +329,7 @@ fn pictures_of_each_kind(theme: &str) {
                     detail: "Their files stay on disk; edits and ratings are lost.".into(),
                     verb: "Delete 3 images".into(),
                     danger: true,
-                    command: "workbench.fullscreen".into(),
+                    command: "app.fullscreen".into(),
                     args: json!(null),
                 });
                 "helios.dialog"
@@ -359,7 +359,7 @@ fn pictures_of_each_kind(theme: &str) {
                         },
                     ],
                     verb: "Export".into(),
-                    command: "workbench.fullscreen".into(),
+                    command: "app.fullscreen".into(),
                 });
                 "helios.dialog"
             }
@@ -475,7 +475,7 @@ fn path_form(key: &str, descriptor: Descriptor, value: &std::path::Path) -> Form
             value: helios_core::Value::Text(value.display().to_string()),
         }],
         verb: "Use".into(),
-        command: "workbench.fullscreen".into(),
+        command: "app.fullscreen".into(),
     }
 }
 

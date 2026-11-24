@@ -472,14 +472,8 @@ command-vault-reject =
 command-vault-stack-toggle =
     .title = Déplier ou replier la pile de l’image sélectionnée
 
-command-view-bottomPanel-toggle =
-    .title = Replier le panneau du bas
-
 command-view-culling =
     .title = Tri : marquer, noter et étiqueter de partout, l’image d’abord (`on` ; basculé en son absence)
-
-command-view-endSideBar-toggle =
-    .title = Replier la barre latérale de fin
 
 command-view-library =
     .title = Aller à la bibliothèque : ses photos, à parcourir, noter et trier
@@ -520,14 +514,8 @@ command-window-maximize =
 command-window-minimize =
     .title = Réduire la fenêtre
 
-command-workbench-fullscreen =
-    .title = Basculer le plein écran
-
 command-workbench-keybindings =
     .title = Raccourcis clavier
-
-command-workbench-palette =
-    .title = Afficher toutes les commandes
 
 command-workbench-quickOpen =
     .title = Aller à un module, un sous-espace de travail, une image ou un espace de travail
