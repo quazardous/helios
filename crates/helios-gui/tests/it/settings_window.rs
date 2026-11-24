@@ -49,6 +49,8 @@ struct Pass {
 struct Node {
     role: Role,
     name: String,
+    /// Its value, a slider's as it shows it.
+    value: Option<String>,
     rect: Rect,
     disabled: bool,
 }
@@ -103,6 +105,7 @@ fn window_pass(h: &mut Harness<'static, Shell>, window: ViewportId, pass: Pass) 
             Some(Node {
                 role: n.role(),
                 name,
+                value: n.value().map(str::to_owned),
                 disabled: n.is_disabled(),
                 rect: Rect::from_min_max(
                     Pos2::new(b.x0 as f32 / ppp, b.y0 as f32 / ppp),
@@ -697,4 +700,148 @@ fn a_closed_settings_window_goes_without_an_outside_event() {
             "covered: {covered}, the loop paints the main window: {loop_wakes}; after the {ran} main passes asked for, the closed window is gone: {gone}"
         );
     }
+}
+
+/// The Settings opened at their Caches section, in their own window, with
+/// Helios's settings installed: the harness, the window, and the
+/// accessibility tree of the window's settled pass.
+fn caches_in_their_own_window(name: &str) -> (Harness<'static, Shell>, ViewportId, Vec<Node>) {
+    let dir = std::env::temp_dir().join(format!("helios-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.state_mut().draw_frame(true);
+    h.run();
+    let app = h.state().app().handle().clone();
+    helios_gui::config::install(
+        &app,
+        helios_gui::config::Settings::resolve(&helios_gui::config::Sources::default()),
+        None,
+        &dir,
+    );
+    h.run();
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "path": "storage/caches" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run_steps(3);
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "the Settings window's own: {windows:?}");
+    let window = windows[0];
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = window_pass(&mut h, window, Pass::default());
+    }
+    (h, window, nodes)
+}
+
+/// The Render cache share's slider in a window's pass.
+fn share(nodes: &[Node]) -> &Node {
+    nodes
+        .iter()
+        .find(|n| n.role == Role::Slider && n.name == "Render cache share")
+        .unwrap_or_else(|| {
+            let sliders: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.role == Role::Slider)
+                .map(|n| &n.name)
+                .collect();
+            panic!("no Render cache share slider; sliders: {sliders:?}")
+        })
+}
+
+/// Escape pressed in a window's pass.
+fn escape_in(h: &mut Harness<'static, Shell>, window: ViewportId) -> Vec<Node> {
+    let key = |pressed| Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let nodes = window_pass(
+        h,
+        window,
+        Pass {
+            events: vec![key(true), key(false)],
+            ..Pass::default()
+        },
+    );
+    main_passes_in_the_back(h, 1);
+    nodes
+}
+
+/// Escape goes to the innermost gesture first (egui-pop's focus order):
+/// pressed while a slider of the Settings window is dragged, it cancels
+/// the drag, the slider's value goes back, and the window stays open;
+/// once the pointer is let go, the next Escape closes the window.
+#[test]
+fn escape_during_a_drag_in_the_settings_window_cancels_the_drag_and_keeps_it_open() {
+    let (mut h, window, nodes) = caches_in_their_own_window("escape-drag");
+    let slider = share(&nodes);
+    let before = slider.value.clone();
+    let at = slider.rect.center();
+    let button = |pressed| Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    window_pass(
+        &mut h,
+        window,
+        Pass {
+            events: vec![Event::PointerMoved(at), button(true)],
+            ..Pass::default()
+        },
+    );
+    let mut nodes = Vec::new();
+    for i in 1..=4 {
+        nodes = window_pass(
+            &mut h,
+            window,
+            Pass {
+                events: vec![Event::PointerMoved(at + vec2(30.0 * i as f32, 0.0))],
+                ..Pass::default()
+            },
+        );
+    }
+    assert_ne!(share(&nodes).value, before, "the drag moves the value");
+
+    escape_in(&mut h, window);
+    let nodes = window_pass(&mut h, window, Pass::default());
+    assert!(admin_open(&h), "the Settings stay open");
+    assert_eq!(declared(&h), [window], "their window too");
+    assert_eq!(share(&nodes).value, before, "the value goes back");
+
+    // Let go: nothing written; the next Escape is the window's.
+    let nodes = window_pass(
+        &mut h,
+        window,
+        Pass {
+            events: vec![button(false)],
+            ..Pass::default()
+        },
+    );
+    assert_eq!(share(&nodes).value, before, "letting go writes nothing");
+    escape_in(&mut h, window);
+    main_passes_in_the_back(&mut h, 3);
+    assert!(!admin_open(&h), "the second Escape closes the Settings");
+    assert!(declared(&h).is_empty(), "and their window");
+}
+
+/// With no gesture under way, Escape closes the Settings window as
+/// before, and leaves the main window.
+#[test]
+fn escape_with_no_gesture_closes_the_settings_window() {
+    let (mut h, window, _) = caches_in_their_own_window("escape-close");
+    escape_in(&mut h, window);
+    main_passes_in_the_back(&mut h, 3);
+    assert!(!admin_open(&h), "the Settings closed");
+    assert!(declared(&h).is_empty(), "their window is gone");
+    assert!(!h.state().quitting());
 }

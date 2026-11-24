@@ -23,8 +23,8 @@
 //! **Quick-collection panels.** A view may show a quick collection
 //! ([`QUICK_OPEN_COMMAND`], a quick collection's "Open in a panel"): its
 //! source is that collection (its filter is `collection:<id>`, kept with
-//! the rest of its state), its grid has no search, and the whole panel
-//! takes dropped photos. Photos dragged from one quick collection to
+//! the rest of its state), its tab is titled with the collection's name,
+//! its grid has no search, and the whole panel takes dropped photos. Photos dragged from one quick collection to
 //! another move (`library.quick.move`); with Ctrl they are copied
 //! (`library.quick.add`); from anywhere else they are added. As many
 //! can be open as wanted, each with its own cursor, so sorting between
@@ -194,6 +194,9 @@ pub struct Views {
     pending: HashMap<String, String>,
     /// The quick collection each quick-collection panel shows.
     quick: HashMap<String, String>,
+    /// The tab title last given to each quick-collection panel: its
+    /// collection's name, given again only when it changes.
+    titled: HashMap<String, String>,
 }
 
 impl Views {
@@ -212,6 +215,7 @@ impl Views {
             self.seen.remove(&k);
             self.pending.remove(&k);
             self.quick.remove(&k);
+            self.titled.remove(&k);
             library.forget_gallery(&k);
         }
         let payload = app.instance_payload(id);
@@ -227,7 +231,9 @@ impl Views {
         match self.quick.get(key).cloned() {
             Some(quick) => {
                 let rect = ui.max_rect();
-                quick_header(ui, library, &quick);
+                if let Some(name) = quick_header(ui, library, &quick) {
+                    self.retitle(app, id, name);
+                }
                 library.show_as(ui, &GalleryOptions::QUICK, key);
                 library.quick_drop_target(ui, &quick, rect);
             }
@@ -241,6 +247,22 @@ impl Views {
             log::warn!(target: "helios", "library view {key} not kept: {e}");
         }
         self.seen.insert(key.to_string(), now);
+    }
+
+    /// Names a quick-collection panel's tab after its collection (not
+    /// "Results 2"), through egui-pop's `pop.panel.retitle`; the title is
+    /// kept with the layout. Asked again only when the name changes (a
+    /// rename, another language).
+    fn retitle(&mut self, app: &AppHandle, id: &PanelId, name: String) {
+        if self.titled.get(id.as_str()) == Some(&name) {
+            return;
+        }
+        match app.set_instance_title(id, Some(name.clone())) {
+            Ok(()) => {
+                self.titled.insert(id.to_string(), name);
+            }
+            Err(e) => log::warn!(target: "helios", "library view {id}: not titled: {e}"),
+        }
     }
 
     /// Makes the gallery `key` as `payload` says, from nothing.
@@ -287,8 +309,8 @@ impl Views {
 }
 
 /// A quick-collection panel's head: the collection's name and how many
-/// photos it holds, or that it was deleted.
-fn quick_header(ui: &mut Ui, library: &Library, quick: &str) {
+/// photos it holds, or that it was deleted. The name shown, for the tab.
+fn quick_header(ui: &mut Ui, library: &Library, quick: &str) -> Option<String> {
     use egui_pop::core::ui::UiPop as _;
     use helios_core::Message;
     let ctx = ui.ctx().clone();
@@ -308,7 +330,7 @@ fn quick_header(ui: &mut Ui, library: &Library, quick: &str) {
                 "This quick collection was deleted",
             ),
         ));
-        return;
+        return None;
     };
     let name = crate::library::quick_label(&ctx, found);
     let count = library.quick_count_of(quick);
@@ -319,6 +341,7 @@ fn quick_header(ui: &mut Ui, library: &Library, quick: &str) {
             Message::new("gui-library-quick-panel-count", "{ $count } photos").with("count", count),
         ));
     });
+    Some(name)
 }
 
 #[cfg(test)]
