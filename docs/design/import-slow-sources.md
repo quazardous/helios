@@ -323,3 +323,18 @@ token bucket per account.
    `thumbnail_cost`, `import_without_listing`, `Limits::parallel`, in the
    manifest; the list view (name, date, size, kind) chosen from them and
    from the count.
+   First part done: an album (any connector listing `collections`) joins
+   the grid page by page as its pages are listed, before any thumbnail,
+   with "Listing… N photos so far" in the window's status bar; Import
+   takes the photos ticked among those listed (the pages listed so far
+   one import, one promise) without waiting for the listing or the
+   thumbnails. A promise's cancel reaches a download under way through
+   its connector's `Cancel`: the part stays out of the Library. The
+   contract needs no new field for this: a page's `next` and `complete`
+   already say whether more is coming, and thumbnails were already read
+   lazily and never gated Import. Left: a pick's pages streamed (Google
+   lists 100 a page, seconds for a full pick; its session is ended by
+   the import, so pages must stay one visit), the list view chosen from
+   a `thumbnail_cost` and the count, `Limits::parallel` with a bucket per
+   account shared by downloads and glances, and the quota and
+   refused-refresh pauses.

@@ -756,7 +756,13 @@ fn run_remote<S: Store>(
         }
     };
     let job = jobs.start(options.job(&id, &title).total(total));
-    let stop = Arc::new(AtomicBool::new(false));
+    // The caller's flag (a promise's cancel) and the job's cancel are one:
+    // a fetch under way hears either through its connector's `Cancel`, so
+    // a slow download stops at once, its part kept out of the Library.
+    let stop = options
+        .cancel
+        .clone()
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
     {
         let stop = stop.clone();
         job.on_cancel(move || stop.store(true, Ordering::SeqCst));

@@ -199,6 +199,21 @@ impl ChosenContents {
     }
 }
 
+/// The pages of one source (an album's, listed page by page) as one
+/// batch: one import, one promise, one history record for the album.
+fn one_batch(pages: &[Arc<Batch>]) -> Option<Arc<Batch>> {
+    let first = pages.first()?;
+    if pages.len() == 1 {
+        return Some(first.clone());
+    }
+    Some(Arc::new(Batch {
+        connector: first.connector.clone(),
+        source: first.source.clone(),
+        items: pages.iter().flat_map(|b| b.items.iter().cloned()).collect(),
+        known: pages.iter().flat_map(|b| b.known.iter().copied()).collect(),
+    }))
+}
+
 /// An item's capture time, as the grid's cells keep it (the camera's
 /// local time, kept as if it were UTC).
 fn taken_of(item: &helios_connect::Item) -> Option<chrono::NaiveDateTime> {
@@ -213,13 +228,9 @@ impl ImportWindow {
     /// (their cells, then their previews). Otherwise the grid goes back
     /// to the sources ticked, read again.
     pub(super) fn follow_chosen(&mut self) -> bool {
-        // An album selected: its photos once listed.
+        // An album selected: its photos as their pages are listed.
         let shown = if let Some((account, source, photos)) = self.album_shown() {
-            let batches = match photos {
-                super::import_albums::Photos::Listed(b) => vec![b],
-                _ => Vec::new(),
-            };
-            Some((account, Some(source.id), batches))
+            Some((account, Some(source.id), photos.pages))
         } else {
             self.sources
                 .account
@@ -346,24 +357,28 @@ impl Shell {
                 }
             }
             // Each visit's photos with the connector that listed them; a
-            // visit taken in since this pass imports none.
-            // An album's photos as listed; else the pages' chosen.
-            let batches = if album {
-                listed.clone()
+            // visit taken in since this pass imports none. An album's
+            // pages listed so far are one import: the photos ticked among
+            // them, the pages still to come left out.
+            let jobs: Vec<(Arc<Batch>, Vec<helios_connect::Item>)> = if album {
+                one_batch(&listed)
+                    .map(|batch| (batch, per.concat()))
+                    .into_iter()
+                    .collect()
             } else {
-                w.accounts.take_chosen(&account)
+                w.accounts
+                    .take_chosen(&account)
+                    .into_iter()
+                    .map(|batch| {
+                        let items = listed
+                            .iter()
+                            .position(|b| Arc::ptr_eq(b, &batch))
+                            .map(|b| per[b].clone())
+                            .unwrap_or_default();
+                        (batch, items)
+                    })
+                    .collect()
             };
-            let jobs: Vec<(Arc<Batch>, Vec<helios_connect::Item>)> = batches
-                .into_iter()
-                .map(|batch| {
-                    let items = listed
-                        .iter()
-                        .position(|b| Arc::ptr_eq(b, &batch))
-                        .map(|b| per[b].clone())
-                        .unwrap_or_default();
-                    (batch, items)
-                })
-                .collect();
             (hook, jobs, args, w.waker(), album)
         };
         if self.core.activity.has_node() {

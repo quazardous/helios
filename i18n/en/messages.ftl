@@ -1229,6 +1229,8 @@ gui-import-window-layout-year = By year
 
 gui-import-window-library-folder = The Library folder
 
+gui-import-window-listing = Listing… { $count } photos so far
+
 gui-import-window-manage-profiles = Manage profiles…
 
 gui-import-window-name = Name
