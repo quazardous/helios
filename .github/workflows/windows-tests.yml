@@ -114,6 +114,19 @@ jobs:
       # backend's own deadline, which rebuilt the shared device under the
       # tests still holding the old one. Doctests: nextest does not run them.
       - run: cargo nextest run --locked --workspace --profile ci
+      # A snapshot that differs only on Windows cannot be looked at
+      # anywhere else: keep the images kittest wrote beside the reference
+      # (the new picture and the diff) when the tests fail.
+      - if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-snapshot-diffs
+          path: |
+            **/tests/snapshots/**/*.new.png
+            **/tests/snapshots/**/*.diff.png
+            **/tests/snapshots/**/*.old.png
+          if-no-files-found: ignore
+          retention-days: 7
       - if: ${{ !cancelled() }}
         run: cargo test --locked --workspace --doc
 

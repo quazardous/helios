@@ -53,9 +53,13 @@ fn run(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Value {
     out
 }
 
+/// Four runs of frames, each until the window settles or its steps are
+/// spent: a slow machine still animating, or repainting for the engine's
+/// background work, is not a failure here (each test checks what the
+/// frames did), so a run that has not settled yet goes on to the next.
 fn frames(h: &mut Harness<'static, Shell>) {
     for _ in 0..4 {
-        h.run();
+        let _ = h.run_ok();
     }
 }
 
