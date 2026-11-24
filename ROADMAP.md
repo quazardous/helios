@@ -54,6 +54,17 @@ owner). The interface aims to need no thinking:
 
 Interaction conventions follow established apps' habits.
 
+**Studio > panel > tool** (2026-11-17, decided by the owner):
+- a **Studio** is a saved arrangement of panels, made for a task (a
+  Retouch or a Culling studio); "arrangement" and "layout" are not UI words;
+- a **panel** is a dockable area with a tab: docked, floating or in its
+  own window;
+- a **tool** is what a panel holds (a module's controls, a scope, a list).
+
+The menus follow it: View holds what is shown; Window holds Panels ▸
+(every panel, ticked while shown, a closed one reopening where it was),
+Studio ▸, then the OS windows. "Workbench" stays egui-pop's internal word.
+
 ### Two repositories
 
 1. **The darktable fork**

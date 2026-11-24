@@ -189,7 +189,7 @@ fn only(specs: &[PanelSpec], shown: &[(Area, &str)]) -> Layout {
 /// panel (the edit's undo steps) is a tab beside the Modules, on the
 /// start side, where darktable and Lightroom keep their history. A
 /// darkroom layout the user saved keeps its own tabs: History, closed
-/// there, opens from Window > History.
+/// there, opens from Window > Panels > History.
 pub fn darkroom(specs: &[PanelSpec]) -> Layout {
     let image = "helios.viewport";
     let modules = "helios.modules";

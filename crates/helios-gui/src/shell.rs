@@ -1029,6 +1029,10 @@ impl Shell {
             // The import focus opens an OS window of its own: on Wayland,
             // a present mode that never stalls every window behind one.
             .multi_window(true)
+            // A "+" at the end of each tab bar lists the closed panels
+            // that tab group may take, opening the one chosen there
+            // (`pop.panel.open`, `here`); Window > Panels lists them all.
+            .dock_controls(egui_pop::api::workbench::DockControls::default().add_buttons(true))
             // A detached panel's window is built transparent where an
             // image surface can sit below it (Wayland), so a detached
             // viewer gets its own, for the screen it is on; elsewhere it
@@ -1068,7 +1072,7 @@ impl Shell {
             })
             // egui-pop's History panel (a tab beside the Modules in the
             // darkroom, `workbench::darkroom`; elsewhere closed until
-            // Window > History or Ctrl+Shift+H) and the agents'
+            // Window > Panels > History or Ctrl+Shift+H) and the agents'
             // `history.*` commands, over
             // Helios's history owner (`crate::history::HeliosHistory`).
             .plugin(egui_pop::api::history_view::HistoryPlugin::default())
@@ -4825,14 +4829,8 @@ impl Shell {
                 3,
                 egui_pop::api::admin::CMD_OPEN.as_str(),
             ),
-            // Window > History (Ctrl+Shift+H): the undo steps, egui-pop's
-            // panel, shown or closed.
-            command(
-                MENU_WINDOW,
-                "2_panels",
-                0,
-                &format!("{}.toggle", egui_pop::api::history_view::PANEL_HISTORY),
-            ),
+            // History (Ctrl+Shift+H) is in Window > Panels with every
+            // panel (`plugins::WindowMenu`).
             // View > Activity… (Ctrl+Shift+J): the background jobs, open
             // whether one runs or not.
             command(MENU_VIEW, "1_activity", 0, crate::activity::COMMAND),

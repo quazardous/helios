@@ -1,5 +1,5 @@
 //! The History panel where a user looks for it: a tab beside the Modules
-//! in the darkroom, an entry of the Window menu and of the palette, and
+//! in the darkroom, an entry of Window > Panels and of the palette, and
 //! Ctrl+Shift+H. The edit's steps read as edits ("Exposure +0.30 EV"),
 //! listed under Start; a click on one goes back there and Ctrl+Z moves
 //! the mark.
@@ -184,20 +184,26 @@ fn the_window_menu_the_palette_and_ctrl_shift_h_open_the_history() {
     let toggle = "egui_pop.history.toggle";
     // Outside the darkroom, closed until asked for.
     assert!(!app.panel_visible(&PANEL_HISTORY));
-    let window: Vec<String> = app
-        .menu(&egui_pop::api::windows::MENU_WINDOW)
-        .iter()
-        .filter_map(|i| match &i.item {
-            Item::Command { id, .. } => Some(id.to_string()),
-            _ => None,
-        })
-        .collect();
-    assert!(window.iter().any(|c| c == toggle), "{window:?}");
+    // Window > Panels lists it with every panel.
+    let window = app.menu(&egui_pop::api::windows::MENU_WINDOW);
+    assert!(
+        window.iter().any(|i| matches!(&i.item,
+            Item::Submenu { menu, .. } if menu.as_str() == "helios.window.panels")),
+        "{window:?}"
+    );
+    let cx = egui_pop::model::when::WhenContext::default();
+    let listed = app.list_items("helios.panels.views", &cx);
+    assert!(
+        listed
+            .iter()
+            .any(|e| e.args["panel"] == PANEL_HISTORY.as_str()),
+        "History is in Window > Panels"
+    );
     assert!(
         app.palette().iter().any(|e| e.command.as_str() == toggle),
         "History is in the palette"
     );
-    // The Window menu's entry opens it.
+    // Its command opens it.
     h.state_mut()
         .run(toggle, json!(null), Origin::User)
         .unwrap();
