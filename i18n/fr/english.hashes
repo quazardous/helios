@@ -2152,6 +2152,8 @@ menu-helios-masks-row-add.label ea5be6af4dfc4a82
 menu-helios-system-profiles.label 493fa9da88311dbf
 menu-helios-system-recent.label 570a956d04ae773e
 menu-helios-system-themes.label 399519de8e880133
+menu-helios-window-panels.label c913492870850a10
+menu-helios-window-studio.label a731d07a87868c63
 node-batch-only 4c5b1c030894c77b
 node-boot-vault f4e65038df2fbe47
 node-command-debug-only 567e960246ad044d
