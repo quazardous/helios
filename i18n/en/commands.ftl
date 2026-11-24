@@ -842,7 +842,7 @@ command-viewport-mask-display-off =
     .title = Image: stop showing the mask
 
 command-viewport-zoom-100 =
-    .title = Image: actual pixels (100 %, 1 image pixel = 1 screen pixel)
+    .title = Image: actual pixels, 100 %
 
 command-viewport-zoom-fill =
     .title = Image: fill the view (cropping the longer side)
