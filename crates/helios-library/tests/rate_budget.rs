@@ -73,6 +73,7 @@ fn import(
             source,
             items,
             new_only: false,
+            holder: None,
         };
         let jobs = Jobs::new(Arc::default());
         let report =
