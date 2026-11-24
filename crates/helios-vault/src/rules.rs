@@ -14,6 +14,9 @@
 //! "op": "within", "value": {"last": 30, "unit": "days"}}` (or `"today"`,
 //! `"this_year"`): kept relative in the tree, they are resolved against a
 //! clock each time a query runs ([`resolve`], [`Relative`]).
+//!
+//! A tree is also written as text, the search field's grammar
+//! (`rating:>=3 label:red -flag:reject`): [`parse_text`] and [`to_text`].
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -23,6 +26,8 @@ use serde_json::{Value, json};
 
 use crate::capture;
 use crate::fields::{self, FLAGS, FieldKind};
+
+pub use crate::rules_text::{ALIASES, ANY_KEYS, KEYS, ParseError, parse_text, to_text};
 
 /// How deep groups may nest.
 pub const MAX_DEPTH: usize = 8;
@@ -82,11 +87,45 @@ pub enum RuleKind {
     /// [`IMPORT_HISTORY`]): `in`, `not_in`, the photos it brought into
     /// the Library or found again.
     Import,
+    /// Where a photo's copies are ([`crate::Presence`]): `is`, `is_not`
+    /// one of [`PRESENCES`].
+    Presence,
+    /// A photo's backups against the query's strategy
+    /// ([`crate::Query::backup_rule`]; none: no volume counts): `is`,
+    /// `is_not` one of [`BACKUPS`]. `short` is any state below the
+    /// strategy (short, unverified or no copy), as the Library's filter
+    /// always read it.
+    Backup,
+    /// A culling state ([`crate::cull::STATES`]): `is`, `is_not`.
+    Cull,
+    /// Words looked for, whatever their case, in the name the Library
+    /// shows or in a tag: `contains`.
+    Words,
+    /// A keyword branch ([`crate::keywords`]): a tag that is the path or
+    /// one below it, `has` or `lacks`.
+    Keyword,
     /// When a photo was imported (seconds since the epoch, UTC): a
     /// number's operators on the time of the sessions that hold it, and
     /// `within` a [`Relative`] period. A photo in no session never
     /// matches.
     Imported,
+}
+
+/// The values of a `presence` condition.
+pub const PRESENCES: [&str; 3] = ["present", "offline", "missing"];
+
+/// The values of a `backup` condition.
+pub const BACKUPS: [&str; 4] = ["met", "short", "unverified", "none"];
+
+/// The backup states a `backup` condition's value takes.
+pub fn backup_states(value: &str) -> Vec<crate::BackupState> {
+    use crate::BackupState as B;
+    match value {
+        "met" => vec![B::Met],
+        "short" => vec![B::Short, B::Unverified, B::None],
+        "unverified" => vec![B::Unverified],
+        _ => vec![B::None],
+    }
 }
 
 /// The store's documents namespace the import history keeps its records
@@ -96,6 +135,17 @@ pub enum RuleKind {
 pub const IMPORT_HISTORY: &str = "library/import/history";
 
 impl RuleKind {
+    /// The values the kind takes, when they are a known list.
+    pub fn values(self) -> Option<&'static [&'static str]> {
+        match self {
+            RuleKind::Flag => Some(&FLAGS),
+            RuleKind::Presence => Some(&PRESENCES),
+            RuleKind::Backup => Some(&BACKUPS),
+            RuleKind::Cull => Some(&crate::cull::STATES),
+            _ => None,
+        }
+    }
+
     /// The operators the kind takes.
     pub fn ops(self) -> &'static [&'static str] {
         match self {
@@ -103,9 +153,12 @@ impl RuleKind {
             RuleKind::Date | RuleKind::Imported => {
                 &["=", "!=", "<", "<=", ">", ">=", "between", "within"]
             }
-            RuleKind::Set => &["has", "lacks"],
+            RuleKind::Set | RuleKind::Keyword => &["has", "lacks"],
             RuleKind::Text => &["is", "is_not", "contains"],
-            RuleKind::Flag => &["is", "is_not"],
+            RuleKind::Flag | RuleKind::Presence | RuleKind::Backup | RuleKind::Cull => {
+                &["is", "is_not"]
+            }
+            RuleKind::Words => &["contains"],
             RuleKind::Folder | RuleKind::Album | RuleKind::Import => &["in", "not_in"],
         }
     }
@@ -148,6 +201,11 @@ pub const RULE_FIELDS: &[RuleField] = &[
     f("focus", crate::cull::FOCUS, RuleKind::Number),
     f("clip_white", crate::cull::CLIP_WHITE, RuleKind::Number),
     f("clip_black", crate::cull::CLIP_BLACK, RuleKind::Number),
+    f("presence", "", RuleKind::Presence),
+    f("backup", "", RuleKind::Backup),
+    f("cull", "", RuleKind::Cull),
+    f("text", "", RuleKind::Words),
+    f("keyword", fields::TAGS, RuleKind::Keyword),
 ];
 
 /// The rule field of that name.
@@ -268,16 +326,21 @@ fn check_value(spec: &RuleField, op: &str, value: Value) -> Result<Value, String
             }
             Ok(Value::from(item))
         }
-        RuleKind::Text | RuleKind::Album | RuleKind::Import => Ok(Value::from(text(&value)?)),
-        RuleKind::Flag => {
-            let flag = text(&value)?;
-            if !FLAGS.contains(&flag.as_str()) {
+        RuleKind::Text
+        | RuleKind::Album
+        | RuleKind::Import
+        | RuleKind::Words
+        | RuleKind::Keyword => Ok(Value::from(text(&value)?)),
+        RuleKind::Flag | RuleKind::Presence | RuleKind::Backup | RuleKind::Cull => {
+            let word = text(&value)?;
+            let known = spec.kind.values().unwrap_or_default();
+            if !known.contains(&word.as_str()) {
                 return Err(format!(
-                    "`{name}`: `{flag}` is not a flag ({})",
-                    FLAGS.join(", ")
+                    "`{name}`: `{word}` is not one of {}",
+                    known.join(", ")
                 ));
             }
-            Ok(Value::from(flag))
+            Ok(Value::from(word))
         }
         RuleKind::Folder => {
             let path = text(&value)?;

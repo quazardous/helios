@@ -163,7 +163,7 @@ impl Draft {
         if kind != before || kind.is_none() {
             self.op = kind.map(|k| k.ops()[0]).unwrap_or_default().to_string();
             self.value = match kind {
-                Some(RuleKind::Flag) => "pick".into(),
+                Some(k) if k.values().is_some() => k.values().unwrap_or_default()[0].into(),
                 Some(RuleKind::Set) if field == "label" => "red".into(),
                 _ => String::new(),
             };

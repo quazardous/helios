@@ -275,9 +275,10 @@ chips to draw (the chip contract: a title, a value menu, a remove).
 
 ```
 query     = term ( ws term )*            all terms hold (AND)
-term      = [ "-" ] ( qualified | word | "(" query ( "OR" query )* ")" )
-qualified = key ":" [ op ] value
-op        = ">=" | "<=" | ">" | "<" | "!="       (numbers, dates)
+term      = [ "-" | "+" ] ( qualified | word | "(" query ( "OR" query )* ")" )
+qualified = key ":" [ op ] value | key op value
+op        = ">=" | "<=" | ">" | "<" | "!=" | "="   (numbers, dates)
+          | "~" | "="                            (texts: contains, exact)
 value     = bare | "\"" quoted "\"" | low ".." high
 word      = text searched in name, title, description, tags, keywords
 ```
@@ -285,7 +286,12 @@ word      = text searched in name, title, description, tags, keywords
 - The same key repeated means any of them (`label:red label:blue`);
   different keys all hold. `-` negates (`-flag:reject`, Slack's habit).
 - `OR` and parentheses for the rare cross-key "any"; the builder is the
-  friendly way to them.
+  friendly way to them. `+` keeps a term out of the "any of them" of a
+  repeated key (`+label:red +label:blue`: both labels), so every tree
+  has a text.
+- A date is a period of whole days (`2024`, `2024-06`, `2024-06-01`) or
+  an instant (`2024-06-01T10:00:00`); `key>=3` (egui-pop's habit) reads
+  as `key:>=3`.
 - `#beach` is `tag:beach` (kept from egui-pop); `★3` is not typed, it
   is how a chip draws `rating:>=3`.
 
@@ -613,6 +619,22 @@ Each slice is one PR with its tests; the order matters.
    operator (property test on generated trees); today's texts parse to
    the same results (a table of the current terms); the window's
    results equal the vault's on a fixture.
+   *Landed in part (2026-11-24):* `rules::parse_text` and
+   `rules::to_text` (`helios-vault/src/rules_text.rs`, written by hand:
+   the grammar is small and whatever is not a term stays a word, which a
+   parser combinator's error recovery says less plainly); `presence`,
+   `backup` (measured against `Query::backup_rule`), `cull`, `keyword`
+   and `text` (words in the name or tags, as the Library searched them)
+   as rule fields, compiled by both stores and offered by the rule
+   editor. Tests: a round trip on 4,000 generated trees drawing every
+   field and operator; a table of today's terms read into the tree; the
+   vault contract running each text of the table beside the query its
+   old terms made, on both stores. Left: the search field, the
+   workspace query (`QueryDesc`) and `library.filter.apply` still read
+   egui-pop's keys and `helios_terms`; they move onto the grammar once
+   the field hands Helios its whole text (egui-pop's `Filter::parse`
+   takes `#beach)` out of `(label:red OR #beach)`), with the window's
+   results checked against the vault's on a fixture.
 4. **G4. Chips and suggestions.** Chips drawn in words with a value
    menu (counts from the facets), the filter button's key list,
    suggestions (keys, values with counts, recent, pinned, virtual

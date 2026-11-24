@@ -462,6 +462,9 @@ pub fn query_json(query: &Query) -> Value {
             }),
         );
     }
+    if let Some(rule) = &query.backup_rule {
+        put("backup_rule", backups_json(rule));
+    }
     if query.order != Order::default() {
         put(
             "order",
@@ -480,6 +483,7 @@ pub fn query_json(query: &Query) -> Value {
 ///  "captured_from": 0, "captured_before": 1, "words": ["beach"],
 ///  "cameras": [], "lenses": [], "file_types": ["cr3"], "folder": "/photos",
 ///  "album": "id", "presence": ["present"], "cull": ["sharp"],
+///  "backup_rule": {"volumes": [], "copies": 2, "off_site_required": true},
 ///  "order": {"by": "captured", "descending": true}}
 /// ```
 ///
@@ -545,6 +549,7 @@ pub fn query_of(value: &Value) -> Result<Query, String> {
                     states,
                 });
             }
+            "backup_rule" => query.backup_rule = Some(backups_of(v)?),
             "presence" => {
                 query.presence = strings(name, v)?
                     .iter()
