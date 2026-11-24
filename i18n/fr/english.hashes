@@ -77,11 +77,11 @@ command-compare-active.title 7dadebc837b489b5
 command-compare-add.title 229f091afb49e821
 command-compare-clear.title eda78f3e54291ce0
 command-compare-leave.title 13db21a9e208fb86
-command-compare-next.title 6a4e045ce2fd0a54
-command-compare-previous.title 76e72bf6ba4bc334
+command-compare-next.title e6342b6107dcb70f
+command-compare-previous.title 6a1e28cabb72852f
 command-compare-remove.title 26edd99dab7aab79
 command-compare-set.title 9a8aa28aa3a5141a
-command-compare-sync.title b6c37169cb876d53
+command-compare-sync.title b837176e9262ff20
 command-controls-catalogue.title 00db25f9cf1d7ca6
 command-controls-context.title 90a0a8a0a76594d2
 command-controls-describe.title 57a06597f7db6978

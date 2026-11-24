@@ -5559,9 +5559,9 @@ impl Library {
     ) -> Option<usize> {
         use crate::comparison as c;
         let run = |id: &str, mut args: Value| {
-            if let Some(surface) = instance {
-                args["surface"] = json!(surface);
-            }
+            // Named always: a command without one goes to the active
+            // Compare, which may be another.
+            args["surface"] = json!(instance.unwrap_or(crate::display_surfaces::COMPARE));
             crate::dialogs::request(
                 ctx,
                 crate::dialogs::Request::Run(id.into(), args, helios_shell::commands::Origin::User),

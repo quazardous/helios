@@ -321,3 +321,65 @@ fn the_target_mark_moves_to_the_compare_focused_last() {
     h.run_steps(3);
     assert!(h.state().compared_in("helios.compare#2").is_empty());
 }
+
+/// The active photo of a Compare.
+fn active_in(h: &mut Harness<'_, Shell>, surface: &str) -> Value {
+    json!(h.state().active_in(surface))
+}
+
+#[test]
+fn the_compare_keys_act_on_the_focused_compare_else_the_last_focused() {
+    let mut h = harness();
+    open_compare(&mut h);
+    compare_only(&mut h, &["a", "b"]);
+    run(
+        &mut h,
+        json!({ "photo": "c", "surface": NEW }),
+        Origin::User,
+    );
+    h.run_steps(3);
+    let second = "helios.compare#2";
+    h.state_mut()
+        .run(
+            "compare.add",
+            json!({ "images": ["d"], "surface": second }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run_steps(2);
+    assert_eq!(h.state().compared_in(second), ["c", "d"]);
+    // The second Compare focused: `compare.next` moves its active photo,
+    // never the first's.
+    let app = h.state().app().handle().clone();
+    app.focus_panel(&egui_pop::model::ids::PanelId::new(second).unwrap());
+    h.run_steps(3);
+    assert_eq!(h.state().active_compare(), second);
+    assert_eq!(active_in(&mut h, second), json!("c"));
+    assert_eq!(active_in(&mut h, COMPARE), json!("a"));
+    h.state_mut()
+        .run("compare.next", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    assert_eq!(active_in(&mut h, second), json!("d"));
+    assert_eq!(active_in(&mut h, COMPARE), json!("a"));
+    // The arrow key does the same, on the focused Compare.
+    h.key_press(egui::Key::ArrowLeft);
+    h.run_steps(3);
+    assert_eq!(active_in(&mut h, second), json!("c"));
+    assert_eq!(active_in(&mut h, COMPARE), json!("a"));
+    // `compare.sync` too.
+    // The focus on a gallery: still the Compare focused last in the
+    // window.
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static("helios.vault"));
+    h.run_steps(3);
+    assert_eq!(h.state().active_compare(), second);
+    // The first focused: the commands go back to it.
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(COMPARE));
+    h.run_steps(3);
+    h.state_mut()
+        .run("compare.next", json!(null), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    assert_eq!(active_in(&mut h, COMPARE), json!("b"));
+    assert_eq!(active_in(&mut h, second), json!("c"));
+}

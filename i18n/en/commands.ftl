@@ -20,10 +20,10 @@ command-compare-leave =
     .title = Leave Compare: back to the grid, or wherever it was entered from (Escape)
 
 command-compare-next =
-    .title = Compare: make the next photo active
+    .title = Compare: make the next photo active (`surface`: a Compare, helios.compare#<n>; else the focused one, else the one focused last in the window)
 
 command-compare-previous =
-    .title = Compare: make the previous photo active
+    .title = Compare: make the previous photo active (`surface`: a Compare, helios.compare#<n>; else the focused one, else the one focused last in the window)
 
 command-compare-remove =
     .title = Compare: take photos out of the comparison (`images`: ids, else the active photo; the last one out leaves Compare; `surface`: another Compare, helios.compare#<n>)
@@ -32,7 +32,7 @@ command-compare-set =
     .title = Compare: compare exactly these photos (`images`: one to sixteen ids, in that order; `surface`: another Compare, helios.compare#<n>), entering Compare
 
 command-compare-sync =
-    .title = Compare: zoom and pan synchronised across the photos (`on`; toggled when absent)
+    .title = Compare: zoom and pan synchronised across the photos (`on`; toggled when absent; `surface`: a Compare, helios.compare#<n>; else the focused one, else the one focused last in the window)
 
 command-controls-catalogue =
     .title = List the registered controls

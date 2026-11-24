@@ -151,10 +151,14 @@ pub fn window_of(layout: &Layout, panel: &str) -> Option<String> {
     layout.window_of(&id).map(|w| w.panel.as_str().to_string())
 }
 
-/// What the surfaces know between frames: the one focused last.
+/// What the surfaces know between frames: the one focused last, and the
+/// Compare focused last in each window.
 #[derive(Clone, Debug, Default)]
 pub struct Surfaces {
     last_focused: Option<String>,
+    /// Per window (`None`: the main window), the Compare that had the
+    /// focus last there.
+    compare_in_window: Vec<(Option<String>, String)>,
 }
 
 impl Surfaces {
@@ -170,6 +174,40 @@ impl Surfaces {
     /// The surface focused last, if any.
     pub fn last_focused(&self) -> Option<&str> {
         self.last_focused.as_deref()
+    }
+
+    /// Keeps `compare`, focused, as the Compare focused last in `window`
+    /// (its window's first panel; `None`: the main window).
+    pub fn follow_compare(&mut self, compare: &str, window: Option<String>) {
+        if !is_compare(compare) {
+            return;
+        }
+        self.compare_in_window.retain(|(w, _)| *w != window);
+        self.compare_in_window.push((window, compare.to_string()));
+    }
+
+    /// The Compare a `compare.*` command without a `surface` acts on (the
+    /// arrows, Delete, sync): the focused Compare, else the one focused
+    /// last in `window` (the window the user works in) while still
+    /// `open`, else the first, [`COMPARE`]. The rule is egui-pop's for
+    /// Ctrl+Z (the focused view's history, else the one focused last in
+    /// the window).
+    pub fn active_compare(
+        &self,
+        focused: Option<&str>,
+        window: Option<&str>,
+        open: &[String],
+    ) -> String {
+        let is_open = |c: &str| c == COMPARE || open.iter().any(|o| o == c);
+        if let Some(f) = focused.filter(|f| is_compare(f) && is_open(f)) {
+            return f.to_string();
+        }
+        self.compare_in_window
+            .iter()
+            .find(|(w, _)| w.as_deref() == window)
+            .map(|(_, c)| c.clone())
+            .filter(|c| is_open(c))
+            .unwrap_or_else(|| COMPARE.to_string())
     }
 
     /// Where a request without a surface goes, by `strategy`, from the
@@ -316,6 +354,35 @@ mod tests {
             s.route(Strategy::LastFocused, &layout, None),
             Route::Surface("helios.compare#2".into())
         );
+    }
+
+    #[test]
+    fn a_command_goes_to_the_focused_compare_else_the_windows_last() {
+        let open: Vec<String> = [COMPARE, "helios.compare#2", "helios.compare#3"]
+            .map(String::from)
+            .into();
+        let mut s = Surfaces::default();
+        // Nothing focused yet: the first.
+        assert_eq!(s.active_compare(None, None, &open), COMPARE);
+        // The focused Compare.
+        assert_eq!(
+            s.active_compare(Some("helios.compare#2"), None, &open),
+            "helios.compare#2"
+        );
+        // The focus elsewhere: the Compare focused last in that window.
+        s.follow_compare("helios.compare#2", None);
+        s.follow_compare("helios.compare#3", Some("helios.compare#3".into()));
+        s.follow_compare("helios.vault", None);
+        assert_eq!(
+            s.active_compare(Some("helios.vault"), None, &open),
+            "helios.compare#2"
+        );
+        assert_eq!(
+            s.active_compare(None, Some("helios.compare#3"), &open),
+            "helios.compare#3"
+        );
+        // Closed: back to the first.
+        assert_eq!(s.active_compare(None, None, &open[..1]), COMPARE);
     }
 
     #[test]
