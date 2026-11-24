@@ -1194,6 +1194,44 @@ mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/r
 source_times = "/target"
 timeout = "1h"
 
+# egui-pop's build cost, measured: where a gate-like build of the
+# workspace's tests spends its time (cargo's --timings, one report per
+# step), the size of the test executables, and what changes when only
+# egui-pop-api is built. Four steps, each in a target folder of its own
+# under the branch's storage (the gate's own build is left alone):
+# 1. the workspace's tests, built from clean (`ws-full`);
+# 2. the same after touching egui-pop-api's lib.rs (`ws-touch`): every
+#    dependent test binary relinks, which is the cost an edit pays;
+# 3. egui-pop-api's tests alone, from clean (`api-full`), and 4. after
+#    the same touch (`api-touch`).
+# /out holds the four timing reports, summary.txt (seconds per step, count
+# and total size of the test executables), the executables by size, and
+# whether one egui-pop-api test binary carries wgpu in each build.
+[jobs.egui-pop-build-timings]
+about = "egui-pop: where a workspace test build spends its time (compile, link), test executable sizes, egui-pop-api alone"
+checkouts = ["egui-pop"]
+cores = 5
+memory = "5g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && \
+step() { name=$1; dir=$2; shift 2; t0=$(date +%s); CARGO_TARGET_DIR=$dir cargo test --locked --no-run --timings "$@" > /out/$name.log 2>&1 || { tail -30 /out/$name.log; return 1; }; t1=$(date +%s); \
+cp $dir/cargo-timings/cargo-timing.html /out/$name.html; \
+find $dir/debug/deps -maxdepth 1 -type f -executable ! -name '*.so' -printf '%s %f\\n' | sort -rn > /out/$name-exes.txt; \
+n=$(wc -l < /out/$name-exes.txt); sz=$(awk '{s+=$1} END {printf "%.2f", s/1e9}' /out/$name-exes.txt); \
+api=$(ls -t $dir/debug/deps/ | grep -E '^[a-z_]+-[0-9a-f]{16}$' | while read f; do grep -l -m1 "egui-pop-api/tests/" "$dir/debug/deps/$f.d" > /dev/null 2>&1 && echo $f && break; done); \
+w=$( [ -n "$api" ] && strings $dir/debug/deps/$api | grep -c 'wgpu_core' ); \
+echo "$name seconds=$((t1-t0)) test_exes=$n size_gb=$sz api_sample=$api wgpu_strings=${w:-?}" | tee -a /out/summary.txt; }; \
+ws=/target/timings-ws; ap=/target/timings-api; rm -rf $ws $ap; : > /out/summary.txt; \
+cargo tree --workspace -e features -i egui_kittest > /out/tree-egui_kittest.txt 2>&1; \
+cargo tree -p egui-pop-api -e normal,dev -i wgpu > /out/tree-api-wgpu.txt 2>&1; \
+step ws-full $ws --workspace && touch crates/egui-pop-api/src/lib.rs && step ws-touch $ws --workspace && \
+step api-full $ap -p egui-pop-api && touch crates/egui-pop-api/src/lib.rs && step api-touch $ap -p egui-pop-api; \
+rc=$?; rm -rf $ws $ap; exit $rc"""
+env = { CARGO_NET_OFFLINE = "true", CARGO_BUILD_JOBS = "2" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
+timeout = "2h"
+
 # what egui-pop costs an application, per feature set of its facade
 # (egui-pop's tools/cost/cost.py): dependencies, release builds of its
 # cost_probe example (the compile cache off; clean for none and default,
