@@ -230,7 +230,7 @@ mod tests {
     use super::*;
 
     fn english(m: Message) -> String {
-        m.english()
+        helios_i18n::message(&helios_i18n::I18n::new("en"), &m)
     }
 
     #[test]
@@ -302,23 +302,21 @@ mod tests {
             "camera:\"Z 8\" rating:3 label:red label:blue -flag:reject",
         )
         .unwrap();
-        let chips = chips(&rule, &english);
-        assert!(chips.contains(&"camera is Z 8".to_string()), "{chips:?}");
+        let read = chips(&rule, &english);
+        assert!(read.contains(&"camera is Z 8".to_string()), "{read:?}");
         assert!(
-            chips.contains(&"rating is at least 3".to_string()),
-            "{chips:?}"
+            read.contains(&"rating is at least 3".to_string()),
+            "{read:?}"
         );
         assert!(
-            chips
-                .iter()
+            read.iter()
                 .any(|c| c.contains("red") && c.contains(" or ") && c.contains("blue")),
-            "{chips:?}"
+            "{read:?}"
         );
         assert!(
-            chips
-                .iter()
+            read.iter()
                 .any(|c| c.contains("flag") && c.contains("reject")),
-            "{chips:?}"
+            "{read:?}"
         );
         let range = helios_vault::rules::parse_text("iso:100..800").unwrap();
         assert_eq!(chips(&range, &english), ["ISO is between 100 and 800"]);
