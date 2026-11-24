@@ -588,6 +588,10 @@ pub struct Query {
     pub presence: Vec<Presence>,
     /// Backed up in one of these states against a strategy.
     pub backup: Option<BackupFilter>,
+    /// The strategy `backup` conditions of `rules` are measured against
+    /// ([`crate::rules::RuleKind::Backup`]); none: no volume counts, so
+    /// no photo has a backup.
+    pub backup_rule: Option<Backups>,
     /// In one of these culling states ([`crate::cull::STATES`]: `sharp`,
     /// `soft`, `clipped`, `unmeasured`); none given: any image.
     pub cull: Vec<String>,

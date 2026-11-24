@@ -2473,6 +2473,8 @@ gui-rule-field-album = album
 
 gui-rule-field-aperture = aperture
 
+gui-rule-field-backup = backup
+
 gui-rule-field-camera = camera
 
 gui-rule-field-captured = capture date
@@ -2480,6 +2482,8 @@ gui-rule-field-captured = capture date
 gui-rule-field-clip-black = crushed shadows (share)
 
 gui-rule-field-clip-white = blown highlights (share)
+
+gui-rule-field-cull = culling state
 
 gui-rule-field-description = description
 
@@ -2499,6 +2503,8 @@ gui-rule-field-imported = import date
 
 gui-rule-field-iso = ISO
 
+gui-rule-field-keyword = keyword
+
 gui-rule-field-label = colour label
 
 gui-rule-field-lens = lens
@@ -2507,11 +2513,15 @@ gui-rule-field-make = camera make
 
 gui-rule-field-name = Field
 
+gui-rule-field-presence = presence
+
 gui-rule-field-rating = rating
 
 gui-rule-field-shutter = shutter speed
 
 gui-rule-field-tag = tag
+
+gui-rule-field-text = name or tag
 
 gui-rule-field-title = title
 
@@ -2785,6 +2795,10 @@ gui-settings-workers = Workers
 
 gui-show-in = Show in
 
+gui-show-in-new = New surface
+
+gui-show-in-new-window = New window
+
 gui-show-in-title = Show in
 
 gui-show-in-window = { $surface } (its own window)
@@ -2984,6 +2998,8 @@ gui-storage-summary = { $online } online, { $offline } offline
 gui-subworkspace-gone = The sub-workspace { $id } is gone: back to where it was entered from
 
 gui-surface-compare = Compare
+
+gui-surface-compare-n = Compare { $n }
 
 gui-surface-image = Image
 

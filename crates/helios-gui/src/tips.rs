@@ -29,6 +29,7 @@ pub const FILES: &[(&str, &str)] = &[
     tip!("helios.fullscreen"),
     tip!("helios.keyboard-shortcuts"),
     tip!("helios.move-panels"),
+    tip!("helios.studio"),
     tip!("helios.profiles"),
     tip!("helios.zoom"),
     tip!("helios.mask-display"),

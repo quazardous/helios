@@ -407,9 +407,16 @@ they do the same.
 Without a `surface`, the setting **Double click shows the photo in**
 (`library.double_click`) chooses: the primary surface (the Image, as
 before), the surface focused last, the surface in the same window as the
-gallery, or ask (a list of the surfaces). With two surfaces open, the one
-a double click reaches wears a target mark. More surfaces of one kind
-(Compare as panel instances, "New surface", "New window") come later.
+gallery, a new Compare each time, or ask (a list of the surfaces). With
+two surfaces open, the one a double click reaches wears a target mark.
+
+Compare opens as many times as asked: each instance (`helios.compare#<n>`,
+its tab "Compare 2") holds a comparison of its own, kept in its instance's
+payload with the layout. **Show in ▸** lists every Compare open, then
+**New surface** (`surface: "new"`, docked) and **New window**
+(`surface: "new_window"`, a window of its own). The `compare.*` commands
+take `surface` to edit another Compare; without it they edit the first.
+Opening or closing a Compare is layout, never an undo step.
 
 ## Queue panel
 

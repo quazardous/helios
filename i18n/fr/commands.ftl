@@ -472,14 +472,8 @@ command-vault-reject =
 command-vault-stack-toggle =
     .title = Déplier ou replier la pile de l’image sélectionnée
 
-command-view-bottomPanel-toggle =
-    .title = Replier le panneau du bas
-
 command-view-culling =
     .title = Tri : marquer, noter et étiqueter de partout, l’image d’abord (`on` ; basculé en son absence)
-
-command-view-endSideBar-toggle =
-    .title = Replier la barre latérale de fin
 
 command-view-library =
     .title = Aller à la bibliothèque : ses photos, à parcourir, noter et trier
@@ -520,14 +514,8 @@ command-window-maximize =
 command-window-minimize =
     .title = Réduire la fenêtre
 
-command-workbench-fullscreen =
-    .title = Basculer le plein écran
-
 command-workbench-keybindings =
     .title = Raccourcis clavier
-
-command-workbench-palette =
-    .title = Afficher toutes les commandes
 
 command-workbench-quickOpen =
     .title = Aller à un module, un sous-espace de travail, une image ou un espace de travail
@@ -719,22 +707,22 @@ command-controls-set =
     .title = Régler un contrôle d’un nœud (`node`, `control`, `value` ; `force`)
 
 command-compare-add =
-    .title = Comparer : ajouter des photos à la comparaison ouverte (`images` : identifiants, sinon la sélection ; `at` : avant la photo à cette place, sinon en dernier ; seize au plus)
+    .title = Comparer : ajouter des photos à la comparaison ouverte (`images` : identifiants, sinon la sélection ; `at` : avant la photo à cette place, sinon en dernier ; seize au plus ; `surface` : un autre Comparer, helios.compare#<n>)
 
 command-compare-remove =
-    .title = Comparer : retirer des photos de la comparaison (`images` : identifiants, sinon la photo active ; la dernière retirée quitte Comparer)
+    .title = Comparer : retirer des photos de la comparaison (`images` : identifiants, sinon la photo active ; la dernière retirée quitte Comparer ; `surface` : un autre Comparer, helios.compare#<n>)
 
 command-compare-set =
-    .title = Comparer : comparer exactement ces photos (`images` : d’un à seize identifiants, dans cet ordre), en entrant dans Comparer
+    .title = Comparer : comparer exactement ces photos (`images` : d’un à seize identifiants, dans cet ordre ; `surface` : un autre Comparer, helios.compare#<n>), en entrant dans Comparer
 
 command-compare-clear =
-    .title = Comparer : vider la comparaison et quitter Comparer
+    .title = Comparer : vider la comparaison et quitter Comparer (`surface` : un autre Comparer, helios.compare#<n>, vidé)
 
 command-compare-leave =
     .title = Quitter Comparer : retour à la grille, ou là d’où Comparer a été ouvert (Échap)
 
 command-compare-active =
-    .title = Comparer : les photos comparées et la photo active (`image` : rendre active cette photo comparée)
+    .title = Comparer : les photos comparées et la photo active (`image` : rendre active cette photo comparée ; `surface` : un autre Comparer, helios.compare#<n>)
 
 command-library-compare =
     .title = Comparer des photos côte à côte (`images` : identifiants, sinon la sélection ; de deux à quatre)
@@ -923,4 +911,4 @@ command-library-metadata-template-save =
     .title = Enregistrer un modèle de métadonnées (`name`), depuis `fields` et `keywords` s’ils sont donnés, sinon depuis ce que partagent les photos sélectionnées
 
 command-photo-show =
-    .title = Montrer une photo sur une surface d’affichage (`photo` : son identifiant ; `surface` : helios.viewport ou helios.compare, sinon la stratégie du double clic choisit ; `from` : le panneau qui demande)
+    .title = Montrer une photo sur une surface d’affichage (`photo` : son identifiant ; `surface` : helios.viewport, helios.compare ou un autre Comparer helios.compare#<n>, new pour un nouveau Comparer, new_window pour un Comparer dans sa propre fenêtre, sinon la stratégie du double clic choisit ; `from` : le panneau qui demande)

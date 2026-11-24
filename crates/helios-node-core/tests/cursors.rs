@@ -402,6 +402,11 @@ fn the_grids_reads_carry_locations_facets_and_whole_queries() {
             },
             states: vec![BackupState::Short, BackupState::None],
         }),
+        backup_rule: Some(Backups {
+            volumes: vec![],
+            copies: 1,
+            off_site_required: false,
+        }),
         now: Some(1_000),
         order: helios_vault::Order {
             by: helios_vault::Sort::parse("captured").unwrap(),

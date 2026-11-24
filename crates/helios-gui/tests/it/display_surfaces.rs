@@ -4,12 +4,17 @@
 //! picked chooses the surface: the primary one, the one focused last, the
 //! one in the gallery's window, or ask. The photo menu's "Show in ▸" runs
 //! the same request an agent does, with the same answer and effect, and
-//! the surface a double click reaches wears a target mark.
+//! the surface a double click reaches wears a target mark. Compare opens
+//! as many times as asked ("New surface", "New window", the always-new
+//! strategy), each with a comparison of its own.
 
 use egui::vec2;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable as _;
 use helios_gui::dialogs::MenuItem;
-use helios_gui::display_surfaces::{COMPARE, IMAGE, SHOW_COMMAND, STRATEGY_SETTING};
+use helios_gui::display_surfaces::{
+    COMPARE, IMAGE, NEW, NEW_WINDOW, SHOW_COMMAND, STRATEGY_SETTING,
+};
 use helios_gui::library::Entry;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -148,6 +153,7 @@ fn an_agents_photo_show_equals_the_show_in_menus() {
             MenuItem::Command { id, args, .. } if id == SHOW_COMMAND => Some(args.clone()),
             _ => None,
         })
+        .filter(|a| ![NEW, NEW_WINDOW].contains(&a["surface"].as_str().unwrap_or_default()))
         .collect();
     let surfaces: Vec<&str> = shows.iter().filter_map(|a| a["surface"].as_str()).collect();
     assert_eq!(surfaces, [IMAGE, COMPARE], "both open surfaces offered");
@@ -169,4 +175,149 @@ fn an_agents_photo_show_equals_the_show_in_menus() {
         Origin::Agent("test".into()),
     );
     assert_eq!(shown(&mut h), (None, vec!["a".to_string()]));
+}
+
+/// The Compares open, the declared one first.
+fn compares(h: &Harness<'_, Shell>) -> Vec<String> {
+    let app = h.state().app().handle();
+    app.panel_instances(&egui_pop::model::ids::PanelId::from_static(COMPARE))
+        .into_iter()
+        .map(|p| p.to_string())
+        .collect()
+}
+
+/// Whether a widget (a tab) carries `label`.
+fn labelled(h: &Harness<'_, Shell>, label: &str) -> bool {
+    h.query_all_by_label(label).next().is_some()
+}
+
+#[test]
+fn new_surface_and_new_window_open_compares_of_their_own() {
+    let mut h = harness();
+    open_compare(&mut h);
+    compare_only(&mut h, &["a"]);
+    let ctx = h.ctx.clone();
+    // "Show in ▸" offers a new surface and a new window.
+    let items = h.state().library().show_in_items(&ctx, "c");
+    let surfaces: Vec<String> = items
+        .iter()
+        .filter_map(|i| match i {
+            MenuItem::Command { id, args, .. } if id == SHOW_COMMAND => {
+                args["surface"].as_str().map(String::from)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(surfaces, [IMAGE, COMPARE, NEW, NEW_WINDOW]);
+
+    // New surface: a second Compare, comparing the photo alone; the
+    // first keeps its own.
+    run(
+        &mut h,
+        json!({ "photo": "c", "surface": NEW }),
+        Origin::User,
+    );
+    h.run_steps(3);
+    assert_eq!(compares(&h), [COMPARE, "helios.compare#2"]);
+    assert_eq!(h.state().compared_in("helios.compare#2"), ["c"]);
+    assert_eq!(shown(&mut h), (None, vec!["a".to_string()]));
+    assert!(labelled(&h, "Compare 2"), "the instance's tab titled");
+
+    // `photo.show` with the instance as `surface` targets it alone.
+    run(
+        &mut h,
+        json!({ "photo": "d", "surface": "helios.compare#2" }),
+        Origin::Agent("test".into()),
+    );
+    assert_eq!(h.state().compared_in("helios.compare#2"), ["d"]);
+    assert_eq!(shown(&mut h), (None, vec!["a".to_string()]));
+    // And the `compare.*` commands too.
+    h.state_mut()
+        .run(
+            "compare.add",
+            json!({ "images": ["e"], "surface": "helios.compare#2" }),
+            Origin::Agent("test".into()),
+        )
+        .unwrap();
+    h.run_steps(2);
+    assert_eq!(h.state().compared_in("helios.compare#2"), ["d", "e"]);
+    assert_eq!(h.state().comparison().photos(), ["a"]);
+
+    // New window: a third Compare, detached in a window of its own.
+    run(
+        &mut h,
+        json!({ "photo": "b", "surface": NEW_WINDOW }),
+        Origin::User,
+    );
+    h.run_steps(3);
+    assert_eq!(
+        compares(&h),
+        [COMPARE, "helios.compare#2", "helios.compare#3"]
+    );
+    assert_eq!(h.state().compared_in("helios.compare#3"), ["b"]);
+    let layout = h.state().app().handle().layout();
+    assert!(
+        helios_gui::display_surfaces::window_of(&layout, "helios.compare#3").is_some(),
+        "in a window of its own"
+    );
+    assert!(helios_gui::display_surfaces::window_of(&layout, "helios.compare#2").is_none());
+    // Kept with the layout: its instance's payload names its photos.
+    let kept = layout
+        .instance(&egui_pop::model::ids::PanelId::new("helios.compare#2").unwrap())
+        .map(|i| i.payload.clone());
+    assert_eq!(kept, Some(json!({ "images": ["d", "e"] })));
+}
+
+#[test]
+fn the_always_new_strategy_opens_a_fresh_compare_each_double_click() {
+    let mut h = harness();
+    set_strategy(&mut h, "always_new");
+    double_click(&mut h, "a", "helios.vault");
+    h.run_steps(3);
+    double_click(&mut h, "b", "helios.vault");
+    h.run_steps(3);
+    let open = compares(&h);
+    assert_eq!(open.len(), 2, "{open:?}");
+    let [first, second] = [&open[0], &open[1]];
+    assert_eq!(h.state().compared_in(first), ["a"]);
+    assert_eq!(h.state().compared_in(second), ["b"]);
+    assert!(labelled(&h, "Compare 3"));
+    // Nothing on the Image, and no target mark (each is a new one).
+    assert_eq!(shown(&mut h).0, None);
+    assert_eq!(h.state().library().double_click_target(), None);
+}
+
+#[test]
+fn the_target_mark_moves_to_the_compare_focused_last() {
+    let mut h = harness();
+    open_compare(&mut h);
+    run(
+        &mut h,
+        json!({ "photo": "c", "surface": NEW }),
+        Origin::User,
+    );
+    h.run_steps(3);
+    set_strategy(&mut h, "last_focused");
+    // The new Compare had the focus last: it wears the mark, and a
+    // double click shows there.
+    assert_eq!(
+        h.state().library().double_click_target(),
+        Some("helios.compare#2")
+    );
+    double_click(&mut h, "e", "helios.vault");
+    assert_eq!(h.state().compared_in("helios.compare#2"), ["e"]);
+    // The first Compare focused: the mark moves to it.
+    h.state()
+        .app()
+        .handle()
+        .focus_panel(&egui_pop::model::ids::PanelId::from_static(COMPARE));
+    h.run_steps(3);
+    assert_eq!(h.state().library().double_click_target(), Some(COMPARE));
+    // Closed, the second Compare is no target and keeps no comparison.
+    h.state().app().handle().set_panel_visible(
+        &egui_pop::model::ids::PanelId::new("helios.compare#2").unwrap(),
+        false,
+    );
+    h.run_steps(3);
+    assert!(h.state().compared_in("helios.compare#2").is_empty());
 }

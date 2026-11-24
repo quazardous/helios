@@ -210,6 +210,7 @@ mod tests {
         "system.workflow.keep_days",
         "project.decisions.mode",
         "interface.panels.queue_when_empty",
+        "library.double_click",
         "interface.graph.zoom",
         "import.automatic.paused",
         "import.automatic.ask_files",
