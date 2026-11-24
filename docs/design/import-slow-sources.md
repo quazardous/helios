@@ -334,10 +334,14 @@ token bucket per account.
    its connector's `Cancel`: the part stays out of the Library. The
    contract needs no new field for this: a page's `next` and `complete`
    already say whether more is coming, and thumbnails were already read
-   lazily and never gated Import. Left: a pick's pages streamed (Google
-   lists 100 a page, seconds for a full pick; its session is ended by
-   the import, so pages must stay one visit), the list view chosen from
-   a `thumbnail_cost` and the count.
+   lazily and never gated Import. A pick's pages stream too: each joins
+   the grid as it is listed, with the same count so far, and Import
+   takes the photos listed (the pages of one pick one import). The
+   pick's session, which an import ends, is held until its listing is
+   over and none of its pages is still chosen (`HeldPick` in the import
+   window), so an import of the first pages cuts neither the listing
+   nor the later pages' import. Left: the list view chosen from a
+   `thumbnail_cost` and the count.
    Done: the quota and refused-refresh pauses. A rate limit or a quota
    met holds the import's promise (still `running`, with `paused`: why,
    and the time it goes on when the service gives a `Retry-After`) and

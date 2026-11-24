@@ -95,6 +95,9 @@ pub(crate) struct Accounts {
     /// The photos chosen, by account, until the footer's Import takes
     /// them: they fill the Contents column's grid.
     pub(crate) chosen: Chosen,
+    /// The pickings whose pages are still being listed, by account: the
+    /// photos listed so far and the listing's cancel.
+    pub(crate) listing: PickListing,
     /// How the chosen items are imported:
     /// `helios_library::fetch::import_remote` over the library, set by
     /// the desktop; none: choosing photos is not offered.
@@ -340,6 +343,10 @@ pub(crate) struct Batch {
 /// The photos chosen, by account, each visit to the page a batch.
 pub(crate) type Chosen = Arc<Mutex<BTreeMap<String, Vec<Arc<Batch>>>>>;
 
+/// The pickings still listing their pages, by account: how many photos
+/// are listed so far, and the cancel that stops the listing.
+pub(crate) type PickListing = Arc<Mutex<BTreeMap<String, (usize, helios_connect::Cancel)>>>;
+
 /// Ends the pickings of `batches` (the service forgets their sessions),
 /// on a thread of its own: each is a request to the service.
 pub(crate) fn end_picks(batches: Vec<Arc<Batch>>) {
@@ -464,6 +471,7 @@ impl Default for Accounts {
             identity: IdentityConnectors::default(),
             picking: None,
             chosen: Chosen::default(),
+            listing: PickListing::default(),
             import: None,
             known: None,
             library: None,
@@ -619,6 +627,14 @@ impl Accounts {
             c.session.cancel();
             self.close();
         }
+        let listing = self
+            .listing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        if let Some((_, stop)) = listing {
+            stop.cancel();
+        }
         let chosen = self
             .chosen
             .lock()
@@ -675,10 +691,19 @@ impl Accounts {
         let cancel = helios_connect::Cancel::new();
         let (st, stop, account_ref) = (status.clone(), cancel.clone(), account.account_ref());
         let opener = self.opener.clone();
-        let (chosen, known_of, account_id) =
-            (self.chosen.clone(), self.known.clone(), account.id.clone());
+        let (chosen, known_of, account_id, listing) = (
+            self.chosen.clone(),
+            self.known.clone(),
+            account.id.clone(),
+            self.listing.clone(),
+        );
         // The log names the source's kind, not the account (an address).
         let kind = account.connector.clone();
+        let wake = Arc::new(wake);
+        let wake_listing = {
+            let wake = wake.clone();
+            move || wake()
+        };
         let set = move |s: PickStatus| {
             *st.lock().unwrap_or_else(PoisonError::into_inner) = s;
             wake();
@@ -694,52 +719,97 @@ impl Accounts {
                     url: url.to_owned(),
                 });
             };
-            let listed = helios_plugin::source::pick_and_list(
-                connector.as_ref(),
+            // Each page of what was chosen joins the grid as it is
+            // listed; the picking's end waits for the listing and for
+            // every page still chosen (`HeldPick`), so an import of the
+            // first pages cuts neither the rest nor their import.
+            let held = Arc::new(super::import_pick_listing::HeldPick::new(
+                connector,
+                chosen.clone(),
+            ));
+            let batch_connector: Arc<dyn helios_connect::Connector> = held.clone();
+            let mut given = 0usize;
+            let mut page = |source: &helios_connect::SourceRef,
+                            items: Vec<helios_connect::Item>,
+                            last: bool| {
+                if stop.is_cancelled() {
+                    return;
+                }
+                // Chosen again: listed once, as first chosen.
+                let before: std::collections::HashSet<helios_connect::ItemId> = chosen
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&account_id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|b| b.source.id == source.id)
+                    .flat_map(|b| b.items.iter().map(|i| i.id.clone()))
+                    .collect();
+                let items: Vec<_> = items
+                    .into_iter()
+                    .filter(|i| !before.contains(&i.id))
+                    .collect();
+                {
+                    let mut listing = listing.lock().unwrap_or_else(PoisonError::into_inner);
+                    if last {
+                        listing.remove(&account_id);
+                    } else {
+                        listing
+                            .entry(account_id.clone())
+                            .or_insert_with(|| (0, stop.clone()))
+                            .0 += items.len();
+                    }
+                }
+                if !items.is_empty() {
+                    given += items.len();
+                    let known = known_of
+                        .as_ref()
+                        .map_or_else(|| vec![false; items.len()], |k| k(source, &items));
+                    chosen
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .entry(account_id.clone())
+                        .or_default()
+                        .push(Arc::new(Batch {
+                            connector: batch_connector.clone(),
+                            source: source.clone(),
+                            items,
+                            known,
+                        }));
+                    // The grid shows the photos from the first page on.
+                    set(PickStatus::Chosen);
+                } else {
+                    wake_listing();
+                }
+            };
+            let listed = helios_plugin::source::pick_and_stream(
+                held.as_ref(),
                 &account_ref,
                 deadline,
                 &stop,
                 &opened,
+                &mut page,
             );
+            listing
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&account_id);
+            if given == 0 {
+                // Nothing to import: the service forgets the picking.
+                let _ = helios_connect::Connector::end_pick(held.as_ref());
+            }
+            held.listed();
             let end = match listed {
-                Ok(Some((source, items))) => {
-                    // Chosen again: listed once, as first chosen.
-                    let before: std::collections::HashSet<helios_connect::ItemId> = chosen
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .get(&account_id)
-                        .into_iter()
-                        .flatten()
-                        .filter(|b| b.source.id == source.id)
-                        .flat_map(|b| b.items.iter().map(|i| i.id.clone()))
-                        .collect();
-                    let items: Vec<_> = items
-                        .into_iter()
-                        .filter(|i| !before.contains(&i.id))
-                        .collect();
-                    if items.is_empty() {
-                        let _ = connector.end_pick();
-                        PickStatus::Nothing
-                    } else {
-                        let known = known_of
-                            .as_ref()
-                            .map_or_else(|| vec![false; items.len()], |k| k(&source, &items));
-                        let batch = Batch {
-                            connector,
-                            source,
-                            items,
-                            known,
-                        };
-                        chosen
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner)
-                            .entry(account_id)
-                            .or_default()
-                            .push(Arc::new(batch));
-                        PickStatus::Chosen
-                    }
+                Ok(true) if given > 0 => PickStatus::Chosen,
+                Ok(_) => PickStatus::Nothing,
+                // Pages shown before the failure stay chosen, to import.
+                Err(e) if given > 0 => {
+                    log::warn!(
+                        "picking from {kind}: the listing stopped after {given} photos: {}",
+                        helios_connect::connect::said(&e)
+                    );
+                    PickStatus::Chosen
                 }
-                Ok(None) => PickStatus::Nothing,
                 Err(ConnectorError::Expired | ConnectorError::Gone) => PickStatus::Expired,
                 Err(ConnectorError::Cancelled) => PickStatus::Cancelled,
                 Err(ConnectorError::AuthNeeded) => {
@@ -899,6 +969,12 @@ impl Accounts {
         }
         self.consent = None;
         self.close();
+        // A listing under way stops: its pages would join no window.
+        let listing =
+            std::mem::take(&mut *self.listing.lock().unwrap_or_else(PoisonError::into_inner));
+        for (_, stop) in listing.into_values() {
+            stop.cancel();
+        }
         let all = std::mem::take(&mut *self.chosen.lock().unwrap_or_else(PoisonError::into_inner));
         end_picks(all.into_values().flatten().collect());
         if self

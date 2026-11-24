@@ -98,6 +98,7 @@ mod import_accounts;
 mod import_albums;
 mod import_browsers;
 mod import_chosen;
+mod import_pick_listing;
 pub use import_accounts::LibraryFolder;
 pub use import_accounts::{KnownRemote, RemoteImport};
 mod import_auto;

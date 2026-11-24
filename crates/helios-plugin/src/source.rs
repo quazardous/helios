@@ -646,24 +646,55 @@ pub fn pick_and_list(
     cancel: &Cancel,
     open: &dyn Fn(&str),
 ) -> Result<Option<(SourceRef, Vec<Item>)>, ConnectorError> {
+    let mut all: Option<(SourceRef, Vec<Item>)> = None;
+    let picked = pick_and_stream(
+        connector,
+        account,
+        deadline,
+        cancel,
+        open,
+        &mut |source, items, _| {
+            all.get_or_insert_with(|| (source.clone(), Vec::new()))
+                .1
+                .extend(items);
+        },
+    )?;
+    Ok(if picked { all } else { None })
+}
+
+/// [`pick_and_list`], each page of what was picked handed to `page` as
+/// it is listed (its source, its items, whether it is the last), so the
+/// photos show before the whole picking is listed. `Ok(false)`: nothing
+/// picked by the deadline (the picking ended). On a failure the picking
+/// is ended too; the pages handed before it stay the caller's, whose
+/// import ends the picking ([`Connector::end_pick`]).
+pub fn pick_and_stream(
+    connector: &dyn Connector,
+    account: &AccountRef,
+    deadline: Instant,
+    cancel: &Cancel,
+    open: &dyn Fn(&str),
+    page: &mut dyn FnMut(&SourceRef, Vec<Item>, bool),
+) -> Result<bool, ConnectorError> {
     let pick = connector.pick(account, cancel)?;
     open(&pick.url);
     let listed = connector.picked(deadline, cancel).and_then(|ready| {
         if !ready {
-            return Ok(None);
+            return Ok(false);
         }
-        let mut items = Vec::new();
         let mut from = None;
         loop {
-            let page = connector.list(&pick.source, from.as_ref(), helios_connect::PAGE, cancel)?;
-            items.extend(page.items);
-            match page.next {
-                Some(next) if !page.complete => from = Some(next),
-                _ => return Ok(Some((pick.source.clone(), items))),
+            let listed =
+                connector.list(&pick.source, from.as_ref(), helios_connect::PAGE, cancel)?;
+            let last = listed.complete || listed.next.is_none();
+            page(&pick.source, listed.items, last);
+            match listed.next {
+                Some(next) if !last => from = Some(next),
+                _ => return Ok(true),
             }
         }
     });
-    if !matches!(listed, Ok(Some(_))) {
+    if !matches!(listed, Ok(true)) {
         let _ = connector.end_pick();
     }
     listed
