@@ -5,7 +5,9 @@
 //! limit and an expired download address are waited out and gone on
 //! from; the pick imported again downloads nothing; a pick unknown to the
 //! process is refused at once; a slow download cancelled mid-way leaves
-//! nothing half-imported.
+//! nothing half-imported. A quota met holds the promise (`paused`, with
+//! the time it goes on) and it goes on by itself; a refused sign-in holds
+//! it until a sign-in, what was imported kept.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -364,5 +366,121 @@ fn a_slow_download_cancelled_mid_way_leaves_nothing_half_imported() {
         .collect();
     placed.sort();
     assert_eq!(placed, ["g00.raf", "g01.raf"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A pick of the album service's first album, `n` photos.
+fn album_pick(provider: &helios_connect::fake_albums::AlbumsProvider) -> String {
+    use helios_connect::{ConnectorProvider as _, ConnectorServices, Settings};
+    let connector: Arc<dyn Connector> = Arc::from(
+        provider
+            .create(&Settings::Null, &ConnectorServices::default())
+            .unwrap(),
+    );
+    let source = SourceRef {
+        connector: helios_connect::fake_albums::ID.into(),
+        id: "acc/album-0".into(),
+        label: "Albums".into(),
+        root: None,
+        capacity: None,
+    };
+    let items = connector
+        .list(&source, None, 100, &Cancel::new())
+        .unwrap()
+        .items;
+    import_promise::hand(Handed {
+        connector,
+        source,
+        items,
+        end_pick: false,
+    })
+}
+
+/// The promise `id` once `ready` says so of it.
+fn until(client: &Client, id: &Value, ready: impl Fn(&Value) -> bool) -> Value {
+    let deadline = std::time::Instant::now() + DEADLINE;
+    loop {
+        let p = client.request("promises.get", json!({ "id": id })).unwrap()["promise"].clone();
+        if ready(&p) {
+            return p;
+        }
+        assert!(std::time::Instant::now() < deadline, "never: {p}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_quota_met_holds_the_import_which_goes_on_by_itself() {
+    let dir = scratch("quota");
+    let (vault, client, _heard) = node();
+    let provider = helios_connect::fake_albums::AlbumsProvider::new(&[("Trip", 4)], 50)
+        .quota(2, Duration::from_secs(1));
+    let answer = client
+        .request(
+            "library.import",
+            json!({ "remote": album_pick(&provider), "rule": "all", "into": dir.join("lib"),
+                    "layout": "flat", "signals": false }),
+        )
+        .unwrap();
+    let id = answer["promise"]["id"].clone();
+    // Held, still running: why, and when it goes on.
+    let held = until(&client, &id, |p| !p["paused"].is_null());
+    assert_eq!(held["state"], "running", "{held}");
+    assert_eq!(held["paused"]["wait"], "quota", "{held}");
+    assert!(held["paused"]["until"].as_u64().is_some(), "{held}");
+    assert_eq!(vault.images().unwrap().len(), 2, "what was imported stays");
+    // It goes on by itself once the service's time has passed.
+    let settled = wait(&client, &id);
+    assert_eq!(settled["state"], "done", "{settled}");
+    assert!(settled["paused"].is_null(), "{settled}");
+    assert_eq!(settled["result"]["report"]["added"], 4, "{settled}");
+    assert_eq!(settled["result"]["failed"], json!([]), "{settled}");
+    assert_eq!(vault.images().unwrap().len(), 4);
+    assert!(provider.refusals.load(Ordering::SeqCst) >= 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_refused_sign_in_holds_the_import_until_a_sign_in() {
+    let dir = scratch("sign-in");
+    let (vault, client, _heard) = node();
+    let provider = helios_connect::fake_albums::AlbumsProvider::new(&[("Trip", 4)], 50).refused(2);
+    let answer = client
+        .request(
+            "library.import",
+            json!({ "remote": album_pick(&provider), "rule": "all", "into": dir.join("lib"),
+                    "layout": "flat", "signals": false }),
+        )
+        .unwrap();
+    let id = answer["promise"]["id"].clone();
+    let held = until(&client, &id, |p| !p["paused"].is_null());
+    assert_eq!(held["state"], "running", "{held}");
+    assert_eq!(held["paused"]["wait"], "sign_in", "{held}");
+    assert!(
+        held["paused"]["until"].is_null(),
+        "no end of its own: {held}"
+    );
+    // A try again while the service still refuses: held again, nothing
+    // failed, nothing more imported.
+    let asked = provider.refusals.load(Ordering::SeqCst);
+    client
+        .request("promises.retry", json!({ "id": id }))
+        .unwrap();
+    let deadline = std::time::Instant::now() + DEADLINE;
+    while provider.refusals.load(Ordering::SeqCst) == asked {
+        assert!(std::time::Instant::now() < deadline, "never tried again");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let held = until(&client, &id, |p| !p["paused"].is_null());
+    assert_eq!(held["state"], "running", "{held}");
+    assert_eq!(vault.images().unwrap().len(), 2, "what was imported stays");
+    // Signed in again: it goes on and ends.
+    provider.sign_in();
+    helios_node_core::promises::signed_in();
+    let settled = wait(&client, &id);
+    assert_eq!(settled["state"], "done", "{settled}");
+    assert_eq!(settled["result"]["report"]["added"], 4, "{settled}");
+    assert_eq!(settled["result"]["failed"], json!([]), "{settled}");
+    assert_eq!(vault.images().unwrap().len(), 4);
     let _ = std::fs::remove_dir_all(&dir);
 }

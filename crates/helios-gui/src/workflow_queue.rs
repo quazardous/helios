@@ -506,6 +506,8 @@ impl WorkflowQueue {
         }
         let mut state = match &p.state {
             State::Pending => ItemState::Waiting,
+            // Held: its work waits on the service (a quota, a sign-in).
+            State::Running { .. } if p.paused.is_some() => ItemState::Paused,
             State::Running { .. } => ItemState::Running,
             State::Done { .. } => ItemState::Done,
             State::Failed { .. } => ItemState::Failed,
@@ -537,6 +539,7 @@ impl WorkflowQueue {
             attempts: p.attempts.max(1),
             place,
             error,
+            paused: p.paused.clone(),
             actions,
         };
         Some((item, Target::Job(job.to_string())))
@@ -582,6 +585,7 @@ fn job_item(job: &Job, offset: f64) -> QueueItem {
         attempts: job.attempts,
         place,
         error: job.error.clone(),
+        paused: None,
         actions,
     }
 }
@@ -621,6 +625,7 @@ impl QueueSource for WorkflowQueue {
                     attempts: row.map_or(0, |r| r.attempts),
                     place: Place::Node(host.clone()),
                     error: row.and_then(|r| r.error.clone()),
+                    paused: None,
                     actions: actions_of(state),
                 });
             }

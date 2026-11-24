@@ -2202,6 +2202,12 @@ gui-queue-state-failed = Échoué
 
 gui-queue-state-paused = En pause
 
+gui-queue-paused-quota = Le service demande d’attendre : reprise automatique
+
+gui-queue-paused-quota-until = Le service demande d’attendre : reprise dans { $time }
+
+gui-queue-paused-sign-in = Le service a refusé la connexion : reconnectez-vous pour reprendre
+
 gui-queue-state-running = En cours
 
 gui-queue-state-waiting = En attente

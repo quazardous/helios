@@ -118,6 +118,9 @@ pub struct QueueItem {
     pub place: Place,
     /// Why it failed.
     pub error: Option<String>,
+    /// Why it is held (a service's quota, a refused sign-in), and until
+    /// when.
+    pub paused: Option<helios_vault::promises::Paused>,
     /// What may be asked of it now.
     pub actions: Vec<Action>,
 }
@@ -387,7 +390,9 @@ impl QueuePanel {
                 for (i, item) in queue.items.iter().enumerate() {
                     cells.cell(|ui| {
                         let state = ui.text_role(TextRole::Body, text(item.state.message()));
-                        if let Some(error) = &item.error {
+                        if let Some(paused) = &item.paused {
+                            state.tip(text(paused_reason(&ctx, &locale, paused, queue.now)));
+                        } else if let Some(error) = &item.error {
                             state.tip(error.as_str());
                         }
                     });
@@ -455,6 +460,32 @@ impl QueuePanel {
     }
 }
 
+/// Why a held item waits, and when it goes on by itself (`now` on the
+/// wall clock its `until` is on).
+fn paused_reason(
+    ctx: &egui::Context,
+    locale: &str,
+    paused: &helios_vault::promises::Paused,
+    now: f64,
+) -> Message {
+    use helios_vault::promises::Wait;
+    match (paused.wait, paused.until) {
+        (Wait::Quota, Some(until)) => Message::new(
+            "gui-queue-paused-quota-until",
+            "The service asks to wait: going on in { $time }",
+        )
+        .with("time", duration(ctx, locale, (until as f64 - now).max(0.0))),
+        (Wait::Quota, None) => Message::new(
+            "gui-queue-paused-quota",
+            "The service asks to wait: going on by itself",
+        ),
+        (Wait::SignIn, _) => Message::new(
+            "gui-queue-paused-sign-in",
+            "The service refused the sign-in: sign in again to go on",
+        ),
+    }
+}
+
 /// A duration as people read it: seconds, minutes or hours.
 fn duration(ctx: &egui::Context, locale: &str, seconds: f64) -> String {
     let m = if seconds < 60.0 {
@@ -474,6 +505,7 @@ mod tests {
 
     fn item(state: ItemState, since: f64) -> QueueItem {
         QueueItem {
+            paused: None,
             id: "j".into(),
             title: "Export a.png".into(),
             state,

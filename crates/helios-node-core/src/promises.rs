@@ -11,7 +11,12 @@
 //!   the runner settles it `cancelled`. One with no runner in this process
 //!   is settled `cancelled` at once.
 //! - `promises.retry` runs a failed promise again when its failure may be
-//!   retried and this node knows its kind.
+//!   retried and this node knows its kind; a held one ([`Handle::hold`]:
+//!   a service's quota, a refused sign-in) goes on at once.
+//! - **Held**: a runner whose work waits on something outside it holds
+//!   its promise (`paused` on the running promise, with why and until
+//!   when), then goes on: by itself at that time, when asked to retry, or
+//!   after a sign-in ([`signed_in`]). Nothing done is lost.
 //!
 //! **After a stop or a crash** ([`Promises::recover`], as the node
 //! starts): a promise left pending or running with no runner is taken up
@@ -20,13 +25,13 @@
 //! [`INTERRUPTED`], retryable when this node knows its kind. Nothing is
 //! left running in people's eyes with nobody working on it.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use helios_core::jobs::Jobs;
 use helios_inspect::rpc::{self, Call, Error};
-use helios_vault::promises::{Filter, INTERRUPTED, Promise, State};
+use helios_vault::promises::{Filter, INTERRUPTED, Paused, Promise, State, Wait};
 use helios_vault::{Store, Vault};
 use serde_json::{Value, json};
 
@@ -81,7 +86,11 @@ pub fn specs() -> Vec<CommandSpec> {
             ]))
             .read_only(),
         spec("promises.cancel", "Cancel a promise's work").params(object(&[id()])),
-        spec("promises.retry", "Run a failed promise again").params(object(&[id()])),
+        spec(
+            "promises.retry",
+            "Run a failed promise again, or let a held one go on",
+        )
+        .params(object(&[id()])),
         spec("promises.wait", "Wait until a promise is settled")
             .params(object(&[
                 id(),
@@ -105,6 +114,46 @@ fn now() -> u64 {
 /// What runs a promise's work: called on a thread of its own with the
 /// promise's handle, it reports through it and settles it.
 pub type Run<S> = Arc<dyn Fn(Handle<S>) + Send + Sync>;
+
+/// The promises held in this process, by id: what they wait for, and the
+/// signal that lets them go on.
+static HELD: LazyLock<Mutex<HashMap<String, (Wait, Arc<Hold>)>>> = LazyLock::new(Mutex::default);
+
+/// A held promise's signal: set once it may go on.
+#[derive(Default)]
+struct Hold {
+    go: Mutex<bool>,
+    woken: Condvar,
+}
+
+impl Hold {
+    fn wake(&self) {
+        *self.go.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.woken.notify_all();
+    }
+}
+
+fn held() -> std::sync::MutexGuard<'static, HashMap<String, (Wait, Arc<Hold>)>> {
+    HELD.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Lets held promise `id` go on now; whether it was held here.
+pub fn go_on(id: &str) -> bool {
+    held().get(id).map(|(_, h)| h.wake()).is_some()
+}
+
+/// A sign-in succeeded: the promises held for one go on (each tries its
+/// service again, and holds again if it still refuses).
+pub fn signed_in() {
+    for (wait, h) in held().values() {
+        if *wait == Wait::SignIn {
+            h.wake();
+        }
+    }
+}
+
+/// How often a held promise looks whether it was cancelled.
+const LOOK: Duration = Duration::from_millis(50);
 
 /// A kind of work promises stand for, as a node runs it.
 pub struct Kind<S: Store> {
@@ -157,6 +206,52 @@ impl<S: Store> Handle<S> {
     /// `done` of `total` so far (`None`: not known yet), with a note.
     pub fn progress(&self, done: u64, total: Option<u64>, note: Option<&str>) {
         self.report(|v, id| v.progress_promise(id, done, total, note, now()));
+    }
+
+    /// Holds it for `wait` (`reason` for people): its promise says so,
+    /// still running, until `after` has passed (none: no end of its own),
+    /// it is asked to go on ([`go_on`], `promises.retry`, a sign-in for
+    /// [`Wait::SignIn`]) or `stopped` says it was cancelled. Whether it
+    /// goes on (`false`: stopped).
+    pub fn hold(
+        &self,
+        wait: Wait,
+        reason: &str,
+        after: Option<Duration>,
+        stopped: &dyn Fn() -> bool,
+    ) -> bool {
+        let hold = Arc::new(Hold::default());
+        held().insert(self.promise.id.clone(), (wait, hold.clone()));
+        let paused = Paused {
+            wait,
+            reason: reason.into(),
+            until: after.map(|d| now() + d.as_secs().max(1)),
+        };
+        self.report(|v, id| v.pause_promise(id, Some(paused), now()));
+        let end = after.map(|d| Instant::now() + d);
+        let mut go = hold.go.lock().unwrap_or_else(PoisonError::into_inner);
+        let goes_on = loop {
+            if *go || end.is_some_and(|e| Instant::now() >= e) {
+                break true;
+            }
+            if stopped() || self.cancel_asked() {
+                break false;
+            }
+            let step = end.map_or(LOOK, |e| {
+                e.saturating_duration_since(Instant::now()).min(LOOK)
+            });
+            go = hold
+                .woken
+                .wait_timeout(go, step)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        };
+        drop(go);
+        held().remove(&self.promise.id);
+        if goes_on {
+            self.report(|v, id| v.pause_promise(id, None, now()));
+        }
+        goes_on
     }
 
     /// Settles it with its result.
@@ -386,12 +481,15 @@ impl<S: Store + Send + 'static> Promises<S> {
     }
 
     /// Runs failed promise `id` again, when it may be retried and its kind
-    /// runs here.
+    /// runs here; a held one goes on at once.
     pub fn retry(&self, id: &str) -> Result<Promise, String> {
         let p = self
             .vault
             .promise(id)?
             .ok_or_else(|| format!("no promise `{id}`"))?;
+        if p.paused.is_some() && go_on(id) {
+            return Ok(p);
+        }
         if !self.kinds.contains_key(&p.kind) {
             return Err(format!(
                 "no runner for promises of kind `{}` on this node",

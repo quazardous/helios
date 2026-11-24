@@ -28,8 +28,11 @@
 //!   ([`hand`]), then asks `library.import {remote: <key>, rule}`. The
 //!   promise downloads them one by one (`helios_library::fetch`): each
 //!   item a step of the progress with its outcome; a rate limit or a
-//!   quota answer waits and goes on, an expired download address is
-//!   listed again, the account's token is renewed per call by the
+//!   quota answer holds the promise (`paused`, with the time it goes on
+//!   by itself when the service gives one) and goes on, a refused sign-in
+//!   holds it until a sign-in ([`crate::promises::signed_in`]) or a
+//!   retry, never failing it: what was imported stays, the item at hand
+//!   is fetched again; an expired download address is listed again, the account's token is renewed per call by the
 //!   connector's host. A pick lives in its process only: after a restart
 //!   the promise fails, not retryable, and the photos chosen again skip
 //!   those imported before (their item ids are known to the Library).
@@ -571,6 +574,10 @@ fn fetched<S: Store + Send + 'static>(
         source: pick.source.clone(),
         items: pick.items.clone(),
         new_only: *rule == Rule::New,
+        holder: Some(&Held {
+            handle,
+            service: &pick.source.label,
+        }),
     };
     let mut done = 0u64;
     let mut failed = Vec::new();
@@ -595,4 +602,42 @@ fn fetched<S: Store + Send + 'static>(
             handle.progress(done, Some(total.max(done)), Some(&name));
         })?;
     Ok((report, failed))
+}
+
+/// What holds an import of a pick: its promise, `paused`.
+struct Held<'a, S: Store> {
+    handle: &'a Handle<S>,
+    /// The service, for people: "Google Photos".
+    service: &'a str,
+}
+
+impl<S: Store> helios_library::fetch::Holder for Held<'_, S>
+where
+    Handle<S>: Sync,
+{
+    fn hold(&self, why: &helios_library::fetch::Hold, stopped: &dyn Fn() -> bool) -> bool {
+        use helios_library::fetch::Hold;
+        use helios_vault::promises::Wait;
+        match why {
+            Hold::Quota { wait, .. } => self.handle.hold(
+                Wait::Quota,
+                &format!(
+                    "{} asks to wait: going on in {} s",
+                    self.service,
+                    wait.as_secs().max(1)
+                ),
+                Some(*wait),
+                stopped,
+            ),
+            Hold::SignIn => self.handle.hold(
+                Wait::SignIn,
+                &format!(
+                    "{} refused the sign-in: sign in again to go on",
+                    self.service
+                ),
+                None,
+                stopped,
+            ),
+        }
+    }
 }
