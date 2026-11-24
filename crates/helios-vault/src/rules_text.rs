@@ -336,18 +336,33 @@ impl Parser<'_> {
                 if !plain.is_empty() {
                     out.push(Segment::plain(std::mem::take(&mut plain)));
                 }
+                // Backslashes are kept as typed (a Windows path), except a
+                // run of them before a `"`: halved, and an odd one out
+                // makes that `"` a character, not the end (the quoting
+                // rule of Windows command lines, so `"C:\Photos\"` is
+                // written `"C:\Photos\\"`).
                 let mut quoted = String::new();
+                let mut run = 0usize;
                 while let Some((_, q)) = chars.next() {
                     match q {
-                        '"' => break,
-                        '\\' => {
-                            if let Some((_, e)) = chars.next() {
-                                quoted.push(e);
+                        '\\' => run += 1,
+                        '"' => {
+                            quoted.extend(std::iter::repeat_n('\\', run / 2));
+                            if run % 2 == 0 {
+                                run = 0;
+                                break;
                             }
+                            run = 0;
+                            quoted.push('"');
                         }
-                        q => quoted.push(q),
+                        q => {
+                            quoted.extend(std::iter::repeat_n('\\', run));
+                            run = 0;
+                            quoted.push(q);
+                        }
                     }
                 }
+                quoted.extend(std::iter::repeat_n('\\', run));
                 out.push(Segment {
                     text: quoted,
                     quoted: true,
@@ -930,7 +945,7 @@ fn bare_ok(text: &str) -> bool {
     !text.is_empty()
         && !text
             .chars()
-            .any(|c| c.is_whitespace() || matches!(c, '"' | '(' | ')' | '\\'))
+            .any(|c| c.is_whitespace() || matches!(c, '"' | '(' | ')'))
 }
 
 /// A text value after `key:`: quoted when it holds a space, a quote, a
@@ -943,8 +958,30 @@ fn value_text(text: &str) -> String {
     }
 }
 
+/// A text in quotes, read back as it was: a `"` and the backslashes
+/// right before it, or before the closing quote, are escaped; any other
+/// backslash is written as it is (`"C:\Photos\2024 trip"`).
 fn quote(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut out = String::from('"');
+    let mut run = 0usize;
+    for ch in text.chars() {
+        match ch {
+            '\\' => run += 1,
+            '"' => {
+                out.extend(std::iter::repeat_n('\\', 2 * run + 1));
+                out.push('"');
+                run = 0;
+            }
+            ch => {
+                out.extend(std::iter::repeat_n('\\', run));
+                out.push(ch);
+                run = 0;
+            }
+        }
+    }
+    out.extend(std::iter::repeat_n('\\', 2 * run));
+    out.push('"');
+    out
 }
 
 #[cfg(test)]
