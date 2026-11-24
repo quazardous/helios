@@ -45,6 +45,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "waits: egui-pop's `context.changed` as a local bus point",
     ),
     (
+        "follow_surfaces",
+        "waits: egui-pop's focused-panel and layout changes as local bus points (the open surfaces and the double-click target)",
+    ),
+    (
         "follow_workspace_keys",
         "waits: an egui-pop keymap-layer-changed event",
     ),
