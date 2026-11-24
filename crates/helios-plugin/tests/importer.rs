@@ -143,7 +143,7 @@ fn a_scan_lists_the_images_with_their_ratings_and_progress() {
             s.lock().unwrap().push(p.clone());
         })
         .unwrap();
-    let dir = dir.canonicalize().unwrap();
+    let dir = helios_plugin::importer::real_path(&dir).unwrap();
     assert_eq!(
         (scan.plugin.as_str(), scan.source.as_path()),
         (PLUGIN, dir.as_path())

@@ -123,13 +123,11 @@ pub fn check_source(decl: &ImporterDecl, source: &Path) -> Result<PathBuf, Strin
     Ok(path)
 }
 
-/// The folder relative paths are read from, and what the images of an
-/// importer that is not a catalogue must lie under: the source, or the
-/// folder of a source file.
 /// `path` resolved through its links (`canonicalize`), written the way
 /// the rest of Helios writes paths: on Windows, without the `\\?\`
 /// prefix `canonicalize` adds, so the same file has one path in the vault.
-fn real_path(path: &Path) -> std::io::Result<PathBuf> {
+/// Public so tests can build the path a scan records.
+pub fn real_path(path: &Path) -> std::io::Result<PathBuf> {
     let real = path.canonicalize()?;
     if cfg!(windows)
         && let Some(plain) = real.to_str().and_then(without_verbatim)
@@ -152,6 +150,9 @@ fn without_verbatim(path: &str) -> Option<String> {
         .then(|| rest.to_string())
 }
 
+/// The folder relative paths are read from, and what the images of an
+/// importer that is not a catalogue must lie under: the source, or the
+/// folder of a source file.
 fn base(decl: &ImporterDecl, source: &Path) -> PathBuf {
     match decl.source {
         SourceKind::Folder => source.to_path_buf(),

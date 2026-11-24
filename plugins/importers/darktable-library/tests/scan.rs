@@ -130,7 +130,7 @@ fn a_scan_lists_each_file_with_darktable_s_marks_in_both_schemas() {
             ["a.jpg", "b.jpg", "c.jpg", "Été à Lyon.jpg"],
             "{schema:?}"
         );
-        let photos = dir.join("photos").canonicalize().unwrap();
+        let photos = helios_plugin::importer::real_path(&dir.join("photos")).unwrap();
         assert_eq!(scan.images[0].path, photos.join("a.jpg"), "{schema:?}");
         let a = &scan.images[0];
         assert_eq!(

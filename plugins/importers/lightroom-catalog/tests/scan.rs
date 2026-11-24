@@ -303,7 +303,7 @@ fn the_shipped_program_scans_through_the_broker() {
         .importer_scan(PLUGIN, IMPORTER, &lrcat, &jpeg, None, |_| {})
         .unwrap();
     assert!(scan.refused.is_empty(), "{:?}", scan.refused);
-    let photos = dir.join("photos").canonicalize().unwrap();
+    let photos = helios_plugin::importer::real_path(&dir.join("photos")).unwrap();
     let a = &scan.images[0];
     assert_eq!(a.path, photos.join("2024/a.jpg"));
     assert_eq!(
