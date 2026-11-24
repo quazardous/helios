@@ -7,6 +7,12 @@
 //! nothing told; the undo puts the point back and is told too. A handle
 //! of a kind this Helios does not know is left out with its reason on
 //! the plugin's Settings section, the rest of the tool kept.
+//!
+//! A tool on the host's own parameters (`"module": "mask_circle"`) shows
+//! on the photo's circle only once the plugin holds `edit.controls`,
+//! declared and granted; until then its refusal is on the plugin's
+//! section. Its drag is one undo step on the photo's own line. Shift
+//! snaps a plugin's handle as it snaps a mask's.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -89,8 +95,35 @@ fn camera(dir: &Path, edit: impl Fn(&mut Json)) -> PathBuf {
 const W: u32 = 1200;
 const H: u32 = 900;
 
+/// The camera with a tool on the photo's circle masks (`spot`, their
+/// centre), and `edit.controls` declared when `declares`.
+fn spotter(dir: &Path, declares: bool) -> PathBuf {
+    let plugin = camera(dir, |d| {
+        d["tools"].as_array_mut().unwrap().push(json!({
+            "name": "spot",
+            "label": "io-github-quazardous-helios-gphoto2-camera-focus",
+            "module": "mask_circle",
+            "handles": {"format": "egui_hud-handles/1", "handles": [
+                {"name": "centre", "kind": "point", "look": "move"}
+            ]},
+        }));
+    });
+    if declares {
+        let m = plugin.join("helios-plugin.toml");
+        let text = std::fs::read_to_string(&m).unwrap()
+            + "\n[[capabilities]]\nname = \"edit.controls\"\nreason = \"Places circle masks on the focus point\"\n";
+        std::fs::write(m, text).unwrap();
+    }
+    plugin
+}
+
 /// A photo open in the viewport, the camera plugin enabled.
 fn shell(broker: &Arc<Broker>) -> Harness<'static, Shell> {
+    shell_with(broker, false)
+}
+
+/// The same, a circle mask `circle` in the photo's graph when `circle`.
+fn shell_with(broker: &Arc<Broker>, circle: bool) -> Harness<'static, Shell> {
     let mut g = Graph::new();
     let src = g.add_source(
         "source",
@@ -107,6 +140,18 @@ fn shell(broker: &Arc<Broker>) -> Harness<'static, Shell> {
         )
         .unwrap();
     g.connect(src, "image", exp, "input").unwrap();
+    if circle {
+        g.add_module(
+            "circle",
+            ModuleRef::new(helios_modules::masks::MaskCircle),
+            &Params::new()
+                .with("x", Value::Float(600.0))
+                .with("y", Value::Float(450.0))
+                .with("radius", Value::Float(100.0))
+                .with("feather", Value::Float(20.0)),
+        )
+        .unwrap();
+    }
     let mut shell = Shell::builder(helios_panels(), None)
         .plugins(broker)
         .build();
@@ -141,31 +186,68 @@ fn handle(h: &Harness<'_, Shell>) -> Option<Pos2> {
     Some(v.state().mapping()?.image_to_screen(k.at))
 }
 
-fn button(h: &mut Harness<'_, Shell>, pos: Pos2, pressed: bool) {
+/// Where the spot tool's handle on node `node` is on screen, if shown.
+fn spot(h: &Harness<'_, Shell>, node: &str) -> Option<Pos2> {
+    let v = h.state().viewport();
+    let id = format!("plugin-tool:{CAMERA}/spot/{node}");
+    let o = v.plugin_tools().overlays().iter().find(|o| o.id == id)?;
+    let k = o.handles.first()?;
+    Some(v.state().mapping()?.image_to_screen(k.at))
+}
+
+fn button(h: &mut Harness<'_, Shell>, pos: Pos2, pressed: bool, modifiers: Modifiers) {
     h.input_mut().events.push(Event::PointerButton {
         pos,
         button: PointerButton::Primary,
         pressed,
-        modifiers: Modifiers::NONE,
+        modifiers,
     });
 }
 
 /// Presses at `from` and moves to `to`; the button stays down.
 fn drag_to(h: &mut Harness<'_, Shell>, from: Pos2, to: Pos2) {
+    drag_with(h, from, to, Modifiers::NONE);
+}
+
+/// The same, `modifiers` held.
+fn drag_with(h: &mut Harness<'_, Shell>, from: Pos2, to: Pos2, modifiers: Modifiers) {
+    h.input_mut()
+        .events
+        .push(Event::ModifiersChanged(modifiers));
     h.hover_at(from);
     h.step();
-    button(h, from, true);
+    button(h, from, true, modifiers);
     h.step();
     for i in 1..=5 {
+        h.input_mut()
+            .events
+            .push(Event::ModifiersChanged(modifiers));
         h.hover_at(from + (to - from) * (i as f32 / 5.0));
         h.step();
     }
 }
 
 fn release(h: &mut Harness<'_, Shell>, at: Pos2) {
-    button(h, at, false);
+    button(h, at, false, Modifiers::NONE);
     h.step();
+    h.input_mut()
+        .events
+        .push(Event::ModifiersChanged(Modifiers::NONE));
     h.step();
+}
+
+/// The plugin's Settings section, as the accessibility tree says it.
+fn section(h: &mut Harness<'_, Shell>) -> String {
+    h.state_mut()
+        .run(
+            "admin.open",
+            json!({ "path": "plugins/io-github-quazardous-helios-gphoto2-camera" }),
+            Origin::User,
+        )
+        .unwrap();
+    h.run();
+    h.run();
+    format!("{:#?}", h.root())
 }
 
 /// The `ui/changed` notifications the plugin got, in order.
@@ -296,19 +378,115 @@ fn an_unknown_handle_kind_is_left_out_and_said_on_the_plugin_s_section() {
         .len();
     assert_eq!(kept, 1);
     // Said on the plugin's Settings section.
-    h.state_mut()
-        .run(
-            "admin.open",
-            json!({ "path": "plugins/io-github-quazardous-helios-gphoto2-camera" }),
-            Origin::User,
-        )
-        .unwrap();
-    h.run();
-    h.run();
-    let page = format!("{:#?}", h.root());
+    let page = section(&mut h);
     assert!(
         page.contains("handle `spiral`: unknown kind `spiral`"),
         "{page}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_tool_on_the_photo_s_circle_moves_it_only_once_edit_controls_is_granted() {
+    let dir = temp("host");
+    let plugin = spotter(&dir, true);
+    let mut broker = Broker::new(Policy::default());
+    broker.add(&plugin, Scope::User).unwrap();
+    let broker = Arc::new(broker);
+    let mut h = shell_with(&broker, true);
+
+    // Not granted: not shown.
+    assert!(spot(&h, "circle").is_none(), "hidden until granted");
+
+    // Granted: on the circle, at its centre.
+    broker.grant(CAMERA, "edit.controls").unwrap();
+    h.step();
+    h.step();
+    let from = spot(&h, "circle").expect("shown once granted");
+    let (x0, y0) = (f(&h, "node/circle/x"), f(&h, "node/circle/y"));
+    let image = h.state().values().lock().unwrap().undo_steps().len();
+
+    // A drag moves the photo's circle: one step on the photo's line,
+    // none on the plugins'.
+    let to = from + vec2(50.0, 30.0);
+    drag_to(&mut h, from, to);
+    release(&mut h, to);
+    let (x1, y1) = (f(&h, "node/circle/x"), f(&h, "node/circle/y"));
+    assert!(x1 > x0 && y1 > y0, "moved: {x1}, {y1}");
+    assert_eq!(
+        h.state().values().lock().unwrap().undo_steps().len(),
+        image + 1,
+        "one step on the photo's line"
+    );
+    assert_eq!(plugin_steps(&h), 0, "nothing on the plugins' line");
+
+    // The photo's undo puts it back.
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .undo(&Origin::User)
+        .unwrap();
+    h.step();
+    assert_eq!((f(&h, "node/circle/x"), f(&h, "node/circle/y")), (x0, y0));
+
+    // Revoked: gone at once.
+    broker.revoke(CAMERA, "edit.controls").unwrap();
+    h.step();
+    h.step();
+    assert!(spot(&h, "circle").is_none(), "hidden once revoked");
+    // Said on the plugin's section.
+    let page = section(&mut h);
+    assert!(
+        page.contains("tool `spot` on `mask_circle`")
+            && page.contains("needs the capability `edit.controls`, not granted"),
+        "{page}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_tool_on_the_host_s_parameters_without_edit_controls_is_refused() {
+    let dir = temp("undeclared");
+    let plugin = spotter(&dir, false);
+    let mut broker = Broker::new(Policy::default());
+    broker.add(&plugin, Scope::User).unwrap();
+    let broker = Arc::new(broker);
+    assert!(broker.grant(CAMERA, "edit.controls").is_err());
+    let mut h = shell_with(&broker, true);
+    assert!(spot(&h, "circle").is_none());
+    let page = section(&mut h);
+    assert!(
+        page.contains("does not declare the capability `edit.controls`"),
+        "{page}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn shift_holds_a_plugin_s_point_to_the_axes_as_a_mask_s() {
+    let dir = temp("shift");
+    let plugin = camera(&dir, |_| {});
+    let mut broker = Broker::new(Policy::default());
+    broker.add(&plugin, Scope::User).unwrap();
+    let broker = Arc::new(broker);
+    let mut h = shell(&broker);
+    h.state()
+        .values()
+        .lock()
+        .unwrap()
+        .set(Set::new(SHOW, Change::To(Value::Bool(true)), Origin::User))
+        .unwrap();
+    h.step();
+    h.step();
+    let from = handle(&h).expect("shown");
+    let (x0, y0) = (f(&h, X), f(&h, Y));
+    // Mostly across, a little down: Shift keeps it on the row.
+    let to = from + vec2(80.0, 9.0);
+    drag_with(&mut h, from, to, Modifiers::SHIFT);
+    release(&mut h, to);
+    let (x1, y1) = (f(&h, X), f(&h, Y));
+    assert!(x1 > x0, "moved across: {x1}");
+    assert!((y1 - y0).abs() < 1e-6, "held on its row: {y0} -> {y1}");
     let _ = std::fs::remove_dir_all(&dir);
 }

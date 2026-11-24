@@ -38,6 +38,7 @@ pub mod event_loop;
 pub mod export;
 pub mod export_start;
 pub mod graph;
+pub mod handle_snap;
 pub mod head_render;
 pub mod history;
 pub mod host;
