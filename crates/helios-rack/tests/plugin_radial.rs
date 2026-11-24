@@ -78,7 +78,7 @@ fn the_decoded_tool_writes_the_plugin_s_values_one_step_per_drag() {
     assert_eq!(d.problems, Vec::<String>::new());
     let t = &d.tool("radial").unwrap().tool;
     assert_eq!(t.target, Target::Plugin);
-    let names: Vec<_> = t.handles.iter().map(|h| h.name()).collect();
+    let names: Vec<_> = t.handles.iter().map(tools::ToolHandle::name).collect();
     assert_eq!(names, ["centre", "radius", "feather"]);
     assert_eq!(t.handle("centre").unwrap().writes(), ["x", "y"]);
 
@@ -148,7 +148,7 @@ fn an_unknown_kind_or_a_foreign_value_is_left_out_and_the_rest_stays() {
         .push(json!({"name": "code", "kind": "custom"}));
     let d = declared(&decl.to_string());
     let t = &d.tool("radial").unwrap().tool;
-    let names: Vec<_> = t.handles.iter().map(|h| h.name()).collect();
+    let names: Vec<_> = t.handles.iter().map(tools::ToolHandle::name).collect();
     assert_eq!(names, ["radius", "feather"]);
     let said = d.problems.join("\n");
     for reason in [

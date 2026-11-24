@@ -23,7 +23,7 @@ use egui_pop::viewport::overlay::{Handle, Overlay, Shape};
 use egui_pop::viewport::{Phase, Signal};
 use helios_controls::render::overlay_kind;
 use helios_core::{Params, Value};
-use helios_rack::handle::HandleKind;
+use helios_rack::handle::{HandleKind, Params as _};
 use helios_rack::plugin::{self, PluginTool};
 use helios_rack::tools::{self, ParamsOf};
 use helios_shell::commands::Origin;
@@ -124,7 +124,6 @@ impl PluginTools {
                     center: c,
                     radius: r.max(0.0),
                 };
-                use helios_rack::handle::Params as _;
                 match &h.handle.kind {
                     HandleKind::Radius {
                         centre,
