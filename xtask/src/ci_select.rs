@@ -146,6 +146,9 @@ pub struct Input {
     pub changes: Vec<Change>,
     /// helios-gui's `it` modules and their source.
     pub gui_suites: BTreeMap<String, String>,
+    /// helios-gui's own sources, by path from the workspace root: the
+    /// crate-internal users of a file ([`gui_users`]).
+    pub gui_sources: BTreeMap<String, String>,
     /// Per feature crate, the names helios-gui re-exports from it
     /// ([`reexports`]): an `it` module naming one uses the feature.
     pub reexported: BTreeMap<String, BTreeSet<String>>,
@@ -194,8 +197,14 @@ fn idents(s: &str) -> impl Iterator<Item = &str> {
 
 /// Whether a test module's source names the unit by a `helios_gui::` path.
 fn uses_unit(source: &str, unit: &str) -> bool {
+    uses_unit_from(source, unit, "helios_gui::")
+}
+
+/// Whether a source names the unit by a path starting with `root`
+/// (`helios_gui::` from a test, `crate::` from inside the crate).
+fn uses_unit_from(source: &str, unit: &str, root: &str) -> bool {
     let segments: Vec<&str> = unit.split("::").collect();
-    source.split("helios_gui::").skip(1).any(|after| {
+    source.split(root).skip(1).any(|after| {
         let span = after.split(';').next().unwrap_or("");
         let mut words = idents(span);
         if span.trim_start().starts_with('{') {
@@ -243,6 +252,93 @@ pub fn gui_modules(path: &str, suites: &BTreeMap<String, String>) -> BTreeMap<St
         }
     }
     out
+}
+
+/// How many hops [`gui_users`] follows from a file to the files using it.
+const USER_HOPS: usize = 3;
+
+/// The `it` modules exercising a helios-gui source file that the names
+/// and `use` paths of the tests do not reach ([`gui_modules`] is empty):
+/// those exercising the crate's own files that use it (`crate::unit`, or
+/// `super::leaf` beside it under a hub), followed up to [`USER_HOPS`]
+/// hops. The root files (`lib.rs`, `main.rs`) declare every module and
+/// use most: they are not followed, and a file only they use maps to
+/// nothing (the caller then runs all of `it`).
+pub fn gui_users(
+    path: &str,
+    sources: &BTreeMap<String, String>,
+    suites: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let mut seen = BTreeSet::from([path.to_string()]);
+    let mut frontier = vec![path.to_string()];
+    for _ in 0..USER_HOPS {
+        let mut next = Vec::new();
+        for file in &frontier {
+            let Some((unit, leaf)) = gui_unit(file) else {
+                continue;
+            };
+            let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
+            for (user, text) in sources {
+                if seen.contains(user) || gui_unit(user).is_none_or(|(u, _)| u == unit) {
+                    continue;
+                }
+                let beside = user.rsplit_once('/').is_some_and(|(d, _)| d == dir)
+                    && unit.contains("::")
+                    && idents_after(text, "super::").any(|w| w == leaf);
+                if !(beside || uses_unit_from(text, &unit, "crate::")) {
+                    continue;
+                }
+                seen.insert(user.clone());
+                let found = gui_modules(user, suites);
+                if found.is_empty() {
+                    next.push(user.clone());
+                }
+                for (m, why) in found {
+                    out.entry(m)
+                        .or_insert_with(|| format!("{user} uses it ({why})"));
+                }
+            }
+        }
+        frontier = next;
+    }
+    out
+}
+
+/// The first identifier after each `prefix` in a source.
+fn idents_after<'a>(source: &'a str, prefix: &'a str) -> impl Iterator<Item = &'a str> {
+    source
+        .split(prefix)
+        .skip(1)
+        .filter_map(|after| idents(after).next())
+}
+
+/// The `it` modules whose source quotes a snapshot's name: the string
+/// literal the test names it by, the stem of `tests/snapshots/<stem>.png`
+/// or a prefix of it ending before a `-` (the theme and scale the
+/// snapshot helpers add, `-pop-dark-1x`), or a `format!` string whose
+/// text before its first `{` starts the stem (`"import-window-{state}-…"`).
+pub fn snapshot_modules(stem: &str, suites: &BTreeMap<String, String>) -> Vec<String> {
+    let mut names: Vec<&str> = stem
+        .match_indices('-')
+        .map(|(i, _)| &stem[..i])
+        .filter(|p| p.contains('-'))
+        .collect();
+    names.push(stem);
+    let formatted = |src: &str| {
+        src.split('"').skip(1).step_by(2).any(|lit| {
+            lit.split_once('{').is_some_and(|(head, _)| {
+                head.len() > 3 && head.contains('-') && stem.starts_with(head)
+            })
+        })
+    };
+    suites
+        .iter()
+        .filter(|(_, src)| {
+            names.iter().any(|n| src.contains(&format!("\"{n}\""))) || formatted(src)
+        })
+        .map(|(m, _)| m.clone())
+        .collect()
 }
 
 /// The `it` modules whose source names module `m` (`crate::m`, `super::m`):
@@ -439,6 +535,22 @@ fn affected_file(input: &Input, change: &Change, s: &mut Selection) {
             ["it", "main.rs"] if name == GUI => {
                 s.add(src, Scope::Binary(GUI_IT.into()), format!("{path} changed"));
             }
+            ["snapshots", file]
+                if name == GUI
+                    && let Some(stem) = file.strip_suffix(".png")
+                    && !snapshot_modules(stem, &input.gui_suites).is_empty() =>
+            {
+                for module in snapshot_modules(stem, &input.gui_suites) {
+                    s.add(
+                        src,
+                        Scope::Module {
+                            binary: GUI_IT.into(),
+                            module,
+                        },
+                        format!("{path}: a snapshot its source names"),
+                    );
+                }
+            }
             ["it", module, ..] if name == GUI => {
                 let module = module.trim_end_matches(".rs");
                 s.add(
@@ -469,7 +581,10 @@ fn affected_file(input: &Input, change: &Change, s: &mut Selection) {
         return;
     }
     if name == GUI && rest.starts_with("src/") {
-        let modules = gui_modules(path, &input.gui_suites);
+        let mut modules = gui_modules(path, &input.gui_suites);
+        if modules.is_empty() {
+            modules = gui_users(path, &input.gui_sources, &input.gui_suites);
+        }
         if modules.is_empty() {
             s.add(
                 src,
@@ -713,12 +828,16 @@ pub fn gather(
         }
     }
     let mut reexported: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut gui_sources = BTreeMap::new();
     for path in rust_files(&root.join(GUI_DIR).join("src"))? {
         let text =
             std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         for f in FEATURES {
             let names = reexports(&text, &f.name.replace('-', "_"));
             reexported.entry(f.name.into()).or_default().extend(names);
+        }
+        if let Ok(rel) = path.strip_prefix(root) {
+            gui_sources.insert(rel.to_string_lossy().replace('\\', "/"), text);
         }
     }
     let mut ids: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -743,6 +862,7 @@ pub fn gather(
         graph,
         changes,
         gui_suites,
+        gui_sources,
         reexported,
         ids,
         history,
@@ -993,6 +1113,7 @@ mod tests {
             graph: graph(),
             changes,
             gui_suites: suites(),
+            gui_sources: BTreeMap::new(),
             reexported: BTreeMap::from([(
                 "helios-storage-ui".to_string(),
                 reexports(
@@ -1098,6 +1219,91 @@ mod tests {
             missing(),
         ));
         assert!(scopes(&s, Source::Affected).contains(&module("persist")));
+    }
+
+    fn gui_sources() -> BTreeMap<String, String> {
+        let s = |k: &str, v: &str| (format!("crates/helios-gui/src/{k}"), v.to_string());
+        BTreeMap::from([
+            s(
+                "lib.rs",
+                "pub mod privacy;\npub mod shell;\nuse crate::lonely;\n",
+            ),
+            s("lonely.rs", "pub fn alone() {}\n"),
+            // two hops: privacy <- consent <- shell/undo.rs
+            s("privacy.rs", "pub fn ask() {}\n"),
+            s("consent.rs", "use crate::privacy::ask;\n"),
+            s("shell/mod.rs", "pub mod undo;\npub mod dialog;\n"),
+            s("shell/undo.rs", "fn f() { crate::consent::x(); }\n"),
+            // beside it under the hub: `super::dialog`
+            s("shell/dialog.rs", "pub fn open() {}\n"),
+            s("shell/import_albums.rs", "use super::dialog::open;\n"),
+        ])
+    }
+
+    #[test]
+    fn a_file_no_test_names_maps_through_the_files_using_it() {
+        let mut i = input(
+            vec![
+                change("crates/helios-gui/src/privacy.rs"),
+                change("crates/helios-gui/src/shell/dialog.rs"),
+            ],
+            missing(),
+        );
+        i.gui_sources = gui_sources();
+        let got = scopes(&select(&i), Source::Affected);
+        assert!(got.contains(&module("undo")), "{got:?}");
+        assert!(got.contains(&module("import_albums")), "{got:?}");
+        assert!(!got.contains(&module("persist")), "{got:?}");
+        assert!(!got.contains(&Scope::Binary(GUI_IT.into())), "{got:?}");
+        let why = gui_users(
+            "crates/helios-gui/src/privacy.rs",
+            &i.gui_sources,
+            &i.gui_suites,
+        );
+        assert!(why["undo"].starts_with("crates/helios-gui/src/shell/undo.rs uses it"));
+
+        // only the root files use it: the whole `it`
+        let mut i = input(vec![change("crates/helios-gui/src/lonely.rs")], missing());
+        i.gui_sources = gui_sources();
+        assert!(scopes(&select(&i), Source::Affected).contains(&Scope::Binary(GUI_IT.into())));
+    }
+
+    #[test]
+    fn a_snapshot_selects_the_modules_naming_it() {
+        let mut suites = suites();
+        suites.insert(
+            "import_window".into(),
+            "shots.check(\"import-window-card\", &h);\n".into(),
+        );
+        assert_eq!(
+            snapshot_modules("import-window-card-pop-dark-1x", &suites),
+            vec!["import_window".to_string()]
+        );
+        assert!(snapshot_modules("import-window-pop-dark-1x", &suites).is_empty());
+        suites.insert(
+            "import_snapshots".into(),
+            "format!(\"import-window-{state}-pop-dark-{scale}x\")\n".into(),
+        );
+        assert_eq!(
+            snapshot_modules("import-window-folder-pop-dark-2x", &suites),
+            vec!["import_snapshots".to_string()]
+        );
+        suites.remove("import_snapshots");
+        let mut i = input(
+            vec![change(
+                "crates/helios-gui/tests/snapshots/import-window-card-pop-dark-2x.png",
+            )],
+            missing(),
+        );
+        i.gui_suites = suites;
+        let got = scopes(&select(&i), Source::Affected);
+        assert_eq!(got, vec![module("import_window")]);
+        // a snapshot no module names: the crate, as before
+        let s = select(&input(
+            vec![change("crates/helios-gui/tests/snapshots/nobody-1x.png")],
+            missing(),
+        ));
+        assert!(scopes(&s, Source::Affected).contains(&Scope::Package(GUI.into())));
     }
 
     fn edited(path: &str, old: &str, new: &str) -> Change {
