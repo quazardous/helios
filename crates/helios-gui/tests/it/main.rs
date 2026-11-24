@@ -36,6 +36,7 @@ mod develop_raw;
 mod dialog_details;
 mod dialogs;
 mod display_route;
+mod display_surfaces;
 mod duplicates;
 mod edit_marks;
 mod edit_snapshots;

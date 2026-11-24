@@ -1839,8 +1839,14 @@ impl eframe::App for App {
         }
         self.render_heads();
         self.follow_photos(ui.ctx());
+        // A photo opened in a gallery goes through `photo.show`, where
+        // the double-click strategy picks its surface; one sent to the
+        // Image (by it, the "Show in" menu or an agent) opens here.
         let activated = self.shell.library_mut().take_activated();
-        if let Some(id) = activated
+        if let Some(id) = activated {
+            self.shell.show_activated(&id);
+        }
+        if let Some(id) = self.shell.take_show_in_image()
             && let Err(e) = self.open_from_library(&id)
         {
             self.shell.notify(helios_gui::dialogs::Level::Error, e);

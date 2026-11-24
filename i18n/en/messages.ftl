@@ -2781,6 +2781,12 @@ gui-settings-workbench = Workbench
 
 gui-settings-workers = Workers
 
+gui-show-in = Show in
+
+gui-show-in-title = Show in
+
+gui-show-in-window = { $surface } (its own window)
+
 gui-size-bytes = { $size } B
 
 gui-size-gib = { $size } GiB
@@ -2974,6 +2980,14 @@ gui-storage-strategy-none = No backup set up
 gui-storage-summary = { $online } online, { $offline } offline
 
 gui-subworkspace-gone = The sub-workspace { $id } is gone: back to where it was entered from
+
+gui-surface-compare = Compare
+
+gui-surface-image = Image
+
+gui-surface-target = ◎ Double-click target
+
+gui-surface-target-tip = A double click in a gallery shows the photo here (Settings: Double click shows the photo in)
 
 gui-template-keys-error = template { $name }: keys: { $error }
 
