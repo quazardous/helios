@@ -1273,6 +1273,14 @@ gui-status-zoom-fit = Ajuster
 
 gui-storage-backup-destination = reçoit des copies
 
+gui-studio-save-as = Enregistrer la disposition du Studio sous…
+
+gui-studio-save-title = Enregistrer la disposition du Studio
+
+gui-studio-save-verb = Enregistrer la disposition
+
+gui-studio-suggested = Disposition du Studio { $n }
+
 gui-subworkspace-gone = Le sous-espace de travail { $id } n’existe plus : retour là où il avait été ouvert
 
 gui-template-keys-error = modèle { $name } : raccourcis : { $error }

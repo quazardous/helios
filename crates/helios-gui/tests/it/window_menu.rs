@@ -206,3 +206,40 @@ fn the_panels_list_names_each_open_compare() {
         assert!(shows(&h, compare), "Window ▸ Panels names {compare}");
     }
 }
+
+#[test]
+fn studio_says_studio_layout_and_open_panel_lists_every_panel() {
+    let mut h = shell();
+    click(&mut h, "Window");
+    open_submenu(&mut h, "Studio");
+    // The Studio's words, not egui-pop's "arrangement".
+    assert!(
+        shows(&h, "Save the Studio layout as…"),
+        "Studio saves a layout"
+    );
+    assert!(!shows(&h, "arrangement"), "no arrangement in Studio");
+    close_menus(&mut h);
+    click(&mut h, "Window");
+    open_submenu(&mut h, "Panels");
+    assert!(shows(&h, "Open panel…"), "Window ▸ Panels has Open panel…");
+    close_menus(&mut h);
+    // Ctrl+Shift+O: the palette lists every panel.
+    h.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::O,
+    );
+    h.run_steps(3);
+    let palette = h
+        .state()
+        .app()
+        .handle()
+        .service(&egui_pop::api::palette::PALETTE)
+        .expect("the palette");
+    let pick = palette
+        .pick_of(egui::ViewportId::ROOT)
+        .expect("Open panel… is open");
+    let titles: Vec<&str> = pick.items.iter().map(|i| i.label.as_str()).collect();
+    for panel in ["Library", "Modules", "History"] {
+        assert!(titles.contains(&panel), "{panel} in {titles:?}");
+    }
+}

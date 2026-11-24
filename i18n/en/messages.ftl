@@ -2995,6 +2995,14 @@ gui-storage-strategy-none = No backup set up
 
 gui-storage-summary = { $online } online, { $offline } offline
 
+gui-studio-save-as = Save the Studio layout as…
+
+gui-studio-save-title = Save the Studio layout
+
+gui-studio-save-verb = Save the layout
+
+gui-studio-suggested = Studio layout { $n }
+
 gui-subworkspace-gone = The sub-workspace { $id } is gone: back to where it was entered from
 
 gui-surface-compare = Compare

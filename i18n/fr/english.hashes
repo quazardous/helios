@@ -1847,6 +1847,10 @@ gui-storage-role-library 6d7e88ea6aaf5346
 gui-storage-role-scratch 15a0679c4a4c55c5
 gui-storage-strategy-none 4863336455443275
 gui-storage-summary ed59fe2c05620589
+gui-studio-save-as 9d06e1c76e2fab7b
+gui-studio-save-title ad11473adf80d5b7
+gui-studio-save-verb 21493ac7f464c5c3
+gui-studio-suggested d5ef5b538ed39c03
 gui-subworkspace-gone 25a07085ab9e56ac
 gui-surface-compare 0b2cb0ac030421c2
 gui-surface-compare-n 6bda7bfd514cc354
