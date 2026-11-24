@@ -100,7 +100,7 @@
 //!
 //! Transport: JSON-RPC 2.0, one message per line on stdin and stdout.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use helios_ai::Ai;
@@ -2863,7 +2863,7 @@ fn confine(roots: &Roots, tool: &Tool, request: &Value) -> Result<(), String> {
             "items" => {
                 for item in value.as_array().into_iter().flatten() {
                     let path = item.as_str().or_else(|| item["path"].as_str());
-                    if let Some(path) = path.filter(|p| Path::new(p).is_absolute()) {
+                    if let Some(path) = path.filter(|p| rooted(p)) {
                         check(path, Access::Read)?;
                     }
                 }
@@ -2902,10 +2902,23 @@ fn confine(roots: &Roots, tool: &Tool, request: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Every string of `value` that is an absolute path, at any depth.
+/// Whether `text` names a place from a root rather than from the working
+/// folder: absolute, or on Windows `\\x` (the current drive's root) and
+/// `C:x` (drive C's current folder), which are not absolute there but
+/// still lead outside the roots, so the roots check them (and refuse them
+/// as not absolute).
+fn rooted(text: &str) -> bool {
+    let path = Path::new(text);
+    path.is_absolute()
+        || path.has_root()
+        || matches!(path.components().next(), Some(Component::Prefix(_)))
+}
+
+/// Every string of `value` that names a path from a root ([`rooted`]),
+/// at any depth.
 fn absolute_paths<'a>(value: &'a Value, into: &mut Vec<&'a str>) {
     match value {
-        Value::String(s) if Path::new(s).is_absolute() => into.push(s),
+        Value::String(s) if rooted(s) => into.push(s),
         Value::Array(items) => items.iter().for_each(|v| absolute_paths(v, into)),
         Value::Object(map) => map.values().for_each(|v| absolute_paths(v, into)),
         _ => {}
