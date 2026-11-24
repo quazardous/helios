@@ -624,7 +624,9 @@ fn a_macro_published_with_the_user_s_answer_is_offered_to_every_workspace_and_ne
     let root = temp("publish");
     let mut h = window(&root);
     let config = root.join("config");
-    let file = config.join("composites/user.look@1.helios-composite.json");
+    let file = config
+        .join("composites")
+        .join("user.look@1.helios-composite.json");
     set(&mut h, "node/exposure/exposure", 1.0);
     run(
         &mut h,

@@ -680,7 +680,11 @@ mod tests {
         assert_eq!(history[0].hash, h(2).to_string(), "the old content kept");
         assert_eq!(
             *w.cache.made.lock().unwrap(),
-            [format!("make /media/disk/b.jpg {}", h(2))],
+            [format!(
+                "make {} {}",
+                Path::new(MOUNT).join("b.jpg").display(),
+                h(2)
+            )],
             "made again under the photo's own key"
         );
         // Its marks and edits stay.

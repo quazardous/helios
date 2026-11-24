@@ -379,7 +379,9 @@ fn a_linux_machine_is_probed() {
 fn the_setup_runs_nothing_without_confirm_and_never_as_root() {
     let runtime = FakeRuntime::new();
     runtime.set_down(true);
-    let archive = dir_path("setup").join("cache/ollama-linux-amd64.tgz");
+    let archive = dir_path("setup")
+        .join("cache")
+        .join("ollama-linux-amd64.tgz");
     let system = machine().output(
         &format!(
             "curl -fL --proto =https --create-dirs -o {} https://ollama.com/download/ollama-linux-amd64.tgz",

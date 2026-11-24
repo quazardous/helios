@@ -564,12 +564,14 @@ mod tests {
 
     #[test]
     fn the_words_become_settings_and_bad_ones_are_refused() {
+        // Absolute on the running system (`/tmp/out` is not on Windows).
+        let folder = if cfg!(windows) { r"C:\out" } else { "/tmp/out" };
         let desc = ExportDesc {
             format: "png".into(),
             bits: Some(16),
             long_edge: Some(2048),
             space: "adobe-rgb".into(),
-            folder: Some("/tmp/out".into()),
+            folder: Some(folder.into()),
             pattern: "{date}-{seq}".into(),
             clash: "skip".into(),
             ..ExportDesc::default()
@@ -578,7 +580,7 @@ mod tests {
         assert_eq!(s.output.format, Format::Png { bits: 16 });
         assert_eq!(s.output.space, OutputSpace::AdobeRgb);
         assert_eq!(s.output.long_edge, Some(2048));
-        assert_eq!(s.folder, PathBuf::from("/tmp/out"));
+        assert_eq!(s.folder, PathBuf::from(folder));
         assert_eq!(s.clash, Clash::Skip);
         for bad in [
             ExportDesc {

@@ -419,7 +419,14 @@ fn the_folders_tree_starts_at_the_volumes_an_offline_one_greyed_and_browsable() 
     };
     h.state_mut().library_mut().set_volumes(&[
         volume("uuid:card", "EOS_CARD", None, seen),
-        volume("uuid:disk", "System", Some(PathBuf::from("/")), seen + 100),
+        // Mounted at the system's root: `/`, or the temporary folder's
+        // drive (`C:\`) on Windows.
+        volume(
+            "uuid:disk",
+            "System",
+            root.ancestors().last().map(Path::to_path_buf),
+            seen + 100,
+        ),
     ]);
     h.get_by_label("Folders").click();
     settle(&mut h, &mut persist, 1.0);

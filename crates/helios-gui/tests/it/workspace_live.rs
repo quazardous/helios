@@ -223,11 +223,24 @@ fn without_a_desktop_holding_it_the_tools_write_the_files() {
     assert_eq!(files.load().unwrap().meta.description, "Closed");
     // A desktop killed without a word left its holder behind: nothing
     // listens there any more, and the files are written.
+    // Where nothing listens, in the system's own kind of address: a
+    // socket file on Unix; on Windows (no Unix sockets) a loopback port
+    // just let go.
+    let (address, token) = if cfg!(unix) {
+        (root.join("gone.sock").display().to_string(), None)
+    } else {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        (format!("tcp://127.0.0.1:{port}"), Some("gone".to_string()))
+    };
     files
         .hold(&Holder {
             pid: holder.pid,
-            address: root.join("gone.sock").display().to_string(),
-            token: None,
+            address,
+            token,
         })
         .unwrap();
     let (failed, done) = call(
@@ -569,7 +582,12 @@ fn an_agent_copies_and_pastes_in_its_own_slot_on_the_desktop() {
     let (mut h, config, dir, _) = window(&root);
     let file = root.join("pasted.jpg");
     std::fs::write(&file, b"not a real image").unwrap();
-    let text = format!("file://{}", file.display());
+    // A URI the platform's way: `file:///C:/…` on Windows.
+    let text = if cfg!(windows) {
+        format!("file:///{}", file.display().to_string().replace('\\', "/"))
+    } else {
+        format!("file://{}", file.display())
+    };
     // An item given whole, in the agent's own slot: the user's is
     // untouched.
     let (failed, wrote) = through(

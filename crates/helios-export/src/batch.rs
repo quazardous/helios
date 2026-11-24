@@ -417,7 +417,8 @@ mod tests {
                 space: crate::OutputSpace::DisplayP3,
                 long_edge: Some(1024),
             },
-            folder: PathBuf::from("/out"),
+            // Absolute on the running system (`/out` is not on Windows).
+            folder: PathBuf::from(if cfg!(windows) { r"C:\out" } else { "/out" }),
             pattern: "{date}-{seq}".into(),
             clash: Clash::Skip,
         }
