@@ -146,7 +146,7 @@ fn view_lists_the_photos_zoom_and_the_scopes() {
         "Image: zoom in",
         "Image: zoom out",
         "Image: fit to the view",
-        "Image: actual pixels",
+        "Image: actual pixels, 100 %",
         "Show or hide Scopes",
     ] {
         assert!(shows(&h, item), "View has {item}");

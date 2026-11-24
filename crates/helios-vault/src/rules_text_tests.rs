@@ -27,6 +27,12 @@ fn day(t: &str) -> i64 {
     crate::capture::day_start(t).unwrap()
 }
 
+/// The top of an absolute path on the running system: `/`, or `C:\` on
+/// Windows (where `/photos` is not absolute).
+fn root() -> &'static str {
+    if cfg!(windows) { r"C:\" } else { "/" }
+}
+
 /// Today's search texts (egui-pop's keys and Helios's own) read as the
 /// terms the Library always ran.
 #[test]
@@ -86,10 +92,6 @@ fn today_s_terms_read_as_they_always_did() {
         ),
         ("lens:L1", all(vec![c("lens", "is", json!("L1"))])),
         ("type:CR3", all(vec![c("file_type", "is", json!("cr3"))])),
-        (
-            "folder:\"/photos/2024 trip\"",
-            all(vec![c("folder", "in", json!("/photos/2024 trip"))]),
-        ),
         ("collection:abc", all(vec![c("album", "in", json!("abc"))])),
         ("import:s1", all(vec![c("import", "in", json!("s1"))])),
         (
@@ -132,6 +134,62 @@ fn today_s_terms_read_as_they_always_did() {
     ];
     for (text, want) in table {
         assert_eq!(parsed(text), want, "{text}");
+    }
+    let trip = format!("{}photos{}2024 trip", root(), std::path::MAIN_SEPARATOR);
+    assert_eq!(
+        parsed(&format!("folder:\"{trip}\"")),
+        all(vec![c("folder", "in", json!(trip))])
+    );
+}
+
+/// A Windows path is typed as it is: its backslashes are no escapes,
+/// quoted or not, and it is written back the same way. A text key holds
+/// it here, so the reading does not hang on the running system's idea of
+/// an absolute path.
+#[test]
+fn windows_paths_read_as_typed() {
+    let lens = |v: &str| all(vec![c("lens", "is", json!(v))]);
+    let table: &[(&str, &str)] = &[
+        (r"lens:C:\Photos\2024", r"C:\Photos\2024"),
+        (r#"lens:"C:\Photos\2024""#, r"C:\Photos\2024"),
+        (r#"lens:"C:\Photos\2024 trip""#, r"C:\Photos\2024 trip"),
+        (r#"lens:"\\nas\photos\a b""#, r"\\nas\photos\a b"),
+        (r#"lens:"C:\Photos\\""#, r"C:\Photos\"),
+        (r#"lens:"say \"hi\"""#, r#"say "hi""#),
+        (r#"lens:"a\\\"b""#, r#"a\"b"#),
+    ];
+    for (text, value) in table {
+        assert_eq!(parsed(text), lens(value), "{text}");
+        let back = to_text(&lens(value));
+        assert_eq!(parsed(&back), lens(value), "{text} written {back}");
+    }
+    // Written plainly when nothing needs quotes, quoted with the
+    // backslashes as typed when a space does.
+    assert_eq!(to_text(&lens(r"C:\Photos\2024")), r"lens:C:\Photos\2024");
+    assert_eq!(
+        to_text(&lens(r"C:\Photos\2024 trip")),
+        r#"lens:"C:\Photos\2024 trip""#
+    );
+    assert_eq!(to_text(&lens(r"C:\Photos\")), r"lens:C:\Photos\");
+    assert_eq!(to_text(&lens(r"C:\My Photos\")), r#"lens:"C:\My Photos\\""#);
+}
+
+/// A folder on Windows, as typed in the search field, quoted or not.
+#[cfg(windows)]
+#[test]
+fn a_windows_folder_is_a_folder_term() {
+    let folder = |v: &str| all(vec![c("folder", "in", json!(v))]);
+    for (text, value) in [
+        (r"folder:C:\Photos\2024", r"C:\Photos\2024"),
+        (r#"folder:"C:\Photos\2024""#, r"C:\Photos\2024"),
+        (r#"folder:"C:\Photos\2024 trip""#, r"C:\Photos\2024 trip"),
+        (
+            r#"folder:"\\nas\photos\2024 trip""#,
+            r"\\nas\photos\2024 trip",
+        ),
+    ] {
+        assert_eq!(parsed(text), folder(value), "{text}");
+        assert_eq!(parsed(&to_text(&folder(value))), folder(value), "{text}");
     }
 }
 
@@ -368,7 +426,7 @@ impl Gen {
                 (RuleKind::Set, _) if spec.name == "label" => {
                     json!(self.pick(&["red", "yellow", "green", "blue", "purple"]))
                 }
-                (RuleKind::Folder, _) => json!(format!("/{}", self.text())),
+                (RuleKind::Folder, _) => json!(format!("{}{}", root(), self.text())),
                 // The text writes file types in lower case, as typed.
                 (RuleKind::Text, _) if spec.name == "file_type" => {
                     json!(self.text().to_lowercase())
