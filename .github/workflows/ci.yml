@@ -11,24 +11,81 @@ on:
   # Pull requests: only a contributor's, from a fork (see each job's `if`).
   # Our own run pr-lint.yml, the cheap checks alone.
   pull_request:
+  # The whole suite on `next`, nightly and on demand (docs/ci-broker.md,
+  # "On next"): a push to `next` runs the CI broker's selection, and only a
+  # full run promotes (promote.yml). Scheduled runs use the default
+  # branch's copy of this file; the test job checks out `next` itself, and
+  # a scheduled run skips a `next` a scheduled run already tested.
+  schedule:
+    - cron: "15 1 * * *"
+  workflow_dispatch:
 
 # One run per branch at a time. A run on `next` is never cancelled: next
 # moves faster than a full run lasts, so cancelling meant no run ever
 # finished and main was never promoted (2026-11-08). The run going finishes;
 # the newest push waits behind it (GitHub keeps only the latest pending
 # one), so main is promoted at least once per run.
+# The nightly and manual runs test `next` whatever ref they start from:
+# one group of their own.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'next-full' || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # A scheduled run tests a `next` no scheduled run tested yet, or nothing,
+  # as windows-tests.yml does: a cache entry `ci-full-tested-<sha>`, saved
+  # by `mark` once a scheduled run tested that commit, pass or fail. Found:
+  # `test` is skipped and the run is not red. Any doubt runs the tests.
+  gate:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      sha: ${{ steps.next.outputs.sha }}
+    steps:
+      - name: next's head
+        id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/next" --jq .sha) || sha=
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: was it tested?
+        id: tested
+        if: steps.next.outputs.sha != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: tested-sha
+          key: ci-full-tested-${{ steps.next.outputs.sha }}
+          lookup-only: true
+      - name: decide
+        id: decide
+        env:
+          SHA: ${{ steps.next.outputs.sha }}
+          HIT: ${{ steps.tested.outputs.cache-hit }}
+        run: |
+          if [ -n "$SHA" ] && [ "$HIT" = true ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "skipped: next unchanged since the full run of $SHA" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "run: next at ${SHA:-an unknown head} not fully tested by a nightly run yet" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   test:
+    needs: gate
     # Our own pull requests (branches of this repository) run none of this,
     # only their cheap checks (pr-lint.yml): they
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
-    # everything.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # everything. Runs unless the gate said no (it runs on schedule only; a
+    # failed gate has no output, so it fails open).
+    if: ${{ !cancelled() && needs.gate.outputs.run != 'false' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) }}
+    permissions:
+      contents: read
+      # earlier runs' `junit` artifacts, for the broker's recent failures
+      actions: read
     # Pinned, not ubuntu-latest: the fallback Mesa build links this
     # image's LLVM 22 (see .github/actions/software-vulkan).
     runs-on: ubuntu-26.04
@@ -36,6 +93,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # A nightly or manual run tests `next` (the commit the gate saw).
+          ref: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (needs.gate.outputs.sha || 'next') || '' }}
       - uses: dtolnay/rust-toolchain@1.95
         with:
           components: clippy, rustfmt
@@ -65,13 +124,86 @@ jobs:
         uses: ./.github/actions/software-vulkan
         with:
           apt: ${{ vars.UBUNTU_ARCHIVE_DOWN != 'true' }}
+      # The whole suite, or the CI broker's selection (docs/ci-broker.md,
+      # "On next"). A push to `next` runs the selection since the push's
+      # previous commit. Everything runs on the nightly and manual runs, on
+      # other pushes and pull requests, when a pushed commit carries the
+      # trailer `CI: full`, and on any doubt: no previous commit, the
+      # tests do not list, the broker fails or selects everything. The
+      # tests that failed in runs the nightly history has not folded yet
+      # come in too: `next`'s last pushes and its last nightly run.
+      - name: full suite or selection
+        id: mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          full() {
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "filter=all()" >> "$GITHUB_OUTPUT"
+            echo "**Every test runs**: $1." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          if [ "$GITHUB_EVENT_NAME" != push ] || [ "$GITHUB_REF" != refs/heads/next ]; then
+            full "a $GITHUB_EVENT_NAME run, not a push to next"
+          fi
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] \
+            || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            full "no previous commit of next to compare with (a first or forced push)"
+          fi
+          if grep -qiE '^CI: *full[[:space:]]*$' <<< "$(git log --format=%B "$BEFORE..HEAD")"; then
+            full "a pushed commit carries the trailer \`CI: full\`"
+          fi
+          {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch next --event push \
+              --status completed --limit 3 --json databaseId --jq '.[].databaseId'
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event schedule \
+              --status completed --limit 1 --json databaseId --jq '.[].databaseId'
+          } 2>/dev/null | while read -r id; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --name junit \
+              --dir "failed/run-$id" 2>/dev/null || true
+          done || true
+          failed=()
+          while IFS= read -r -d '' f; do failed+=(--failed-junit "$f"); done \
+            < <(find failed -name '*.xml' -print0 2>/dev/null)
+          cargo nextest list --workspace --message-format oneline > tests.txt \
+            || full "the tests do not list"
+          filter=$(cargo xtask ci-broker select --base "$BEFORE" --committed "${failed[@]}" \
+            --list tests.txt --summary-md broker-summary.md) \
+            || full "the broker failed (see the step \"full suite or selection\")"
+          if [ -z "$filter" ] || [ "$filter" = 'all()' ]; then
+            cat broker-summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+            full "the broker selected everything"
+          fi
+          cat broker-summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "mode=select" >> "$GITHUB_OUTPUT"
+          echo "filter=$filter" >> "$GITHUB_OUTPUT"
+      # What this run tests, read by promote.yml (only a full run promotes)
+      # and by ci-history.yml (a nightly run's commit is next's, not its
+      # own head_sha): keep the name `ci-run`.
+      - name: what this run tests
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          printf '{"format":1,"mode":"%s","commit":"%s","event":"%s"}\n' \
+            "${MODE:-full}" "$(git rev-parse HEAD)" "$GITHUB_EVENT_NAME" > ci-run.json
+          cat ci-run.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-run
+          path: ci-run.json
       # One process per test, a JUnit report, slow tests named
       # (.config/nextest.toml); nextest does not run doctests.
-      - run: cargo nextest run --workspace --profile ci
+      - name: tests
+        env:
+          FILTER: ${{ steps.mode.outputs.filter || 'all()' }}
+        run: cargo nextest run --workspace --profile ci -E "$FILTER"
       - run: cargo test --workspace --doc
       # Quit, kill -9 and reopen: the scenarios that gate a release, by name.
-      # promote.yml releases this very commit without running them again.
+      # promote.yml releases this very commit without running them again
+      # (a full run only). A selective run has them in its smoke set.
       - name: survival scenarios
+        if: steps.mode.outputs.mode != 'select'
         run: cargo survival
       - name: slowest tests
         if: ${{ !cancelled() }}
@@ -83,9 +215,9 @@ jobs:
         with:
           name: junit
           path: target/nextest/ci/junit.xml
-      # The broker's shadow week (docs/ci-broker.md, "Shadow week"): which
-      # of the tests above `ci-broker select` would have run, since the
-      # push's previous commit. It skips nothing and never fails the job;
+      # The broker's shadow (docs/ci-broker.md, "Shadow week"): which of the
+      # tests above `ci-broker select` chose, since the push's previous
+      # commit. It skips nothing and never fails the job;
       # xtask is already built (by "slowest tests"), so it costs seconds.
       # ci-history.yml reads the `broker-shadow` artifact nightly.
       - name: broker shadow
@@ -127,6 +259,22 @@ jobs:
             cargo xtask check
           fi
 
+  # A scheduled run marks the commit it tested, pass or fail: the next
+  # night skips it unless `next` moved (as windows-tests.yml does).
+  mark:
+    needs: [gate, test]
+    if: ${{ !cancelled() && needs.gate.outputs.sha != '' && (needs.test.result == 'success' || needs.test.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "$SHA" > tested-sha
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+      - uses: actions/cache/save@v4
+        with:
+          path: tested-sha
+          key: ci-full-tested-${{ needs.gate.outputs.sha }}
+
   # The workspace builds on Windows (MSVC), every push. Its tests run
   # nightly and on demand instead (windows-tests.yml): they took 20 of this
   # job's 33 minutes, made it the run's slowest path, and blocked nothing.
@@ -136,7 +284,8 @@ jobs:
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
     # everything.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # The nightly and manual runs are the test job's alone.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
@@ -163,7 +312,8 @@ jobs:
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
     # everything.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # The nightly and manual runs are the test job's alone.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
@@ -210,7 +360,8 @@ jobs:
     # are tested on the bench box and merged into next, whose push run is
     # the one that counts. A contributor's pull request from a fork runs
     # everything.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # The nightly and manual runs are the test job's alone.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -236,7 +387,8 @@ jobs:
     # they are tested on the bench box and merged into next, whose push run
     # is the one that counts. A contributor's pull request from a fork runs
     # everything.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # The nightly and manual runs are the test job's alone.
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

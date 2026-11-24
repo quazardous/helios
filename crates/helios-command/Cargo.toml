@@ -1,0 +1,14 @@
+[package]
+name = "helios-command"
+description = "Helios's node command contract: what a verb declares (its id, label, category, params schema and needs), so each crate declares the verbs of its own concept"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

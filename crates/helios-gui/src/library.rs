@@ -1863,6 +1863,9 @@ pub struct Library {
     /// what the marks act on there, instead of the gallery's selection,
     /// which Compare leaves alone ([`Library::set_compare_active`]).
     compare_active: Option<String>,
+    /// The open display surfaces and the double click's target, as the
+    /// shell last told them ([`crate::display_surfaces::Seen`]).
+    surfaces: crate::display_surfaces::Seen,
     /// Marks a plugin refused, to say.
     pub notes: Vec<String>,
     /// The Albums section's row photos are dragged over this pass, and
@@ -2072,6 +2075,7 @@ impl Default for Library {
             focused: GalleryOptions::MAIN_PANEL.id.to_string(),
             search_keys: SearchKeys::builtin(),
             compare_active: None,
+            surfaces: crate::display_surfaces::Seen::default(),
             notes: Vec::new(),
             drop_hover: std::cell::Cell::new(None),
             import_offered: false,
@@ -3820,6 +3824,61 @@ impl Library {
         std::mem::take(&mut self.import_asked)
     }
 
+    /// The open display surfaces and the double click's target, told by
+    /// the shell each frame.
+    pub fn set_surfaces(&mut self, seen: crate::display_surfaces::Seen) {
+        self.surfaces = seen;
+    }
+
+    /// The display surface a double click reaches, when it wears the
+    /// target mark (two surfaces or more open).
+    pub fn double_click_target(&self) -> Option<&'static str> {
+        self.surfaces.target
+    }
+
+    /// The photo menu's "Show in ▸": each open display surface (the
+    /// Image always, being the primary one), then "Add to comparison";
+    /// each a `photo.show` (or `compare.add`) of `photo`, as an agent
+    /// runs it.
+    pub fn show_in_items(&self, ctx: &egui::Context, photo: &str) -> Vec<crate::dialogs::MenuItem> {
+        use crate::dialogs::MenuItem;
+        use crate::display_surfaces as ds;
+        let mut open: Vec<(&'static str, bool)> = self.surfaces.open.clone();
+        if !open.iter().any(|(s, _)| *s == ds::IMAGE) {
+            open.insert(0, (ds::IMAGE, false));
+        }
+        if !open.iter().any(|(s, _)| *s == ds::COMPARE) {
+            open.push((ds::COMPARE, false));
+        }
+        let mut items: Vec<MenuItem> = open
+            .into_iter()
+            .map(|(s, windowed)| {
+                let name = crate::i18n::text(ctx, crate::shell::surface_name(s));
+                let label = if windowed {
+                    crate::i18n::text(
+                        ctx,
+                        Message::new("gui-show-in-window", "{ $surface } (its own window)")
+                            .with("surface", name),
+                    )
+                } else {
+                    name
+                };
+                MenuItem::run(ds::SHOW_COMMAND, json!({ "photo": photo, "surface": s }))
+                    .labeled(label)
+            })
+            .collect();
+        items.push(MenuItem::Separator);
+        items.push(
+            MenuItem::run(crate::comparison::ADD_COMMAND, json!({ "images": [photo] }))
+                .labeled(crate::i18n::text(
+                    ctx,
+                    Message::new("gui-library-compare-add", "Add to comparison"),
+                ))
+                .enabled(self.comparing()),
+        );
+        items
+    }
+
     /// The image the user opened (Enter, a double click), once.
     pub fn take_activated(&mut self) -> Option<String> {
         self.activated.take()
@@ -5195,6 +5254,13 @@ impl Library {
             );
             items.push(MenuItem::Separator);
         }
+        if let Some(photo) = self.cursor() {
+            items.push(MenuItem::Submenu {
+                label: crate::i18n::text(ctx, Message::new("gui-show-in", "Show in")),
+                items: self.show_in_items(ctx, &photo),
+            });
+            items.push(MenuItem::Separator);
+        }
         items.extend(vec![
             crate::dialogs::MenuItem::command("library.export"),
             crate::dialogs::MenuItem::command("library.copyFiles"),
@@ -5367,6 +5433,10 @@ impl Library {
         ui.horizontal_wrapped(|ui| {
             if comparing {
                 back_to_grid_action(ui);
+                ui.divider();
+            }
+            if self.surfaces.target == Some(crate::display_surfaces::COMPARE) {
+                target_mark(ui);
                 ui.divider();
             }
             widgets::checkbox(ui, &mut cmp.synced, sync.as_str());
@@ -5766,6 +5836,23 @@ fn back_to_grid_action(ui: &mut Ui) {
             ),
         );
     }
+}
+
+/// The small mark a display surface wears while a double click reaches
+/// it ([`crate::display_surfaces`]).
+pub fn target_mark(ui: &mut Ui) {
+    let text = crate::i18n::text(
+        ui.ctx(),
+        Message::new("gui-surface-target", "◎ Double-click target"),
+    );
+    let tip = crate::i18n::text(
+        ui.ctx(),
+        Message::new(
+            "gui-surface-target-tip",
+            "A double click in a gallery shows the photo here (Settings: Double click shows the photo in)",
+        ),
+    );
+    ui.meta(text).tip(tip);
 }
 
 #[cfg(test)]

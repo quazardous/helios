@@ -3348,3 +3348,11 @@ gui-reset-forget-accounts = Oublier aussi les comptes (leurs connexions et les c
 gui-library-sources = Sources
 
 gui-library-sources-tip = Dossiers, albums, mots-clés et imports : choisir les photos affichées
+
+gui-show-in-title = Montrer dans
+gui-surface-compare = Comparer
+gui-surface-image = Image
+gui-show-in-window = { $surface } (sa propre fenêtre)
+gui-show-in = Montrer dans
+gui-surface-target = ◎ Cible du double clic
+gui-surface-target-tip = Un double clic dans une galerie montre la photo ici (Réglages : Le double clic montre la photo dans)

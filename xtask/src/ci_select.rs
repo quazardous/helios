@@ -24,9 +24,11 @@
 //!      helios-gui and its dependents. A contract edit, its manifest, data
 //!      or a crate depending on it beside helios-gui select as before.
 //! 2. **changed tests**: the `#[test]` functions the diff adds or edits.
-//! 3. **recent failures**: the tests that failed or flaked in the last N
-//!    runs of the `ci-history` summary; skipped, and said, while there is
-//!    no history.
+//! 3. **recent failures**: the tests that failed or flaked in the last
+//!    days (7) and runs (20) of the `ci-history` summary, whichever reaches
+//!    further, and in the runs it has not folded yet (`--failed-junit`:
+//!    `next`'s latest runs, the nightly full one included); the summary is skipped,
+//!    and that said, while there is no history.
 //! 4. **smoke**: the list in `ci/smoke.txt`.
 //!
 //! The filter goes to stdout, the summary per source to stderr.
@@ -45,16 +47,24 @@ use std::process::ExitCode;
 use crate::affected::{self, Graph, Rule};
 use crate::ci_broker::history::Summary;
 use crate::ci_broker::select::{
-    Scope, Selection, Source, hunks, parse_smoke, recent_failures, test_scope, touched_tests,
+    Scope, Selection, Source, Window, failed_in, hunks, parse_smoke, recent_failures, run_summary,
+    test_scope, touched_tests,
 };
 use crate::ci_broker::shadow::artifact_json;
 
-pub const USAGE: &str = "ci-broker select [--base REF] [--history DIR] [--runs N] [--committed | --head REF] [--explain '<binary id> <test>' | --shadow FILE --run ID --commit SHA --junit FILE]";
+pub const USAGE: &str = "ci-broker select [--base REF] [--history DIR] [--days N] [--runs N] [--failed-junit FILE]... [--committed | --head REF] [--list FILE --summary-md FILE] [--explain '<binary id> <test>' | --shadow FILE --run ID --commit SHA --junit FILE]";
 
 /// The base a change is computed against: pull requests go into `next`.
 pub const DEFAULT_BASE: &str = "origin/next";
-/// How many of the last runs the history source reads.
+/// How many of the last runs the history source reads at least.
 pub const DEFAULT_RUNS: usize = 20;
+/// How many days back the history source reads: a failure of the last
+/// week runs again, however many runs `next` had since.
+pub const DEFAULT_DAYS: i64 = 7;
+/// What the job summary of a selective run says after its counts.
+pub const SELECTIVE_RUN: &str = "This push to `next` ran the CI broker's selection since the previous commit of `next` (docs/ci-broker.md). \
+The nightly run tests everything, as do a manual run and a push whose commits carry the trailer `CI: full`; \
+only a full run promotes to `main` and releases.";
 /// A test of the history is current when one of its last N runs listed
 /// it: the measure of a set counts those.
 pub const CURRENT_RUNS: u64 = 10;
@@ -144,7 +154,10 @@ pub struct Input {
     /// feature through the bus.
     pub ids: BTreeMap<String, BTreeSet<String>>,
     pub history: History,
-    pub runs: usize,
+    pub window: Window,
+    /// Failures and flakes of runs the history has not folded yet, as
+    /// `(test id, why)` ([`failed_in`]).
+    pub failed: Vec<(String, String)>,
     pub smoke: Vec<Scope>,
 }
 
@@ -588,20 +601,19 @@ pub fn select(input: &Input) -> Selection {
             );
         }
         History::Read(summary) => {
-            let read = summary.ingested.len().min(input.runs);
-            s.note(
-                Source::History,
-                format!(
-                    "read the last {read} of {} runs in the summary",
-                    summary.runs
-                ),
-            );
-            for (id, why) in recent_failures(summary, input.runs) {
+            s.note(Source::History, input.window.describe(summary));
+            for (id, why) in recent_failures(summary, input.window) {
                 match test_scope(&id) {
                     Some(scope) => s.add(Source::History, scope, why),
                     None => s.note(Source::History, format!("`{id}`: not a test id, left out")),
                 }
             }
+        }
+    }
+    for (id, why) in &input.failed {
+        match test_scope(id) {
+            Some(scope) => s.add(Source::History, scope, why.clone()),
+            None => s.note(Source::History, format!("`{id}`: not a test id, left out")),
         }
     }
     for scope in &input.smoke {
@@ -618,7 +630,7 @@ pub fn gather(
     root: &Path,
     base: &str,
     history: Option<&Path>,
-    runs: usize,
+    window: Window,
     committed: bool,
     at: Option<&str>,
 ) -> Result<Input, String> {
@@ -734,7 +746,8 @@ pub fn gather(
         reexported,
         ids,
         history,
-        runs,
+        window,
+        failed: Vec::new(),
         smoke,
     })
 }
@@ -780,11 +793,38 @@ fn read_history(root: &Path, dir: Option<&Path>) -> History {
     }
 }
 
+/// The failures of runs the history has not folded yet, from their JUnit
+/// reports. A report that does not read is said and left out: the
+/// summary's window still covers what it holds, but a day later.
+fn read_failed(files: &[&Path]) -> Vec<(String, String)> {
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    for file in files {
+        let report = std::fs::read_to_string(file)
+            .map_err(|e| e.to_string())
+            .and_then(|xml| crate::test_times::parse_junit(&xml));
+        match report {
+            Ok(report) => {
+                let run = crate::ci_history::run_from_reports("", "", "", "", &[report]);
+                for (id, why) in failed_in(&run.tests, &file.display().to_string()) {
+                    out.entry(id).or_insert(why);
+                }
+            }
+            Err(e) => eprintln!("ci-broker select: {}: {e}, left out", file.display()),
+        }
+    }
+    out.into_iter().collect()
+}
+
 pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
     let ["select", rest @ ..] = args else {
         return None;
     };
-    let (mut base, mut history, mut runs, mut explain) = (DEFAULT_BASE, None, DEFAULT_RUNS, None);
+    let (mut base, mut history, mut explain) = (DEFAULT_BASE, None, None);
+    let mut window = Window {
+        days: DEFAULT_DAYS,
+        runs: DEFAULT_RUNS,
+    };
+    let (mut failed_junit, mut list, mut summary_md) = (Vec::new(), None, None);
     let (mut committed, mut shadow, mut run_id, mut commit, mut junit) =
         (false, None, None, None, None);
     let mut at = None;
@@ -793,7 +833,11 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         match *a {
             "--base" => base = *it.next()?,
             "--history" => history = Some(Path::new(*it.next()?)),
-            "--runs" => runs = it.next()?.parse().ok()?,
+            "--runs" => window.runs = it.next()?.parse().ok()?,
+            "--days" => window.days = it.next()?.parse().ok()?,
+            "--failed-junit" => failed_junit.push(Path::new(*it.next()?)),
+            "--list" => list = Some(Path::new(*it.next()?)),
+            "--summary-md" => summary_md = Some(Path::new(*it.next()?)),
             "--explain" => explain = Some(*it.next()?),
             "--committed" => committed = true,
             "--head" => at = Some(*it.next()?),
@@ -809,10 +853,16 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         Some(file) => Some((file, run_id?, commit?, junit?)),
         None => None,
     };
-    let input = match gather(root, base, history, runs, committed, at) {
+    // The job summary needs the run's list of tests.
+    let summary_md = match summary_md {
+        Some(file) => Some((file, list?)),
+        None => None,
+    };
+    let mut input = match gather(root, base, history, window, committed, at) {
         Ok(i) => i,
         Err(e) => return Some(crate::fail(&[format!("ci-broker select: {e}")])),
     };
+    input.failed = read_failed(&failed_junit);
     let selection = select(&input);
     if let Some(test) = explain {
         return Some(match selection.explain(test) {
@@ -840,6 +890,25 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
         eprintln!(
             "measured: {held} of the {current} tests of a full run (listed in the history's last {CURRENT_RUNS} runs)"
         );
+    }
+    if let Some((file, list)) = summary_md {
+        let written = std::fs::read_to_string(list)
+            .map_err(|e| format!("{}: {e}", list.display()))
+            .and_then(|text| {
+                let all: Vec<String> = text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| l.contains(' '))
+                    .map(str::to_string)
+                    .collect();
+                std::fs::write(file, run_summary(&selection, &all, SELECTIVE_RUN))
+                    .map_err(|e| format!("{}: {e}", file.display()))
+            });
+        if let Err(e) = written {
+            return Some(crate::fail(&[format!(
+                "ci-broker select --summary-md: {e}"
+            )]));
+        }
     }
     println!("{}", selection.filter());
     if let Some((file, run_id, commit, junit)) = shadow {
@@ -939,7 +1008,11 @@ mod tests {
                 ),
             )]),
             history,
-            runs: DEFAULT_RUNS,
+            window: Window {
+                days: DEFAULT_DAYS,
+                runs: DEFAULT_RUNS,
+            },
+            failed: Vec::new(),
             smoke: parse_smoke("helios-core::engine renders_a_chain\n").unwrap(),
         }
     }
@@ -1279,6 +1352,20 @@ mod tests {
         assert_eq!(why.len(), 1);
         assert_eq!(why[0].source, Source::History);
         assert!(why[0].why.starts_with("flaked in run 2"));
+        assert!(s.filter().contains("test(=undo::a_redo)"));
+    }
+
+    #[test]
+    fn a_failure_of_a_run_not_folded_yet_is_selected_without_a_history() {
+        let mut i = input(vec![change("docs/x.md")], missing());
+        i.failed = vec![(
+            "helios-gui::it undo::a_redo".into(),
+            "failed in next's run 7".into(),
+        )];
+        let s = select(&i);
+        let why = s.explain("helios-gui::it undo::a_redo").unwrap();
+        assert_eq!(why.len(), 1);
+        assert_eq!(why[0].source, Source::History);
         assert!(s.filter().contains("test(=undo::a_redo)"));
     }
 

@@ -9,16 +9,18 @@
 //!   files; see `ci_select.rs` for Helios);
 //! - **changed tests**: the `#[test]` functions a diff adds or edits
 //!   ([`test_fns`], [`hunks`], [`touched_tests`]);
-//! - **history**: the tests that failed or flaked in the last N runs of
-//!   the summary ([`recent_failures`]);
+//! - **history**: the tests that failed or flaked in the last days and
+//!   runs of the summary ([`recent_failures`]), and in runs not folded yet
+//!   ([`failed_in`]);
 //! - **smoke**: a short checked-in list ([`parse_smoke`]).
 //!
 //! Like the rest of `ci_broker`, it knows nothing of Helios.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use super::history::Summary;
+use super::history::{Outcome, Stamp, Summary, TestResult};
+use super::shadow::day_number;
 
 /// Why a test is in the always-run set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -333,27 +335,60 @@ impl Selection {
     }
 }
 
-/// The tests that failed or flaked in the last `runs` runs folded into
-/// the summary, as `(test id, why)`, by id.
-pub fn recent_failures(summary: &Summary, runs: usize) -> Vec<(String, String)> {
-    let skip = summary.ingested.len().saturating_sub(runs);
+/// How far back the history source reads: every failure or flake of the
+/// last `days` days (counted back from the summary's newest run), and of
+/// the last `runs` runs folded, whichever reaches further. A count of runs
+/// alone missed tests that had been failing for a while (`next` runs often:
+/// 20 runs can be a few hours).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Window {
+    pub days: i64,
+    pub runs: usize,
+}
+
+impl Window {
+    /// What the summary says the window read, for the notes.
+    pub fn describe(self, summary: &Summary) -> String {
+        let newest = summary
+            .last_run
+            .as_ref()
+            .map_or("no run", |r| r.date.get(..10).unwrap_or(&r.date));
+        format!(
+            "read the failures of the last {} days (up to {newest}) and of the last {} of {} runs in the summary",
+            self.days,
+            summary.ingested.len().min(self.runs),
+            summary.runs
+        )
+    }
+}
+
+/// The tests that failed or flaked within the window, as `(test id,
+/// why)`, by id. A test's last failure is its newest one: when it lies
+/// before the window, so do all the others.
+pub fn recent_failures(summary: &Summary, window: Window) -> Vec<(String, String)> {
+    let skip = summary.ingested.len().saturating_sub(window.runs);
     let recent: BTreeSet<&str> = summary
         .ingested
         .iter()
         .skip(skip)
         .map(String::as_str)
         .collect();
+    let since = summary
+        .last_run
+        .as_ref()
+        .and_then(|r| day_number(&r.date))
+        .map(|d| d - window.days + 1);
+    let in_window = |s: &&Stamp| {
+        recent.contains(s.run.as_str())
+            || since.is_some_and(|since| day_number(&s.date).is_some_and(|d| d >= since))
+    };
     let short = |c: &str| c.chars().take(10).collect::<String>();
     summary
         .tests
         .iter()
         .filter_map(|(id, stats)| {
             let mut why = Vec::new();
-            if let Some(f) = stats
-                .last_failure
-                .as_ref()
-                .filter(|s| recent.contains(s.run.as_str()))
-            {
+            if let Some(f) = stats.last_failure.as_ref().filter(in_window) {
                 why.push(format!(
                     "failed in run {} ({}, {})",
                     f.run,
@@ -361,11 +396,7 @@ pub fn recent_failures(summary: &Summary, runs: usize) -> Vec<(String, String)> 
                     f.date
                 ));
             }
-            if let Some(f) = stats
-                .last_flake
-                .as_ref()
-                .filter(|s| recent.contains(s.run.as_str()))
-            {
+            if let Some(f) = stats.last_flake.as_ref().filter(in_window) {
                 why.push(format!(
                     "flaked in run {} ({}, {})",
                     f.run,
@@ -376,6 +407,85 @@ pub fn recent_failures(summary: &Summary, runs: usize) -> Vec<(String, String)> 
             (!why.is_empty()).then(|| (id.clone(), why.join("; ")))
         })
         .collect()
+}
+
+/// The tests that failed or flaked in runs the history has not folded yet
+/// (`next`'s runs since the last night), as `(test id, why)`, by id. `from` names where the results come
+/// from.
+pub fn failed_in(results: &[TestResult], from: &str) -> Vec<(String, String)> {
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    for t in results {
+        let what = match t.outcome {
+            Outcome::Fail => "failed",
+            Outcome::Flaky => "flaked",
+            Outcome::Pass | Outcome::Skip => continue,
+        };
+        out.entry(t.id.clone())
+            .or_insert_with(|| format!("{what} in {from}"));
+    }
+    out.into_iter().collect()
+}
+
+/// The job summary of a selective run: how many of the run's tests (`all`,
+/// as nextest lists them: `<binary id> <test name>`) the set holds, and per
+/// source how many it brought, then `context` (what ran, how to run
+/// everything) and each source's notes.
+pub fn run_summary(selection: &Selection, all: &[String], context: &str) -> String {
+    let mut out = String::new();
+    let tests: Vec<(&str, &str)> = all
+        .iter()
+        .filter_map(|id| id.split_once(' '))
+        .map(|(b, n)| (b, n.trim()))
+        .collect();
+    let total = tests.len();
+    if selection.everything() {
+        let why = selection
+            .picks
+            .iter()
+            .find(|p| p.scope == Scope::All)
+            .map_or("", |p| p.why.as_str());
+        let _ = writeln!(
+            out,
+            "**All {total} tests run**: the change selects everything ({why})."
+        );
+        return out;
+    }
+    let selected = tests
+        .iter()
+        .filter(|(b, n)| selection.selects(b, n))
+        .count();
+    let reasons: Vec<String> = Source::ALL
+        .iter()
+        .filter_map(|source| {
+            let n = tests
+                .iter()
+                .filter(|(b, n)| {
+                    selection
+                        .picks
+                        .iter()
+                        .any(|p| p.source == *source && p.scope.contains(b, n))
+                })
+                .count();
+            (n > 0).then(|| format!("{}: {n}", source.name()))
+        })
+        .collect();
+    let reasons = if reasons.is_empty() {
+        "nothing selects a test".to_string()
+    } else {
+        reasons.join(", ")
+    };
+    let _ = writeln!(
+        out,
+        "**{selected} of {total} tests selected** ({reasons}; a test may have several reasons)."
+    );
+    let _ = writeln!(out, "\n{context}");
+    if !selection.notes.is_empty() {
+        out.push('\n');
+    }
+    for (source, note) in &selection.notes {
+        let _ = writeln!(out, "- {}: {note}", source.name());
+    }
+    out
 }
 
 /// A test id of the history (`<binary id> <test name>`) as a scope.
@@ -510,7 +620,7 @@ pub fn touched_tests(source: &str, ranges: &[(usize, usize)]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ci_broker::history::{Stamp, TestStats};
+    use crate::ci_broker::history::TestStats;
 
     fn test(binary: &str, name: &str) -> Scope {
         Scope::Test {
@@ -610,38 +720,157 @@ mod tests {
         assert!(touched_tests(source, &[(1, 1)]).is_empty());
     }
 
+    fn stamp(run: &str, date: &str) -> Stamp {
+        Stamp {
+            run: run.into(),
+            commit: "0123456789abcdef".into(),
+            date: date.into(),
+        }
+    }
+
     #[test]
-    fn recent_failures_read_the_last_runs_only() {
-        let stamp = |run: &str| {
-            Some(Stamp {
-                run: run.into(),
-                commit: "0123456789abcdef".into(),
-                date: "2026-11-19T09:00:00Z".into(),
-            })
-        };
+    fn recent_failures_read_the_last_runs_and_days() {
         let mut summary = Summary {
+            runs: 30,
             ingested: (1..=30).map(|i| i.to_string()).collect(),
+            last_run: Some(stamp("30", "2026-11-21T18:00:00Z")),
             ..Summary::default()
         };
         summary.tests.insert(
             "helios-gui::it a::flaky".into(),
             TestStats {
-                last_flake: stamp("29"),
+                last_flake: Some(stamp("29", "2026-11-21T09:00:00Z")),
                 ..TestStats::default()
             },
         );
         summary.tests.insert(
             "helios-core b::old".into(),
             TestStats {
-                last_failure: stamp("3"),
+                last_failure: Some(stamp("3", "2026-11-10T09:00:00Z")),
                 ..TestStats::default()
             },
         );
-        let recent = recent_failures(&summary, 20);
+        let by_runs = Window { days: 0, runs: 20 };
+        let recent = recent_failures(&summary, by_runs);
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].0, "helios-gui::it a::flaky");
         assert!(recent[0].1.starts_with("flaked in run 29 (0123456789"));
-        assert_eq!(recent_failures(&summary, 30).len(), 2);
+        assert_eq!(
+            recent_failures(&summary, Window { days: 0, runs: 30 }).len(),
+            2
+        );
+        // 11-10 is 12 days before the newest run: out of a week, in two
+        assert_eq!(
+            recent_failures(&summary, Window { days: 7, runs: 20 }).len(),
+            1
+        );
+        assert_eq!(
+            recent_failures(&summary, Window { days: 12, runs: 20 }).len(),
+            2
+        );
+    }
+
+    /// The shadow study's misses: a test failing for days on a busy `next`
+    /// fell out of the last 20 runs while it was still failing. Read by
+    /// days, it stays selected for as long as its last failure is recent.
+    #[test]
+    fn a_test_failing_for_days_stays_selected_past_the_last_runs() {
+        let mut summary = Summary {
+            runs: 88,
+            ingested: (1..=88).map(|i| i.to_string()).collect(),
+            last_run: Some(stamp("88", "2026-11-21T20:00:00Z")),
+            ..Summary::default()
+        };
+        summary.tests.insert(
+            "helios-gui::it import::still_red".into(),
+            TestStats {
+                last_failure: Some(stamp("60", "2026-11-20T08:00:00Z")),
+                ..TestStats::default()
+            },
+        );
+        assert!(recent_failures(&summary, Window { days: 0, runs: 20 }).is_empty());
+        let week = Window { days: 7, runs: 20 };
+        assert_eq!(recent_failures(&summary, week).len(), 1);
+        assert!(
+            week.describe(&summary)
+                .contains("last 7 days (up to 2026-11-21)")
+        );
+        assert!(week.describe(&summary).contains("last 20 of 88 runs"));
+    }
+
+    #[test]
+    fn failures_of_runs_not_folded_yet_are_named_once() {
+        let r = |id: &str, outcome| TestResult {
+            id: id.into(),
+            outcome,
+            seconds: 1.0,
+        };
+        let got = failed_in(
+            &[
+                r("helios-core a::red", Outcome::Fail),
+                r("helios-core a::green", Outcome::Pass),
+                r("helios-gui::it b::shaky", Outcome::Flaky),
+                r("helios-core a::red", Outcome::Fail),
+                r("helios-core a::off", Outcome::Skip),
+            ],
+            "next's run 7",
+        );
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "helios-core a::red".to_string(),
+                    "failed in next's run 7".to_string()
+                ),
+                (
+                    "helios-gui::it b::shaky".to_string(),
+                    "flaked in next's run 7".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_run_summary_counts_the_selected_tests_and_their_reasons() {
+        let all: Vec<String> = [
+            "helios-gui::it import::a",
+            "helios-gui::it import::b",
+            "helios-gui::it undo::c",
+            "helios-core d::e",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+        let mut s = Selection::default();
+        s.add(
+            Source::Affected,
+            Scope::Module {
+                binary: "helios-gui::it".into(),
+                module: "import".into(),
+            },
+            "near",
+        );
+        s.add(Source::Smoke, test("helios-core", "d::e"), "smoke");
+        s.add(Source::History, test("helios-gui::it", "import::b"), "red");
+        s.note(Source::History, "read the last 7 days");
+        let md = run_summary(&s, &all, "The nightly run tests everything.");
+        assert!(
+            md.starts_with("**3 of 4 tests selected** (affected: 2, recent failures: 1, smoke: 1;"),
+            "{md}"
+        );
+        assert!(md.contains("\nThe nightly run tests everything.\n"), "{md}");
+        assert!(
+            md.contains("- recent failures: read the last 7 days"),
+            "{md}"
+        );
+        s.add(Source::Affected, Scope::All, "Cargo.lock changed");
+        let md = run_summary(&s, &all, "");
+        assert!(
+            md.starts_with(
+                "**All 4 tests run**: the change selects everything (Cargo.lock changed)"
+            ),
+            "{md}"
+        );
     }
 
     #[test]

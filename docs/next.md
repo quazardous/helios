@@ -168,7 +168,8 @@ Every failed box job gets its reason at once:
 | Local | fmt, check, typos | while coding |
 | Bench box, narrow | the branch's `check` (clippy) and the manifests' jobs | the author, per pull request; a merger, per batch on a `gate/…` branch |
 | The pull request's `pr-lint` | the cheap checks, no test but the English catalogue's: every linter, `cargo doc` without a warning, the UI index, the catalogues, the changelog fragment | every push of our own pull request into `next` |
-| `next`'s CI | the whole suite, survival, the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, the Windows build | every push of `next` |
+| `next`'s CI, per push | the CI broker's selection of tests since the previous commit of `next` ([ci-broker.md](ci-broker.md), "On next"; every test when the broker selects everything or a commit carries the trailer `CI: full`), survival on a full run (the smoke set holds it otherwise), the commits walk (each merge of `next`, `--first-parent`: a pull request's own fix-up commits are not walked one by one; owner, 2026-11-13), lint, the Windows build | every push of `next` |
+| `next`'s CI, nightly | the whole suite, survival, on `next`'s head; the run that promotes `main` and releases | nightly (01:15 UTC) when `next` moved since the last nightly run, and on manual dispatch of ci.yml |
 | `windows-tests` workflow | the workspace's tests on Windows | nightly on `next` (02:30 UTC) when `next` moved since the last nightly run, and on manual dispatch |
 | `ci-history` workflow | no test: the JUnit reports of `next`'s runs folded into the per-test history, the `ci-history` branch ([ci-broker.md](ci-broker.md)) | nightly (03:45 UTC) when a run of `next` is left to ingest, and on manual dispatch |
 | Bench box, wide | `test-affected`, `test`, GPU, timing, `stability` | daily, before a release, on demand |
@@ -179,13 +180,17 @@ stress runs (`stability`) never go into CI.
 
 ## What happens on `next`
 
-- Every push runs the whole CI. Runs are not cancelled: the newest push
-  waits behind the run going, and each green run is promoted.
-- When CI passes, `promote.yml` promotes that exact commit: when a
-  fragment asks for a release (or one has waited 7 days) it commits
+- Every push runs CI, its tests chosen by the CI broker (docs/ci-broker.md,
+  "On next"); the whole suite runs nightly, on demand (a manual run of
+  ci.yml), and on a push whose commits carry the trailer `CI: full`. Runs
+  are not cancelled: the newest push waits behind the run going.
+- When a **full** run passes, `promote.yml` promotes that exact commit:
+  when a fragment asks for a release (or one has waited 7 days) it commits
   "Release X.Y.Z" on top of it (version, CHANGELOG, Cargo.lock), tags and
   publishes it; then it fast-forwards `main`, and `next` if it has not
-  moved.
+  moved. A selective green run promotes nothing: `main` and releases rest
+  on full runs only (docs/releases.md). A release wanted today without
+  waiting for the night: a manual run of ci.yml on `next`.
 - **One watcher** (the coordinating agent) follows CI on `next`: a
   standing watch wakes it on every finished run, so a red run is seen
   within minutes, never hours. **A red `next` comes before everything**

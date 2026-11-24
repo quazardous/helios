@@ -9,9 +9,10 @@
 //!   when green (see `gate.rs`).
 //! - `manifest check [FILE|-]`: the test manifest of a pull request into
 //!   `devel` (see `manifest.rs`).
-//! - `promote <SHA> [--remote NAME]`: what `promote.yml` runs once CI passed
-//!   on a commit of `next`: the release of its fragments committed on top
-//!   of it, then `main` (and `next`) moved to that (see `promote.rs`).
+//! - `promote <SHA> [--run full|select] [--remote NAME]`: what `promote.yml`
+//!   runs once CI passed on a commit of `next`: a full run only, the release
+//!   of its fragments committed on top of it, then `main` (and `next`)
+//!   moved to that (see `promote.rs`).
 //! - `check [--base REF]`: fragments are well formed and readable by an
 //!   outsider; with `--base`, code changed since REF comes with a fragment.
 //!   The in-tree plugins' Helios range and the workspace's own Cargo.lock
@@ -773,7 +774,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] [--shadow FILE] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-history report --shadow [--history DIR] [--days N] | ci-broker select [--base REF] [--history DIR] [--runs N] [--committed] [--explain TEST | --shadow FILE --run ID --commit SHA --junit FILE] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | engine-diffstat <fixture|all> [--module NAME] [--dump-diff DIR] [--json FILE] [--cpu] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | bench-remote cancel <ext_job_id> | affected [BASE] [--filter | --critical] | i18n extract | i18n check [--new-since REF] | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--run full|select] [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] [--shadow FILE] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-history report --shadow [--history DIR] [--days N] | ci-broker select [--base REF] [--history DIR] [--days N] [--runs N] [--failed-junit FILE]... [--committed] [--list FILE --summary-md FILE] [--explain TEST | --shadow FILE --run ID --commit SHA --junit FILE] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | engine-diffstat <fixture|all> [--module NAME] [--dump-diff DIR] [--json FILE] [--cpu] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | bench-remote cancel <ext_job_id> | affected [BASE] [--filter | --critical] | i18n extract | i18n check [--new-since REF] | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

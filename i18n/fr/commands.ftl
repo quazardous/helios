@@ -921,3 +921,6 @@ command-library-metadata-template-list =
     .title = Lister les modèles de métadonnées, avec leurs champs et mots-clés
 command-library-metadata-template-save =
     .title = Enregistrer un modèle de métadonnées (`name`), depuis `fields` et `keywords` s’ils sont donnés, sinon depuis ce que partagent les photos sélectionnées
+
+command-photo-show =
+    .title = Montrer une photo sur une surface d’affichage (`photo` : son identifiant ; `surface` : helios.viewport ou helios.compare, sinon la stratégie du double clic choisit ; `from` : le panneau qui demande)

@@ -1178,6 +1178,29 @@ mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/r
 source_times = "/target"
 timeout = "1h"
 
+# egui-pop's window smoke run on Linux (its tools/window-smoke.py checks,
+# run by tools/wbox/window_smoke.py): the gallery in release in a headless
+# labwc, as a Wayland client and as an X11 one (Xwayland); a detached
+# window focused by the compositor, real keys typed into it, each window's
+# scale (output scale 2 on Wayland, WINIT_X11_SCALE_FACTOR=1.5 on X11).
+# One `check` line per check and session in the log. A pre-release check
+# (egui-pop's docs/releasing.md), run by hand, never on CI
+[jobs.egui-pop-window-smoke]
+about = "egui-pop: the window smoke run (focus, keys, scale across windows) in a headless labwc, under Wayland and X11"
+first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]
+checkouts = ["egui-pop"]
+cores = 5
+memory = "6g"
+cwd = "/work/${src:-egui-pop}"
+command = """mkdir -p /tmp/w/egui-pop && cp -r --preserve=mode,timestamps . /tmp/w/egui-pop/ && cd /tmp/w/egui-pop && { [ "$(cat /target/.built-at 2> /dev/null)" = /tmp/w/egui-pop ] || { rm -rf /target/* && echo /tmp/w/egui-pop > /target/.built-at; }; } && \
+cargo build --release --locked -p egui-pop-gallery && \
+mkdir -p "$XDG_RUNTIME_DIR" "$HOME" && chmod 700 "$XDG_RUNTIME_DIR" && \
+"$WBOX_PYTHON" -I tools/wbox/window_smoke.py --out /out ${session:+--only ${session}}"""
+env = { CARGO_NET_OFFLINE = "true", WLR_RENDERER = "pixman" }
+mounts = { "egui-pop-target/${egui_pop:-main}" = "/target", registry = "/cargo/registry", cargo-git = "/cargo/git", sccache = "/sccache" }
+source_times = "/target"
+timeout = "45m"
+
 [jobs.egui-pop-catalogues]
 about = "egui-pop's catalogue test: the English catalogues match the sources, the French stamped"
 first = [{ job = "egui-pop-check", pass = ["branch", "egui_pop", "src"] }]

@@ -304,6 +304,15 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.select.similar" => object(&[], &[("by", any())]),
         "library.view.open" => object(&[], &[("place", string_or_null())]),
         "library.view.close" => object(&["view"], &[("view", string())]),
+        "photo.show" => object(
+            &[],
+            &[
+                ("photo", string()),
+                ("surface", string()),
+                ("origin", any()),
+                ("from", any()),
+            ],
+        ),
         // The network (destructive).
         "node.reset" => object(&[], &[("node", any())]),
         "mask.member.delete" => object(&[], &[("member", any())]),

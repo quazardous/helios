@@ -241,6 +241,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("param.set", "phosphor:sliders"),
     ("param.undo", "undo"),
     ("param.undoAgent", "phosphor:robot"),
+    ("photo.show", "phosphor:monitor"),
     ("profile.export", "phosphor:export"),
     ("profile.import", "phosphor:tray-arrow-down"),
     ("profile.import.apply", "check"),

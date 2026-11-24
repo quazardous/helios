@@ -282,3 +282,15 @@ setting-interface-graph-zoom-choice-overview = la vue d’ensemble
 setting-interface-panels-queue-when-empty =
     .description = Ce que fait le panneau File d’attente quand le nœud sélectionné n’a pas de file.
     .label = Panneau File d’attente sans file
+
+setting-library-double-click =
+    .description = Où un double clic ou Entrée dans une galerie montre la photo : la surface principale (l’Image), la surface utilisée en dernier, celle de la même fenêtre que la galerie, ou demander à chaque fois. Avec deux surfaces ouvertes, celle qu’il atteint porte une marque de cible.
+    .label = Le double clic montre la photo dans
+
+setting-library-double-click-choice-primary = la surface principale
+
+setting-library-double-click-choice-last-focused = la dernière utilisée
+
+setting-library-double-click-choice-same-window = la même fenêtre
+
+setting-library-double-click-choice-ask = demander
