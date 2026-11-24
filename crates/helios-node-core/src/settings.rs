@@ -232,19 +232,11 @@ mod tests {
                 .count();
             assert_eq!((sets, times), (1, 1), "`{key}`");
         }
-        // Settings added since (the double-click strategy…) are welcome:
-        // only a key lost or renamed would break a saved layer.
-        let now: Vec<&str> = super::schema().iter().map(|s| s.key).collect();
-        let lost: Vec<&str> = BEFORE_THE_MOVE
-            .iter()
-            .copied()
-            .filter(|k| !now.contains(k))
-            .collect();
-        assert!(lost.is_empty(), "the schema lost {lost:?}");
-        let mut unique = now.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), now.len(), "a key is declared twice: {now:?}");
+        let mut now: Vec<&str> = super::schema().iter().map(|s| s.key).collect();
+        let mut before = BEFORE_THE_MOVE.to_vec();
+        now.sort_unstable();
+        before.sort_unstable();
+        assert_eq!(now, before, "the schema holds exactly the keys it held");
     }
 
     #[test]
