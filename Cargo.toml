@@ -110,7 +110,7 @@ egui-pop-wayland = "0.2"
 egui-pop-fit = "0.1.2"
 # MIT OR Apache-2.0: the controls framework (controls as data, cards on the
 # slot engine, the value flow, renderers on egui-pop), agnostic of Helios.
-egui_hud = "0.14.0"
+egui_hud = "0.15.0"
 blake3 = "1"
 # MIT OR Apache-2.0: the hashes connectors claim for their items (MD5,
 # SHA-1, SHA-256), checked while fetched bytes land.
@@ -277,3 +277,25 @@ opt-level = 3
 
 [profile.dev.package.blake3]
 opt-level = 3
+
+[patch.crates-io]
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-fit = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui-pop-winit = { git = "https://github.com/quazardous/egui-pop", rev = "61e028d4" }
+egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "6208b8e1" }
