@@ -5970,8 +5970,8 @@ mod tests {
         .rules
     }
 
-    fn parsed(text: &str) -> Option<helios_vault::rules::Rule> {
-        Some(helios_vault::rules::parse_text(text).unwrap())
+    fn parsed(text: &str) -> helios_vault::rules::Rule {
+        helios_vault::rules::parse_text(text).unwrap()
     }
 
     /// The whole search text is read with the vault's grammar: Helios's
@@ -5980,7 +5980,7 @@ mod tests {
     #[test]
     fn the_search_text_is_read_with_the_vault_s_grammar() {
         let text = "camera:\"Z 8\" lens:L1 TYPE:NEF presence:offline presence:soon sea -(flag:reject OR cull:soft)";
-        assert_eq!(rules_of(text), parsed(text));
+        assert_eq!(rules_of(text), Some(parsed(text)));
         let chips = Filter {
             text: "sea".into(),
             min_rating: Some(3),
@@ -5990,7 +5990,7 @@ mod tests {
         };
         assert_eq!(
             query_of(&chips).rules,
-            parsed("rating>=3 label:red from:2024-06-01 sea")
+            Some(parsed("rating>=3 label:red from:2024-06-01 sea"))
         );
         assert_eq!(rules_of(""), None, "nothing typed: no rules");
         let refused = query_of(&Filter {
@@ -6005,7 +6005,7 @@ mod tests {
         assert_eq!(facet_term("file_type", "nef"), "type:nef");
         assert_eq!(
             rules_of(&facet_term("camera", "Z 8")),
-            parsed("camera:\"Z 8\"")
+            Some(parsed("camera:\"Z 8\""))
         );
     }
 
@@ -6013,7 +6013,7 @@ mod tests {
     fn cull_terms_and_badges_follow_the_measures() {
         assert_eq!(
             rules_of("cull:soft cull:Clipped cull:blurry"),
-            parsed("cull:soft cull:clipped \"cull:blurry\"")
+            Some(parsed("cull:soft cull:clipped \"cull:blurry\""))
         );
         assert_eq!(facet_term("cull", "sharp"), "cull:sharp");
         let entry = |id: &str, focus: Option<f64>, white: Option<f64>, black: Option<f64>| {
