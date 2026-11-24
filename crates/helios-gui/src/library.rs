@@ -690,46 +690,26 @@ impl Change {
 }
 
 /// The vault query a search filter makes: all of it runs in the vault
-/// (`docs/design/library.md`, L4). Its rating, labels, flags, tags and
-/// dates (a date being the capture day by the camera's clock:
-/// `date:2024-06-01..2024-06-30` takes both days whole), and in its text
-/// Helios's own keys ([`helios_terms`]): `camera:`, `lens:`, `type:`,
-/// `folder:`, `collection:`, `import:`, `presence:`, `cull:` and `backup:`; the other words are looked for
-/// in the photo's name and tags. A `backup:` term is measured against no
-/// volume until the library sets its rule ([`Library::set_backup_rule`]).
+/// (`docs/design/library.md`, L4). The filter is written as one search
+/// text ([`crate::recent_filters::text`]: its chips, then the text typed)
+/// and read with the vault's grammar (`helios_vault::rules::parse_text`):
+/// every key, `-`, `OR`, ranges and relative dates, a date being the
+/// capture day by the camera's clock; the words left are looked for in the
+/// photo's name and tags. A text the grammar refuses (a `(` not closed)
+/// searches its words. A `backup:` term is measured against no volume
+/// until the library sets its rule ([`Library::set_backup_rule`]).
 pub fn query_of(filter: &Filter) -> Query {
-    use helios_vault::capture::day_start;
-    let terms = helios_terms(&filter.text);
-    Query {
-        min_rating: filter.min_rating.map(i64::from),
-        labels: filter.labels.iter().map(|l| l.name().to_string()).collect(),
-        flags: filter.flags.iter().map(|f| f.name().to_string()).collect(),
-        tags: filter.tags.clone(),
-        keywords: terms.keywords,
-        captured_from: filter.from.as_deref().and_then(day_start),
-        captured_before: filter.to.as_deref().and_then(day_start).map(|d| d + 86_400),
-        words: terms.words,
-        cameras: terms.cameras,
-        lenses: terms.lenses,
-        file_types: terms.file_types,
-        folder: terms.folder,
-        album: terms.collection,
-        presence: terms.presence,
-        backup: terms.backup.map(|states| helios_vault::BackupFilter {
-            rule: helios_vault::Backups::default(),
-            states,
-        }),
-        cull: terms.cull,
-        // An import session: the photos it brought in, by the vault's
-        // `import` rule (nothing copied or moved).
-        // The tree must be a group at its top (`Rule::parse` refuses a bare
-        // condition when the query crosses to the node).
-        rules: terms.import.and_then(|id| {
-            helios_vault::rules::Rule::condition("import", "in", serde_json::json!(id))
-                .ok()
-                .map(|c| helios_vault::rules::Rule::group(helios_vault::rules::Match::All, vec![c]))
-        }),
-        ..Query::default()
+    let text = crate::recent_filters::text(filter);
+    match helios_vault::rules::parse_text(&text) {
+        Ok(rules) => Query {
+            rules: (!matches!(&rules, helios_vault::rules::Rule::Group { rules, .. } if rules.is_empty()))
+                .then_some(rules),
+            ..Query::default()
+        },
+        Err(_) => Query {
+            words: tokens(&text).iter().map(|w| unquoted(w)).collect(),
+            ..Query::default()
+        },
     }
 }
 
@@ -861,7 +841,8 @@ pub fn helios_terms(text: &str) -> Terms {
 }
 
 /// The search filter a workspace's library query makes (see
-/// `helios_template::QueryDesc`): the library opens on it.
+/// `helios_template::QueryDesc`): the library opens on it, its other
+/// terms as the text typed.
 pub fn filter_of(query: &helios_template::QueryDesc) -> Filter {
     Filter {
         min_rating: query.min_rating,
@@ -872,26 +853,62 @@ pub fn filter_of(query: &helios_template::QueryDesc) -> Filter {
             .collect(),
         flags: query.flags.iter().filter_map(|f| Flag::parse(f)).collect(),
         tags: query.tags.clone(),
+        text: query.search.trim().to_string(),
         ..Filter::default()
     }
 }
 
-/// A library query typed as in the search field (`flag:pick rating:3`):
-/// its words and dates are refused, a workspace keeps criteria only;
-/// nothing typed is no query.
+/// A library query typed as in the search field (`flag:pick rating:3
+/// -camera:R5`), read with the vault's grammar: its stars, labels, flags
+/// and tags kept as the query's criteria, every other term as its
+/// `search` text; a text the grammar refuses (a `(` not closed) is
+/// refused; nothing typed is no query.
 pub fn query_typed(text: &str) -> Result<Option<helios_template::QueryDesc>, String> {
-    let f = Filter::parse(text);
-    if !f.text.is_empty() || f.from.is_some() || f.to.is_some() {
-        return Err(format!(
-            "the library's query keeps a rating, labels, flags and tags only, not `{text}`"
-        ));
-    }
-    let q = helios_template::QueryDesc {
-        min_rating: f.min_rating,
-        labels: f.labels.iter().map(|l| l.name().to_string()).collect(),
-        flags: f.flags.iter().map(|f| f.name().to_string()).collect(),
-        tags: f.tags,
+    use helios_vault::rules::{Match, Rule, parse_text, to_text};
+    let tree = parse_text(text).map_err(|e| format!("the library's query `{text}`: {e}"))?;
+    let Rule::Group { rules, .. } = tree else {
+        return Ok(None);
     };
+    let mut q = helios_template::QueryDesc::default();
+    // A condition, or an `any` group of one key's, as one key's values.
+    let values = |rule: &Rule, field: &str, op: &str| -> Option<Vec<String>> {
+        let one = |r: &Rule| match r {
+            Rule::Condition(c) if c.field.name == field && c.op == op => {
+                c.value.as_str().map(String::from)
+            }
+            _ => None,
+        };
+        match rule {
+            Rule::Group {
+                mode: Match::Any,
+                rules,
+            } if !rules.is_empty() => rules.iter().map(one).collect(),
+            other => one(other).map(|v| vec![v]),
+        }
+    };
+    let mut rest = Vec::new();
+    for rule in rules {
+        let stars = match &rule {
+            Rule::Condition(c) if c.field.name == "rating" && c.op == ">=" => {
+                c.value.as_u64().and_then(|n| u8::try_from(n).ok())
+            }
+            _ => None,
+        };
+        if let Some(n) = stars.filter(|_| q.min_rating.is_none()) {
+            q.min_rating = Some(n);
+        } else if let Some(v) = values(&rule, "label", "has").filter(|_| q.labels.is_empty()) {
+            q.labels = v;
+        } else if let Some(v) = values(&rule, "flag", "is").filter(|_| q.flags.is_empty()) {
+            q.flags = v;
+        } else if let Some(v) = values(&rule, "tag", "has")
+            .filter(|v| v.len() == 1 && !v[0].contains(char::is_whitespace))
+        {
+            q.tags.extend(v);
+        } else {
+            rest.push(rule);
+        }
+    }
+    q.search = to_text(&Rule::group(Match::All, rest));
     Ok((!q.is_empty()).then_some(q))
 }
 
@@ -2985,11 +3002,10 @@ impl Library {
 
     /// The vault query of the filter in force, its backup rule set.
     fn query_for(&self, filter: &Filter) -> Query {
-        let mut query = query_of(filter);
-        if let Some(b) = &mut query.backup {
-            b.rule = self.backup_rule.clone();
+        Query {
+            backup_rule: Some(self.backup_rule.clone()),
+            ..query_of(filter)
         }
-        query
     }
 
     /// Asks the host to run the filter's query again (the photos or what
@@ -4420,7 +4436,11 @@ impl Library {
         let search = crate::i18n::text(&ctx, Message::new("gui-library-search", "Search images"));
         // The field's box holds its icon and its "+" beside the text.
         let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
-        let mut field = SearchField::new(LIBRARY).label(search).width(width);
+        // Helios reads the whole text with the vault's grammar.
+        let mut field = SearchField::new(LIBRARY)
+            .label(search)
+            .width(width)
+            .whole_text(true);
         if let Some(app) = &self.app {
             field = field.app(app);
         }
@@ -5941,38 +5961,60 @@ mod tests {
         assert_eq!(reds(&back), reds(&picture));
     }
 
-    /// A date in the search field is a capture day: the vault query takes
-    /// both ends whole, and an entry's day is its capture's by the
-    /// camera's clock, not its file's.
-    /// Helios's own keys come out of the search text into the vault
-    /// query, quoted values whole, unknown values left as words; several
-    /// `backup:` terms keep the states every one allows.
+    /// The rule tree a search text makes, as the field hands it whole.
+    fn rules_of(text: &str) -> Option<helios_vault::rules::Rule> {
+        query_of(&Filter {
+            text: text.into(),
+            ..Filter::default()
+        })
+        .rules
+    }
+
+    fn parsed(text: &str) -> Option<helios_vault::rules::Rule> {
+        Some(helios_vault::rules::parse_text(text).unwrap())
+    }
+
+    /// The whole search text is read with the vault's grammar: Helios's
+    /// keys, egui-pop's chips written before the text, unknown values left
+    /// as words; a text the grammar refuses searches its words.
     #[test]
-    fn helios_keys_become_query_terms() {
-        use helios_vault::{BackupState as B, Presence};
-        let q = query_of(&Filter::parse(
-            "camera:\"Z 8\" lens:L1 TYPE:NEF folder:\"/a b/c\" presence:offline presence:soon sea backup:short backup:unverified",
-        ));
-        assert_eq!(q.cameras, ["Z 8"]);
-        assert_eq!(q.lenses, ["L1"]);
-        assert_eq!(q.file_types, ["nef"]);
-        assert_eq!(q.folder.as_deref(), Some("/a b/c"));
-        assert_eq!(q.presence, [Presence::Offline]);
-        assert_eq!(q.words, ["presence:soon", "sea"]);
-        assert_eq!(q.backup.unwrap().states, [B::Unverified]);
+    fn the_search_text_is_read_with_the_vault_s_grammar() {
+        let text = "camera:\"Z 8\" lens:L1 TYPE:NEF presence:offline presence:soon sea -(flag:reject OR cull:soft)";
+        assert_eq!(rules_of(text), parsed(text));
+        let chips = Filter {
+            text: "sea".into(),
+            min_rating: Some(3),
+            labels: vec![ColorLabel::Red],
+            from: Some("2024-06-01".into()),
+            ..Filter::default()
+        };
+        assert_eq!(
+            query_of(&chips).rules,
+            parsed("rating>=3 label:red from:2024-06-01 sea")
+        );
+        assert_eq!(rules_of(""), None, "nothing typed: no rules");
+        let refused = query_of(&Filter {
+            text: "(label:red sea".into(),
+            ..Filter::default()
+        });
+        assert_eq!(
+            (refused.rules, refused.words),
+            (None, vec!["(label:red".to_string(), "sea".to_string()])
+        );
         assert_eq!(facet_term("camera", "Z 8"), "camera:\"Z 8\"");
         assert_eq!(facet_term("file_type", "nef"), "type:nef");
         assert_eq!(
-            query_of(&Filter::parse(&facet_term("camera", "Z 8"))).cameras,
-            ["Z 8"]
+            rules_of(&facet_term("camera", "Z 8")),
+            parsed("camera:\"Z 8\"")
         );
     }
 
     #[test]
     fn cull_terms_and_badges_follow_the_measures() {
-        let q = query_of(&Filter::parse("cull:soft cull:Clipped cull:blurry"));
-        assert_eq!(q.cull, ["soft", "clipped"]);
-        assert_eq!(q.words, ["cull:blurry"]);
+        assert_eq!(
+            rules_of("cull:soft cull:Clipped cull:blurry"),
+            parsed("cull:soft cull:clipped \"cull:blurry\"")
+        );
         assert_eq!(facet_term("cull", "sharp"), "cull:sharp");
         let entry = |id: &str, focus: Option<f64>, white: Option<f64>, black: Option<f64>| {
             let mut e = Entry {
@@ -6010,12 +6052,30 @@ mod tests {
     #[test]
     fn search_dates_are_capture_days_queried_in_the_vault() {
         use helios_vault::capture::day_start;
-        let q = query_of(&Filter::parse("date:2024-06-01..2024-06-02 rating>=2"));
-        assert_eq!(q.captured_from, day_start("2024-06-01"));
-        assert_eq!(q.captured_before, day_start("2024-06-03"));
-        assert_eq!(q.min_rating, Some(2));
-        let open = query_of(&Filter::parse("from:2024-06-01"));
-        assert_eq!(open.captured_before, None);
+        let rules = |r: Vec<helios_vault::rules::Rule>| {
+            Some(helios_vault::rules::Rule::group(
+                helios_vault::rules::Match::All,
+                r,
+            ))
+        };
+        let c = |op: &str, v: serde_json::Value| {
+            helios_vault::rules::Rule::condition("captured", op, v).unwrap()
+        };
+        let (from, after) = (
+            day_start("2024-06-01").unwrap(),
+            day_start("2024-06-03").unwrap(),
+        );
+        assert_eq!(
+            query_of(&Filter::parse("date:2024-06-01..2024-06-02 rating>=2")).rules,
+            rules(vec![
+                helios_vault::rules::Rule::condition("rating", ">=", serde_json::json!(2)).unwrap(),
+                c("between", serde_json::json!([from, after - 1])),
+            ])
+        );
+        assert_eq!(
+            query_of(&Filter::parse("from:2024-06-01")).rules,
+            rules(vec![c(">=", serde_json::json!(from))])
+        );
         let mut e = Entry {
             modified: Some(1_800_000_000),
             ..Entry::default()

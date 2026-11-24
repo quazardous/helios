@@ -258,8 +258,10 @@ fn the_search_filter_is_a_vault_query() {
         .library_mut()
         .set_filter(picked_and_rated.clone());
     let query = helios_gui::library::query_of(&picked_and_rated);
-    assert_eq!(query.min_rating, Some(3));
-    assert_eq!(query.flags, ["pick"]);
+    assert_eq!(
+        query.rules,
+        Some(helios_vault::rules::parse_text("rating>=3 flag:pick").unwrap())
+    );
     persist.frame_settled(h.state_mut(), 2.0);
     assert_eq!(h.state().library().shown(), [id(2).hex()]);
     let tagged = Filter {
@@ -273,6 +275,67 @@ fn the_search_filter_is_a_vault_query() {
     h.state_mut().library_mut().set_filter(Filter::default());
     persist.frame_settled(h.state_mut(), 4.0);
     assert_eq!(h.state().library().shown().len(), 3);
+    h.run();
+    drop((h, persist, other));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The search text typed in the window, or applied by an agent, shows
+/// the photos the vault's grammar selects: for each text, the window's
+/// results are the vault's own query of `rules::parse_text`.
+#[test]
+fn the_window_s_results_are_the_vault_s_for_every_search_text() {
+    let dir = scratch("grammar");
+    let path = vault_file(&dir);
+    let other = Vault::new(SqliteStore::open(&path).unwrap());
+    other
+        .apply(
+            &[
+                helios_vault::Command::set(id(1), RATING, json!(4)),
+                helios_vault::Command::add(id(1), LABELS, "red"),
+                helios_vault::Command::set(id(2), RATING, json!(2)),
+                helios_vault::Command::set(id(2), PICKED, json!(true)),
+                helios_vault::Command::add(id(2), LABELS, "blue"),
+                helios_vault::Command::add(id(3), TAGS, "sea"),
+                helios_vault::Command::set(id(3), REJECTED, json!(true)),
+            ],
+            "user",
+            None,
+            1,
+        )
+        .unwrap();
+    let (mut h, mut persist) = open(&path);
+    let texts = [
+        "rating>=3",
+        "rating:<3",
+        "label:red label:blue",
+        "-flag:reject",
+        "(flag:pick OR #sea)",
+        "-(label:red OR #sea)",
+        "#sea -rating:>=1",
+        "+label:red +label:blue",
+        "rating:2..4 -label:blue",
+    ];
+    for (i, text) in texts.iter().enumerate() {
+        run(&mut h, "library.filter.apply", json!({ "query": text }));
+        persist.frame_settled(h.state_mut(), 10.0 + i as f64);
+        let mut shown = h.state().library().shown();
+        shown.sort();
+        let query = helios_vault::Query {
+            rules: Some(helios_vault::rules::parse_text(text).unwrap()),
+            ..helios_vault::Query::default()
+        };
+        let cursor = other.open_cursor(query).unwrap();
+        let mut want: Vec<String> = other
+            .cursor_ids(cursor.id, 0, 99)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.hex())
+            .collect();
+        other.close_cursor(cursor.id);
+        want.sort();
+        assert_eq!(shown, want, "`{text}`");
+    }
     h.run();
     drop((h, persist, other));
     let _ = std::fs::remove_dir_all(&dir);

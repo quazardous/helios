@@ -629,12 +629,15 @@ Each slice is one PR with its tests; the order matters.
    editor. Tests: a round trip on 4,000 generated trees drawing every
    field and operator; a table of today's terms read into the tree; the
    vault contract running each text of the table beside the query its
-   old terms made, on both stores. Left: the search field, the
-   workspace query (`QueryDesc`) and `library.filter.apply` still read
-   egui-pop's keys and `helios_terms`; they move onto the grammar once
-   the field hands Helios its whole text (egui-pop's `Filter::parse`
-   takes `#beach)` out of `(label:red OR #beach)`), with the window's
-   results checked against the vault's on a fixture.
+   old terms made, on both stores.
+   *Landed (2026-11-24), the rest:* egui-pop's `SearchField::whole_text`
+   hands Helios the text as typed; `query_of` writes the filter (its
+   chips, then the text) as one text and reads it with `parse_text`
+   (a text it refuses searches its words); `library.filter.apply`
+   takes its `query` whole and refuses an unbalanced one; a workspace's
+   `QueryDesc` keeps its stars, labels, flags and tags and any other
+   term in `search`. A test types each text of a table and compares the
+   window's results with the vault's query of the same text.
 4. **G4. Chips and suggestions.** Chips drawn in words with a value
    menu (counts from the facets), the filter button's key list,
    suggestions (keys, values with counts, recent, pinned, virtual

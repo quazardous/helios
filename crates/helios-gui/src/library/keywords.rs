@@ -400,8 +400,8 @@ mod tests {
         lib.set_keyword(Some("Animals|Dog"));
         assert_eq!(lib.keyword().as_deref(), Some("Animals|Dog"));
         assert_eq!(
-            super::super::query_of(lib.filter()).keywords,
-            ["Animals|Dog"]
+            super::super::query_of(lib.filter()).rules,
+            Some(helios_vault::rules::parse_text("keyword:Animals|Dog").unwrap())
         );
         assert_eq!(lib.add_keyword("Pets | Cat", Some(vec!["a".into()])), Ok(1));
         assert_eq!(lib.entry("a").unwrap().tags, ["Animals|Dog", "Pets|Cat"]);

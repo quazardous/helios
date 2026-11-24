@@ -250,9 +250,12 @@ What the workspace sets for the library (optional):
 - `query` (2026-11-03) is what the library opens on, as the search
   field's criteria: `min_rating` (0 to 5 stars), `labels` (`red`,
   `yellow`, `green`, `blue`, `purple`: any of them), `flags` (`pick`,
-  `reject`, `none`: any of them) and `tags` (all of them); all must hold.
+  `reject`, `none`: any of them), `tags` (all of them) and `search`
+  (2026-11-24: any other terms, as typed in the search field, read with
+  the vault's search grammar of `docs/design/library-search.md`, section
+  4); all must hold.
   The workspace opens with them as the search field's filter, which the
-  user may then change; words and dates are not kept. A query changed in
+  user may then change. A query changed in
   the workspace (an edit, an undo, a reset) filters the library again;
   its other settings changing keep the search typed. Validation refuses
   a query with no criterion, a word it does not know, more than 5 stars
