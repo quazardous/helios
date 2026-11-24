@@ -51,6 +51,7 @@ pub fn check<S: Store>(make: impl Fn() -> S) {
     forgetting_and_pruning_never_touch_the_library(make());
     capture_fields_are_read_only_and_a_date_range_is_one_query(make());
     queries_filter_by_every_library_term_in_one_query(make());
+    search_texts_select_as_their_terms_did(make());
     facets_count_each_value_in_one_query(make());
     folders_count_their_photos_and_those_below_in_one_query(make());
     albums_are_made_filled_renamed_and_forgotten(make());
@@ -2326,6 +2327,211 @@ fn queries_filter_by_every_library_term_in_one_query<S: Store>(s: S) {
         pick(&[1, 0]),
         "`beach.jpg` after `IMG_0001.CR3`, descending"
     );
+}
+
+/// The search text's grammar (`crate::rules::parse_text`) selects, in one
+/// query, the photos the Library's own terms selected: each text of the
+/// table beside the query its terms always made, and the new terms
+/// (`-`, `OR`, presence, backup and culling as rule fields) beside theirs.
+fn search_texts_select_as_their_terms_did<S: Store>(s: S) {
+    use crate::{BackupFilter, BackupState};
+    let (v, ids, rule) = library_fixture(s);
+    let shots = p_root().join("shots");
+    let run = |q: Query| {
+        let q0 = v.reads().queries;
+        let cursor = v.open_cursor(q.clone()).unwrap();
+        assert_eq!(v.reads().queries - q0, 1, "{q:?}: one query");
+        let got = v.cursor_ids(cursor.id, 0, 99).unwrap();
+        v.close_cursor(cursor.id);
+        got
+    };
+    let text = |t: &str| {
+        run(Query {
+            rules: Some(crate::rules::parse_text(t).unwrap()),
+            backup_rule: Some(rule.clone()),
+            ..Query::default()
+        })
+    };
+    let backup = |states: Vec<BackupState>| {
+        Some(BackupFilter {
+            rule: rule.clone(),
+            states,
+        })
+    };
+    let strings = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let table: Vec<(String, Query)> = vec![
+        (
+            "rating>=3".into(),
+            Query {
+                min_rating: Some(3),
+                ..Query::default()
+            },
+        ),
+        (
+            "stars:3".into(),
+            Query {
+                min_rating: Some(3),
+                ..Query::default()
+            },
+        ),
+        (
+            "label:red label:blue".into(),
+            Query {
+                labels: strings(&["red", "blue"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "flag:pick".into(),
+            Query {
+                flags: strings(&["pick"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "flag:none".into(),
+            Query {
+                flags: strings(&["none"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "#Été".into(),
+            Query {
+                tags: strings(&["Été"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "img".into(),
+            Query {
+                words: strings(&["img"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "BEACH .jpg".into(),
+            Query {
+                words: strings(&["BEACH", ".jpg"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "été".into(),
+            Query {
+                words: strings(&["été"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "camera:\"Z 8\"".into(),
+            Query {
+                cameras: strings(&["Z 8"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "lens:L2 lens:L1".into(),
+            Query {
+                lenses: strings(&["L2", "L1"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "type:NEF".into(),
+            Query {
+                file_types: strings(&["nef"]),
+                ..Query::default()
+            },
+        ),
+        (
+            format!("folder:\"{}\"", shots.display()),
+            Query {
+                folder: Some(shots.display().to_string()),
+                ..Query::default()
+            },
+        ),
+        (
+            "presence:missing".into(),
+            Query {
+                presence: vec![Presence::Missing],
+                ..Query::default()
+            },
+        ),
+        (
+            "presence:present presence:offline".into(),
+            Query {
+                presence: vec![Presence::Present, Presence::Offline],
+                ..Query::default()
+            },
+        ),
+        (
+            "backup:met".into(),
+            Query {
+                backup: backup(vec![BackupState::Met]),
+                ..Query::default()
+            },
+        ),
+        (
+            "backup:short".into(),
+            Query {
+                backup: backup(vec![
+                    BackupState::Short,
+                    BackupState::Unverified,
+                    BackupState::None,
+                ]),
+                ..Query::default()
+            },
+        ),
+        (
+            "backup:short backup:unverified".into(),
+            Query {
+                backup: backup(vec![BackupState::Unverified]),
+                ..Query::default()
+            },
+        ),
+        (
+            "cull:unmeasured".into(),
+            Query {
+                cull: strings(&["unmeasured"]),
+                ..Query::default()
+            },
+        ),
+        (
+            "cull:sharp".into(),
+            Query {
+                cull: strings(&["sharp"]),
+                ..Query::default()
+            },
+        ),
+        (
+            ". camera:\"Z 8\" presence:present rating:3 backup:short".into(),
+            Query {
+                words: strings(&["."]),
+                cameras: strings(&["Z 8"]),
+                presence: vec![Presence::Present],
+                min_rating: Some(3),
+                backup: backup(vec![
+                    BackupState::Short,
+                    BackupState::Unverified,
+                    BackupState::None,
+                ]),
+                ..Query::default()
+            },
+        ),
+    ];
+    for (t, old) in &table {
+        let want = run(old.clone());
+        assert_eq!(text(t), want, "`{t}` selects as {old:?}");
+    }
+    // What the old terms could not say.
+    let pick = |n: &[usize]| n.iter().map(|&i| ids[i]).collect::<Vec<_>>();
+    assert_eq!(text("-presence:missing"), pick(&[0, 1, 2]));
+    assert_eq!(text("-backup:met"), pick(&[0, 1, 3, 4]));
+    assert_eq!(text("(flag:pick OR label:blue)"), pick(&[1, 2]));
+    assert_eq!(text("-(camera:R5 OR rating:>=3)"), pick(&[3, 4]));
+    assert_eq!(text("+label:red +label:blue"), pick(&[2]));
+    assert_eq!(text("-cull:unmeasured"), pick(&[]));
 }
 
 /// The count per value of every facet comes in one query, for the whole

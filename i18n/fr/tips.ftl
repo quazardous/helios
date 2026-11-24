@@ -40,6 +40,10 @@ tip-helios-scopes-linear =
     .text = L’histogramme est tracé en diaphs, une échelle logarithmique qui laisse autant de place aux ombres qu’aux hautes lumières. { $key } le passe en linéaire, { $key-scopes-stops } revient aux diaphs.
     .title = Les mesures en diaphs
 
+tip-helios-studio =
+    .text = Fenêtre ▸ Studio affiche ou masque les barres latérales et le panneau du bas, et enregistre la disposition de vos panneaux pour y revenir plus tard. Un panneau fermé revient à sa place depuis Fenêtre ▸ Panneaux, ou depuis le + au bout d’une barre d’onglets.
+    .title = Votre Studio
+
 tip-helios-system-menu =
     .text = { $key }, ou le bouton au début de la barre de titre, ouvre le menu Helios : profils, thèmes, raccourcis clavier et À propos.
     .title = Le menu Helios

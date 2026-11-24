@@ -1026,7 +1026,11 @@ fn an_import_is_one_undo_step_and_ctrl_z_on_the_library_takes_it_back() {
         .expect("the library's scope");
     assert_eq!(seen.undo.len(), 1, "{seen:?}");
     assert_eq!(seen.undo[0].label.text, "Import 2 photos");
-    // Ctrl+Z with the Library shown takes the import back; the files stay.
+    // Ctrl+Z goes to the focused view's history (egui-pop's focus
+    // routing): the Library's grid takes the focus, as a click there
+    // does, and Ctrl+Z takes the import back; the files stay.
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     for _ in 0..3 {
         h.run();
@@ -1174,6 +1178,10 @@ fn a_card_imported_from_the_window_lands_in_the_library_selected_as_one_undo_ste
     let line = egui_pop::api::history::line(h.state().app().handle(), &scope).unwrap();
     assert_eq!(line.undo.len(), 1, "{line:?}");
     assert_eq!(line.undo[0].label.text, "Import 2 photos");
+    // Ctrl+Z goes to the focused view's history (egui-pop's focus
+    // routing): the Library's grid takes the focus, as a click there does.
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run_steps(3);
     // The walk runs off the frame: it lands once the vault answered.

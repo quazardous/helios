@@ -104,7 +104,7 @@ pub struct ToolHandle {
     pub handle: Handle,
     /// The case's part it shows (`center`, `radius`, `feather`,
     /// `rotation`).
-    pub part: &'static str,
+    pub part: String,
     /// What its first parameter may be on the image, inside the
     /// parameter's own range: a tool's own bounds (a feather no wider
     /// than this tool wants). Drags, wheel turns and resets stay in it.
@@ -113,10 +113,10 @@ pub struct ToolHandle {
 
 impl ToolHandle {
     /// `handle`, showing the case's part `part`.
-    pub fn new(part: &'static str, handle: Handle) -> Self {
+    pub fn new(part: impl Into<String>, handle: Handle) -> Self {
         Self {
             handle,
-            part,
+            part: part.into(),
             range: None,
         }
     }
@@ -165,23 +165,58 @@ impl ToolHandle {
     }
 }
 
+/// Whose values a tool's handles read and write.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Target {
+    /// A module node's parameters, `node/<node>/<param>`: the node is
+    /// the one the tool is shown on.
+    #[default]
+    Nodes,
+    /// A plugin's own values, `plugin/<id>/<key>`: the "node" is the
+    /// plugin's id (`crate::plugin`).
+    Plugin,
+}
+
+impl Target {
+    /// The store path of `param` on `node`.
+    pub fn path(&self, node: &str, param: &str) -> String {
+        match self {
+            Target::Nodes => node_path(node, param),
+            Target::Plugin => crate::plugin::path(node, param),
+        }
+    }
+}
+
 /// A shape's case on the image: its handles.
 #[derive(Clone, Debug)]
 pub struct Tool {
     /// The case (`circle-mask`).
-    pub control: &'static str,
-    /// The module whose nodes it edits (`mask_circle`).
-    pub module: &'static str,
+    pub control: String,
+    /// The module whose nodes it edits (`mask_circle`), or the plugin
+    /// whose values it edits.
+    pub module: String,
+    /// Whose values its handles write.
+    pub target: Target,
     pub handles: Vec<ToolHandle>,
 }
 
 impl Tool {
     /// The case `control` of `module`'s nodes, with no handle yet.
-    pub fn new(control: &'static str, module: &'static str) -> Self {
+    pub fn new(control: impl Into<String>, module: impl Into<String>) -> Self {
         Self {
-            control,
-            module,
+            control: control.into(),
+            module: module.into(),
+            target: Target::Nodes,
             handles: Vec::new(),
+        }
+    }
+
+    /// The case `control` on the plugin `plugin`'s own values, with no
+    /// handle yet.
+    pub fn plugin(control: impl Into<String>, plugin: impl Into<String>) -> Self {
+        Self {
+            target: Target::Plugin,
+            ..Self::new(control, plugin)
         }
     }
 
@@ -216,7 +251,7 @@ pub fn of_module(module: &str) -> Option<Tool> {
 
 /// A shape's centre or anchor: a point at `x`, `y`, drawn as the whole
 /// shape's move.
-fn centre(part: &'static str) -> ToolHandle {
+fn centre(part: &str) -> ToolHandle {
     ToolHandle::new(
         part,
         Handle::new("centre", HandleKind::point(Centre::default())).look(Look::Move),
@@ -228,8 +263,9 @@ fn centre(part: &'static str) -> ToolHandle {
 /// (reset to none, scaled by the wheel).
 pub fn circle_mask() -> Tool {
     Tool {
-        control: CIRCLE_MASK,
-        module: "mask_circle",
+        control: CIRCLE_MASK.into(),
+        module: "mask_circle".into(),
+        target: Target::Nodes,
         handles: vec![
             centre("center"),
             ToolHandle::new(
@@ -268,8 +304,9 @@ pub fn ellipse_mask() -> Tool {
         )
     };
     Tool {
-        control: ELLIPSE_MASK,
-        module: "mask_ellipse",
+        control: ELLIPSE_MASK.into(),
+        module: "mask_ellipse".into(),
+        target: Target::Nodes,
         handles: vec![
             centre("center"),
             radius("radius_x", 0.0),
@@ -301,8 +338,9 @@ pub fn ellipse_mask() -> Tool {
 pub fn gradient_mask() -> Tool {
     let angle = AngleParam::new("rotation").y_up();
     Tool {
-        control: GRADIENT_MASK,
-        module: "mask_gradient",
+        control: GRADIENT_MASK.into(),
+        module: "mask_gradient".into(),
+        target: Target::Nodes,
         handles: vec![
             centre("anchor"),
             ToolHandle::new(
@@ -384,11 +422,11 @@ fn write(
 }
 
 /// The values of `params` under `node`'s paths, as the store holds them.
-fn values_of(store: &Store, node: &str, params: &[String]) -> Vec<(String, f64)> {
+fn values_of(store: &Store, target: &Target, node: &str, params: &[String]) -> Vec<(String, f64)> {
     params
         .iter()
         .filter_map(|p| {
-            let path = node_path(node, p);
+            let path = target.path(node, p);
             let v = store.get(&path)?.value.as_f64()?;
             Some((path, v))
         })
@@ -433,6 +471,7 @@ fn finish(
 pub struct Drag {
     gesture: GestureId,
     node: String,
+    target: Target,
     handle: ToolHandle,
     /// The shape's parameters at the gesture's start.
     start: Params,
@@ -453,11 +492,12 @@ impl Drag {
         origin: Origin,
     ) -> Option<Drag> {
         let h = tool.handle(handle)?.clone();
-        let before = values_of(store, node, &h.writes());
+        let before = values_of(store, &tool.target, node, &h.writes());
         let gesture = store.begin_gesture(origin.clone(), &format!("drag {node} {handle}"));
         Some(Drag {
             gesture,
             node: node.into(),
+            target: tool.target.clone(),
             handle: h,
             start,
             before,
@@ -481,7 +521,7 @@ impl Drag {
         for (p, v) in self.handle.drag(&self.start, to) {
             write(
                 store,
-                &node_path(&self.node, &p),
+                &self.target.path(&self.node, &p),
                 v,
                 &self.origin,
                 self.gesture,
@@ -529,9 +569,9 @@ pub fn reset(
         return false;
     };
     let to = h.held(&p, to);
-    let before = values_of(store, node, std::slice::from_ref(&p));
+    let before = values_of(store, &tool.target, node, std::slice::from_ref(&p));
     let g = store.begin_group(origin.clone(), &format!("reset {node} {handle}"));
-    let _ = write(store, &node_path(node, &p), to, &origin, g);
+    let _ = write(store, &tool.target.path(node, &p), to, &origin, g);
     finish(store, registry, steps, g, &before, &origin, Cause::Reset)
 }
 
@@ -540,6 +580,7 @@ pub fn reset(
 #[derive(Debug)]
 pub struct Turn {
     gesture: GestureId,
+    target: Target,
     before: Vec<(String, f64)>,
     origin: Origin,
     /// When the last unit came, in seconds.
@@ -559,10 +600,11 @@ impl Turn {
     ) -> Option<Turn> {
         let h = tool.handle(handle)?;
         h.handle.wheel?;
-        let before = values_of(store, node, &h.writes());
+        let before = values_of(store, &tool.target, node, &h.writes());
         let gesture = store.begin_group(origin.clone(), &format!("adjust {node} {handle}"));
         Some(Turn {
             gesture,
+            target: tool.target.clone(),
             before,
             origin,
             last: now,
@@ -583,7 +625,13 @@ impl Turn {
         self.last = now;
         if let Some((p, v)) = h.handle.wheeled(&ParamsOf(params), delta) {
             let v = h.held(&p, v);
-            let _ = write(store, &node_path(node, &p), v, &self.origin, self.gesture);
+            let _ = write(
+                store,
+                &self.target.path(node, &p),
+                v,
+                &self.origin,
+                self.gesture,
+            );
         }
     }
 

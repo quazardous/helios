@@ -10,7 +10,10 @@
 //! of seconds) are declared in `ui/controls.json` (the `ui` interface):
 //! Helios draws them and keeps their values; each committed change comes
 //! as a `ui/changed` notification, set on the camera with
-//! `gphoto2 --set-config`.
+//! `gphoto2 --set-config`. Its focus point is a tool on the image (a
+//! point handle on its `focus-x`, `focus-y` values, shown while
+//! `focus-show` is on): a drag sets the live-view zoom position
+//! (`eoszoomposition`, Canon's word) once it ends.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
@@ -174,14 +177,33 @@ impl Plugin {
         };
         for (key, value) in values {
             self.ui.insert(key.clone(), value.clone());
+        }
+        let mut configs = Vec::new();
+        for (key, value) in values {
             let config = match (key.as_str(), value) {
                 ("iso", Json::String(iso)) => format!("iso={iso}"),
                 ("shutter", v) => match v.as_f64() {
                     Some(s) => format!("shutterspeed={}", shutter_speed(s)),
                     None => continue,
                 },
+                // The focus point's tool on the image moves both at once:
+                // one setting, said once.
+                ("focus-x" | "focus-y", _) => {
+                    let at = |k: &str| self.ui.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+                    format!(
+                        "eoszoomposition={},{}",
+                        at("focus-x").round(),
+                        at("focus-y").round()
+                    )
+                }
                 _ => continue,
             };
+            if configs.contains(&config) {
+                continue;
+            }
+            configs.push(config);
+        }
+        for config in configs {
             let said = match self.run(None, &["--set-config", &config]) {
                 Ok(_) => format!("ui/changed: {config}"),
                 Err((_, e)) => format!("ui/changed: {config} not set: {e}"),

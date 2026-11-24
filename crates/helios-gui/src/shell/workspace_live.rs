@@ -742,11 +742,40 @@ impl Shell {
             for k in ["cmd", "workspace", "config", "group"] {
                 o.remove(k);
             }
+            // An agent has no focused view: with no scope named, its undo
+            // or redo goes to the history holding the newest step, so it
+            // is refused when that step is the user's (egui-pop routes a
+            // scope-less undo by the window's focus, which is the user's).
+            if matches!(cmd, "history.undo" | "history.redo")
+                && o.get("scope").is_none_or(Value::is_null)
+                && let Some(scope) = self.newest_scope(cmd == "history.redo")
+            {
+                o.insert("scope".into(), json!(scope.as_str()));
+            }
         }
         match self.core.app.run(&id, args, origin) {
             egui_pop::api::host::Reply::Done(r) => r,
             egui_pop::api::host::Reply::Later(_) => Ok(json!({ "queued": true })),
         }
+    }
+
+    /// The value store's history whose undo (or, with `redo`, redo) line
+    /// ends on the newest step, if any line holds one.
+    fn newest_scope(&self, redo: bool) -> Option<egui_pop::api::history::ScopeId> {
+        use helios_values::HistoryScope;
+        let store = lock(&self.core.values);
+        HistoryScope::ALL
+            .into_iter()
+            .filter_map(|h| {
+                let line = if redo {
+                    store.redo_steps_of(h)
+                } else {
+                    store.undo_steps_of(h)
+                };
+                line.last().map(|s| (s.id, h))
+            })
+            .max_by_key(|(id, _)| *id)
+            .map(|(_, h)| crate::history::scope_id(h))
     }
 
     /// `history.undo` with a `group`: that batch of the agent's undone

@@ -1,9 +1,11 @@
 //! The display surfaces a photo can be shown on, and where a double
 //! click sends it.
 //!
-//! Two surfaces show a photo today: the **Image** (the darkroom's
+//! Two kinds of surface show a photo: the **Image** (the darkroom's
 //! viewport, `helios.viewport`) and **Compare** (the loupe and survey,
-//! `helios.compare`, a comparison of one being the loupe). Showing a
+//! `helios.compare`, a comparison of one being the loupe). Compare opens
+//! as many times as wanted: each instance (`helios.compare#<n>`, "Compare
+//! 2") holds a comparison of its own, kept with the layout. Showing a
 //! photo is one bus request, [`SHOW_COMMAND`] (`photo.show {photo,
 //! surface?, origin?, from?}`): a double click or Enter in a gallery, the
 //! photo menu's "Show in ▸" and an agent all go through it, so they do
@@ -12,7 +14,7 @@
 //! Without a `surface`, the request follows the double-click strategy the
 //! user picked ([`STRATEGY_SETTING`]): the Studio's primary surface (the
 //! Image, as before), the surface focused last, the surface in the same
-//! window as the gallery, or ask each time. When more than one surface is
+//! window as the gallery, a new Compare each time, or ask each time. When more than one surface is
 //! open, the one a double click would reach wears a small target mark.
 //!
 //! The conventions are those of catalogue apps with a loupe beside a
@@ -23,7 +25,8 @@ use egui_pop::model::ids::PanelId;
 use egui_pop::model::layout::Layout;
 
 /// Shows a photo on a display surface (`photo`: its id; `surface`: the
-/// surface's panel, else the double-click strategy chooses).
+/// surface's panel, [`NEW`] or [`NEW_WINDOW`], else the double-click
+/// strategy chooses).
 pub const SHOW_COMMAND: &str = "photo.show";
 
 /// Where a double click (or Enter) in a gallery shows the photo.
@@ -32,10 +35,18 @@ pub const STRATEGY_SETTING: &str = "library.double_click";
 /// The Image surface: the darkroom's viewport.
 pub const IMAGE: &str = "helios.viewport";
 
-/// The Compare surface: the loupe (a comparison of one) and survey.
+/// The Compare surface: the loupe (a comparison of one) and survey. A
+/// panel declared with several instances: `helios.compare#<n>` is
+/// another Compare, with a comparison of its own.
 pub const COMPARE: &str = "helios.compare";
 
-/// The surfaces, the primary first.
+/// `photo.show`'s `surface` for a new Compare, docked.
+pub const NEW: &str = "new";
+
+/// `photo.show`'s `surface` for a new Compare in a window of its own.
+pub const NEW_WINDOW: &str = "new_window";
+
+/// The surfaces declared, the primary first.
 pub const SURFACES: &[&str] = &[IMAGE, COMPARE];
 
 /// How a double click chooses its surface ([`STRATEGY_SETTING`]).
@@ -47,12 +58,20 @@ pub enum Strategy {
     LastFocused,
     /// The surface in the same window as the gallery clicked.
     SameWindow,
+    /// A new Compare each time.
+    AlwaysNew,
     /// A menu of the surfaces each time.
     Ask,
 }
 
 /// The strategies' setting words, in [`Strategy`]'s order.
-pub const STRATEGIES: &[&str] = &["primary", "last_focused", "same_window", "ask"];
+pub const STRATEGIES: &[&str] = &[
+    "primary",
+    "last_focused",
+    "same_window",
+    "always_new",
+    "ask",
+];
 
 impl Strategy {
     /// The strategy a setting word names (an unknown one: the primary).
@@ -60,6 +79,7 @@ impl Strategy {
         match word {
             "last_focused" => Strategy::LastFocused,
             "same_window" => Strategy::SameWindow,
+            "always_new" => Strategy::AlwaysNew,
             "ask" => Strategy::Ask,
             _ => Strategy::Primary,
         }
@@ -71,30 +91,56 @@ impl Strategy {
             Strategy::Primary => STRATEGIES[0],
             Strategy::LastFocused => STRATEGIES[1],
             Strategy::SameWindow => STRATEGIES[2],
-            Strategy::Ask => STRATEGIES[3],
+            Strategy::AlwaysNew => STRATEGIES[3],
+            Strategy::Ask => STRATEGIES[4],
         }
     }
 }
 
 /// Where a request without a surface goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
-    Surface(&'static str),
+    /// A surface open (or the Image).
+    Surface(String),
+    /// A new Compare.
+    New,
+    /// A question.
     Ask,
 }
 
-/// A surface by its panel id, if it is one.
-pub fn surface(id: &str) -> Option<&'static str> {
-    SURFACES.iter().copied().find(|s| *s == id)
+/// Whether `id` is a Compare: the panel declared or one of its
+/// instances (`helios.compare#<n>`).
+pub fn is_compare(id: &str) -> bool {
+    PanelId::new(id).is_ok_and(|p| p.kind().as_str() == COMPARE)
 }
 
-/// The surfaces the layout shows (docked or in a window), in order.
-pub fn open(layout: &Layout) -> Vec<&'static str> {
-    SURFACES
-        .iter()
-        .copied()
-        .filter(|s| PanelId::new(*s).is_ok_and(|p| layout.shows(&p)))
-        .collect()
+/// A surface by its panel id, if it is one: the Image, Compare or a
+/// Compare instance.
+pub fn surface(id: &str) -> Option<String> {
+    (id == IMAGE || is_compare(id)).then(|| id.to_string())
+}
+
+/// The surfaces the layout shows (docked or in a window), the Image
+/// first, then each Compare in its number's order.
+pub fn open(layout: &Layout) -> Vec<String> {
+    let shown = |p: &PanelId| layout.shows(p);
+    let image = PanelId::from_static(IMAGE);
+    let compare = PanelId::from_static(COMPARE);
+    let mut out = Vec::new();
+    if shown(&image) {
+        out.push(IMAGE.to_string());
+    }
+    let mut compares = layout.instances_of(&compare);
+    if !compares.contains(&compare) {
+        compares.insert(0, compare);
+    }
+    out.extend(
+        compares
+            .into_iter()
+            .filter(|p| shown(p))
+            .map(|p| p.as_str().to_string()),
+    );
+    out
 }
 
 /// The window a panel is in: the first panel of its own window, `None`
@@ -108,59 +154,62 @@ pub fn window_of(layout: &Layout, panel: &str) -> Option<String> {
 /// What the surfaces know between frames: the one focused last.
 #[derive(Clone, Debug, Default)]
 pub struct Surfaces {
-    last_focused: Option<&'static str>,
+    last_focused: Option<String>,
 }
 
 impl Surfaces {
     /// The focused panel this frame: a surface is remembered.
     pub fn follow(&mut self, focused: Option<&str>) {
-        if let Some(s) = focused.and_then(surface) {
+        if let Some(s) = focused.and_then(surface)
+            && self.last_focused.as_ref() != Some(&s)
+        {
             self.last_focused = Some(s);
         }
     }
 
     /// The surface focused last, if any.
-    pub fn last_focused(&self) -> Option<&'static str> {
-        self.last_focused
+    pub fn last_focused(&self) -> Option<&str> {
+        self.last_focused.as_deref()
     }
 
     /// Where a request without a surface goes, by `strategy`, from the
     /// panel `from` (the gallery clicked; none: the main window).
     pub fn route(&self, strategy: Strategy, layout: &Layout, from: Option<&str>) -> Route {
         let open = open(layout);
+        let image = || Route::Surface(IMAGE.to_string());
         match strategy {
-            Strategy::Primary => Route::Surface(IMAGE),
-            Strategy::LastFocused => Route::Surface(
-                self.last_focused
-                    .filter(|s| open.contains(s))
-                    .unwrap_or(IMAGE),
-            ),
+            Strategy::Primary => image(),
+            Strategy::LastFocused => self
+                .last_focused
+                .clone()
+                .filter(|s| open.contains(s))
+                .map_or_else(image, Route::Surface),
             Strategy::SameWindow => {
                 let window = from.and_then(|f| window_of(layout, f));
-                let same = open
-                    .iter()
-                    .copied()
-                    .find(|s| window_of(layout, s) == window);
-                Route::Surface(same.unwrap_or(IMAGE))
+                open.into_iter()
+                    .find(|s| window_of(layout, s) == window)
+                    .map_or_else(image, Route::Surface)
             }
+            Strategy::AlwaysNew => Route::New,
             Strategy::Ask => Route::Ask,
         }
     }
 
     /// The surface wearing the target mark: the one a double click from
-    /// the main window reaches, when more than one surface is open.
+    /// the main window reaches, when more than one surface is open (none
+    /// for a new one each time, or ask).
     pub fn target(
         &self,
         strategy: Strategy,
         layout: &Layout,
         from: Option<&str>,
-    ) -> Option<&'static str> {
+    ) -> Option<String> {
         if open(layout).len() < 2 {
             return None;
         }
         match self.route(strategy, layout, from) {
             Route::Surface(s) => Some(s),
-            Route::Ask => None,
+            Route::New | Route::Ask => None,
         }
     }
 }
@@ -171,10 +220,10 @@ impl Surfaces {
 pub struct Seen {
     /// The open surfaces: each panel and whether it is in a window of
     /// its own.
-    pub open: Vec<(&'static str, bool)>,
+    pub open: Vec<(String, bool)>,
     /// The surface a double click reaches, marked when two or more are
     /// open.
-    pub target: Option<&'static str>,
+    pub target: Option<String>,
 }
 
 #[cfg(test)]
@@ -215,37 +264,35 @@ mod tests {
     fn each_strategy_routes_by_its_rule() {
         let layout = two_windows();
         assert_eq!(open(&layout), [IMAGE, COMPARE]);
+        let surf = |s: &str| Route::Surface(s.to_string());
         let mut s = Surfaces::default();
         let route = |s: &Surfaces, k, from| s.route(k, &layout, from);
         // Primary: the Image, wherever the click.
         assert_eq!(
             route(&s, Strategy::Primary, Some("helios.vault#2")),
-            Route::Surface(IMAGE)
+            surf(IMAGE)
         );
         // Same window: the surface beside the gallery clicked.
         assert_eq!(
             route(&s, Strategy::SameWindow, Some("helios.vault")),
-            Route::Surface(IMAGE)
+            surf(IMAGE)
         );
         assert_eq!(
             route(&s, Strategy::SameWindow, Some("helios.vault#2")),
-            Route::Surface(COMPARE)
+            surf(COMPARE)
         );
         // Last focused: the primary until a surface had the focus.
-        assert_eq!(
-            route(&s, Strategy::LastFocused, None),
-            Route::Surface(IMAGE)
-        );
+        assert_eq!(route(&s, Strategy::LastFocused, None), surf(IMAGE));
         s.follow(Some(COMPARE));
         s.follow(Some("helios.vault"));
-        assert_eq!(
-            route(&s, Strategy::LastFocused, None),
-            Route::Surface(COMPARE)
-        );
+        assert_eq!(route(&s, Strategy::LastFocused, None), surf(COMPARE));
         assert_eq!(
             s.target(Strategy::LastFocused, &layout, None),
-            Some(COMPARE)
+            Some(COMPARE.to_string())
         );
+        // Always new: a new Compare, and no target mark.
+        assert_eq!(route(&s, Strategy::AlwaysNew, None), Route::New);
+        assert_eq!(s.target(Strategy::AlwaysNew, &layout, None), None);
         // Ask: a question, and no target mark.
         assert_eq!(route(&s, Strategy::Ask, None), Route::Ask);
         assert_eq!(s.target(Strategy::Ask, &layout, None), None);
@@ -256,8 +303,30 @@ mod tests {
     }
 
     #[test]
+    fn compare_instances_are_surfaces_of_their_window() {
+        let mut layout = two_windows();
+        let id = |s: &str| PanelId::new(s).unwrap();
+        layout
+            .join_window(&id("helios.compare#2"), &id(COMPARE))
+            .unwrap();
+        assert_eq!(open(&layout), [IMAGE, COMPARE, "helios.compare#2"]);
+        let mut s = Surfaces::default();
+        s.follow(Some("helios.compare#2"));
+        assert_eq!(
+            s.route(Strategy::LastFocused, &layout, None),
+            Route::Surface("helios.compare#2".into())
+        );
+    }
+
+    #[test]
     fn a_surface_is_known_by_its_panel() {
-        assert_eq!(surface("helios.compare"), Some(COMPARE));
+        assert_eq!(surface("helios.compare").as_deref(), Some(COMPARE));
+        assert_eq!(
+            surface("helios.compare#3").as_deref(),
+            Some("helios.compare#3")
+        );
+        assert!(is_compare("helios.compare#3"));
+        assert!(!is_compare(IMAGE));
         assert_eq!(surface("helios.vault"), None);
     }
 }
