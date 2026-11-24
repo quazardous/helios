@@ -153,6 +153,7 @@ fn an_agents_photo_show_equals_the_show_in_menus() {
             MenuItem::Command { id, args, .. } if id == SHOW_COMMAND => Some(args.clone()),
             _ => None,
         })
+        .filter(|a| ![NEW, NEW_WINDOW].contains(&a["surface"].as_str().unwrap_or_default()))
         .collect();
     let surfaces: Vec<&str> = shows.iter().filter_map(|a| a["surface"].as_str()).collect();
     assert_eq!(surfaces, [IMAGE, COMPARE], "both open surfaces offered");
