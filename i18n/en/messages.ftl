@@ -2793,6 +2793,10 @@ gui-settings-workers = Workers
 
 gui-show-in = Show in
 
+gui-show-in-new = New surface
+
+gui-show-in-new-window = New window
+
 gui-show-in-title = Show in
 
 gui-show-in-window = { $surface } (its own window)
@@ -2992,6 +2996,8 @@ gui-storage-summary = { $online } online, { $offline } offline
 gui-subworkspace-gone = The sub-workspace { $id } is gone: back to where it was entered from
 
 gui-surface-compare = Compare
+
+gui-surface-compare-n = Compare { $n }
 
 gui-surface-image = Image
 

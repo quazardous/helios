@@ -8,13 +8,13 @@ command-calibrate-open =
     .title = Calibrate camera colour… (`path`: a chart shot; `corners`: its four corner patches' centres; `camera`: the profiles listed)
 
 command-compare-active =
-    .title = Compare: the photos compared and the active one (`image`: make that compared photo active)
+    .title = Compare: the photos compared and the active one (`image`: make that compared photo active; `surface`: another Compare, helios.compare#<n>)
 
 command-compare-add =
-    .title = Compare: add photos to the comparison open (`images`: ids, else the selection; `at`: before the photo at that place, else last; sixteen at most)
+    .title = Compare: add photos to the comparison open (`images`: ids, else the selection; `at`: before the photo at that place, else last; sixteen at most; `surface`: another Compare, helios.compare#<n>)
 
 command-compare-clear =
-    .title = Compare: empty the comparison and leave Compare
+    .title = Compare: empty the comparison and leave Compare (`surface`: another Compare, helios.compare#<n>, emptied)
 
 command-compare-leave =
     .title = Leave Compare: back to the grid, or wherever it was entered from (Escape)
@@ -26,10 +26,10 @@ command-compare-previous =
     .title = Compare: make the previous photo active
 
 command-compare-remove =
-    .title = Compare: take photos out of the comparison (`images`: ids, else the active photo; the last one out leaves Compare)
+    .title = Compare: take photos out of the comparison (`images`: ids, else the active photo; the last one out leaves Compare; `surface`: another Compare, helios.compare#<n>)
 
 command-compare-set =
-    .title = Compare: compare exactly these photos (`images`: one to sixteen ids, in that order), entering Compare
+    .title = Compare: compare exactly these photos (`images`: one to sixteen ids, in that order; `surface`: another Compare, helios.compare#<n>), entering Compare
 
 command-compare-sync =
     .title = Compare: zoom and pan synchronised across the photos (`on`; toggled when absent)
@@ -701,7 +701,7 @@ command-param-undoAgent =
     .title = Undo an agent's last changes alone (`agent`, `group`)
 
 command-photo-show =
-    .title = Show a photo on a display surface (`photo`: its id; `surface`: helios.viewport or helios.compare, else the double-click strategy chooses; `from`: the panel asking)
+    .title = Show a photo on a display surface (`photo`: its id; `surface`: helios.viewport, helios.compare or another Compare helios.compare#<n>, new for a new Compare, new_window for one in a window of its own, else the double-click strategy chooses; `from`: the panel asking)
 
 command-profile-export =
     .title = Export the profile (all parts, or `parts`; `this_machine` flattens its variants)

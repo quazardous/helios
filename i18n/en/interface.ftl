@@ -215,8 +215,10 @@ setting-interface-panels-queue-when-empty =
     .label = Queue panel without a queue
 
 setting-library-double-click =
-    .description = Where a double click or Enter in a gallery shows the photo: the primary surface (the Image), the surface you used last, the surface in the same window as the gallery, or ask each time. With two surfaces open, the one it reaches wears a target mark.
+    .description = Where a double click or Enter in a gallery shows the photo: the primary surface (the Image), the surface you used last, the surface in the same window as the gallery, a new Compare each time, or ask each time. With two surfaces open, the one it reaches wears a target mark.
     .label = Double click shows the photo in
+
+setting-library-double-click-choice-always-new = always_new
 
 setting-library-double-click-choice-ask = ask
 

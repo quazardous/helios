@@ -82,9 +82,15 @@ pub const SETTINGS: &[Setting] = &[
         key: "library.double_click",
         concern: Concern::User,
         label: "Double click shows the photo in",
-        about: "Where a double click or Enter in a gallery shows the photo: the primary surface (the Image), the surface you used last, the surface in the same window as the gallery, or ask each time. With two surfaces open, the one it reaches wears a target mark.",
+        about: "Where a double click or Enter in a gallery shows the photo: the primary surface (the Image), the surface you used last, the surface in the same window as the gallery, a new Compare each time, or ask each time. With two surfaces open, the one it reaches wears a target mark.",
         kind: Kind::Choice {
-            options: &["primary", "last_focused", "same_window", "ask"],
+            options: &[
+                "primary",
+                "last_focused",
+                "same_window",
+                "always_new",
+                "ask",
+            ],
             default: "primary",
         },
     },
