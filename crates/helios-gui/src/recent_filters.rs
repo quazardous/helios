@@ -140,7 +140,15 @@ pub fn filter_arg(args: &Value) -> Result<Option<Filter>, String> {
     }
     match args.get("query") {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(q)) => Ok(Some(Filter::parse(q))),
+        // The text whole, read by the vault's grammar as typed in the
+        // field; one it refuses (a `(` not closed) is refused here.
+        Some(Value::String(q)) => {
+            helios_vault::rules::parse_text(q).map_err(|e| format!("`query`: {e}"))?;
+            Ok(Some(Filter {
+                text: q.trim().to_string(),
+                ..Filter::default()
+            }))
+        }
         Some(other) => Err(format!("`query`: {other} is not text")),
     }
 }
@@ -284,9 +292,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            filter_arg(&serde_json::json!({ "query": "rating>=4" })).unwrap(),
-            Some(f("rating>=4"))
+            filter_arg(&serde_json::json!({ "query": " (label:red OR #sea) " })).unwrap(),
+            Some(Filter {
+                text: "(label:red OR #sea)".into(),
+                ..Filter::default()
+            }),
+            "the text whole, for the vault's grammar"
         );
+        assert!(filter_arg(&serde_json::json!({ "query": "(label:red" })).is_err());
         let listed = serde_json::to_value(&e[0].filter).unwrap();
         assert_eq!(
             filter_arg(&serde_json::json!({ "filter": listed })).unwrap(),

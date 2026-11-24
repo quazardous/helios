@@ -378,6 +378,10 @@
           "description": "All of these tags.",
           "type": "array",
           "items": { "type": "string" }
+        },
+        "search": {
+          "description": "Any other terms, as typed in the search field (the vault's search grammar: words, keys, -, OR, ranges, relative dates).",
+          "type": "string"
         }
       }
     },

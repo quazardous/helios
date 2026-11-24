@@ -218,6 +218,7 @@ fn a_library_query_names_known_criteria_and_fits_the_schema() {
         labels: vec!["red".into()],
         flags: vec!["pick".into()],
         tags: vec!["sea".into()],
+        search: String::new(),
     };
     assert_eq!(query.search_text(), "rating:2 label:red flag:pick tag:sea");
     bundle.template.library.as_mut().unwrap().query = Some(query);
@@ -236,6 +237,7 @@ fn a_library_query_names_known_criteria_and_fits_the_schema() {
         labels: vec!["pink".into()],
         flags: vec!["picked".into()],
         tags: vec!["two words".into()],
+        search: String::new(),
     });
     let problems = bundle.validate(&catalogue()).problems;
     for expected in [

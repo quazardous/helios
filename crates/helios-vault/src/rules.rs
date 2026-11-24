@@ -77,8 +77,9 @@ pub enum RuleKind {
     Flag,
     /// A folder (an absolute path): a copy `in` it or below, or `not_in`.
     Folder,
-    /// An album (its id): `in`, `not_in`. A smart album holds no photo
-    /// here: its rules are written out instead.
+    /// An album (its id): `in`, `not_in`. A smart album or a set is
+    /// written out as its rules when the query runs
+    /// ([`crate::collections::expand_sets`]).
     Album,
     /// A capture time (seconds, the camera's clock read as UTC): a
     /// number's operators, and `within` a [`Relative`] period.

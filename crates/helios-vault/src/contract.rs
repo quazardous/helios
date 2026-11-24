@@ -3330,6 +3330,25 @@ fn smart_albums_scope_count_and_undo<S: Store>(s: S) {
             .unwrap()
     };
     assert_eq!(best(&v).count, Some(2));
+    // Named in the search text, the smart album is written out as its
+    // rules: `collection:best` selects its photos, negated the others.
+    let searched = |text: &str| {
+        let c = v
+            .open_cursor(Query {
+                rules: Some(crate::rules::parse_text(text).unwrap()),
+                ..Query::default()
+            })
+            .unwrap();
+        let found = v.cursor_ids(c.id, 0, 100).unwrap();
+        v.close_cursor(c.id);
+        found
+    };
+    assert_eq!(searched("collection:best"), vec![ids[0], ids[1]]);
+    assert!(
+        !searched("-collection:best")
+            .iter()
+            .any(|i| *i == ids[0] || *i == ids[1])
+    );
     // The count follows the photos.
     v.apply(&[Command::set(ids[4], RATING, json!(5))], "user", None, 1)
         .unwrap();

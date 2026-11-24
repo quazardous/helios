@@ -205,14 +205,20 @@ fn the_library_opens_on_the_workspace_s_query_kept_as_view_state() {
         "{query}"
     );
     run(&mut h, "dialog.answer", json!({ "answer": "cancel" }));
-    // Words and dates are not a workspace's query; nothing changed.
-    let refused = helios_gui::library::query_typed("harbour date:2026-01-01..");
-    assert!(refused.unwrap_err().contains("not `harbour"));
+    // Any other term is kept as typed, in the vault's grammar.
+    let kept = helios_gui::library::query_typed("rating:2 harbour -camera:R5 date:2026-01-01..")
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.min_rating, Some(2));
+    assert_eq!(kept.search, "harbour -camera:R5 captured:>=2026-01-01");
+    // A text the grammar refuses changes nothing.
+    let refused = helios_gui::library::query_typed("(harbour");
+    assert!(refused.unwrap_err().contains("not closed"));
     let before = steps(&h);
     run(
         &mut h,
         "workspace.library",
-        json!({ "source": "none", "query": "harbour" }),
+        json!({ "source": "none", "query": "(harbour" }),
     );
     assert_eq!(steps(&h), before, "a refused query is no step");
     assert_eq!(h.state().library().filter().flags, [Flag::Pick]);

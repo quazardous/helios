@@ -410,6 +410,11 @@ pub struct QueryDesc {
     /// All of these tags.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Any other terms, as typed in the search field and read with the
+    /// vault's search grammar (`helios_vault::rules::parse_text`): words,
+    /// keys, `-`, `OR`, ranges, relative dates.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub search: String,
 }
 
 impl QueryDesc {
@@ -419,6 +424,7 @@ impl QueryDesc {
             && self.labels.is_empty()
             && self.flags.is_empty()
             && self.tags.is_empty()
+            && self.search.trim().is_empty()
     }
 
     /// As typed in the search field: `rating:3 label:red flag:pick
@@ -431,6 +437,9 @@ impl QueryDesc {
         words.extend(self.labels.iter().map(|l| format!("label:{l}")));
         words.extend(self.flags.iter().map(|f| format!("flag:{f}")));
         words.extend(self.tags.iter().map(|t| format!("tag:{t}")));
+        if !self.search.trim().is_empty() {
+            words.push(self.search.trim().to_string());
+        }
         words.join(" ")
     }
 }
