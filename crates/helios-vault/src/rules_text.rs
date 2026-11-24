@@ -482,13 +482,12 @@ fn qualified(segments: &[Segment]) -> Option<Item> {
         }
     };
     // `key:` then an operator, or the operator straight after the key.
-    let (op, plain) = match rest.strip_prefix(':') {
-        Some(after) => split_op(after),
-        None => {
-            let (op, plain) = split_op(&rest);
-            op?;
-            (op, plain)
-        }
+    let (op, plain) = if let Some(after) = rest.strip_prefix(':') {
+        split_op(after)
+    } else {
+        let (op, plain) = split_op(&rest);
+        op?;
+        (op, plain)
     };
     let value = format!("{plain}{tail}");
     if value.is_empty() {
@@ -560,9 +559,8 @@ fn condition(
             let contains_default = matches!(field, "title" | "description");
             let op = match op {
                 None if contains_default => "contains",
-                None => "is",
                 Some("~") => "contains",
-                Some("=") => "is",
+                None | Some("=") => "is",
                 Some("!=") => "is_not",
                 Some(_) => return None,
             };
@@ -628,8 +626,8 @@ fn period(text: &str) -> Option<(i64, i64, bool)> {
     let parts: Vec<&str> = day.split('-').collect();
     let num = |s: &str, len: usize| (s.len() == len).then(|| s.parse::<i64>().ok()).flatten();
     let year = num(parts.first()?, 4)?;
-    let month = parts.get(1).map(|m| num(m, 2)).unwrap_or(Some(0))?;
-    let dayn = parts.get(2).map(|d| num(d, 2)).unwrap_or(Some(0))?;
+    let month = parts.get(1).map_or(Some(0), |m| num(m, 2))?;
+    let dayn = parts.get(2).map_or(Some(0), |d| num(d, 2))?;
     if parts.len() > 3 || (parts.len() > 1 && !(1..=12).contains(&month)) {
         return None;
     }

@@ -417,7 +417,7 @@ impl Gen {
 #[test]
 fn generated_trees_read_back_as_written() {
     let mut g = Gen(0x5078_6a3c_91d2_4e11);
-    let mut seen_ops: std::collections::BTreeSet<(&str, &str)> = Default::default();
+    let mut seen_ops = std::collections::BTreeSet::<(&str, &str)>::default();
     for _ in 0..4000 {
         let tree = g.tree();
         let text = to_text(&tree);
