@@ -89,9 +89,12 @@ impl Drop for Ticket {
     }
 }
 
+/// Budgets by connector and account.
+type Budgets = HashMap<(String, String), Arc<Budget>>;
+
 /// The budgets of this process, by connector and account.
-fn budgets() -> &'static Mutex<HashMap<(String, String), Arc<Budget>>> {
-    static BUDGETS: OnceLock<Mutex<HashMap<(String, String), Arc<Budget>>>> = OnceLock::new();
+fn budgets() -> &'static Mutex<Budgets> {
+    static BUDGETS: OnceLock<Mutex<Budgets>> = OnceLock::new();
     BUDGETS.get_or_init(Mutex::default)
 }
 
