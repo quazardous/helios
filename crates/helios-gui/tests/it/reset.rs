@@ -350,7 +350,12 @@ fn reset_snapshots() {
         h.query_by_label_contains("your 3 photos").is_some()
     });
     h.run_steps(4);
-    results.add(h.try_body_shot("reset-danger-zone-pop-dark-1x"));
+    // The Danger zone shows the fixture's folders, under the system's
+    // temporary folder: the reference has the Unix paths, so Windows
+    // (`C:\Users\…\Temp\…`) checks the wizard's picture only.
+    if cfg!(not(windows)) {
+        results.add(h.try_body_shot("reset-danger-zone-pop-dark-1x"));
+    }
     run(&mut h, "admin.wizard.open", json!({ "id": reset::WIZARD })).unwrap();
     until(&mut h, "the reset wizard open", |h| wizard(h).is_some());
     run(&mut h, "admin.wizard.next", json!({})).unwrap();
