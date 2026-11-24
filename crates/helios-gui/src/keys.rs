@@ -38,6 +38,17 @@ pub fn comparison() -> String {
     format!("place == '{COMPARISON}'")
 }
 
+/// Where the arrows (and Delete, on a Compare) work on a Compare: the
+/// Compare place, or another Compare (`helios.compare#<n>`) focused. The
+/// command goes to the focused Compare, else the one focused last in the
+/// window (`display_surfaces::Surfaces::active_compare`).
+pub fn compare_arrows() -> String {
+    format!(
+        "{} || (focusedPanelKind == 'helios.compare' && focusedPanel != 'helios.compare')",
+        comparison()
+    )
+}
+
 /// While culling (a mode of the context stack): the culling keys work
 /// wherever the focus is, the image's included.
 pub fn culling() -> String {
@@ -128,13 +139,14 @@ pub fn defaults() -> Vec<Binding> {
     // win there, and an image is not rated behind it.
     // In Compare, the arrows move the active photo instead (below).
     let comparison = comparison();
+    let arrows = compare_arrows();
     // The Library window shows the library alone: its keys there, with
     // no focus test (its gallery is the window).
     let in_library_window = library_window();
     for (k, command) in &culling_keys {
         for when in [&library, &culling] {
             let when = if matches!(k.as_str(), "Left" | "Right") {
-                format!("({when}) && !({comparison})")
+                format!("({when}) && !({arrows})")
             } else {
                 when.clone()
             };
@@ -182,14 +194,15 @@ pub fn defaults() -> Vec<Binding> {
     // Remove from Library, as Lightroom's and darktable's Delete in the
     // grid: the flag only, undoable, so nothing is asked first. Delete
     // is the image's own while a mask point is picked (above).
-    // Not on the Compare panel: there Delete takes the active photo out
-    // of the comparison (below), never out of the Library.
+    // Not on a Compare panel (any instance): there Delete takes the
+    // active photo out of the comparison (below), never out of the
+    // Library.
     bind_in(
         MAIN,
         "Delete",
         crate::library::REMOVE_COMMAND,
         &format!(
-            "{} && focusedPanel != 'helios.compare' && !textInputFocus",
+            "{} && focusedPanelKind != 'helios.compare' && !textInputFocus",
             behind_no_picker(&library)
         ),
     );
@@ -272,18 +285,8 @@ pub fn defaults() -> Vec<Binding> {
             behind_no_picker(&comparison)
         ),
     );
-    bind_in(
-        MAIN,
-        "Right",
-        "compare.next",
-        &behind_no_picker(&comparison),
-    );
-    bind_in(
-        MAIN,
-        "Left",
-        "compare.previous",
-        &behind_no_picker(&comparison),
-    );
+    bind_in(MAIN, "Right", "compare.next", &behind_no_picker(&arrows));
+    bind_in(MAIN, "Left", "compare.previous", &behind_no_picker(&arrows));
     // Delete on the Compare panel takes the active photo out of the
     // comparison (Lightroom's Survey drops a photo from its view).
     bind_in(
@@ -291,8 +294,8 @@ pub fn defaults() -> Vec<Binding> {
         "Delete",
         crate::comparison::REMOVE_COMMAND,
         &format!(
-            "{} && focusedPanel == 'helios.compare' && !textInputFocus",
-            behind_no_picker(&comparison)
+            "{} && focusedPanelKind == 'helios.compare' && !textInputFocus",
+            behind_no_picker(&arrows)
         ),
     );
     // Next and previous image while culling; in the grid Space selects.

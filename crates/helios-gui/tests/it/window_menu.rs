@@ -160,3 +160,49 @@ fn view_lists_the_photos_zoom_and_the_scopes() {
     h.run_steps(3);
     assert_ne!(app.panel_visible(&scopes), before, "the scopes toggled");
 }
+
+#[test]
+fn the_panels_list_names_each_open_compare() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(
+        ["a", "b"]
+            .iter()
+            .map(|id| helios_gui::library::Entry {
+                id: (*id).to_string(),
+                name: format!("{id}.jpg"),
+                ..helios_gui::library::Entry::default()
+            })
+            .collect(),
+    );
+    let mut h = headless::harness(shell, vec2(1600.0, 1000.0));
+    h.run_steps(3);
+    for photo in ["a", "b"] {
+        h.state_mut()
+            .run(
+                "photo.show",
+                json!({ "photo": photo, "surface": "new" }),
+                Origin::User,
+            )
+            .unwrap();
+        h.run_steps(3);
+    }
+    let app = h.state().app().handle().clone();
+    let cx = egui_pop::model::when::WhenContext::default();
+    let listed: Vec<(String, bool)> = app
+        .list_items("helios.panels.views", &cx)
+        .into_iter()
+        .filter(|e| e.label.starts_with("Compare"))
+        .map(|e| (e.label, e.checked))
+        .collect();
+    assert!(
+        listed.contains(&("Compare 2".into(), true))
+            && listed.contains(&("Compare 3".into(), true)),
+        "each open Compare ticked by its tab title: {listed:?}"
+    );
+    close_menus(&mut h);
+    click(&mut h, "Window");
+    open_submenu(&mut h, "Panels");
+    for compare in ["Compare 2", "Compare 3"] {
+        assert!(shows(&h, compare), "Window ▸ Panels names {compare}");
+    }
+}

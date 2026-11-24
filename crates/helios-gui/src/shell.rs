@@ -445,12 +445,12 @@ enum Action {
     /// Scans a folder for the image map (`path`).
     ScanFolder(Value),
     /// Moves the comparison's active photo by a step.
-    CompareStep(i64),
+    CompareStep(i64, Value),
     /// Leaves Compare, back to the place it was entered from.
     CompareLeave,
     /// Zoom and pan synchronised across the compared photos, or not
     /// (toggled when `None`).
-    CompareSync(Option<bool>),
+    CompareSync(Value),
     /// Edits the comparison's list: `compare.add`, `compare.remove`,
     /// `compare.set`, `compare.clear`, `compare.active` (the command's
     /// id, its arguments).
@@ -2186,6 +2186,19 @@ impl Shell {
             .unwrap_or_default()
     }
 
+    /// The active photo of a Compare (`helios.compare` or another,
+    /// `helios.compare#<n>`); none when it compares nothing.
+    pub fn active_in(&self, surface: &str) -> Option<String> {
+        if surface == crate::display_surfaces::COMPARE {
+            let selection = self.focus.library.borrow().selection();
+            let cmp = self.focus.comparison.borrow();
+            return cmp.active(&cmp.shown(&selection)).cloned();
+        }
+        let compares = self.focus.compares.borrow();
+        let cmp = compares.get(surface)?;
+        cmp.active(cmp.photos()).cloned()
+    }
+
     /// Where an import's lines go, with its arguments (`library.import`'s),
     /// from any thread: its duplicates fill the Duplicates panel.
     pub fn duplicates_sink(&self) -> std::sync::mpsc::Sender<(Value, Value)> {
@@ -3809,25 +3822,29 @@ impl Shell {
             Box::new(|_, _| Ok(Action::CompareLeave)),
         );
         for (id, title, step) in [
-            ("compare.next", "Compare: make the next photo active", 1),
+            (
+                "compare.next",
+                "Compare: make the next photo active (`surface`: a Compare, helios.compare#<n>; else the focused one, else the one focused last in the window)",
+                1,
+            ),
             (
                 "compare.previous",
-                "Compare: make the previous photo active",
+                "Compare: make the previous photo active (`surface`: a Compare, helios.compare#<n>; else the focused one, else the one focused last in the window)",
                 -1,
             ),
         ] {
             add(
                 CommandSpec::new(id, title, "Library"),
-                Box::new(move |_, _| Ok(Action::CompareStep(step))),
+                Box::new(move |a, _| Ok(Action::CompareStep(step, a.clone()))),
             );
         }
         add(
             CommandSpec::new(
                 "compare.sync",
-                "Compare: zoom and pan synchronised across the photos (`on`; toggled when absent)",
+                "Compare: zoom and pan synchronised across the photos (`on`; toggled when absent; `surface`: a Compare, helios.compare#<n>; else the focused one, else the one focused last in the window)",
                 "Library",
             ),
-            Box::new(|a, _| Ok(Action::CompareSync(a.get("on").and_then(Value::as_bool)))),
+            Box::new(|a, _| Ok(Action::CompareSync(a.clone()))),
         );
         for (id, title) in [
             (
@@ -6877,6 +6894,10 @@ impl Shell {
             .surfaces
             .follow(focused.as_ref().map(PanelId::as_str));
         let layout = app.layout();
+        if let Some(f) = focused.as_ref().map(PanelId::as_str) {
+            let window = crate::display_surfaces::window_of(&layout, f);
+            self.focus.surfaces.follow_compare(f, window);
+        }
         let strategy = self.double_click_strategy();
         let open = crate::display_surfaces::open(&layout);
         // A Compare closed takes its comparison with it.
@@ -7003,7 +7024,7 @@ impl Shell {
             // The loupe: a comparison of this one photo.
             self.compare_list(
                 crate::comparison::SET_COMMAND,
-                &json!({ "images": [photo.clone()] }),
+                &json!({ "images": [photo.clone()], "surface": ds::COMPARE }),
             )?;
         } else if ds::is_compare(&surface) {
             // Another Compare: its comparison of this one photo, shown.
@@ -7145,6 +7166,100 @@ impl Shell {
         Ok(out)
     }
 
+    /// The Compare a `compare.*` command without a `surface` acts on: the
+    /// focused one, else the one focused last in the window the user
+    /// works in, else the first (`display_surfaces::Surfaces::active_compare`).
+    pub fn active_compare(&self) -> String {
+        let app = self.core.app.handle();
+        let focused = app.focused_panel();
+        let window = app.window_panel(app.active_window());
+        let open = crate::display_surfaces::open(&app.layout());
+        self.focus.surfaces.active_compare(
+            focused.as_ref().map(PanelId::as_str),
+            window.as_ref().map(PanelId::as_str),
+            &open,
+        )
+    }
+
+    /// The Compare named by a command's `surface`, else the active one.
+    fn compare_surface(&self, args: &Value) -> Result<String, String> {
+        match args.get("surface") {
+            None | Some(Value::Null) => Ok(self.active_compare()),
+            Some(Value::String(s)) if crate::display_surfaces::is_compare(s) => Ok(s.clone()),
+            Some(s) => Err(format!(
+                "`surface`: a Compare (`helios.compare#<n>`), not `{s}`"
+            )),
+        }
+    }
+
+    /// Another Compare's comparison (`helios.compare#<n>`), open, handed
+    /// to `f` (loaded from its instance's payload the first time).
+    fn with_instance<R>(
+        &self,
+        surface: &str,
+        f: impl FnOnce(&mut crate::comparison::Comparison) -> R,
+    ) -> Result<R, String> {
+        let app = self.core.app.handle();
+        let panel = PanelId::new(surface).map_err(|e| format!("`surface`: {e}"))?;
+        if !app
+            .panel_instances(&PanelId::from_static(crate::display_surfaces::COMPARE))
+            .contains(&panel)
+        {
+            return Err(format!("`surface`: no Compare `{surface}` is open"));
+        }
+        let mut compares = self.focus.compares.borrow_mut();
+        let cmp = compares
+            .entry(surface.to_string())
+            .or_insert_with(|| kept_comparison(app, &panel));
+        Ok(f(cmp))
+    }
+
+    /// `compare.next` and `compare.previous`: the next or previous photo
+    /// of the Compare named, else of the active one, made active.
+    fn compare_step(&mut self, step: i64, args: &Value) -> Result<Value, String> {
+        let surface = self.compare_surface(args)?;
+        if surface != crate::display_surfaces::COMPARE {
+            return self.with_instance(&surface, |cmp| {
+                let shown = cmp.photos().to_vec();
+                if shown.is_empty() {
+                    return Err("no photos are compared".to_string());
+                }
+                cmp.step(step, shown.len());
+                Ok(json!({ "surface": surface, "active": cmp.active(&shown) }))
+            })?;
+        }
+        let selection = self.focus.library.borrow().selection();
+        let mut cmp = self.focus.comparison.borrow_mut();
+        let shown = cmp.shown(&selection);
+        if shown.is_empty() {
+            return Err("no photos are compared".into());
+        }
+        cmp.step(step, shown.len());
+        let active = cmp.active(&shown).cloned();
+        if !cmp.photos().is_empty() {
+            self.focus
+                .library
+                .borrow_mut()
+                .set_compare_active(active.clone());
+        }
+        Ok(json!({ "surface": surface, "active": active }))
+    }
+
+    /// `compare.sync`: zoom and pan synchronised across the photos of the
+    /// Compare named, else of the active one.
+    fn compare_sync(&mut self, args: &Value) -> Result<Value, String> {
+        let surface = self.compare_surface(args)?;
+        let on = args.get("on").and_then(Value::as_bool);
+        let flip = |cmp: &mut crate::comparison::Comparison| {
+            cmp.synced = on.unwrap_or(!cmp.synced);
+            json!({ "surface": surface, "synced": cmp.synced })
+        };
+        if surface != crate::display_surfaces::COMPARE {
+            return self.with_instance(&surface, flip);
+        }
+        Ok(flip(&mut self.focus.comparison.borrow_mut()))
+    }
+
     /// The `compare.*` list commands: the comparison's photos edited by
     /// id, the Compare place's payload written so the workspace keeps
     /// them; a gallery's selection and cursor are never written.
@@ -7165,16 +7280,9 @@ impl Shell {
                 return Err(format!("the library has no photo `{unknown}`"));
             }
         }
-        match args.get("surface").and_then(Value::as_str) {
-            Some(s) if s != crate::display_surfaces::COMPARE => {
-                if !crate::display_surfaces::is_compare(s) {
-                    return Err(format!(
-                        "`surface`: a Compare (`helios.compare#<n>`), not `{s}`"
-                    ));
-                }
-                return self.compare_instance_list(id, s, images, args);
-            }
-            _ => {}
+        let surface = self.compare_surface(args)?;
+        if surface != crate::display_surfaces::COMPARE {
+            return self.compare_instance_list(id, &surface, images, args);
         }
         let app = self.core.app.handle().clone();
         let comparing = crate::contexts::comparing(&app);
@@ -7826,26 +7934,10 @@ impl Shell {
                 let asked = self.focus.library.borrow().scan_folder(Path::new(path));
                 return Ok(json!({ "asked": asked }));
             }
-            Action::CompareStep(step) => {
-                let selection = self.focus.library.borrow().selection();
-                let mut cmp = self.focus.comparison.borrow_mut();
-                let shown = cmp.shown(&selection);
-                if shown.is_empty() {
-                    return Err("no photos are compared".into());
-                }
-                cmp.step(step, shown.len());
-                if !cmp.photos().is_empty() {
-                    let active = cmp.active(&shown).cloned();
-                    self.focus.library.borrow_mut().set_compare_active(active);
-                }
-            }
+            Action::CompareStep(step, args) => return self.compare_step(step, &args),
             Action::CompareList(id, args) => return self.compare_list(id, &args),
             Action::ShowPhoto(args) => return self.show_photo(&args),
-            Action::CompareSync(on) => {
-                let mut cmp = self.focus.comparison.borrow_mut();
-                cmp.synced = on.unwrap_or(!cmp.synced);
-                return Ok(json!({ "synced": cmp.synced }));
-            }
+            Action::CompareSync(args) => return self.compare_sync(&args),
             Action::EnterSubworkspace(id, origin) => {
                 let id = if let Some(id) = id {
                     id

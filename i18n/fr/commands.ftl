@@ -671,13 +671,13 @@ command-health-checkNow =
     .title = Lancer le bilan de santé maintenant (Aide > Bilan de santé)
 
 command-compare-next =
-    .title = Comparer : rendre active la photo suivante
+    .title = Comparer : rendre active la photo suivante (`surface` : un Comparer, helios.compare#<n> ; sinon celui qui a le focus, sinon le dernier à l'avoir eu dans la fenêtre)
 
 command-compare-previous =
-    .title = Comparer : rendre active la photo précédente
+    .title = Comparer : rendre active la photo précédente (`surface` : un Comparer, helios.compare#<n> ; sinon celui qui a le focus, sinon le dernier à l'avoir eu dans la fenêtre)
 
 command-compare-sync =
-    .title = Comparer : zoom et déplacement synchronisés entre les photos (`on` ; basculé en son absence)
+    .title = Comparer : zoom et déplacement synchronisés entre les photos (`on` ; basculé en son absence ; `surface` : un Comparer, helios.compare#<n> ; sinon celui qui a le focus, sinon le dernier à l'avoir eu dans la fenêtre)
 
 command-controls-catalogue =
     .title = Lister les contrôles enregistrés
