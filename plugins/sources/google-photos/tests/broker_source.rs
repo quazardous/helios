@@ -145,6 +145,7 @@ fn a_picking_through_the_broker_imports_the_two_photos_picked() {
         source,
         items,
         new_only: false,
+        holder: None,
     };
     let into = p.0.join("library");
     let report =
@@ -186,6 +187,7 @@ fn two_pickings_add_to_one_source_without_duplicates_and_expired_addresses_are_r
             source,
             items,
             new_only: false,
+            holder: None,
         };
         let report =
             fetch::import_remote(&vault, &jobs, &remote, &options(&into), 1000, &mut |_| {})

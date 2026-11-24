@@ -103,6 +103,7 @@ fn picked_items_are_listed_page_by_page_downloaded_and_imported() {
         source: account,
         items,
         new_only: false,
+        holder: None,
     };
     let report =
         fetch::import_remote(&vault, &jobs, &remote, &options(&p.0), 1000, &mut |_| {}).unwrap();
