@@ -678,18 +678,22 @@ const OUTSIDE: &str =
 
 /// The condition (on `s`, with `?1` the volume and `?2` the folder) for
 /// sightings in a folder and below: on a volume its path there, else the
-/// absolute path. The empty folder is the whole volume.
+/// absolute path. The empty folder is the whole volume. On Windows a
+/// path's parts are split by `\` or `/` (a connector may name its items
+/// with `/`), as `Path::starts_with` and the memory store see them.
 fn under(volume: Option<&VolumeId>, rel_dir: &Path) -> (String, String) {
-    let sep = std::path::MAIN_SEPARATOR;
+    let seps: &[char] = if cfg!(windows) { &['\\', '/'] } else { &['/'] };
     let dir = rel_dir.to_string_lossy();
-    let dir = dir.trim_end_matches(sep);
+    let dir = dir.trim_end_matches(seps);
     let (place, column) = if volume.is_some() {
         ("s.volume = ?1", "s.rel_path")
     } else {
         ("?1 IS NULL AND s.volume IS NULL", "s.path")
     };
+    let after: Vec<String> = seps.iter().map(|sep| format!("?2 || '{sep}'")).collect();
     let condition = format!(
-        "{place} AND (?2 = '' OR {column} = ?2 OR substr({column}, 1, length(?2) + 1) = ?2 || '{sep}')"
+        "{place} AND (?2 = '' OR {column} = ?2 OR substr({column}, 1, length(?2) + 1) IN ({}))",
+        after.join(", ")
     );
     (condition, dir.to_string())
 }

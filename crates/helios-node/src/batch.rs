@@ -1009,11 +1009,12 @@ mod tests {
         let out = Path::new("/out");
         let on_disk = |p: &Path| p == Path::new("/out/y.jpg");
         let paths = output_paths(&images, out, "{stem}.{ext}", "jpg", on_disk);
-        let names: Vec<_> = paths.iter().map(|p| p.to_str().unwrap()).collect();
-        assert_eq!(
-            names,
-            ["/out/x.jpg", "/out/x-1.jpg", "/out/x-2.jpg", "/out/y-1.jpg"]
-        );
+        // Compared as paths: joined on Windows, they read `/out\x.jpg`.
+        let expected: Vec<PathBuf> = ["x.jpg", "x-1.jpg", "x-2.jpg", "y-1.jpg"]
+            .iter()
+            .map(|n| out.join(n))
+            .collect();
+        assert_eq!(paths, expected);
         let plain = output_paths(&images[..2], out, "{stem}", "jpg", |_| false);
         assert_eq!(plain, [out.join("x"), out.join("x-1")]);
     }

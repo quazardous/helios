@@ -102,23 +102,10 @@ fn window(root: &Path, on: bool) -> Harness<'static, Shell> {
     h
 }
 
-/// The frames a step takes, the image kept open through a network change.
-fn follow(h: &mut Harness<'static, Shell>) {
-    for _ in 0..3 {
-        h.run();
-    }
-    if crate::host::network_changed() > 0 {
-        assert!(h.state_mut().keep_image_open().unwrap(), "kept in place");
-    }
-    for _ in 0..2 {
-        h.run();
-    }
-}
-
 /// Runs a command as a person would; its answer from the history.
 fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Json) -> Result<Json, String> {
     let out = h.state_mut().run(id, args, Origin::User);
-    follow(h);
+    crate::host::follow(h);
     match out {
         Ok(v) if v == json!({ "queued": true }) => {
             h.state()
@@ -217,7 +204,7 @@ fn applying_a_workshop_is_one_undo_step_carrying_its_aimed_value() {
         .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(nodes(&h), before);
     assert_eq!(shown(&h, &node, "brightness"), None);
     let state = h.state().workspace_state().unwrap();
@@ -311,8 +298,8 @@ fn the_panel_lists_the_shipped_workshop_and_applies_it() {
     // Apply, from its row: one undo step, its node selected.
     let steps = h.state().values().lock().unwrap().all_undo_steps().len();
     h.get_by_label("Apply").click();
-    follow(&mut h);
-    follow(&mut h);
+    crate::host::follow(&mut h);
+    crate::host::follow(&mut h);
     assert!(nodes(&h).contains(&"lift_midtones".to_string()));
     assert_eq!(
         h.state().values().lock().unwrap().all_undo_steps().len(),
@@ -352,7 +339,7 @@ fn aiming_again_is_one_value_step_that_undo_takes_back() {
             ))
             .unwrap();
     }
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(brightness(&h), Some(0.0));
     let state = h.state().workspace_state().unwrap();
     let steps = h.state().values().lock().unwrap().all_undo_steps().len();
@@ -384,7 +371,7 @@ fn aiming_again_is_one_value_step_that_undo_takes_back() {
         .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(brightness(&h), Some(0.0));
     // A module is not a workshop.
     let e = answer(&mut h, "workshop.aim", json!({ "node": "exposure" })).unwrap_err();
@@ -511,7 +498,7 @@ fn saving_a_macro_as_a_workshop_is_its_next_version_and_one_undo_step() {
             .undo_newest(&Origin::User)
             .unwrap()
             .expect("a step to undo");
-        follow(&mut h);
+        crate::host::follow(&mut h);
     }
     assert_eq!(pinned(&h, "look").as_deref(), Some("user.look@1"));
     assert!(composite_file(&h, "user.look@2").is_none());
@@ -617,8 +604,8 @@ fn workshops_snapshots() {
     results.add(h.try_shot_of("workshops-list-pop-dark-1x", rect));
 
     h.get_by_label("Apply").click();
-    follow(&mut h);
-    follow(&mut h);
+    crate::host::follow(&mut h);
+    crate::host::follow(&mut h);
     h.get_by_label("Aim again");
     h.run_steps(3);
     let rect = panel_rect(&h);

@@ -21,7 +21,13 @@ use serde_json::json;
 const CHILD: &str = "dialog_details::a_failing_command_in_an_environment_holding_a_secret";
 const CLIENT_ID: &str = "HELIOS_TESTING_PHOTOS_CLIENT_ID";
 const SECRET: &str = "4242-client-abcdef.apps.example";
+/// The child's home folder, absolute on the running system, and the
+/// variable the system reads it from (`std::env::home_dir`).
+#[cfg(not(windows))]
 const HOME: &str = "/tmp/helios-dialog-details-home";
+#[cfg(windows)]
+const HOME: &str = r"C:\Users\helios-dialog-details-home";
+const HOME_VAR: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
 
 fn harness(shell: Shell) -> Harness<'static, Shell> {
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
@@ -83,7 +89,7 @@ fn a_failing_command_opens_an_error_whose_copy_is_a_bug_report() {
             "--test-threads=1",
         ])
         .env(CLIENT_ID, SECRET)
-        .env("HOME", HOME)
+        .env(HOME_VAR, HOME)
         .output()
         .expect("the test binary runs again");
     let log = format!(

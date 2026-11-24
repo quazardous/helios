@@ -2069,6 +2069,13 @@ fn library_rows_come_with_their_locations_and_moves_show_in_deltas<S: Store>(s: 
     v.close_cursor(cursor.id);
 }
 
+/// The fixture library's top folder, absolute on the running system:
+/// `/p`, or `C:\p` on Windows (where `\p` is not absolute).
+fn p_root() -> PathBuf {
+    let root = if cfg!(windows) { r"C:\" } else { "/" };
+    Path::new(root).join("p")
+}
+
 /// The Library of the filter and facet scenarios (`docs/design/library.md`,
 /// L4), and the backup rule they are measured against: 1 `IMG_0001.CR3`
 /// present, tagged `Été`, a verified copy on one backup drive (short of
@@ -2079,7 +2086,7 @@ fn library_fixture<S: Store>(s: S) -> (Vault<S>, Vec<ImageId>, crate::Backups) {
     use crate::capture::{CAMERA_MODEL, FILE_TYPE, LENS};
     let mut s = with_images(s, 5);
     let ids: Vec<ImageId> = (1..=5).map(|i| image(i).id).collect();
-    let root = Path::new(std::path::MAIN_SEPARATOR_STR).join("p");
+    let root = p_root();
     let copy = |path: PathBuf, volume: &str, rel: &str, presence: Presence| Location {
         volume: Some(VolumeId(volume.into())),
         rel_path: Some(PathBuf::from(rel)),
@@ -2265,9 +2272,7 @@ fn queries_filter_by_every_library_term_in_one_query<S: Store>(s: S) {
         pick(&[0, 2])
     );
     assert_eq!(run(&|q| q.file_types = vec!["nef".into()]), pick(&[2]));
-    let shots = Path::new(std::path::MAIN_SEPARATOR_STR)
-        .join("p")
-        .join("shots");
+    let shots = p_root().join("shots");
     let folder = |f: String| run(&|q| q.folder = Some(f.clone()));
     assert_eq!(folder(shots.display().to_string()), pick(&[0, 1, 3]));
     assert_eq!(
@@ -2912,11 +2917,7 @@ fn smart_album_rules_select_in_one_query<S: Store>(s: S) {
     let one = |field: &str, op: &str, value: serde_json::Value| {
         run(json!({"match": "all", "rules": [{"field": field, "op": op, "value": value}]}))
     };
-    let shots = Path::new(std::path::MAIN_SEPARATOR_STR)
-        .join("p")
-        .join("shots")
-        .display()
-        .to_string();
+    let shots = p_root().join("shots").display().to_string();
     assert_eq!(one("rating", ">=", json!(3)), pick(&[0, 1]));
     assert_eq!(
         one("rating", "=", json!(0)),
