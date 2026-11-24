@@ -7,9 +7,13 @@
 //! - **Listed page by page.** The first page is read when the account is
 //!   selected, on a thread of its own; "More albums" reads the next.
 //! - **One source at a time.** Clicking an album selects that album as
-//!   the source: highlighted alone, its photos listed (every page) and
-//!   shown in the middle as a card's are ("in your Library" marked), the
-//!   account's Detail on the right. Clicking the account again leaves it.
+//!   the source: highlighted alone, its photos shown in the middle as a
+//!   card's are ("in your Library" marked), the account's Detail on the
+//!   right. Clicking the account again leaves it.
+//! - **The list before the end of the listing.** Each page of the
+//!   album's photos joins the grid as it is listed (the status bar says
+//!   "Listing… N photos so far"), before any thumbnail; Import takes the
+//!   photos ticked among those listed, without waiting for the rest.
 //! - **Imported as chosen photos are**: the footer's Import fetches the
 //!   ones ticked through the connector that listed them, with the Detail
 //!   column's choices ([`super::import_chosen`]); the import history
@@ -62,12 +66,27 @@ struct AlbumList {
     listed: Arc<Mutex<Listed>>,
 }
 
-/// The photos of the album selected.
-#[derive(Clone)]
-pub(crate) enum Photos {
-    Reading,
-    Listed(Arc<Batch>),
-    Failed(String),
+/// The photos of the album selected, as listed so far: each page a
+/// batch of its own, joining the grid as it comes.
+#[derive(Clone, Default)]
+pub(crate) struct Photos {
+    pub(crate) pages: Vec<Arc<Batch>>,
+    /// Every page was listed.
+    pub(crate) complete: bool,
+    /// Why the next page could not be listed: the pages before it stay.
+    pub(crate) failed: Option<String>,
+}
+
+impl Photos {
+    /// The photos listed so far.
+    pub(crate) fn count(&self) -> usize {
+        self.pages.iter().map(|b| b.items.len()).sum()
+    }
+
+    /// Pages are still being listed.
+    pub(crate) fn listing(&self) -> bool {
+        !self.complete && self.failed.is_none()
+    }
 }
 
 /// The album selected as the source, its photos being listed.
@@ -201,7 +220,7 @@ impl Albums {
         let Some(list) = self.lists.get(account) else {
             return;
         };
-        let photos = Arc::new(Mutex::new(Photos::Reading));
+        let photos = Arc::new(Mutex::new(Photos::default()));
         let cancel = Cancel::new();
         let (connector, src, out, stop, wake) = (
             list.connector.clone(),
@@ -213,39 +232,49 @@ impl Albums {
         let spawned = std::thread::Builder::new()
             .name("import-album".into())
             .spawn(move || {
-                let mut items = Vec::new();
+                // Each page to the grid as it is listed: the list shows
+                // before the listing ends, and before any thumbnail.
                 let mut from = None;
-                let end = loop {
+                loop {
                     match connector.list(&src, from.as_ref(), PAGE, &stop) {
                         Ok(page) => {
-                            items.extend(page.items);
+                            if stop.is_cancelled() {
+                                return;
+                            }
+                            let last = page.complete || page.next.is_none();
+                            let items = page.items;
+                            let known = known
+                                .as_ref()
+                                .map_or_else(|| vec![false; items.len()], |k| k(&src, &items));
+                            {
+                                let mut out = lock(&out);
+                                if !items.is_empty() {
+                                    out.pages.push(Arc::new(Batch {
+                                        connector: connector.clone(),
+                                        source: src.clone(),
+                                        items,
+                                        known,
+                                    }));
+                                }
+                                out.complete = last;
+                            }
+                            wake();
                             match page.next {
-                                Some(next) if !page.complete => from = Some(next),
-                                _ => break None,
+                                Some(next) if !last => from = Some(next),
+                                _ => return,
                             }
                         }
-                        Err(e) => break Some(e),
+                        Err(e) => {
+                            if stop.is_cancelled() {
+                                return;
+                            }
+                            log::warn!("an album of {}: {e}", src.connector);
+                            lock(&out).failed = Some(said(&e));
+                            wake();
+                            return;
+                        }
                     }
-                };
-                if stop.is_cancelled() {
-                    return;
                 }
-                let photos = if let Some(e) = end {
-                    log::warn!("an album of {}: {e}", src.connector);
-                    Photos::Failed(said(&e))
-                } else {
-                    let known = known
-                        .as_ref()
-                        .map_or_else(|| vec![false; items.len()], |k| k(&src, &items));
-                    Photos::Listed(Arc::new(Batch {
-                        connector,
-                        source: src,
-                        items,
-                        known,
-                    }))
-                };
-                *lock(&out) = photos;
-                wake();
             });
         if let Err(e) = spawned {
             log::warn!("import album: {e}");

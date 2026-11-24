@@ -2118,6 +2118,7 @@ gui-import-window-pair-short = R+J
 gui-import-window-raw-only = Raw seulement
 
 gui-import-window-reading = Lecture de { $path }
+gui-import-window-listing = Liste en cours… { $count } photos pour l’instant
 
 gui-import-window-last-import = Dernière importation le { $when }
 

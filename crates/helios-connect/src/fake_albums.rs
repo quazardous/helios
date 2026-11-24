@@ -3,10 +3,13 @@
 //! ([`Connector::list`]), page by page too: its service answers at most
 //! `per_page` entries whatever is asked, as a real service caps its pages.
 //! Its photos are fetched, a few bytes each. The import window's tests
-//! use it for the `collections` browser.
+//! use it for the `collections` browser, and as a slow source
+//! ([`AlbumsProvider::slow`]): its pages after the first and its
+//! thumbnails wait while held.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use crate::{
     Access, AccountRef, Cancel, Caps, Collection, Collections, ConnectStep, Connector,
@@ -26,6 +29,16 @@ pub struct AlbumsProvider {
     pub per_page: usize,
     /// How many album pages were asked, for tests.
     pub album_pages: Arc<AtomicUsize>,
+    /// A slow service: while set, an album's pages after the first wait.
+    pub hold_pages: Arc<AtomicBool>,
+    /// A slow service: while set, each thumbnail waits.
+    pub hold_thumbnails: Arc<AtomicBool>,
+    /// It gives thumbnails (`caps.thumbnails`), each after
+    /// `hold_thumbnails` is cleared, and none in the end (an empty one).
+    pub thumbnails: bool,
+    /// How many thumbnails were asked, and how many answered.
+    pub thumbnails_asked: Arc<AtomicUsize>,
+    pub thumbnails_given: Arc<AtomicUsize>,
 }
 
 impl AlbumsProvider {
@@ -34,8 +47,33 @@ impl AlbumsProvider {
             albums: Arc::new(albums.iter().map(|(n, c)| ((*n).to_owned(), *c)).collect()),
             per_page: per_page.max(1),
             album_pages: Arc::default(),
+            hold_pages: Arc::default(),
+            hold_thumbnails: Arc::default(),
+            thumbnails: false,
+            thumbnails_asked: Arc::default(),
+            thumbnails_given: Arc::default(),
         }
     }
+
+    /// A slow service: its pages after the first and its thumbnails held
+    /// until the test lets them go.
+    pub fn slow(mut self) -> Self {
+        self.hold_pages.store(true, Ordering::SeqCst);
+        self.hold_thumbnails.store(true, Ordering::SeqCst);
+        self.thumbnails = true;
+        self
+    }
+}
+
+/// Waits while `hold` is set, or until `cancel`: whether it was let go.
+fn wait_while(hold: &AtomicBool, cancel: Option<&Cancel>) -> bool {
+    while hold.load(Ordering::SeqCst) {
+        if cancel.is_some_and(Cancel::is_cancelled) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    true
 }
 
 fn label() -> Text {
@@ -53,6 +91,7 @@ impl ConnectorProvider for AlbumsProvider {
                 accounts: true,
                 sizes: true,
                 collections: true,
+                thumbnails: self.thumbnails,
                 originals: crate::Originals::Rendered,
                 ..Caps::default()
             },
@@ -183,6 +222,9 @@ impl Connector for Albums {
         let album = album_of(source).ok_or(ConnectorError::NotFound)?;
         let count = self.0.albums.get(album).ok_or(ConnectorError::NotFound)?.1;
         let start = offset(from)?;
+        if start > 0 && !wait_while(&self.0.hold_pages, Some(cancel)) {
+            return Err(ConnectorError::Cancelled);
+        }
         let end = (start + self.take(page)).min(count);
         let items = (start.min(end)..end)
             .map(|n| Item {
@@ -205,6 +247,20 @@ impl Connector for Albums {
             complete: next.is_none(),
             next,
         })
+    }
+
+    fn thumbnail(
+        &self,
+        _item: &ItemRef,
+        _max_side: u32,
+    ) -> Result<Option<Vec<u8>>, ConnectorError> {
+        if !self.0.thumbnails {
+            return Ok(None);
+        }
+        self.0.thumbnails_asked.fetch_add(1, Ordering::SeqCst);
+        wait_while(&self.0.hold_thumbnails, None);
+        self.0.thumbnails_given.fetch_add(1, Ordering::SeqCst);
+        Ok(None)
     }
 
     fn access(&self, _item: &ItemRef) -> Access {

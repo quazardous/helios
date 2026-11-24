@@ -4,7 +4,9 @@
 //! one selects that album as the source, its photos fill the grid ("in
 //! your Library" marked) and the footer's Import fetches the ones ticked
 //! under the album's name. A connector without albums shows none, even
-//! one declaring the `collections` browser.
+//! one declaring the `collections` browser. A slow service's album shows
+//! its first page before its thumbnails and the rest of its listing, and
+//! imports the photos listed without waiting for either.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -150,6 +152,71 @@ fn an_account_s_albums_are_listed_page_by_page_and_one_imports_as_a_source() {
         ("Trip".into(), vec!["a0-p1".into(), "a0-p2".into()])
     );
     assert!(!h.state().import_window_open(), "closed as a card's import");
+}
+
+#[test]
+fn a_slow_album_shows_its_list_first_and_imports_without_waiting() {
+    use std::sync::atomic::Ordering::SeqCst;
+    // Two photos a page; the pages after the first and every thumbnail
+    // wait until let go.
+    let provider = AlbumsProvider::new(&[("Trip", 5)], 2).slow();
+    let (pages, thumbs) = (
+        provider.hold_pages.clone(),
+        provider.hold_thumbnails.clone(),
+    );
+    let (asked, given) = (
+        provider.thumbnails_asked.clone(),
+        provider.thumbnails_given.clone(),
+    );
+    let (mut h, imported) = world(Arc::new(provider));
+    until(&mut h, "the album", |h| shown(h, "Trip"));
+    click(&mut h, "Trip");
+    // The first page is in the grid, with no thumbnail yet, while the
+    // listing goes on.
+    until(&mut h, "the first page in the grid", |h| {
+        h.state().import_cells().len() == 2
+    });
+    until(&mut h, "the count so far", |h| {
+        shown(h, "Listing… 2 photos so far")
+    });
+    until(&mut h, "thumbnails asked", |_| asked.load(SeqCst) > 0);
+    assert_eq!(given.load(SeqCst), 0, "no thumbnail yet");
+    // Import takes the new photo listed, thumbnails and pages still held.
+    until(&mut h, "one taken", |h| shown(h, "Import 1"));
+    click(&mut h, "Import 1");
+    until(&mut h, "the photos listed imported", |_| {
+        !imported.lock().unwrap().is_empty()
+    });
+    assert_eq!(
+        imported.lock().unwrap()[0],
+        ("Trip".into(), vec!["a0-p1".into()])
+    );
+    assert_eq!(given.load(SeqCst), 0, "imported before any thumbnail");
+    assert!(!h.state().import_window_open(), "closed as a card's import");
+    // Let the threads still waiting go.
+    pages.store(false, SeqCst);
+    thumbs.store(false, SeqCst);
+}
+
+#[test]
+fn a_slow_album_fills_page_by_page_until_complete() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let provider = AlbumsProvider::new(&[("Trip", 5)], 2).slow();
+    let pages = provider.hold_pages.clone();
+    provider.hold_thumbnails.store(false, SeqCst);
+    let (mut h, _) = world(Arc::new(provider));
+    until(&mut h, "the album", |h| shown(h, "Trip"));
+    click(&mut h, "Trip");
+    until(&mut h, "the first page", |h| {
+        h.state().import_cells().len() == 2
+    });
+    pages.store(false, SeqCst);
+    until(&mut h, "every page", |h| {
+        h.state().import_cells().len() == 5
+    });
+    until(&mut h, "the listing over", |h| {
+        !h.query_all_by_label_contains("so far").any(|_| true)
+    });
 }
 
 #[test]
