@@ -3832,28 +3832,29 @@ impl Library {
 
     /// The display surface a double click reaches, when it wears the
     /// target mark (two surfaces or more open).
-    pub fn double_click_target(&self) -> Option<&'static str> {
-        self.surfaces.target
+    pub fn double_click_target(&self) -> Option<&str> {
+        self.surfaces.target.as_deref()
     }
 
     /// The photo menu's "Show in ▸": each open display surface (the
-    /// Image always, being the primary one), then "Add to comparison";
-    /// each a `photo.show` (or `compare.add`) of `photo`, as an agent
-    /// runs it.
+    /// Image always, being the primary one, each Compare by its name),
+    /// "New surface" and "New window" (a new Compare), then "Add to
+    /// comparison"; each a `photo.show` (or `compare.add`) of `photo`, as
+    /// an agent runs it.
     pub fn show_in_items(&self, ctx: &egui::Context, photo: &str) -> Vec<crate::dialogs::MenuItem> {
         use crate::dialogs::MenuItem;
         use crate::display_surfaces as ds;
-        let mut open: Vec<(&'static str, bool)> = self.surfaces.open.clone();
-        if !open.iter().any(|(s, _)| *s == ds::IMAGE) {
-            open.insert(0, (ds::IMAGE, false));
+        let mut open: Vec<(String, bool)> = self.surfaces.open.clone();
+        if !open.iter().any(|(s, _)| s == ds::IMAGE) {
+            open.insert(0, (ds::IMAGE.to_string(), false));
         }
-        if !open.iter().any(|(s, _)| *s == ds::COMPARE) {
-            open.push((ds::COMPARE, false));
+        if !open.iter().any(|(s, _)| ds::is_compare(s)) {
+            open.push((ds::COMPARE.to_string(), false));
         }
         let mut items: Vec<MenuItem> = open
             .into_iter()
             .map(|(s, windowed)| {
-                let name = crate::i18n::text(ctx, crate::shell::surface_name(s));
+                let name = crate::i18n::text(ctx, crate::shell::surface_name(&s));
                 let label = if windowed {
                     crate::i18n::text(
                         ctx,
@@ -3867,6 +3868,21 @@ impl Library {
                     .labeled(label)
             })
             .collect();
+        for (surface, label) in [
+            (ds::NEW, Message::new("gui-show-in-new", "New surface")),
+            (
+                ds::NEW_WINDOW,
+                Message::new("gui-show-in-new-window", "New window"),
+            ),
+        ] {
+            items.push(
+                MenuItem::run(
+                    ds::SHOW_COMMAND,
+                    json!({ "photo": photo, "surface": surface }),
+                )
+                .labeled(crate::i18n::text(ctx, label)),
+            );
+        }
         items.push(MenuItem::Separator);
         items.push(
             MenuItem::run(crate::comparison::ADD_COMMAND, json!({ "images": [photo] }))
@@ -5398,10 +5414,17 @@ impl Library {
     /// click in the filmstrip on one of them makes it active, as in
     /// Lightroom's Survey view. It never writes the gallery's selection
     /// or cursor: the filmstrip keeps its place.
-    pub fn compare_ui(&mut self, ui: &mut Ui, cmp: &mut Comparison) {
+    pub fn compare_ui(&mut self, ui: &mut Ui, cmp: &mut Comparison, instance: Option<&str>) {
         self.receive(ui.ctx());
-        let comparing = self.comparing();
-        let selection = self.selection();
+        // Another Compare (`helios.compare#<n>`) shows its own photos
+        // alone: never the selection, never the Compare place.
+        let surface = instance.unwrap_or(crate::display_surfaces::COMPARE);
+        let comparing = instance.is_none() && self.comparing();
+        let selection = if instance.is_none() {
+            self.selection()
+        } else {
+            Vec::new()
+        };
         let keys: Vec<String> = cmp
             .shown(&selection)
             .into_iter()
@@ -5435,7 +5458,7 @@ impl Library {
                 back_to_grid_action(ui);
                 ui.divider();
             }
-            if self.surfaces.target == Some(crate::display_surfaces::COMPARE) {
+            if self.surfaces.target.as_deref() == Some(surface) {
                 target_mark(ui);
                 ui.divider();
             }
@@ -5483,7 +5506,7 @@ impl Library {
                     changed: None,
                 },
             };
-            CompareView::new(COMPARE_SURFACE)
+            CompareView::new(instance.unwrap_or(COMPARE_SURFACE))
                 .synced(cmp.synced)
                 .best(best.clone())
                 .active(cmp.active(&keys).cloned())
@@ -5494,10 +5517,12 @@ impl Library {
                 })
                 .show(ui, &mut cmp.view, &panes, &thumbs)
         };
-        crate::name_rect(ui.ctx(), "helios.library.compare", out.response.rect);
         let active = cmp.active_index(keys.len());
-        if let Some(area) = out.panes.get(active) {
-            crate::name_rect(ui.ctx(), "helios.library.compare.active", *area);
+        if instance.is_none() {
+            crate::name_rect(ui.ctx(), "helios.library.compare", out.response.rect);
+            if let Some(area) = out.panes.get(active) {
+                crate::name_rect(ui.ctx(), "helios.library.compare.active", *area);
+            }
         }
         self.after_pass(ui.ctx());
         if let Some(k) = out.best {
@@ -5508,28 +5533,35 @@ impl Library {
         }
         let mut active = active;
         for intent in out.intents {
-            if let Some(i) = Self::compare_intent(ui.ctx(), cmp, &keys, chosen, intent) {
+            if let Some(i) = Self::compare_intent(ui.ctx(), cmp, &keys, chosen, instance, intent) {
                 active = i;
             }
         }
-        // The marks follow the active photo of a chosen comparison; the
-        // gallery's selection and cursor stay as they were.
-        self.compare_active = keys.get(active).filter(|_| chosen).cloned();
+        // The marks follow the active photo of the main comparison, when
+        // chosen; the gallery's selection and cursor stay as they were.
+        if instance.is_none() {
+            self.compare_active = keys.get(active).filter(|_| chosen).cloned();
+        }
     }
 
     /// What the Compare surface asked of the list: the active photo
     /// changed here (its new place), the list edited through the
     /// `compare.*` commands so the Compare place, and the workspace,
     /// keep it. A comparison of the selection becomes one of its own.
+    /// Another Compare's (`instance`) are sent to it (`surface`).
     fn compare_intent(
         ctx: &egui::Context,
         cmp: &mut Comparison,
         keys: &[String],
         chosen: bool,
+        instance: Option<&str>,
         intent: Intent<String>,
     ) -> Option<usize> {
         use crate::comparison as c;
-        let run = |id: &str, args: Value| {
+        let run = |id: &str, mut args: Value| {
+            if let Some(surface) = instance {
+                args["surface"] = json!(surface);
+            }
             crate::dialogs::request(
                 ctx,
                 crate::dialogs::Request::Run(id.into(), args, helios_shell::commands::Origin::User),

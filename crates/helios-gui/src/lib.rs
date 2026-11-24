@@ -217,8 +217,10 @@ pub const PANEL_KINDS: &[(&str, PanelKind)] = &[
 
 /// The panels that open as many times as asked (egui-pop's panel
 /// instances, `<panel>#<n>`): the Library's Results, each new one a
-/// Library view of its own ([`library_views`]). The others are single.
-pub const MULTIPLE: &[&str] = &[library::RESULTS_PANEL];
+/// Library view of its own ([`library_views`]), and Compare, each new
+/// one a comparison of its own ([`display_surfaces`]). The others are
+/// single.
+pub const MULTIPLE: &[&str] = &[library::RESULTS_PANEL, display_surfaces::COMPARE];
 
 /// The panels Helios declares today, with the areas each may be moved to
 /// (egui-pop's placement rules); each shows a placeholder until its

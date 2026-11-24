@@ -1761,6 +1761,7 @@ impl Shell {
             if has(&shell, panel) {
                 let library = shell.focus.library.clone();
                 let comparison = shell.focus.comparison.clone();
+                let compares = shell.focus.compares.clone();
                 let window = shell.library_focus.state.clone();
                 let views = std::rc::Rc::new(RefCell::new(crate::library_views::Views::default()));
                 shell.set_instance_content(panel, move |ui, app, drawn| {
@@ -1781,7 +1782,14 @@ impl Shell {
                         0 => library.show(ui, &crate::library::GalleryOptions::RESULTS_PANEL),
                         3 => library.show(ui, &crate::library::GalleryOptions::FILTERS_PANEL),
                         1 => library.filmstrip(ui),
-                        _ => library.compare_ui(ui, &mut comparison.borrow_mut()),
+                        _ if drawn.is_instance() => {
+                            let mut compares = compares.borrow_mut();
+                            let cmp = compares
+                                .entry(drawn.to_string())
+                                .or_insert_with(|| kept_comparison(app, drawn));
+                            library.compare_ui(ui, cmp, Some(drawn.as_str()));
+                        }
+                        _ => library.compare_ui(ui, &mut comparison.borrow_mut(), None),
                     }
                 });
             }
@@ -2169,6 +2177,17 @@ impl Shell {
     /// pan.
     pub fn comparison(&self) -> std::cell::Ref<'_, crate::comparison::Comparison> {
         self.focus.comparison.borrow()
+    }
+
+    /// The photos another Compare (`helios.compare#<n>`) compares; none
+    /// for a Compare not open.
+    pub fn compared_in(&self, surface: &str) -> Vec<String> {
+        self.focus
+            .compares
+            .borrow()
+            .get(surface)
+            .map(|c| c.photos().to_vec())
+            .unwrap_or_default()
     }
 
     /// Where an import's lines go, with its arguments (`library.import`'s),
@@ -3830,23 +3849,23 @@ impl Shell {
         for (id, title) in [
             (
                 crate::comparison::ADD_COMMAND,
-                "Compare: add photos to the comparison open (`images`: ids, else the selection; `at`: before the photo at that place, else last; sixteen at most)",
+                "Compare: add photos to the comparison open (`images`: ids, else the selection; `at`: before the photo at that place, else last; sixteen at most; `surface`: another Compare, helios.compare#<n>)",
             ),
             (
                 crate::comparison::REMOVE_COMMAND,
-                "Compare: take photos out of the comparison (`images`: ids, else the active photo; the last one out leaves Compare)",
+                "Compare: take photos out of the comparison (`images`: ids, else the active photo; the last one out leaves Compare; `surface`: another Compare, helios.compare#<n>)",
             ),
             (
                 crate::comparison::SET_COMMAND,
-                "Compare: compare exactly these photos (`images`: one to sixteen ids, in that order), entering Compare",
+                "Compare: compare exactly these photos (`images`: one to sixteen ids, in that order; `surface`: another Compare, helios.compare#<n>), entering Compare",
             ),
             (
                 crate::comparison::CLEAR_COMMAND,
-                "Compare: empty the comparison and leave Compare",
+                "Compare: empty the comparison and leave Compare (`surface`: another Compare, helios.compare#<n>, emptied)",
             ),
             (
                 crate::comparison::ACTIVE_COMMAND,
-                "Compare: the photos compared and the active one (`image`: make that compared photo active)",
+                "Compare: the photos compared and the active one (`image`: make that compared photo active; `surface`: another Compare, helios.compare#<n>)",
             ),
         ] {
             add(
@@ -3857,7 +3876,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 crate::display_surfaces::SHOW_COMMAND,
-                "Show a photo on a display surface (`photo`: its id; `surface`: helios.viewport or helios.compare, else the double-click strategy chooses; `from`: the panel asking)",
+                "Show a photo on a display surface (`photo`: its id; `surface`: helios.viewport, helios.compare or another Compare helios.compare#<n>, new for a new Compare, new_window for one in a window of its own, else the double-click strategy chooses; `from`: the panel asking)",
                 "Library",
             ),
             Box::new(|a, _| Ok(Action::ShowPhoto(a.clone()))),
@@ -6871,10 +6890,19 @@ impl Shell {
             .follow(focused.as_ref().map(PanelId::as_str));
         let layout = app.layout();
         let strategy = self.double_click_strategy();
+        let open = crate::display_surfaces::open(&layout);
+        // A Compare closed takes its comparison with it.
+        self.focus
+            .compares
+            .borrow_mut()
+            .retain(|id, _| open.contains(id));
         let seen = crate::display_surfaces::Seen {
-            open: crate::display_surfaces::open(&layout)
+            open: open
                 .into_iter()
-                .map(|s| (s, crate::display_surfaces::window_of(&layout, s).is_some()))
+                .map(|s| {
+                    let windowed = crate::display_surfaces::window_of(&layout, &s).is_some();
+                    (s, windowed)
+                })
                 .collect(),
             target: self.focus.surfaces.target(strategy, &layout, None),
         };
@@ -6918,8 +6946,19 @@ impl Shell {
         }
         let layout = self.core.app.handle().layout();
         let surface = if let Some(s) = args.get("surface").and_then(Value::as_str) {
-            ds::surface(s)
-                .ok_or_else(|| format!("`surface`: {} or {}, not `{s}`", ds::IMAGE, ds::COMPARE))?
+            match s {
+                ds::NEW | ds::NEW_WINDOW => return self.show_in_new(&photo, s == ds::NEW_WINDOW),
+                _ => ds::surface(s).ok_or_else(|| {
+                    format!(
+                        "`surface`: {}, {} (or one of its instances `{}#<n>`), {} or {}, not `{s}`",
+                        ds::IMAGE,
+                        ds::COMPARE,
+                        ds::COMPARE,
+                        ds::NEW,
+                        ds::NEW_WINDOW
+                    )
+                })?,
+            }
         } else {
             {
                 let from = args.get("from").and_then(Value::as_str);
@@ -6929,17 +6968,37 @@ impl Shell {
                     .route(self.double_click_strategy(), &layout, from)
                 {
                     ds::Route::Surface(s) => s,
+                    ds::Route::New => return self.show_in_new(&photo, false),
                     ds::Route::Ask => {
                         self.focus.show_asked = Some(photo.clone());
                         let t = |m: Message| self.text(m);
-                        let choices = ds::SURFACES
+                        let mut surfaces = ds::open(&layout);
+                        for s in ds::SURFACES {
+                            if !surfaces.iter().any(|o| o == s) {
+                                surfaces.push((*s).to_string());
+                            }
+                        }
+                        let mut choices: Vec<crate::dialogs::Choice> = surfaces
                             .iter()
                             .map(|s| crate::dialogs::Choice {
-                                value: (*s).to_string(),
+                                value: s.clone(),
                                 label: t(surface_name(s)),
                                 detail: None,
                             })
                             .collect();
+                        for (value, label) in [
+                            (ds::NEW, Message::new("gui-show-in-new", "New surface")),
+                            (
+                                ds::NEW_WINDOW,
+                                Message::new("gui-show-in-new-window", "New window"),
+                            ),
+                        ] {
+                            choices.push(crate::dialogs::Choice {
+                                value: value.to_string(),
+                                label: t(label),
+                                detail: None,
+                            });
+                        }
                         let picker = crate::dialogs::Picker {
                             title: t(Message::new("gui-show-in-title", "Show in")),
                             choices,
@@ -6958,10 +7017,144 @@ impl Shell {
                 crate::comparison::SET_COMMAND,
                 &json!({ "images": [photo.clone()] }),
             )?;
+        } else if ds::is_compare(&surface) {
+            // Another Compare: its comparison of this one photo, shown.
+            self.compare_list(
+                crate::comparison::SET_COMMAND,
+                &json!({ "images": [photo.clone()], "surface": surface }),
+            )?;
+            let app = self.core.app.handle();
+            if let Ok(panel) = PanelId::new(&surface) {
+                app.focus_panel(&panel);
+            }
         } else {
             self.focus.show_in_image = Some(photo.clone());
         }
         Ok(json!({ "photo": photo, "surface": surface }))
+    }
+
+    /// `photo.show` on a new Compare (`pop.panel.open`, `instance:
+    /// "new"`), in a window of its own when `window`: the photo its
+    /// comparison of one. Opening a Compare is layout, not an undo step.
+    fn show_in_new(&mut self, photo: &str, window: bool) -> Result<Value, String> {
+        use crate::display_surfaces as ds;
+        use egui_pop::api::bus::{OpenPlace, PanelOpenAsk};
+        let app = self.core.app.handle().clone();
+        let kind = PanelId::from_static(ds::COMPARE);
+        let before = app.panel_instances(&kind);
+        app.open_panel(
+            PanelOpenAsk::new(ds::COMPARE, OpenPlace::Last, ds::SHOW_COMMAND).instance("new"),
+        )?;
+        let Some(panel) = app
+            .panel_instances(&kind)
+            .into_iter()
+            .find(|p| p.is_instance() && !before.contains(p))
+        else {
+            return Err("the new Compare did not open (the workbench is busy): try again".into());
+        };
+        let surface = panel.as_str().to_string();
+        self.focus
+            .compares
+            .borrow_mut()
+            .insert(surface.clone(), crate::comparison::Comparison::default());
+        self.compare_list(
+            crate::comparison::SET_COMMAND,
+            &json!({ "images": [photo], "surface": surface }),
+        )?;
+        if window {
+            app.detach_panel(&panel);
+        }
+        app.focus_panel(&panel);
+        Ok(json!({ "photo": photo, "surface": surface, "window": window }))
+    }
+
+    /// The `compare.*` list commands on another Compare (`surface`:
+    /// `helios.compare#<n>`): its comparison edited by id and kept in its
+    /// instance's payload, never the Compare place, the selection or the
+    /// cursor.
+    fn compare_instance_list(
+        &mut self,
+        id: &str,
+        surface: &str,
+        images: Option<Vec<String>>,
+        args: &Value,
+    ) -> Result<Value, String> {
+        use crate::comparison as c;
+        let app = self.core.app.handle().clone();
+        let panel = PanelId::new(surface).map_err(|e| format!("`surface`: {e}"))?;
+        if !app
+            .panel_instances(&PanelId::from_static(crate::display_surfaces::COMPARE))
+            .contains(&panel)
+        {
+            return Err(format!("`surface`: no Compare `{surface}` is open"));
+        }
+        let selection = self.focus.library.borrow().selection();
+        let mut compares = self.focus.compares.borrow_mut();
+        let cmp = compares
+            .entry(surface.to_string())
+            .or_insert_with(|| kept_comparison(&app, &panel));
+        let current = cmp.photos().to_vec();
+        let out = match id {
+            c::ADD_COMMAND => {
+                let ids = images.unwrap_or(selection);
+                let at = args.get("at").and_then(Value::as_u64).map(|a| a as usize);
+                let (list, added) = cmp.with_added(&ids, at);
+                cmp.edit(list.clone());
+                json!({ "images": list, "added": added })
+            }
+            c::REMOVE_COMMAND => {
+                let ids =
+                    images.unwrap_or_else(|| cmp.active(&current).cloned().into_iter().collect());
+                let list: Vec<String> = current
+                    .iter()
+                    .filter(|p| !ids.contains(p))
+                    .cloned()
+                    .collect();
+                let removed: Vec<String> = current
+                    .iter()
+                    .filter(|p| ids.contains(p))
+                    .cloned()
+                    .collect();
+                cmp.edit(list.clone());
+                json!({ "images": list, "removed": removed })
+            }
+            c::SET_COMMAND => {
+                let mut ids = images.ok_or("`images`: the photos to compare")?;
+                let mut seen = std::collections::HashSet::new();
+                ids.retain(|id| seen.insert(id.clone()));
+                if ids.is_empty() {
+                    return Err("`images`: one photo at least (`compare.clear` empties it)".into());
+                }
+                cmp.set_photos(ids);
+                json!({ "images": cmp.photos() })
+            }
+            c::CLEAR_COMMAND => {
+                cmp.set_photos(Vec::new());
+                json!({ "cleared": current.len() })
+            }
+            _ => {
+                if let Some(image) = args.get("image").and_then(Value::as_str) {
+                    let at = current
+                        .iter()
+                        .position(|p| p == image)
+                        .ok_or_else(|| format!("`{image}` is not compared"))?;
+                    cmp.set_active(at);
+                }
+                json!({
+                    "comparing": !current.is_empty(),
+                    "images": current,
+                    "active": cmp.active(&current),
+                    "best": cmp.best(),
+                    "synced": cmp.synced,
+                })
+            }
+        };
+        let kept = json!({ "images": cmp.photos() });
+        drop(compares);
+        if let Err(e) = app.set_instance_payload(&panel, kept) {
+            log::warn!(target: "helios", "compare {surface} not kept: {e}");
+        }
+        Ok(out)
     }
 
     /// The `compare.*` list commands: the comparison's photos edited by
@@ -6983,6 +7176,17 @@ impl Shell {
             if let Some(unknown) = ids.iter().find(|id| !library.holds(id)) {
                 return Err(format!("the library has no photo `{unknown}`"));
             }
+        }
+        match args.get("surface").and_then(Value::as_str) {
+            Some(s) if s != crate::display_surfaces::COMPARE => {
+                if !crate::display_surfaces::is_compare(s) {
+                    return Err(format!(
+                        "`surface`: a Compare (`helios.compare#<n>`), not `{s}`"
+                    ));
+                }
+                return self.compare_instance_list(id, s, images, args);
+            }
+            _ => {}
         }
         let app = self.core.app.handle().clone();
         let comparing = crate::contexts::comparing(&app);
@@ -9248,9 +9452,28 @@ fn images_arg(args: &Value) -> Result<Option<Vec<String>>, String> {
 
 /// A display surface's name, as the "Show in ▸" menu says it.
 pub(crate) fn surface_name(surface: &str) -> Message {
-    if surface == crate::display_surfaces::COMPARE {
-        Message::new("gui-surface-compare", "Compare")
-    } else {
-        Message::new("gui-surface-image", "Image")
+    let id = PanelId::new(surface).ok();
+    match id {
+        Some(id) if id.is_instance() && crate::display_surfaces::is_compare(surface) => {
+            Message::new("gui-surface-compare-n", "Compare { $n }").with("n", id.instance_number())
+        }
+        _ if surface == crate::display_surfaces::COMPARE => {
+            Message::new("gui-surface-compare", "Compare")
+        }
+        _ => Message::new("gui-surface-image", "Image"),
     }
+}
+
+/// Another Compare's comparison as its instance's payload kept it
+/// (`{"images": [...]}`), or an empty one.
+fn kept_comparison(app: &AppHandle, id: &PanelId) -> crate::comparison::Comparison {
+    let mut cmp = crate::comparison::Comparison::default();
+    let layout = app.layout();
+    let images: Vec<String> = layout
+        .instance(id)
+        .and_then(|i| i.payload.get("images"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    cmp.set_photos(images);
+    cmp
 }

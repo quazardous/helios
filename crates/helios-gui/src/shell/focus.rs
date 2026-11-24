@@ -71,6 +71,9 @@ pub(super) struct Focus {
     /// The comparison: its photos, the active one, its zoom and pan (the
     /// Compare place names its photos; the Compare panel draws it).
     pub(super) comparison: Rc<RefCell<crate::comparison::Comparison>>,
+    /// The other Compares' comparisons (`helios.compare#<n>`), by
+    /// instance: each its own, kept in its instance's payload.
+    pub(super) compares: Rc<RefCell<BTreeMap<String, crate::comparison::Comparison>>>,
     /// The workspace opens in Compare (its template says so): the place
     /// is entered once the stack is read, when it shows the root.
     pub(super) open_in_compare: bool,
@@ -207,6 +210,7 @@ impl Focus {
             scopes: Rc::default(),
             library: seed.library,
             comparison: Rc::default(),
+            compares: Rc::default(),
             open_in_compare: false,
             compare_panel_shown: false,
             album_renamed: None,

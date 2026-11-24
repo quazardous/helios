@@ -3356,6 +3356,9 @@ gui-library-sources-tip = Dossiers, albums, mots-clés et imports : choisir les 
 
 gui-show-in-title = Montrer dans
 gui-surface-compare = Comparer
+gui-surface-compare-n = Comparer { $n }
+gui-show-in-new = Nouvelle surface
+gui-show-in-new-window = Nouvelle fenêtre
 gui-surface-image = Image
 gui-show-in-window = { $surface } (sa propre fenêtre)
 gui-show-in = Montrer dans
