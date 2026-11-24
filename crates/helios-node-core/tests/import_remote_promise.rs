@@ -358,7 +358,7 @@ fn a_slow_download_cancelled_mid_way_leaves_nothing_half_imported() {
     assert!(!service.calls.lock().unwrap().iter().any(|c| c == "g03"));
     let mut placed: Vec<String> = std::fs::read_dir(dir.join("lib"))
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
