@@ -156,6 +156,16 @@ Recommended, not decided: all placement is egui-pop's (the layout layer
 grown out of its `UiPop` layout-by-role helpers; egui_stack and egui_fit
 stay separate solvers reached only through egui-pop). The analysis and
 its slices: docs/design/ui-responsibilities.md.
+The design criterion of egui_hud and the controls layer (2026-11-24,
+decided): a feature must reduce what an agent composing a workshop has to
+know (the presentation decisions it writes, the rules for one control, the
+words it must learn), never add vocabulary of its own. A presentation
+preference goes through what exists: the control (its purpose, feel and
+the faces it accepts), the kit and the context (slot, surface), the host
+(its drawings, configured kits). A new mechanism needs a measured need: an
+agent bench, where an agent composes three workshops (portrait, raw
+development, restoration) and its presentation decisions are counted, is
+planned after the controls layer's current slice (not decided).
 Translation goes into egui-pop too (2026-10-11, decided): an official
 `egui-pop-i18n` plugin (Fluent catalogues, language fallback, key
 extraction) built on egui-pop's public API, moved there from
