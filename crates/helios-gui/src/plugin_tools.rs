@@ -164,7 +164,7 @@ fn shown(tools: Vec<Declared>, store: &Store, graph: Option<&Graph>) -> Vec<Show
                     .tool
                     .handles
                     .iter()
-                    .flat_map(|h| h.writes())
+                    .flat_map(tools::ToolHandle::writes)
                     .collect();
                 for id in g.ids() {
                     let of = g
