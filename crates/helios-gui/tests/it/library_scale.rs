@@ -96,8 +96,10 @@ fn synthetic(dir: &Path, n: u32) -> PathBuf {
 fn grow(dir: &Path, ids: std::ops::Range<u32>) -> PathBuf {
     // One source file per 20,000 links: a file system caps a file's
     // hard links (ext4 at 65,000), and the measure goes to 100,000 photos.
+    // NTFS caps them at 1,023: one per 1,000 there.
+    let per_source = if cfg!(windows) { 1_000 } else { 20_000 };
     let source = |i: u32| {
-        let file = dir.join(format!("photo-{}.raw", i / 20_000));
+        let file = dir.join(format!("photo-{}.raw", i / per_source));
         if !file.exists() {
             std::fs::write(&file, ON_DISK).unwrap();
         }

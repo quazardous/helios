@@ -249,7 +249,13 @@ fn a_crash_costs_that_plugin_alone_and_it_restarts() {
         crashed,
         Notice::Crashed {
             plugin: TESTEE.into(),
-            status: "exit status: 3".into(),
+            // The system's own words for an exit code.
+            status: if cfg!(windows) {
+                "exit code: 3"
+            } else {
+                "exit status: 3"
+            }
+            .into(),
             stderr: vec!["testee: crashing on demand".into()],
         }
     );
