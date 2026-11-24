@@ -8,11 +8,22 @@ moves only when a release is made, and every release is published.
 ## Releases: asked for by a fragment
 
 Every change reaches `next` through the tester's gate (docs/next.md). When
-CI passes on a commit of `next`,
+a **full** CI run passes on a commit of `next`,
 the promotion workflow (`.github/workflows/promote.yml`, running
 `cargo xtask promote`) moves `main` forward:
 
-- **It works on the exact commit CI validated**, the run's `head_sha`,
+- **Only a run of the whole suite promotes**: the nightly run, a manual
+  run (`workflow_dispatch` of ci.yml), or a push to `next` that ran every
+  test (its selection was everything, or a pushed commit carries the
+  trailer `CI: full`). A push to `next` usually runs the CI broker's
+  selection of tests (docs/ci-broker.md, "On next"): green, it promotes
+  nothing, neither `main` nor a release, since a test it skipped may be
+  broken. The next full run promotes `next`'s head, which holds it, so
+  `main` trails `next` by a day at most. The run's `ci-run` artifact says
+  its mode; `cargo xtask promote <SHA> --run full|select` holds the rule
+  (`run_promotes`, with its unit test).
+- **It works on the exact commit CI validated**, the `commit` of the run's
+  `ci-run` artifact (a nightly run tests `next`, its own head is `main`'s),
   never on whatever `next` points to when the promotion runs. A commit CI
   did not test never reaches `main`.
 - When a fragment in `changelog.d/` asks for a release (a line
@@ -28,8 +39,8 @@ the promotion workflow (`.github/workflows/promote.yml`, running
   the next promotion, so a fix never waits for a feature.
 - The release commit is refused unless it is the validated commit plus a
   version bump and nothing else; in Cargo.lock only the workspace's own
-  versions may move. The survival scenarios are not run again: CI ran them
-  on the validated commit, and the bump changes no code.
+  versions may move. The survival scenarios are not run again: the full
+  run ran them on the validated commit, and the bump changes no code.
 - `main` fast-forwards to the release commit. `next` does too, in the same
   atomic push, if it still points at the validated commit. If `next` has
   moved, `main` still gets the release (the validated tree plus the bump)
@@ -38,7 +49,8 @@ the promotion workflow (`.github/workflows/promote.yml`, running
   newer commit then starts from that merge.
 - The workflow pushes with its own token, which starts no workflow: the
   release commit and the merge do not rerun CI (they change versions
-  only); the next push to `next` tests them with whatever it brings.
+  only); the next push to `next` tests them with whatever it brings, and
+  the next nightly run tests everything again.
 - A branch started before a bump still carries the old version where it
   adds or moves a plugin: `cargo xtask check`, in CI on every pull
   request, fails when an in-tree plugin's Helios range is not the one the

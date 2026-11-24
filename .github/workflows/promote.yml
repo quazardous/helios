@@ -1,12 +1,19 @@
 name: Promote next to main
 
 # `next` is the buffer branch agents merge into (docs/bench.md, "The next
-# branch"). Once CI passes on a push to `next`, `main` moves to that exact
+# branch"). Once a FULL CI run passes on `next`, `main` moves to that exact
 # commit, with its release (docs/releases.md):
 #
-# - The promotion works on the commit CI validated, the run's `head_sha`,
-#   never on whatever `next` points to by then. A commit CI did not test
-#   never reaches `main`.
+# - Only a run of the whole suite promotes: the nightly run, a manual run,
+#   or a push whose selection was everything (its `ci-run` artifact says
+#   `"mode": "full"`). A push to `next` usually runs the CI broker's
+#   selection (docs/ci-broker.md): green, it promotes nothing, and the next
+#   full run promotes `next`'s head, which holds it. `cargo xtask promote
+#   --run` holds the rule.
+# - The promotion works on the commit CI validated, the `commit` of the
+#   run's `ci-run` artifact (a nightly run's own head_sha is main's), never
+#   on whatever `next` points to by then. A commit CI did not test never
+#   reaches `main`.
 # - When a fragment in `changelog.d/` asks for a release (`release: patch`,
 #   `minor` or `major`), or a user-facing one has waited 7 days,
 #   `cargo xtask promote` commits "Release X.Y.Z" on top of that commit
@@ -30,11 +37,12 @@ name: Promote next to main
 #   by a dispatch with `publish` (a tag pushed with GITHUB_TOKEN starts no
 #   workflow, a dispatch does): no hand step between a fragment asking for
 #   a release and the GitHub Release.
+# No `branches:` filter: a nightly run's head branch is main (it tests
+# next); the job's `if` names the runs that may promote.
 on:
   workflow_run:
     workflows: [ci]
     types: [completed]
-    branches: [next]
 
 permissions:
   contents: write
@@ -48,30 +56,56 @@ concurrency:
 jobs:
   promote:
     name: Release and fast-forward main
-    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event.workflow_run.conclusion == 'success' && (
+        (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'next')
+        || github.event.workflow_run.event == 'schedule'
+        || github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
+      # What the run tested: its commit and whether it ran every test. No
+      # artifact (a run from before it existed): nothing is promoted.
+      - name: What the run tested
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          if ! gh run download "$RUN" --repo "$GITHUB_REPOSITORY" --name ci-run --dir ci-run; then
+            echo "not promoted: run $RUN has no ci-run artifact" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "commit=$(jq -r .commit ci-run/ci-run.json)" >> "$GITHUB_OUTPUT"
+          echo "mode=$(jq -r .mode ci-run/ci-run.json)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.run.outputs.commit != ''
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ steps.run.outputs.commit }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.95
+        if: steps.run.outputs.commit != ''
       - uses: Swatinem/rust-cache@v2
+        if: steps.run.outputs.commit != ''
         with:
           shared-key: promote
       - name: Bot identity
+        if: steps.run.outputs.commit != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Where main stands before
         id: before
+        if: steps.run.outputs.commit != ''
         run: echo "main=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+      # A selective run promotes nothing (`--run select`): xtask says why.
       - name: Release and promote the commit CI passed
         id: promote
+        if: steps.run.outputs.commit != ''
         env:
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ steps.run.outputs.commit }}
+          MODE: ${{ steps.run.outputs.mode }}
         # --locked: a stale Cargo.lock fails here, before anything is written.
-        run: cargo --locked xtask promote "$SHA"
+        run: cargo --locked xtask promote "$SHA" --run "$MODE"
       - name: Tag and publish the release
         if: steps.promote.outputs.release != ''
         env:
@@ -88,6 +122,7 @@ jobs:
       # to main touching site/) is started here when the promotion brought
       # changes to the site.
       - name: Publish the site when it changed
+        if: steps.run.outputs.commit != ''
         env:
           BEFORE: ${{ steps.before.outputs.main }}
           GH_TOKEN: ${{ github.token }}
