@@ -26,8 +26,9 @@ fn click(h: &mut Harness<'_, Shell>, label: &str) {
     h.run_steps(3);
 }
 
+/// Whether a node's name holds `label` (a menu row may add its key).
 fn shows(h: &Harness<'_, Shell>, label: &str) -> bool {
-    h.query_all_by_label(label).next().is_some()
+    h.query_all_by_label_contains(label).next().is_some()
 }
 
 /// Opens a submenu of the open menu (a click on its row, the pointer
@@ -53,7 +54,7 @@ fn close_menus(h: &mut Harness<'_, Shell>) {
 fn view_holds_what_is_shown_and_window_where_things_are() {
     let mut h = shell();
     click(&mut h, "View");
-    for item in ["Command palette", "Activity…"] {
+    for item in ["Activity…", "Zoom in the interface", "Full screen"] {
         assert!(shows(&h, item), "View has {item}");
     }
     // The layout entries left View for Window ▸ Studio.
