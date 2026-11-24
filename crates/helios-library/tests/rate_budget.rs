@@ -4,8 +4,8 @@
 //! connector declared, and a waiting download goes before the thumbnails.
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use helios_connect::budget::{Budget, Use};
@@ -105,9 +105,8 @@ fn glances(
 }
 
 #[test]
-fn downloads_and_thumbnails_together_stay_within_the_account_s_rate() {
+fn an_import_and_thumbnails_together_stay_within_the_parallel_places() {
     let limits = Limits {
-        per_second: Some(8),
         parallel: Some(2),
         ..Limits::default()
     };
@@ -124,21 +123,95 @@ fn downloads_and_thumbnails_together_stay_within_the_account_s_rate() {
         t.join().unwrap();
     }
     assert_eq!(fetched, 5);
-    let requests = &provider.requests;
-    assert!(requests.most_at_once.load(Ordering::SeqCst) <= 2);
-    let log = requests.log.lock().unwrap().clone();
-    assert_eq!(log.len(), 5 + 9);
-    // Counted where the service sees them, a little after each place
-    // was given: a second's window, less that margin.
-    let window = Duration::from_millis(950);
-    for (_, start) in &log {
-        let within = log
-            .iter()
-            .filter(|(_, t)| *t >= *start && t.duration_since(*start) < window)
-            .count();
-        assert!(within <= 8, "{within} requests within a second: {log:?}");
-    }
+    assert!(provider.requests.most_at_once.load(Ordering::SeqCst) <= 2);
+    assert_eq!(provider.requests.log.lock().unwrap().len(), 5 + 9);
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A clock the test moves: milliseconds after a start.
+struct FakeClock(Instant, AtomicU64);
+
+impl FakeClock {
+    fn now(&self) -> Instant {
+        self.0 + Duration::from_millis(self.1.load(Ordering::SeqCst))
+    }
+}
+
+#[test]
+fn downloads_and_thumbnails_together_stay_within_the_rate_on_a_fake_clock() {
+    let limits = Limits {
+        per_second: Some(8),
+        parallel: Some(2),
+        ..Limits::default()
+    };
+    let (provider, connector, source, items) = service("rate-cat", 5, limits);
+    let connector: Arc<dyn Connector> = Arc::from(connector);
+    let budget = Budget::of(&source, limits);
+    let clock = Arc::new(FakeClock(Instant::now(), AtomicU64::new(0)));
+    // Each request's use and the fake time its place was given.
+    let granted = Arc::new(Mutex::new(Vec::new()));
+    let worker = |use_: Use, n: usize| {
+        let (connector, source, items, budget, clock, granted) = (
+            connector.clone(),
+            source.clone(),
+            items.clone(),
+            budget.clone(),
+            clock.clone(),
+            granted.clone(),
+        );
+        std::thread::spawn(move || {
+            for item in items.iter().cycle().take(n) {
+                // The time the budget counted the place at: the last asked.
+                let last = std::cell::Cell::new(clock.now());
+                let now = || {
+                    last.set(clock.now());
+                    last.get()
+                };
+                let _permit = budget.take(use_, &now, &|| false).unwrap();
+                granted.lock().unwrap().push((use_, last.get()));
+                let at = ItemRef {
+                    source: source.clone(),
+                    id: item.id.clone(),
+                };
+                match use_ {
+                    Use::Download => {
+                        let mut sink = Vec::new();
+                        connector.fetch(&at, 0, &mut sink, &Cancel::new()).unwrap();
+                    }
+                    Use::Thumbnail => {
+                        connector.thumbnail(&at, 64).unwrap();
+                    }
+                }
+            }
+        })
+    };
+    let threads = vec![
+        worker(Use::Download, 10),
+        worker(Use::Download, 10),
+        worker(Use::Thumbnail, 10),
+        worker(Use::Thumbnail, 10),
+    ];
+    // The clock moves a tenth of a second at a time until all is asked.
+    while granted.lock().unwrap().len() < 40 {
+        std::thread::sleep(Duration::from_millis(2));
+        clock.1.fetch_add(100, Ordering::SeqCst);
+    }
+    for t in threads {
+        t.join().unwrap();
+    }
+    let granted = granted.lock().unwrap().clone();
+    for (_, start) in &granted {
+        let within = granted
+            .iter()
+            .filter(|(_, t)| *t >= *start && t.duration_since(*start) < Duration::from_secs(1))
+            .count();
+        assert!(
+            within <= 8,
+            "{within} requests within a second: {granted:?}"
+        );
+    }
+    assert!(provider.requests.most_at_once.load(Ordering::SeqCst) <= 2);
+    assert_eq!(provider.requests.log.lock().unwrap().len(), 40);
 }
 
 #[test]
