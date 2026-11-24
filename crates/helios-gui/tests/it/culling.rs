@@ -280,8 +280,8 @@ fn the_search_filter_is_a_vault_query() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The search text typed in the window, or applied by an agent, shows
-/// the photos the vault's grammar selects: for each text, the window's
+/// The search text, as the field or `library.filter.apply` hands it,
+/// shows the photos the vault's grammar selects: for each text, the window's
 /// results are the vault's own query of `rules::parse_text`.
 #[test]
 fn the_window_s_results_are_the_vault_s_for_every_search_text() {
@@ -317,7 +317,11 @@ fn the_window_s_results_are_the_vault_s_for_every_search_text() {
         "rating:2..4 -label:blue",
     ];
     for (i, text) in texts.iter().enumerate() {
-        run(&mut h, "library.filter.apply", json!({ "query": text }));
+        // As the field hands it: the text whole.
+        let typed = helios_gui::recent_filters::filter_arg(&json!({ "query": text }))
+            .unwrap()
+            .unwrap();
+        h.state_mut().library_mut().set_filter(typed);
         persist.frame_settled(h.state_mut(), 10.0 + i as f64);
         let mut shown = h.state().library().shown();
         shown.sort();

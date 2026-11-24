@@ -214,9 +214,15 @@ fn collection_rule(
     let any = |rules| Rule::group(crate::rules::Match::Any, rules);
     Ok(Some(match doc.get("kind").and_then(Value::as_str) {
         Some(SMART) => {
+            if seen.iter().any(|s| s == id) {
+                return Ok(Some(any(Vec::new())));
+            }
+            seen.push(id.to_string());
             let rules = Rule::parse(doc.get("rules").unwrap_or(&Value::Null))
                 .map_err(|e| format!("the smart album `{id}`: {e}"))?;
-            expand(&rules, docs, seen)?
+            let expanded = expand(&rules, docs, seen)?;
+            seen.retain(|s| s != id);
+            expanded
         }
         Some(SET) => {
             if seen.iter().any(|s| s == id) {
@@ -238,8 +244,9 @@ fn collection_rule(
     }))
 }
 
-/// `rules` with each `album` condition naming a set written out as the
-/// set's tree ([`set_rule`]; `not_in`: none of it).
+/// `rules` with each `album` condition naming a set or a smart album
+/// written out as its tree ([`set_rule`]; `not_in`: none of it), so the
+/// search text's `collection:<smart album>` selects its photos.
 pub fn expand_sets(rules: &Rule, docs: &[(String, Value)]) -> Result<Rule, String> {
     expand(rules, docs, &mut Vec::new())
 }
@@ -256,7 +263,8 @@ fn expand(rule: &Rule, docs: &[(String, Value)], seen: &mut Vec<String>) -> Resu
         Rule::Condition(c)
             if c.field.kind == crate::rules::RuleKind::Album
                 && docs.iter().any(|(k, d)| {
-                    k == c.text() && d.get("kind").and_then(Value::as_str) == Some(SET)
+                    k == c.text()
+                        && matches!(d.get("kind").and_then(Value::as_str), Some(SET | SMART))
                 }) =>
         {
             let set = collection_rule(c.text(), docs, seen)?
