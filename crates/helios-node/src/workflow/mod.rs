@@ -18,6 +18,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use helios_command::schema::{
+    absolute, boolean, count, node_params, or_null, string, strings, text,
+};
+use helios_command::{CommandSpec, object};
 use helios_core::Graph;
 use helios_decision::Mode;
 use helios_journal::{Node as JournalNode, Workflow};
@@ -27,6 +31,86 @@ use serde_json::{Value, json};
 pub mod extract;
 pub mod lifecycle;
 pub mod runs;
+
+fn run_item() -> Value {
+    json!({ "anyOf": [
+        absolute(),
+        object(&[("path", absolute(), true), ("params", node_params(), false)]),
+    ] })
+}
+
+fn on_run(extra: &[(&str, Value, bool)]) -> Value {
+    let mut fields = vec![("run", string(), true)];
+    fields.extend(extra.iter().cloned());
+    object(&fields)
+}
+
+/// The workflow level's node verbs, declared here: submit images as a run,
+/// list runs and their items, and steer a run (forget, cancel, retry,
+/// prioritize, pause, resume), answered by [`runs::Workflows`].
+pub fn verbs() -> Vec<CommandSpec> {
+    use crate::commands::{file_format, quality};
+    vec![
+        CommandSpec::new("workflow.submit", "Submit images as a run", "Workflow").params(object(
+            &[
+                ("title", or_null(string()), false),
+                (
+                    "items",
+                    json!({ "type": "array", "items": run_item() }),
+                    true,
+                ),
+                ("out", absolute(), true),
+                ("format", file_format(), true),
+                ("quality", quality(), false),
+                (
+                    "name",
+                    text("the file name: {stem} and {ext} replaced"),
+                    false,
+                ),
+                ("node", or_null(string()), false),
+                ("source", or_null(string()), false),
+                ("again", boolean(), false),
+                ("concurrency", or_null(count()), false),
+            ],
+        )),
+        CommandSpec::new("workflow.runs", "List the runs", "Workflow").read_only(),
+        CommandSpec::new("workflow.items", "List a run's items", "Workflow")
+            .params(on_run(&[
+                ("node", or_null(string()), false),
+                ("state", or_null(string()), false),
+                ("offset", count(), false),
+                ("limit", count(), false),
+            ]))
+            .read_only(),
+        CommandSpec::new("workflow.forget", "Remove a run not at work", "Workflow")
+            .params(on_run(&[])),
+        CommandSpec::new("workflow.cancel", "Cancel a run's items", "Workflow").params(on_run(&[
+            ("items", or_null(strings()), false),
+            ("node", or_null(string()), false),
+        ])),
+        CommandSpec::new("workflow.retry", "Retry a run's failed items", "Workflow").params(
+            on_run(&[
+                ("items", or_null(strings()), false),
+                ("node", or_null(string()), false),
+            ]),
+        ),
+        CommandSpec::new(
+            "workflow.prioritize",
+            "Move a run's items first or last",
+            "Workflow",
+        )
+        .params(on_run(&[
+            ("items", strings(), true),
+            (
+                "to",
+                json!({ "type": "string", "enum": ["top", "bottom"] }),
+                true,
+            ),
+        ])),
+        CommandSpec::new("workflow.pause", "Pause a run", "Workflow").params(on_run(&[])),
+        CommandSpec::new("workflow.resume", "Resume a run", "Workflow").params(on_run(&[])),
+    ]
+}
 
 /// The root every item of a run is `done` at once it entered the run.
 pub const SUBMIT: &str = "submit";

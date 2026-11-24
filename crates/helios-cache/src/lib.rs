@@ -22,6 +22,7 @@ mod disk;
 mod flight;
 mod lru;
 mod service;
+pub mod verbs;
 
 pub use disk::{CACHEDIR_TAG, Disk, user_cache_dir};
 pub use flight::{Begin, Flight, FlightError, Lead, Waiter};

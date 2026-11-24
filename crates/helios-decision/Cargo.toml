@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# Its verbs (`decisions`, `decision_*`) are declared here.
+helios-command.workspace = true
 helios-core.workspace = true
 helios-config.workspace = true
 serde.workspace = true

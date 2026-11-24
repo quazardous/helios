@@ -26,10 +26,13 @@
 
 use std::sync::Arc;
 
+use helios_command::schema::text;
 use helios_config::{Schema, Setting};
 use helios_core::{Bus, Event};
 use helios_vault::{Store, Vault};
 use serde::Serialize;
+
+use crate::commands::{CommandSpec, Need, object};
 
 mod declared;
 
@@ -64,6 +67,24 @@ pub fn kept_elsewhere(key: &str) -> Option<&'static Setting> {
         .iter()
         .flat_map(|set| set.iter())
         .find(|s| s.key == key)
+}
+
+/// The settings layers' node verbs: read and write a layer the node keeps
+/// ([`NodeSettings`]).
+pub fn verbs() -> Vec<CommandSpec> {
+    let layer = || text("`user` or `project/<library folder>`");
+    vec![
+        CommandSpec::new("settings.layer.get", "Read a settings layer", "Settings")
+            .params(object(&[("layer", layer(), true)]))
+            .needs(Need::Vault)
+            .read_only(),
+        CommandSpec::new("settings.layer.set", "Write a settings layer", "Settings")
+            .params(object(&[
+                ("layer", layer(), true),
+                ("text", text("TOML"), true),
+            ]))
+            .needs(Need::Vault),
+    ]
 }
 
 /// The source the node's settings events are published under.

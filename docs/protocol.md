@@ -22,7 +22,11 @@ direction. Why JSON-RPC, and what other projects do, is in
 - **Method**: on the control and batch endpoints, a command's id, as
   `commands.list` lists it (`export`, `workflow.submit`,
   `library.import`); on the inspect endpoint, the inspection requests
-  (`state`, `describe`, `events`, `wait_event`, `wait_idle`).
+  (`state`, `describe`, `events`, `wait_event`, `wait_idle`). Each
+  command is declared by the crate that owns its concept, with the
+  `helios-command` contract (the workflow's in `helios-node`, the
+  decisions' in `helios-decision`, the caches' in `helios-cache`), and
+  the node gathers the sets.
 - **Params**: an object, by name, as the command's schema in
   `commands.list` describes it; checked against it before the command
   runs. `_meta.origin` names who runs a command (`user`, `cli`,
