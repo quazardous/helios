@@ -21,9 +21,9 @@ use helios_vault::ImageId;
 use helios_vault_sqlite::SqliteStore;
 use serde_json::{Value as Json, json};
 
-const EV: &str = "node/exposure/exposure";
+pub(crate) const EV: &str = "node/exposure/exposure";
 
-fn temp(name: &str) -> PathBuf {
+pub(crate) fn temp(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("helios-view-undo-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -31,7 +31,7 @@ fn temp(name: &str) -> PathBuf {
 }
 
 /// A window on a blank workspace, its photo open.
-fn window(root: &Path) -> (Harness<'static, Shell>, Persist<SqliteStore>) {
+pub(crate) fn window(root: &Path) -> (Harness<'static, Shell>, Persist<SqliteStore>) {
     let config = root.join("config");
     let dir = root.join("photos");
     std::fs::create_dir_all(&dir).unwrap();
@@ -87,7 +87,7 @@ fn open(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, pho
 
 /// The frames a step takes, then the image kept open through a network
 /// that changed (what the host does).
-fn follow(h: &mut Harness<'static, Shell>) {
+pub(crate) fn follow(h: &mut Harness<'static, Shell>) {
     for _ in 0..3 {
         h.run();
     }
@@ -99,17 +99,17 @@ fn follow(h: &mut Harness<'static, Shell>) {
     }
 }
 
-fn run(h: &mut Harness<'static, Shell>, id: &str, args: Json) {
+pub(crate) fn run(h: &mut Harness<'static, Shell>, id: &str, args: Json) {
     h.state_mut().run(id, args, Origin::User).unwrap();
     follow(h);
 }
 
 /// Focuses `panel` (`<panel>.focus`, what a click in it does).
-fn focus(h: &mut Harness<'static, Shell>, panel: &str) {
+pub(crate) fn focus(h: &mut Harness<'static, Shell>, panel: &str) {
     run(h, &format!("{panel}.focus"), json!(null));
 }
 
-fn ctrl_z(h: &mut Harness<'static, Shell>) {
+pub(crate) fn ctrl_z(h: &mut Harness<'static, Shell>) {
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     follow(h);
 }
@@ -119,7 +119,12 @@ fn ctrl_shift_z(h: &mut Harness<'static, Shell>) {
     follow(h);
 }
 
-fn set(h: &Harness<'static, Shell>, path: &str, v: f64, gesture: Option<helios_values::GestureId>) {
+pub(crate) fn set(
+    h: &Harness<'static, Shell>,
+    path: &str,
+    v: f64,
+    gesture: Option<helios_values::GestureId>,
+) {
     let mut set = helios_values::Set::new(
         path,
         helios_values::Change::To(Value::Float(v)),
@@ -131,7 +136,7 @@ fn set(h: &Harness<'static, Shell>, path: &str, v: f64, gesture: Option<helios_v
     h.state().values().lock().unwrap().set(set).unwrap();
 }
 
-fn value(h: &Harness<'static, Shell>, path: &str) -> Option<f64> {
+pub(crate) fn value(h: &Harness<'static, Shell>, path: &str) -> Option<f64> {
     h.state()
         .values()
         .lock()
@@ -140,7 +145,7 @@ fn value(h: &Harness<'static, Shell>, path: &str) -> Option<f64> {
         .and_then(|e| e.value.as_f64())
 }
 
-fn steps(h: &Harness<'static, Shell>, scope: HistoryScope) -> usize {
+pub(crate) fn steps(h: &Harness<'static, Shell>, scope: HistoryScope) -> usize {
     h.state()
         .values()
         .lock()
@@ -150,7 +155,7 @@ fn steps(h: &Harness<'static, Shell>, scope: HistoryScope) -> usize {
 }
 
 /// Adds a node to the workspace's network: a step of its line.
-fn add_node(h: &mut Harness<'static, Shell>) {
+pub(crate) fn add_node(h: &mut Harness<'static, Shell>) {
     run(
         h,
         "network.add",
@@ -159,7 +164,7 @@ fn add_node(h: &mut Harness<'static, Shell>) {
     assert!(in_network(h, "sigmoid"), "the node added");
 }
 
-fn in_network(h: &Harness<'static, Shell>, node: &str) -> bool {
+pub(crate) fn in_network(h: &Harness<'static, Shell>, node: &str) -> bool {
     h.state()
         .viewport()
         .graph()
