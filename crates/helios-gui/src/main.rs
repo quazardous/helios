@@ -640,6 +640,7 @@ fn library_commands(
                 source: job.source,
                 items: job.items,
                 new_only: false,
+                holder: None,
             };
             // Its end is said by the window, once for all its batches.
             library.import_remote(&jobs, &remote, &options, seconds(), &mut emit)

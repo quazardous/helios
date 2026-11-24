@@ -2327,6 +2327,12 @@ gui-queue-oldest-wait = Oldest wait: { $time }
 
 gui-queue-on-node = Node { $name }
 
+gui-queue-paused-quota = The service asks to wait: going on by itself
+
+gui-queue-paused-quota-until = The service asks to wait: going on in { $time }
+
+gui-queue-paused-sign-in = The service refused the sign-in: sign in again to go on
+
 gui-queue-retry = Retry
 
 gui-queue-seconds = { $n } s

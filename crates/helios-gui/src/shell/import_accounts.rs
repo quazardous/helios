@@ -576,8 +576,17 @@ impl Accounts {
         let watched: Arc<OnceLock<Weak<Session>>> = Arc::default();
         let look = Arc::new(browser_follower(watched.clone(), self.opener.clone()));
         let then = look.clone();
+        let signed = watched.clone();
         let session = Arc::new(Session::start(context, account, new, move || {
             then();
+            // Signed in: the imports held for a sign-in go on.
+            if signed
+                .get()
+                .and_then(Weak::upgrade)
+                .is_some_and(|s| matches!(s.status(), Status::Connected(_)))
+            {
+                helios_node_core::promises::signed_in();
+            }
             wake();
         }));
         let _ = watched.set(Arc::downgrade(&session));

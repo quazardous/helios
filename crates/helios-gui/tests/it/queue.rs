@@ -116,6 +116,7 @@ fn promise(id: &str, job: &str, label: &str, state: State) -> Promise {
         state,
         cancel_asked: false,
         attempts: 1,
+        paused: None,
         created: 1_794_650_000,
         updated: 1_794_650_000,
     }

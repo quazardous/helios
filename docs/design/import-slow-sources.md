@@ -336,5 +336,10 @@ token bucket per account.
    lists 100 a page, seconds for a full pick; its session is ended by
    the import, so pages must stay one visit), the list view chosen from
    a `thumbnail_cost` and the count, `Limits::parallel` with a bucket per
-   account shared by downloads and glances, and the quota and
-   refused-refresh pauses.
+   account shared by downloads and glances.
+   Done: the quota and refused-refresh pauses. A rate limit or a quota
+   met holds the import's promise (still `running`, with `paused`: why,
+   and the time it goes on when the service gives a `Retry-After`) and
+   it goes on by itself; a refused sign-in holds it until a sign-in or a
+   `promises.retry`. Nothing imported is lost, the item at hand is
+   fetched again. The Queue panel shows it paused, with its reason.

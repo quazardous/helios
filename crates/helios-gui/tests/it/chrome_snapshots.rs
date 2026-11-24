@@ -60,6 +60,7 @@ fn import_running() -> Promise {
         },
         cancel_asked: false,
         attempts: 1,
+        paused: None,
         created: at - 95,
         updated: at,
     }

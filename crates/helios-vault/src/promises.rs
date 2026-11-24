@@ -9,7 +9,9 @@
 //!
 //! Its life: `pending`, then `running` with its progress, then settled
 //! once: `done` with its result, `failed` with a reason (and whether it can
-//! be retried) or `cancelled`. A settled promise never changes again,
+//! be retried) or `cancelled`. A running promise may be held ([`Paused`]):
+//! its work waits on something outside it (a service's quota, a sign-in)
+//! and goes on after, the promise still `running`. A settled promise never changes again,
 //! except a failed one retried, which goes back to `pending`.
 //!
 //! Each change is announced on the vault's bus: [`PROGRESS`] while it is
@@ -87,6 +89,30 @@ impl State {
     }
 }
 
+/// What a held promise waits for ([`Promise::paused`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Wait {
+    /// A service's quota or rate limit: it goes on by itself at `until`
+    /// (or when asked to try again).
+    Quota,
+    /// The account's sign-in was refused: it goes on after a sign-in, or
+    /// when asked to try again.
+    SignIn,
+}
+
+/// Why a running promise's work is held, and until when.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Paused {
+    pub wait: Wait,
+    /// Why, for people (English; a client words it from `wait`).
+    pub reason: String,
+    /// When it goes on by itself, in seconds since the epoch: the
+    /// service's `Retry-After` when it gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<u64>,
+}
+
 /// A result to come, as the vault keeps it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Promise {
@@ -110,6 +136,10 @@ pub struct Promise {
     /// Runs so far: 1, then one more per retry or resume.
     #[serde(default)]
     pub attempts: u32,
+    /// Running but held: what it waits for. Cleared by its next progress
+    /// and when it settles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<Paused>,
     /// When it was created and last changed, in seconds since the epoch.
     pub created: u64,
     pub updated: u64,
@@ -175,6 +205,7 @@ impl<S: Store> Vault<S> {
                 state: State::Pending,
                 cancel_asked: false,
                 attempts: 1,
+                paused: None,
                 created: now,
                 updated: now,
             };
@@ -223,6 +254,24 @@ impl<S: Store> Vault<S> {
                 total,
                 note: note.map(Into::into),
             };
+            p.paused = None;
+            Ok(())
+        })
+    }
+
+    /// Holds running promise `id` (`Some`) or lets it go on (`None`): its
+    /// state stays `running`. Announced as [`PROGRESS`].
+    pub fn pause_promise(
+        &self,
+        id: &str,
+        paused: Option<Paused>,
+        now: u64,
+    ) -> Result<Promise, String> {
+        self.change_promise(id, now, |p| {
+            if p.state.is_settled() {
+                return Err(format!("promise `{id}` is already {}", p.state.name()));
+            }
+            p.paused = paused;
             Ok(())
         })
     }
@@ -242,6 +291,7 @@ impl<S: Store> Vault<S> {
                 return Err(format!("promise `{id}` is already {}", p.state.name()));
             }
             p.state = outcome;
+            p.paused = None;
             Ok(())
         })
     }

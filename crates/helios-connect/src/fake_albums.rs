@@ -5,11 +5,14 @@
 //! Its photos are fetched, a few bytes each. The import window's tests
 //! use it for the `collections` browser, and as a slow source
 //! (`AlbumsProvider::slow`): its pages after the first and its
-//! thumbnails wait while held.
+//! thumbnails wait while held. Its fetches can meet a quota
+//! (`AlbumsProvider::quota`: "asked to wait" with a `Retry-After`, until
+//! that time has passed) or a refused sign-in (`AlbumsProvider::refused`:
+//! a token's refresh refused, until `AlbumsProvider::sign_in`).
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use crate::{
     Access, AccountRef, Cancel, Caps, Collection, Collections, ConnectStep, Connector,
@@ -39,6 +42,20 @@ pub struct AlbumsProvider {
     /// How many thumbnails were asked, and how many answered.
     pub thumbnails_asked: Arc<AtomicUsize>,
     pub thumbnails_given: Arc<AtomicUsize>,
+    /// How many photos were fetched whole.
+    pub fetched: Arc<AtomicUsize>,
+    /// A quota: after this many fetches, the service asks to wait this
+    /// long (`Retry-After`), and answers again once it has passed.
+    pub quota: Option<(usize, Duration)>,
+    /// When the quota was met, once it was.
+    pub quota_met: Arc<Mutex<Option<Instant>>>,
+    /// A refused refresh: after this many fetches, the sign-in is refused
+    /// until [`AlbumsProvider::sign_in`].
+    pub refuse_after: Option<usize>,
+    /// The sign-in is refused now; `Some(false)` once signed in again.
+    pub refusing: Arc<Mutex<Option<bool>>>,
+    /// How many fetches were refused (a quota or a sign-in).
+    pub refusals: Arc<AtomicUsize>,
 }
 
 impl AlbumsProvider {
@@ -52,7 +69,62 @@ impl AlbumsProvider {
             thumbnails: false,
             thumbnails_asked: Arc::default(),
             thumbnails_given: Arc::default(),
+            fetched: Arc::default(),
+            quota: None,
+            quota_met: Arc::default(),
+            refuse_after: None,
+            refusing: Arc::default(),
+            refusals: Arc::default(),
         }
+    }
+
+    /// A service with a quota: after `after` fetches it asks to wait
+    /// `retry_after`, then answers again.
+    pub fn quota(mut self, after: usize, retry_after: Duration) -> Self {
+        self.quota = Some((after, retry_after));
+        self
+    }
+
+    /// A service that refuses the account's sign-in (its token's refresh)
+    /// after `after` fetches, until [`AlbumsProvider::sign_in`].
+    pub fn refused(mut self, after: usize) -> Self {
+        self.refuse_after = Some(after);
+        self
+    }
+
+    /// The person signed in again: the service answers.
+    pub fn sign_in(&self) {
+        *self.refusing.lock().unwrap_or_else(PoisonError::into_inner) = Some(false);
+    }
+
+    /// What the service answers a fetch now instead of the photo.
+    fn refusal(&self) -> Option<ConnectorError> {
+        let fetched = self.fetched.load(Ordering::SeqCst);
+        if let Some(after) = self.refuse_after {
+            let mut refusing = self.refusing.lock().unwrap_or_else(PoisonError::into_inner);
+            if fetched >= after && refusing.is_none() {
+                *refusing = Some(true);
+            }
+            if *refusing == Some(true) {
+                return Some(ConnectorError::AuthNeeded);
+            }
+        }
+        if let Some((after, wait)) = self.quota
+            && fetched >= after
+        {
+            let mut met = self
+                .quota_met
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let since = *met.get_or_insert_with(Instant::now);
+            let left = wait.saturating_sub(since.elapsed());
+            if !left.is_zero() {
+                return Some(ConnectorError::RateLimited {
+                    retry_after: Some(left),
+                });
+            }
+        }
+        None
     }
 
     /// A slow service: its pages after the first and its thumbnails held
@@ -274,9 +346,14 @@ impl Connector for Albums {
         sink: &mut dyn FetchSink,
         _cancel: &Cancel,
     ) -> Result<Fetched, ConnectorError> {
+        if let Some(refused) = self.0.refusal() {
+            self.0.refusals.fetch_add(1, Ordering::SeqCst);
+            return Err(refused);
+        }
         let bytes = b"photo!";
         sink.accept(bytes)
             .map_err(|e| ConnectorError::Transient(e.to_string()))?;
+        self.0.fetched.fetch_add(1, Ordering::SeqCst);
         Ok(Fetched {
             bytes: bytes.len() as u64,
             mime: Some("image/jpeg".into()),

@@ -1026,6 +1026,7 @@ mod tests {
             state,
             cancel_asked: false,
             attempts: 1,
+            paused: None,
             created: 1,
             updated: 1,
         }

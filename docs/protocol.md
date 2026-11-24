@@ -683,6 +683,12 @@ them (they survive a restart), and every client of the node sees them.
   work's own answer), `failed` (`reason`, and `retryable`: running it
   again may work) or `cancelled`. A settled promise never changes again,
   except a failed one retried, which goes back to `pending`.
+- **Held:** a running promise whose work waits on something outside it
+  carries `paused`: `{"wait": "quota" | "sign_in", "reason": "...",
+  "until": 1763000300}` (`until` when the service said when). It stays
+  `running`; `paused` goes with its next progress. A quota goes on by
+  itself at `until`; a refused sign-in goes on after a sign-in; both go
+  on at once on `promises.retry`.
 - **Its owner** is the job its work reports under (`helios.job.*`, the jobs
   centre); `kind` names the work, so a node knows how to run it again.
 
@@ -692,7 +698,7 @@ them (they survive a restart), and every client of the node sees them.
 | `promises.list` | `states`, `owner`, `kind`, `limit` (at most 1,000) | `promises`, newest first, and `total` |
 | `promises.wait` | `id`, `timeout_ms` (at most 600,000) | `promise`, `settled`: answers when it settles or at the timeout, whichever comes first |
 | `promises.cancel` | `id` | `promise`: its work is asked to stop (its job is cancelled too), and settles it `cancelled`; one with no runner on the node is settled `cancelled` at once |
-| `promises.retry` | `id` | `promise`, pending again with one more `attempts`; refused unless it failed `retryable` and this node runs its kind |
+| `promises.retry` | `id` | `promise`, pending again with one more `attempts`; refused unless it failed `retryable` and this node runs its kind; a held one (`paused`) goes on at once, answered as it is |
 
 - **One way to wait on anything long.** `promises.wait` answers at the
   timeout with `settled: false`: wait again. It is cancellable

@@ -408,6 +408,7 @@ fn pictured() -> Vec<Promise> {
         state,
         cancel_asked: false,
         attempts: 1,
+        paused: None,
         created,
         updated: at,
     };

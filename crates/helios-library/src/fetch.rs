@@ -71,6 +71,26 @@ const MAX_WAIT: Duration = Duration::from_mins(5);
 /// How long a rate limit without `Retry-After` waits, doubled each time.
 const BACKOFF: Duration = Duration::from_secs(1);
 
+/// Why a remote import holds rather than fails ([`Holder`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Hold {
+    /// The service asks to wait (a rate limit, a quota met): `wait` is its
+    /// `Retry-After`, else a doubling backoff.
+    Quota { wait: Duration, said: bool },
+    /// The service refused the account's sign-in (its token's refresh):
+    /// a sign-in is needed.
+    SignIn,
+}
+
+/// What holds a remote import while the service cannot answer it now,
+/// instead of failing its items: nothing fetched is lost, the item at
+/// hand is fetched again after (its part stays out of the Library).
+pub trait Holder: Sync {
+    /// Holds the import for `why`, until it may go on (`true`) or
+    /// `stopped` says it was cancelled (`false`).
+    fn hold(&self, why: &Hold, stopped: &dyn Fn() -> bool) -> bool;
+}
+
 /// What to import from a connector's source.
 pub struct Remote<'a> {
     pub connector: &'a dyn Connector,
@@ -80,6 +100,10 @@ pub struct Remote<'a> {
     /// "New only": items probably in the Library are left out when the
     /// source re-encodes its bytes (choice C9).
     pub new_only: bool,
+    /// What holds it on a quota or a refused sign-in; none: a rate limit
+    /// is waited out at most [`CUTS`] times, a refused sign-in fails the
+    /// item.
+    pub holder: Option<&'a dyn Holder>,
 }
 
 /// The volume a connector's source is: one per account or source.
@@ -468,6 +492,32 @@ impl<S: Store> Run<'_, S> {
             drop(landing);
             match error {
                 ConnectorError::Cancelled => return Err(format!("{name}: cancelled")),
+                ConnectorError::RateLimited { retry_after } if self.remote.holder.is_some() => {
+                    // Held, not failed: as long as the service asks.
+                    let pause = retry_after.unwrap_or(wait);
+                    wait = (wait * 2).min(MAX_WAIT);
+                    self.log.push(format!(
+                        "{}: asked to wait {} s, the import holds",
+                        self.remote.source.label,
+                        pause.as_secs()
+                    ));
+                    let why = Hold::Quota {
+                        wait: pause,
+                        said: retry_after.is_some(),
+                    };
+                    if !self.held(&why) {
+                        return Err(format!("{name}: cancelled"));
+                    }
+                }
+                ConnectorError::AuthNeeded if self.remote.holder.is_some() => {
+                    self.log.push(format!(
+                        "{}: the sign-in was refused, the import holds until a sign-in",
+                        self.remote.source.label
+                    ));
+                    if !self.held(&Hold::SignIn) {
+                        return Err(format!("{name}: cancelled"));
+                    }
+                }
                 ConnectorError::RateLimited { retry_after } if cuts < CUTS => {
                     cuts += 1;
                     let pause = retry_after.unwrap_or(wait).min(MAX_WAIT);
@@ -502,6 +552,14 @@ impl<S: Store> Run<'_, S> {
             }
             offset = if self.caps.resume { got } else { 0 };
         }
+    }
+
+    /// Held by the remote's [`Holder`] for `why`: whether it goes on.
+    fn held(&self, why: &Hold) -> bool {
+        self.remote
+            .holder
+            .is_some_and(|h| h.hold(why, &|| self.stopped()))
+            && !self.stopped()
     }
 
     /// Imports one item: its line, and what happened.
