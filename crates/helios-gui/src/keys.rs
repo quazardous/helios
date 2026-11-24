@@ -194,14 +194,15 @@ pub fn defaults() -> Vec<Binding> {
     // Remove from Library, as Lightroom's and darktable's Delete in the
     // grid: the flag only, undoable, so nothing is asked first. Delete
     // is the image's own while a mask point is picked (above).
-    // Not on the Compare panel: there Delete takes the active photo out
-    // of the comparison (below), never out of the Library.
+    // Not on a Compare panel (any instance): there Delete takes the
+    // active photo out of the comparison (below), never out of the
+    // Library.
     bind_in(
         MAIN,
         "Delete",
         crate::library::REMOVE_COMMAND,
         &format!(
-            "{} && focusedPanel != 'helios.compare' && !textInputFocus",
+            "{} && focusedPanelKind != 'helios.compare' && !textInputFocus",
             behind_no_picker(&library)
         ),
     );
