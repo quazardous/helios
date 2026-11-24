@@ -79,6 +79,7 @@ pub mod persist;
 pub mod photo_panels;
 pub mod platform;
 pub mod plugin_controls;
+pub mod plugin_tools;
 mod plugins;
 pub mod pointer_choice;
 pub mod preview;

@@ -15,6 +15,15 @@
 //!   number, a menu for a choice); `egui_hud` [`Patch`]es may add parts
 //!   too. A plugin adds no control of its own (controls.md Q5 A).
 //!
+//! - **tools on the image**: each a [`ToolDecl`], its handles an
+//!   `egui_hud` handles file (`egui_hud-handles/1`, the kinds that carry
+//!   their maths: a point, a radius, a feather, an angle, a band) on the
+//!   plugin's number values, with the tool's own range per handle. The
+//!   viewport draws them over the image and owns their drags (a drag is
+//!   one undo step, in the plugins' scope). A kind this Helios does not
+//!   know is left out with its reason, the tool's other handles kept;
+//!   `custom` (code) never comes from a file.
+//!
 //! Checked at resolution (controls.md 3.4): every part names a value
 //! declared with a type that fits its control, and every control is in
 //! the catalogue. A mismatch is a problem, said with its reason, and the
@@ -22,6 +31,7 @@
 
 use std::collections::BTreeMap;
 
+use egui_hud::handle::{Handles, Params as HandleParams};
 use egui_hud::model::{CaseItem, ValueSpec};
 use egui_hud::registry::Patch;
 use helios_controls::Registry;
@@ -29,6 +39,8 @@ use helios_core::Value;
 use helios_values::{Descriptor, PLUGIN_PATHS, Type};
 use serde::Deserialize;
 use serde_json::Value as Json;
+
+use crate::tools::{Tool, ToolHandle};
 
 /// The newest rack declaration format this Helios reads.
 pub const FORMAT: u32 = 1;
@@ -74,6 +86,8 @@ pub struct Declared {
     pub values: Vec<(String, Descriptor)>,
     /// The card's parts, in order.
     pub parts: Vec<Part>,
+    /// Its tools on the image, in order.
+    pub tools: Vec<PluginTool>,
     /// What was left out, each with its reason.
     pub problems: Vec<String>,
 }
@@ -93,7 +107,18 @@ impl Declared {
     }
 
     fn items(&self) -> usize {
-        self.values.len() + self.parts.len()
+        self.values.len()
+            + self.parts.len()
+            + self
+                .tools
+                .iter()
+                .map(|t| t.tool.handles.len())
+                .sum::<usize>()
+    }
+
+    /// Its tool named `name`.
+    pub fn tool(&self, name: &str) -> Option<&PluginTool> {
+        self.tools.iter().find(|t| t.tool.control == name)
     }
 
     /// Reads one declaration file (`file` names it in the problems) and
@@ -194,6 +219,114 @@ impl Declared {
                 Err(e) => self.problems.push(format!("{file}: part `{key}`: {e}")),
             }
         }
+        for t in decl.tools {
+            let decl: ToolDecl = match serde_json::from_value(t) {
+                Ok(d) => d,
+                Err(e) => {
+                    self.problems
+                        .push(format!("{file}: a tool is not read: {e}"));
+                    continue;
+                }
+            };
+            let name = decl.name.clone();
+            match self.tool_of(decl, &prefix) {
+                Ok((tool, problems)) => {
+                    let ok = !tool.tool.handles.is_empty();
+                    self.problems.extend(
+                        problems
+                            .into_iter()
+                            .map(|p| format!("{file}: tool `{name}`: {p}")),
+                    );
+                    if self.items() + tool.tool.handles.len() > MAX_ITEMS {
+                        self.problems
+                            .push(format!("{file}: more than {MAX_ITEMS} values and parts"));
+                        return;
+                    }
+                    if ok {
+                        self.tools.push(tool);
+                    } else {
+                        self.problems
+                            .push(format!("{file}: tool `{name}`: no handle left, left out"));
+                    }
+                }
+                Err(e) => self.problems.push(format!("{file}: tool `{name}`: {e}")),
+            }
+        }
+    }
+
+    /// A tool, checked: its name free, its texts the plugin's, its
+    /// handles of kinds this Helios knows (the others left out, each
+    /// with its reason) on number values the plugin declares, its ranges
+    /// on handles it has.
+    fn tool_of(&self, d: ToolDecl, prefix: &str) -> Result<(PluginTool, Vec<String>), String> {
+        if !key_ok(&d.name) {
+            return Err("a name is lowercase letters, digits, `-` and `_`, at most 64".into());
+        }
+        if self.tool(&d.name).is_some() {
+            return Err("declared twice".into());
+        }
+        if !d.label.starts_with(prefix) {
+            return Err(format!(
+                "`{}` is not a message id of the plugin's catalogue (`{prefix}…`)",
+                d.label
+            ));
+        }
+        if let Some(w) = &d.when
+            && self.value(w).is_none_or(|v| v.ty != Type::Bool)
+        {
+            return Err(format!("`when` names no switch value: `{w}`"));
+        }
+        let handles = Handles::from_json(&d.handles.to_string())?;
+        let (known, skipped) = handles.split();
+        let mut problems: Vec<String> = skipped.iter().map(ToString::to_string).collect();
+        let mut tool = Tool::plugin(&d.name, &self.plugin);
+        for h in known {
+            let asked = Asked::default();
+            h.position(&asked);
+            let _ = h.drag(&asked, [0.0, 0.0]);
+            let reads = asked.names.into_inner();
+            let writes = h.writes();
+            // It writes numbers; it may read a switch (a feather in
+            // proportion while one is on).
+            let bad = writes
+                .iter()
+                .find(|n| self.value(n).is_none_or(|v| v.ty != Type::Float))
+                .or_else(|| {
+                    reads.iter().find(|n| {
+                        self.value(n)
+                            .is_none_or(|v| !matches!(v.ty, Type::Float | Type::Bool))
+                    })
+                });
+            if let Some(bad) = bad {
+                problems.push(format!(
+                    "handle `{}`: `{bad}` is not a number value the plugin declares, left out",
+                    h.name
+                ));
+                continue;
+            }
+            let mut th = ToolHandle::new(h.name.clone(), h);
+            if let Some([lo, hi]) = d.ranges.get(&th.handle.name) {
+                if lo < hi && lo.is_finite() && hi.is_finite() {
+                    th = th.range(*lo, *hi);
+                } else {
+                    problems.push(format!("range of `{}`: `min` below `max`", th.handle.name));
+                }
+            }
+            tool.handles.push(th);
+        }
+        for name in d.ranges.keys() {
+            if tool.handle(name).is_none() && !skipped.iter().any(|s| &s.name == name) {
+                problems.push(format!("a range names no handle: `{name}`"));
+            }
+        }
+        Ok((
+            PluginTool {
+                label: d.label,
+                when: d.when,
+                tool,
+            },
+            problems,
+        ))
     }
 
     /// A part, checked: its value declared once on the card, its control
@@ -233,6 +366,70 @@ impl Declared {
     }
 }
 
+/// A plugin's tool on the image, once checked.
+#[derive(Clone, Debug)]
+pub struct PluginTool {
+    /// Its name for people, a message id of the plugin's catalogue.
+    pub label: String,
+    /// The switch value it is shown while on; `None`: always, while
+    /// the plugin is enabled and a photo is open.
+    pub when: Option<String>,
+    /// Its handles, on the plugin's values ([`crate::tools::Target::Plugin`]);
+    /// its `control` is its name, its `module` the plugin's id.
+    pub tool: Tool,
+}
+
+/// By what they show: their names, labels, switches, handles (by name
+/// and kind) and ranges (a handle's maths may be code, which has no
+/// equality).
+impl PartialEq for PluginTool {
+    fn eq(&self, o: &Self) -> bool {
+        let shown = |t: &PluginTool| {
+            t.tool
+                .handles
+                .iter()
+                .map(|h| (h.name().to_owned(), h.handle.kind.name(), h.range))
+                .collect::<Vec<_>>()
+        };
+        self.label == o.label
+            && self.when == o.when
+            && self.tool.control == o.tool.control
+            && self.tool.module == o.tool.module
+            && shown(self) == shown(o)
+    }
+}
+
+/// A tool as written: a name, its label, the switch that shows it, its
+/// handles (an `egui_hud` handles file) and the tool's own range per
+/// handle.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolDecl {
+    pub name: String,
+    pub label: String,
+    #[serde(default)]
+    pub when: Option<String>,
+    /// `{"format": "egui_hud-handles/1", "handles": [...]}`.
+    pub handles: Json,
+    /// By handle name: `[min, max]` for the first value it writes.
+    #[serde(default)]
+    pub ranges: BTreeMap<String, [f64; 2]>,
+}
+
+/// Parameters that answer 1.0 to every name, and keep the names asked:
+/// what a handle reads.
+#[derive(Default)]
+struct Asked {
+    names: std::cell::RefCell<Vec<String>>,
+}
+
+impl HandleParams for Asked {
+    fn float(&self, name: &str) -> Option<f64> {
+        self.names.borrow_mut().push(name.to_owned());
+        Some(1.0)
+    }
+}
+
 /// A rack declaration file, as written.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -248,6 +445,9 @@ struct FileDecl {
     case: Option<Json>,
     #[serde(default)]
     patches: Vec<Json>,
+    /// Its tools on the image, each read alone.
+    #[serde(default)]
+    tools: Vec<Json>,
 }
 
 /// A value as written.
