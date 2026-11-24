@@ -285,25 +285,12 @@ fn window(root: &Path) -> Harness<'static, Shell> {
     h
 }
 
-/// The frames a step takes, the image kept open through a network change.
-fn follow(h: &mut Harness<'static, Shell>) {
-    for _ in 0..3 {
-        h.run();
-    }
-    if crate::host::network_changed() > 0 {
-        assert!(h.state_mut().keep_image_open().unwrap(), "kept in place");
-    }
-    for _ in 0..2 {
-        h.run();
-    }
-}
-
 /// What the node's MCP server sends the desktop holding the workspace
 /// for a `helios_workshop_*` tool, and the desktop's answer.
 fn agent(h: &mut Harness<'static, Shell>, root: &Path, mut request: Json) -> Json {
     request["workspace"] = json!(root.join("photos"));
     let out = h.state_mut().workspace_request(&request);
-    follow(h);
+    crate::host::follow(h);
     out
 }
 
@@ -337,7 +324,7 @@ fn an_agent_designs_the_backlit_workshop_and_the_panel_shows_only_its_sliders() 
     h.get_by_label("Describe what you want").type_text(INTENT);
     h.run();
     h.get_by_label("Design a workshop").click();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     h.get_by_label_contains("Waiting for your agent");
 
     // The agent reads the context: the words, the measures, the catalogue;
@@ -464,7 +451,7 @@ fn an_agent_designs_the_backlit_workshop_and_the_panel_shows_only_its_sliders() 
         .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
-    follow(&mut h);
+    crate::host::follow(&mut h);
     let nodes: Vec<String> = h
         .state()
         .workspace_state()
@@ -498,7 +485,7 @@ fn a_refused_draft_applies_nothing_and_the_user_alone_lets_the_proxy_out() {
             Origin::User,
         )
         .unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     // A target on a zone the draft lacks: refused, nothing applied.
     let mut draft = backlit_draft();
     draft["composite"]["workshop"]["targets"][0]["zone"] = json!("moon");
@@ -533,7 +520,7 @@ fn a_refused_draft_applies_nothing_and_the_user_alone_lets_the_proxy_out() {
     h.state_mut()
         .run("workshop.send_proxy", json!({ "on": true }), Origin::User)
         .unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     let ctx = answer(agent(
         &mut h,
         &root,
@@ -556,7 +543,7 @@ fn designed(h: &mut Harness<'static, Shell>, root: &Path) -> (String, String) {
             Origin::User,
         )
         .unwrap();
-    follow(h);
+    crate::host::follow(h);
     let a = answer(agent(
         h,
         root,
@@ -586,7 +573,7 @@ fn set_value(
         set = set.aim(aim);
     }
     h.state().values().lock().unwrap().set(set).unwrap();
-    follow(h);
+    crate::host::follow(h);
 }
 
 fn record(h: &mut Harness<'static, Shell>, root: &Path) -> Json {
@@ -620,7 +607,7 @@ fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
         .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
-    follow(&mut h);
+    crate::host::follow(&mut h);
 
     let out = record(&mut h, &root);
     let rec = &out["record"];
@@ -758,7 +745,7 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
         h.run();
     }
     h.get_by_label("Keep").click();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     persist.frame_settled(h.state_mut(), 3.0);
     assert_eq!(sessions(&persist), [(kept.clone(), true)]);
     // One more design: the kept session ends and stays; the new one is
@@ -856,7 +843,7 @@ fn the_agent_proposes_the_user_accepts_one_ghost_and_rejects_another() {
             Origin::User,
         )
         .unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(steps(&h), before + 1, "accepting is one undo step");
     assert_eq!(value(&h, &lift), 0.8);
     h.state_mut()
@@ -866,7 +853,7 @@ fn the_agent_proposes_the_user_accepts_one_ghost_and_rejects_another() {
             Origin::User,
         )
         .unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(steps(&h), before + 1, "rejecting sets nothing");
     assert_eq!(value(&h, &sky), sky_before);
     assert!(
@@ -914,7 +901,7 @@ fn the_agent_proposes_the_user_accepts_one_ghost_and_rejects_another() {
         );
         store.undo(&Origin::User).unwrap();
     }
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(value(&h, &lift), lift_before);
 
     // A user's own move of a proposed value overrides it.
@@ -1022,7 +1009,7 @@ fn make_it_automatic_writes_the_next_version_once_the_user_confirms() {
     }
     h.get_by_label_contains("AI per photo: 1 junctions, 1 calls");
     h.get_by_label("Make it automatic").click();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     for _ in 0..3 {
         h.run();
     }
@@ -1055,7 +1042,7 @@ fn make_it_automatic_writes_the_next_version_once_the_user_confirms() {
             Origin::User,
         )
         .unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(steps(&h), before + 1, "one undo step");
     let file = version(&h, 2).expect("the next version");
     let block = file.workshop.as_ref().unwrap();
@@ -1104,7 +1091,7 @@ fn open_photo(h: &mut Harness<'static, Shell>, image: &Image, id: &str) {
         .set_view_source(built.graph, built.view.0, &built.view.1)
         .unwrap();
     h.state_mut().set_edited_image(Some(id.into()));
-    follow(h);
+    crate::host::follow(h);
 }
 
 /// The backlit photo with its sky a stop darker.
@@ -1191,7 +1178,7 @@ fn a_second_test_photo_joins_the_session_and_a_junction_is_written() {
             Origin::User,
         )
         .unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(steps(&h), before + 1, "one undo step");
     let file = h
         .state()
@@ -1264,7 +1251,7 @@ fn workshops_session_snapshots() {
     results.add(h.try_shot_of("workshops-session-pop-dark-1x", rect));
 
     h.get_by_label("Make it automatic").click();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     for _ in 0..3 {
         h.run();
     }
@@ -1313,7 +1300,7 @@ fn the_session_records_a_step_made_while_the_panels_draw_in_the_same_pass() {
     h.state_mut()
         .run("helios.params.focus", json!(null), Origin::User)
         .unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     h.state_mut().take_session_writes();
     armed.set(true);
     h.step();

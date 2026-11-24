@@ -53,25 +53,11 @@ fn window(root: &Path) -> Harness<'static, Shell> {
     h
 }
 
-/// The frames a step takes, then what the host does when the network
-/// changed: the image kept open through it.
-fn follow(h: &mut Harness<'static, Shell>) {
-    for _ in 0..3 {
-        h.run();
-    }
-    if crate::host::network_changed() > 0 {
-        assert!(h.state_mut().keep_image_open().unwrap(), "kept in place");
-    }
-    for _ in 0..2 {
-        h.run();
-    }
-}
-
 /// Runs a command as a person would and answers its result: a command
 /// queued runs at the next frame, its answer in the history.
 fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Json) -> Result<Json, String> {
     let out = h.state_mut().run(id, args, Origin::User);
-    follow(h);
+    crate::host::follow(h);
     match out {
         Ok(v) if v == json!({ "queued": true }) => {
             h.state()
@@ -101,7 +87,7 @@ fn set(h: &mut Harness<'static, Shell>, path: &str, v: f64) {
             Origin::User,
         ))
         .unwrap();
-    follow(h);
+    crate::host::follow(h);
 }
 
 fn undo(h: &mut Harness<'static, Shell>) {
@@ -112,7 +98,7 @@ fn undo(h: &mut Harness<'static, Shell>) {
         .undo_newest(&Origin::User)
         .unwrap()
         .expect("a step to undo");
-    follow(h);
+    crate::host::follow(h);
 }
 
 fn steps(h: &Harness<'static, Shell>) -> usize {
@@ -330,7 +316,7 @@ fn a_macro_made_from_the_form_opens_its_interface_editor_answered_as_a_form() {
         "dialog.answer",
         json!({ "values": { "name": "Look" } }),
     );
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert!(network(&h).iter().any(|(n, _)| n == "look"));
     let current = run(&mut h, "dialog.current", json!(null));
     let text = current.to_string();
@@ -348,7 +334,7 @@ fn a_macro_made_from_the_form_opens_its_interface_editor_answered_as_a_form() {
             "group": "Light",
         }] } }),
     );
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(shown(&h, "look", "brightness"), Some(1.0), "the value kept");
     let pinned = h
         .state()
@@ -385,7 +371,7 @@ fn macro_interface_snapshots() {
         "dialog.answer",
         json!({ "values": { "name": "Look" } }),
     );
-    follow(&mut h);
+    crate::host::follow(&mut h);
     h.run_steps(4);
     let mut results = egui_kittest::SnapshotResults::new();
     let rect = h.state().target_rect("helios.dialog").unwrap();
@@ -473,7 +459,7 @@ fn a_macro_changed_while_open_folds_by_the_answer_given_each_one_undo_step() {
     }
     // Kept open: nothing changes.
     run(&mut h, "dialog.answer", json!({ "choice": "keep" }));
-    follow(&mut h);
+    crate::host::follow(&mut h);
     assert_eq!(pinned(&h, "look"), (1, true));
     assert_eq!(steps(&h), before);
     // Discarded: back to version 1's inside, one step.
@@ -505,7 +491,7 @@ fn a_macro_changed_while_open_folds_by_the_answer_given_each_one_undo_step() {
     // offered version 2 as an update.
     run(&mut h, "macro.fold", json!({ "node": "look" }));
     run(&mut h, "dialog.answer", json!({ "choice": "version" }));
-    follow(&mut h);
+    crate::host::follow(&mut h);
     let saved = last_answer(&h, "macro.fold");
     assert_eq!(
         saved["composite"],
@@ -603,7 +589,7 @@ fn answer_as(
 ) -> Result<Json, String> {
     let before = h.state().history().len();
     let out = h.state_mut().run(id, args, origin);
-    follow(h);
+    crate::host::follow(h);
     match out {
         Ok(v) if v == json!({ "queued": true }) => {
             h.state()
@@ -695,7 +681,7 @@ fn a_macro_published_with_the_user_s_answer_is_offered_to_every_workspace_and_ne
     let other = root.join("other");
     std::fs::create_dir_all(&other).unwrap();
     h.state_mut().open_workspace(&config, &other).unwrap();
-    follow(&mut h);
+    crate::host::follow(&mut h);
     let added = run(
         &mut h,
         "network.add",

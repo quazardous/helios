@@ -427,8 +427,17 @@ fn click(h: &mut egui_kittest::Harness<'static, Shell>, label: &str) {
         .next()
         .unwrap_or_else(|| panic!("no {label:?}"))
         .click_accesskit();
+    settle(h);
+}
+
+/// Frames until the dialog settles, three times over (it grows with the
+/// picker and is placed again). The picker scrolls to the folder it
+/// shows, an animation of a few frames, more where the folder's path is
+/// long (a Windows temporary folder): a run not settled within the
+/// harness's steps is run again, a bounded number of times.
+fn settle(h: &mut egui_kittest::Harness<'static, Shell>) {
     for _ in 0..3 {
-        h.run();
+        assert!((0..4).any(|_| h.run_ok().is_some()), "the dialog settles");
     }
 }
 
@@ -454,9 +463,7 @@ fn go_into(h: &mut egui_kittest::Harness<'static, Shell>, label: &str) {
             });
         }
     }
-    for _ in 0..3 {
-        h.run();
-    }
+    settle(h);
 }
 
 fn path_form(key: &str, descriptor: Descriptor, value: &std::path::Path) -> Form {
