@@ -4834,6 +4834,14 @@ impl Shell {
             // View > Activity… (Ctrl+Shift+J): the background jobs, open
             // whether one runs or not.
             command(MENU_VIEW, "1_activity", 0, crate::activity::COMMAND),
+            // View > the photo: zoom in and out, fit, 100 %, and the
+            // scopes shown or closed (the viewport's commands, the Scopes
+            // panel's toggle).
+            command(MENU_VIEW, "2_photo", 0, "viewport.zoom.in"),
+            command(MENU_VIEW, "2_photo", 1, "viewport.zoom.out"),
+            command(MENU_VIEW, "2_photo", 2, "viewport.zoom.fit"),
+            command(MENU_VIEW, "2_photo", 3, "viewport.zoom.100"),
+            command(MENU_VIEW, "2_photo", 4, "helios.scopes.toggle"),
             // File > Storage: the disks and what each is for.
             command(MENU_FILE, "1_import", 3, helios_storage_ui::COMMAND),
             // Help > Health check.
