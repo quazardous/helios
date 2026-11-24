@@ -74,6 +74,8 @@ pub enum Action {
     Cancel,
     /// Queue it again, failed or cancelled.
     Retry,
+    /// Let a held item go on now (a service's quota, a refused sign-in).
+    Resume,
     /// Claim it before every other waiting item.
     Top,
     /// Claim it after every other waiting item.
@@ -86,6 +88,7 @@ impl Action {
         match self {
             Action::Cancel => Message::new("gui-queue-cancel", "Cancel"),
             Action::Retry => Message::new("gui-queue-retry", "Retry"),
+            Action::Resume => Message::new("gui-queue-resume", "Resume"),
             Action::Top => Message::new("gui-queue-top", "Top"),
             Action::Bottom => Message::new("gui-queue-bottom", "Bottom"),
         }
@@ -96,6 +99,7 @@ impl Action {
         match self {
             Action::Cancel => "cancel",
             Action::Retry => "retry",
+            Action::Resume => "resume",
             Action::Top => "top",
             Action::Bottom => "bottom",
         }

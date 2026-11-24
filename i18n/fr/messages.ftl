@@ -761,6 +761,8 @@ gui-jobs-source = Source
 gui-jobs-started = Début
 gui-jobs-started-by = Lancée par
 gui-jobs-state = État
+
+gui-jobs-goes-on = Reprise à
 gui-jobs-state-all = Tous les états
 gui-jobs-state-done = Terminée
 gui-jobs-state-failed = En échec ou annulée
@@ -1072,6 +1074,12 @@ gui-promise-failed = Échec : { $reason }
 gui-promise-pending = En attente de démarrage
 
 gui-promise-retry = Réessayer
+
+gui-promise-resume = Reprendre
+
+gui-promise-paused-quota = En pause : le service demande d’attendre
+
+gui-promise-paused-sign-in = En pause : le service a refusé la connexion
 
 gui-promise-so-far = { $done } jusqu’ici
 
@@ -2171,6 +2179,8 @@ gui-library-reading = Lecture de la bibliothèque…
 
 gui-queue-cancel = Annuler
 gui-queue-retry = Réessayer
+
+gui-queue-resume = Reprendre
 gui-queue-top = En tête
 gui-queue-bottom = En fin
 

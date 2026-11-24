@@ -115,12 +115,21 @@ fn now() -> u64 {
 /// promise's handle, it reports through it and settles it.
 pub type Run<S> = Arc<dyn Fn(Handle<S>) + Send + Sync>;
 
-/// The promises held, by id: what each waits for, and its signal.
-type Held = HashMap<String, (Wait, Arc<Hold>)>;
+/// A held promise's key: its vault (two libraries in one process may
+/// both have a `promise-1`), then its id.
+type HeldKey = (usize, String);
 
-/// The promises held in this process, by id: what they wait for, and the
-/// signal that lets them go on.
+/// The promises held, by vault and id: what each waits for, and its signal.
+type Held = HashMap<HeldKey, (Wait, Arc<Hold>)>;
+
+/// The promises held in this process, by vault and id: what they wait
+/// for, and the signal that lets them go on.
 static HELD: LazyLock<Mutex<Held>> = LazyLock::new(Mutex::default);
+
+/// Vault `vault`'s part of a held promise's key.
+fn vault_key<S: Store>(vault: &Arc<Vault<S>>) -> usize {
+    Arc::as_ptr(vault).cast::<()>() as usize
+}
 
 /// A held promise's signal: set once it may go on.
 #[derive(Default)]
@@ -136,13 +145,16 @@ impl Hold {
     }
 }
 
-fn held() -> std::sync::MutexGuard<'static, HashMap<String, (Wait, Arc<Hold>)>> {
+fn held() -> std::sync::MutexGuard<'static, HashMap<HeldKey, (Wait, Arc<Hold>)>> {
     HELD.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Lets held promise `id` go on now; whether it was held here.
-pub fn go_on(id: &str) -> bool {
-    held().get(id).map(|(_, h)| h.wake()).is_some()
+/// Lets held promise `id` of `vault` go on now; whether it was held here.
+fn go_on<S: Store>(vault: &Arc<Vault<S>>, id: &str) -> bool {
+    held()
+        .get(&(vault_key(vault), id.to_string()))
+        .map(|(_, h)| h.wake())
+        .is_some()
 }
 
 /// A sign-in succeeded: the promises held for one go on (each tries its
@@ -213,7 +225,7 @@ impl<S: Store> Handle<S> {
 
     /// Holds it for `wait` (`reason` for people): its promise says so,
     /// still running, until `after` has passed (none: no end of its own),
-    /// it is asked to go on ([`go_on`], `promises.retry`, a sign-in for
+    /// it is asked to go on (`promises.retry`, a sign-in for
     /// [`Wait::SignIn`]) or `stopped` says it was cancelled. Whether it
     /// goes on (`false`: stopped).
     pub fn hold(
@@ -224,7 +236,8 @@ impl<S: Store> Handle<S> {
         stopped: &dyn Fn() -> bool,
     ) -> bool {
         let hold = Arc::new(Hold::default());
-        held().insert(self.promise.id.clone(), (wait, hold.clone()));
+        let key = (vault_key(&self.vault), self.promise.id.clone());
+        held().insert(key.clone(), (wait, hold.clone()));
         let paused = Paused {
             wait,
             reason: reason.into(),
@@ -250,7 +263,7 @@ impl<S: Store> Handle<S> {
                 .0;
         };
         drop(go);
-        held().remove(&self.promise.id);
+        held().remove(&key);
         if goes_on {
             self.report(|v, id| v.pause_promise(id, None, now()));
         }
@@ -490,7 +503,7 @@ impl<S: Store + Send + 'static> Promises<S> {
             .vault
             .promise(id)?
             .ok_or_else(|| format!("no promise `{id}`"))?;
-        if p.paused.is_some() && go_on(id) {
+        if p.paused.is_some() && go_on(&self.vault, id) {
             return Ok(p);
         }
         if !self.kinds.contains_key(&p.kind) {
