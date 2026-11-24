@@ -42,7 +42,10 @@ pub const WIDGET: &str = "helios.plugin-controls";
 pub const PLUGINS: &str = "helios.plugins.ui";
 
 /// A plugin's rack declarations, read from its folder and checked against
-/// the catalogue; `None` when it declares none.
+/// the catalogue; `None` when it declares none. A tool on the host's
+/// parameters the plugin may not use yet (`edit.controls` not declared
+/// or not granted) stays declared, its refusal among the problems
+/// ([`crate::plugin_tools::refusal`]): it shows once granted.
 pub fn read(broker: &Broker, id: &str) -> Option<Declared> {
     let m = broker.manifest(id)?;
     if m.ui.rack.is_empty() {
@@ -57,6 +60,12 @@ pub fn read(broker: &Broker, id: &str) -> Option<Declared> {
             Err(e) => d.problems.push(format!("{file}: not read: {e}")),
         }
     }
+    let refused: Vec<String> = d
+        .tools
+        .iter()
+        .filter_map(|t| crate::plugin_tools::refusal(broker, id, t))
+        .collect();
+    d.problems.extend(refused);
     for p in &d.problems {
         log::warn!("plugin `{id}`'s controls: {p}");
     }
@@ -104,6 +113,7 @@ pub fn install(app: &AppHandle, broker: &Arc<Broker>, values: &Arc<Mutex<Store>>
                 })
             })
             .collect(),
+        Some(broker.clone()),
     );
     if cards.is_empty() {
         return;

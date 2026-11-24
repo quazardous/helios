@@ -22,7 +22,8 @@
 //!   each Update writes the parameters the handle moves (from the values
 //!   at the gesture's start), End closes it (one undo step), Cancel
 //!   (Escape) puts the values back with no step ([`Store::cancel`]).
-//! - **Snapping** is the viewport's `before_handle` hook: Shift
+//! - **Snapping** is the viewport's `before_handle` hook
+//!   ([`crate::handle_snap`], shared with the plugins' tools): Shift
 //!   constrains the angle (a rotation to 15° steps, a move to the axes and
 //!   diagonals), Ctrl (Cmd) moves the handle a tenth of the pointer.
 //! - **Editing state** lives in the store as transient values (never an
@@ -33,11 +34,9 @@
 //! palette and agents reach the same actions.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use egui::{Painter, Pos2, Stroke};
-use egui_pop::viewport::hooks::HandleMove;
 use egui_pop::viewport::overlay::{self, HIT_RADIUS, Handle, HandleKind, Overlay, Shape};
 use egui_pop::viewport::tokens::ViewportTokens;
 use egui_pop::viewport::{Cause, Mapping, Phase, Signal, Verdict, ViewChange};
@@ -53,6 +52,8 @@ use helios_rack::handle::{
 use helios_rack::tools::{self, ParamsOf};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Descriptor, GestureId, Set, Store, node_path};
+
+use crate::handle_snap::{Constraint, Snaps};
 
 /// The mask edited: a `mask_combine` node's name (empty: the graph's
 /// first).
@@ -618,14 +619,9 @@ pub fn distance_to(points: &[[f64; 2]], closed: bool, m: &Mapping, p: Pos2) -> f
         .fold(f32::INFINITY, f32::min)
 }
 
-/// How a handle is held by Shift, and the point an angle turns around.
-type Constraint = (Option<HudSnap>, [f64; 2]);
-
-/// What the `before_handle` and `before_view` hooks know, set before
-/// each frame.
+/// What the `before_view` hook knows, set before each frame.
 #[derive(Default)]
 struct Snap {
-    constraints: BTreeMap<(String, u32), Constraint>,
     /// A primary click this frame is the editor's (a path point, a
     /// shape's edge or a handle): the pointer profile's click on the
     /// image (Lightroom Classic's fit or 100 %) leaves the view alone.
@@ -799,6 +795,9 @@ pub struct Masks {
     drag: Option<Drag>,
     wheel: Option<Wheel>,
     snap: Rc<RefCell<Snap>>,
+    /// What Shift does to each handle drawn: the viewport's one
+    /// `before_handle` hook reads it, the plugins' tools add theirs.
+    snaps: Snaps,
     faint: Rc<RefCell<Faint>>,
     double: Rc<RefCell<Double>>,
     hooked: bool,
@@ -974,31 +973,19 @@ impl Masks {
         self.hovered.map(|g| g.hint(ctx))
     }
 
+    /// The handles' Shift rules this frame, shared with the plugins'
+    /// tools (drawn after the masks, which clear them).
+    pub fn snaps(&self) -> &Snaps {
+        &self.snaps
+    }
+
     /// Installs the hooks on the viewport's state, once.
     pub fn hook(&mut self, hooks: &mut egui_pop::viewport::Hooks) {
         if self.hooked {
             return;
         }
         self.hooked = true;
-        let snap = self.snap.clone();
-        hooks.before_handle = Some(Box::new(move |mv: &HandleMove, _m: &Mapping| {
-            let s = snap.borrow();
-            let key = (mv.overlay.clone(), mv.handle);
-            let (rule, pivot) = s.constraints.get(&key).copied().unwrap_or((None, mv.start));
-            let to = hud::snapped(
-                rule,
-                pivot,
-                mv.start,
-                mv.to,
-                mv.modifiers.shift,
-                mv.modifiers.command,
-            );
-            if to == mv.to {
-                Verdict::Allow
-            } else {
-                Verdict::Redirect(to)
-            }
-        }));
+        hooks.before_handle = Some(self.snaps.hook());
         let faint = self.faint.clone();
         hooks.under_overlays = Some(Box::new(move |painter: &Painter, m: &Mapping| {
             paint_controls(painter, m, &faint.borrow());
@@ -1071,7 +1058,7 @@ impl Masks {
             ..Faint::default()
         };
         let mut snap = self.snap.borrow_mut();
-        snap.constraints.clear();
+        self.snaps.clear();
         self.overlays.clear();
         self.guides.clear();
         let mut edge = None;
@@ -1096,7 +1083,7 @@ impl Masks {
                 let c: Constraint = handle_of(&member.module, name).map_or((None, centre), |k| {
                     (k.snap, k.kind.pivot(&ParamsOf(&member.params)))
                 });
-                snap.constraints.insert((o.id.clone(), h.index), c);
+                self.snaps.insert(&o.id, h.index, c.0, c.1);
                 if member.module == "mask_path" && name.starts_with(['b', 'a']) {
                     let i = h.index as usize / 3 * 3;
                     faint.controls.push((member.outline.handles[i].at, h.at));
@@ -1120,10 +1107,7 @@ impl Masks {
                         wheel: spec.wheel.is_some(),
                     });
                 }
-                let shift = snap
-                    .constraints
-                    .get(&(o.id.clone(), h.index))
-                    .and_then(|c| c.0);
+                let shift = self.snaps.get(&o.id, h.index).and_then(|c| c.0);
                 Some(Gestures::of(name, shift))
             }),
             _ => None,

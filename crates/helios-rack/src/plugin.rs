@@ -276,10 +276,21 @@ impl Declared {
         {
             return Err(format!("`when` names no switch value: `{w}`"));
         }
+        if let Some(m) = &d.module
+            && !key_ok(m)
+        {
+            return Err(format!("`module` names no module: `{m}`"));
+        }
         let handles = Handles::from_json(&d.handles.to_string())?;
         let (known, skipped) = handles.split();
         let mut problems: Vec<String> = skipped.iter().map(ToString::to_string).collect();
-        let mut tool = Tool::plugin(&d.name, &self.plugin);
+        let mut tool = match &d.module {
+            // The host's parameters: the nodes' own descriptors hold
+            // them to their types and ranges, checked where the tool is
+            // shown (a node of that module with those parameters).
+            Some(m) => Tool::new(&d.name, m),
+            None => Tool::plugin(&d.name, &self.plugin),
+        };
         for h in known {
             let asked = Asked::default();
             h.position(&asked);
@@ -297,7 +308,9 @@ impl Declared {
                             .is_none_or(|v| !matches!(v.ty, Type::Float | Type::Bool))
                     })
                 });
-            if let Some(bad) = bad {
+            if d.module.is_none()
+                && let Some(bad) = bad
+            {
                 problems.push(format!(
                     "handle `{}`: `{bad}` is not a number value the plugin declares, left out",
                     h.name
@@ -374,9 +387,19 @@ pub struct PluginTool {
     /// The switch value it is shown while on; `None`: always, while
     /// the plugin is enabled and a photo is open.
     pub when: Option<String>,
-    /// Its handles, on the plugin's values ([`crate::tools::Target::Plugin`]);
-    /// its `control` is its name, its `module` the plugin's id.
+    /// Its handles, on the plugin's values ([`crate::tools::Target::Plugin`],
+    /// its `module` the plugin's id) or on a host module's nodes
+    /// ([`crate::tools::Target::Nodes`], its `module` that module's
+    /// name); its `control` is its name.
     pub tool: Tool,
+}
+
+impl PluginTool {
+    /// The host module whose nodes it edits, if it edits the host's
+    /// parameters rather than the plugin's values.
+    pub fn host(&self) -> Option<&str> {
+        (self.tool.target == crate::tools::Target::Nodes).then_some(self.tool.module.as_str())
+    }
 }
 
 /// By what they show: their names, labels, switches, handles (by name
@@ -409,6 +432,12 @@ pub struct ToolDecl {
     pub label: String,
     #[serde(default)]
     pub when: Option<String>,
+    /// The host module whose nodes it edits (`mask_circle`): its handles
+    /// then read and write those nodes' parameters, not the plugin's
+    /// values, and the plugin needs the `edit.controls` capability,
+    /// granted, for it to show.
+    #[serde(default)]
+    pub module: Option<String>,
     /// `{"format": "egui_hud-handles/1", "handles": [...]}`.
     pub handles: Json,
     /// By handle name: `[min, max]` for the first value it writes.
@@ -641,6 +670,38 @@ mod tests {
         ] {
             assert!(said.contains(reason), "{reason}\n{said}");
         }
+    }
+
+    #[test]
+    fn a_tool_on_a_host_module_edits_its_nodes_not_the_plugin_s_values() {
+        let mut decl = camera();
+        decl["tools"] = json!([{
+            "name": "spot",
+            "label": "org-example-camera-spot",
+            "module": "mask_circle",
+            "handles": {"format": "egui_hud-handles/1", "handles": [
+                {"name": "centre", "kind": "point", "look": "move"},
+                {"name": "radius", "kind": "radius", "radius": "radius"},
+            ]},
+        }, {
+            "name": "bad",
+            "label": "org-example-camera-bad",
+            "module": "Not A Module",
+            "handles": {"format": "egui_hud-handles/1", "handles": []},
+        }]);
+        let d = read(&decl);
+        let t = d.tool("spot").expect("kept");
+        assert_eq!(t.host(), Some("mask_circle"));
+        assert_eq!(t.tool.target, crate::tools::Target::Nodes);
+        assert_eq!(t.tool.handles.len(), 2, "{:?}", d.problems);
+        assert!(d.tool("bad").is_none());
+        assert!(
+            d.problems
+                .iter()
+                .any(|p| p.contains("`module` names no module")),
+            "{:?}",
+            d.problems
+        );
     }
 
     #[test]
