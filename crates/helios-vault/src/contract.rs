@@ -2511,8 +2511,10 @@ fn culling_fields_filter_count_sort_and_rule<S: Store>(s: S) {
 /// one volume counts what the `folder:` filter selects.
 fn folders_count_their_photos_and_those_below_in_one_query<S: Store>(s: S) {
     let (v, _, _) = library_fixture(s);
-    let root = Path::new(std::path::MAIN_SEPARATOR_STR);
-    let p = root.join("p");
+    // The fixture's own root, drive and all: a folder key is the real path
+    // the store holds (`C:\` on Windows, `/` elsewhere).
+    let p = p_root();
+    let root = p.parent().expect("the fixture's folder has a root");
     let key = |path: &Path| path.to_string_lossy().into_owned();
     let on = |name: &str| Some(VolumeId(name.into()));
     let q0 = v.reads().queries;
