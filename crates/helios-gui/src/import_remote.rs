@@ -13,22 +13,21 @@
 //!   prefetched one.
 //! - [`RemoteGlances::read`] reads the items wanted first (the cells in
 //!   view), then the rest in order while the connector's declared limits
-//!   ([`helios_connect::Limits`], counted by a [`Throttle`]) and the glance
-//!   cache's budget allow: it pauses at the first one met, and never
-//!   evicts a glance shown.
+//!   ([`helios_connect::Limits`], counted by the account's
+//!   [`Budget`], shared with the downloads, which go first) and the
+//!   glance cache's budget allow: it pauses at the first one met, and
+//!   never evicts a glance shown.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use egui::ColorImage;
+use helios_connect::budget::{Budget, Use};
 use helios_connect::{Cancel, Connector, ConnectorError, Item, ItemId, ItemRef, Limits, SourceRef};
 
 use crate::import_scan::{GlanceCache, GlanceKey, Glanced};
-
-const MINUTE: Duration = Duration::from_mins(1);
-const DAY: Duration = Duration::from_hours(24);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -57,76 +56,6 @@ pub fn glance_path(source: &SourceRef, item: &Item) -> PathBuf {
 
 fn ram_key(source: &SourceRef, item: &Item) -> GlanceKey {
     (glance_path(source, item), 0, None)
-}
-
-/// The requests made to a service, held to its declared [`Limits`]: a
-/// minute's, a day's, and a wait the service asked for.
-#[derive(Debug)]
-pub struct Throttle {
-    limits: Limits,
-    state: Mutex<Sent>,
-}
-
-#[derive(Debug, Default)]
-struct Sent {
-    /// When each request of the longest window counted went.
-    at: VecDeque<Instant>,
-    /// No request before this: the service asked to wait.
-    hold: Option<Instant>,
-}
-
-impl Throttle {
-    pub fn new(limits: Limits) -> Self {
-        Self {
-            limits,
-            state: Mutex::default(),
-        }
-    }
-
-    /// Takes one request at `now` when the limits leave room for it.
-    pub fn take(&self, now: Instant) -> bool {
-        let Limits {
-            per_minute,
-            per_day,
-        } = self.limits;
-        let mut sent = lock(&self.state);
-        if sent.hold.is_some_and(|until| now < until) {
-            return false;
-        }
-        if per_minute.is_none() && per_day.is_none() {
-            return true;
-        }
-        let window = if per_day.is_some() { DAY } else { MINUTE };
-        while sent
-            .at
-            .front()
-            .is_some_and(|t| now.saturating_duration_since(*t) >= window)
-        {
-            sent.at.pop_front();
-        }
-        if per_day.is_some_and(|n| sent.at.len() >= n as usize) {
-            return false;
-        }
-        if let Some(n) = per_minute {
-            let recent = sent
-                .at
-                .iter()
-                .rev()
-                .take_while(|t| now.saturating_duration_since(**t) < MINUTE)
-                .count();
-            if recent >= n as usize {
-                return false;
-            }
-        }
-        sent.at.push_back(now);
-        true
-    }
-
-    /// The service asked to wait (`retry_after`, else a minute): no
-    /// request before.
-    pub fn hold(&self, now: Instant, retry_after: Option<Duration>) {
-        lock(&self.state).hold = Some(now + retry_after.unwrap_or(MINUTE));
-    }
 }
 
 /// Why a read of glances stopped before the end.
@@ -169,7 +98,9 @@ pub struct RemoteGlances {
     cache: Arc<GlanceCache>,
     connector: Arc<dyn Connector>,
     thumbnails: bool,
-    throttle: Throttle,
+    limits: Limits,
+    /// The budget of each account read, shared with its downloads.
+    budgets: Mutex<HashMap<String, Arc<Budget>>>,
     /// What its read-ahead added to the cache, from one read to the next:
     /// what the budget rule counts.
     own: Mutex<Own>,
@@ -192,7 +123,8 @@ impl RemoteGlances {
             cache,
             connector,
             thumbnails: caps.thumbnails,
-            throttle: Throttle::new(caps.limits),
+            limits: caps.limits,
+            budgets: Mutex::default(),
             own: Mutex::default(),
         }
     }
@@ -297,6 +229,15 @@ impl RemoteGlances {
         }
     }
 
+    /// The budget of `source`'s account, shared with its downloads.
+    fn budget(&self, source: &SourceRef) -> Arc<Budget> {
+        let account = helios_connect::budget::account_of(source).to_owned();
+        lock(&self.budgets)
+            .entry(account)
+            .or_insert_with(|| Budget::of(source, self.limits))
+            .clone()
+    }
+
     /// One item's glance: the cache's RAM tier, its disk tier, else the
     /// connector's preview, when the limits allow it.
     fn glance(&self, source: &SourceRef, item: &Item, now: Instant) -> Result<Got, Pause> {
@@ -312,9 +253,11 @@ impl RemoteGlances {
         if !self.thumbnails {
             return Ok(Got::Nothing);
         }
-        if !self.throttle.take(now) {
+        let budget = self.budget(source);
+        // Kept until the preview is in: a request under way.
+        let Some(_permit) = budget.try_take(Use::Thumbnail, now) else {
             return Err(Pause::Rate);
-        }
+        };
         let at = ItemRef {
             source: source.clone(),
             id: item.id.clone(),
@@ -324,7 +267,7 @@ impl RemoteGlances {
             Ok(Some(bytes)) => bytes,
             Ok(None) => return Ok(Got::Nothing),
             Err(ConnectorError::RateLimited { retry_after }) => {
-                self.throttle.hold(now, retry_after);
+                budget.hold(now, retry_after);
                 return Err(Pause::Rate);
             }
             Err(e) => {
@@ -379,6 +322,7 @@ fn picture(bytes: &[u8]) -> Option<ColorImage> {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use helios_connect::{
         Access, Caps, ConnectorInfo, Cursor, FetchSink, Fetched, ItemKind, Page, Text,
@@ -565,6 +509,7 @@ mod tests {
         let limits = Limits {
             per_minute: Some(3),
             per_day: Some(7),
+            ..Limits::default()
         };
         let (connector, calls) = remote(limits);
         let glances = RemoteGlances::new(cache, connector);
@@ -585,12 +530,6 @@ mod tests {
         let day = read_all(&glances, &listed, t0 + Duration::from_secs(200));
         assert_eq!((day.read, day.paused), (0, Some(Pause::Rate)));
         assert_eq!(calls.load(Ordering::SeqCst), 7);
-        // A wait the service asks for holds every request.
-        let throttle = Throttle::new(Limits::default());
-        assert!(throttle.take(t0));
-        throttle.hold(t0, Some(Duration::from_secs(5)));
-        assert!(!throttle.take(t0 + Duration::from_secs(4)));
-        assert!(throttle.take(t0 + Duration::from_secs(5)));
     }
 
     #[test]

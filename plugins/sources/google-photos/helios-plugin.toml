@@ -23,7 +23,7 @@ one_source_per_account = true
 # What Helios asks of Google at most: reading glances ahead pauses here.
 # Every install shares the OAuth client's project quota, so these stay
 # well under it (`LIMITS` in src/lib.rs says the same).
-limits = { per_minute = 120, per_day = 10000 }
+limits = { per_minute = 120, per_day = 10000, parallel = 2 }
 
 [compat]
 helios = ">=0.92.0, <0.93.0"
