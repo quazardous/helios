@@ -53,62 +53,6 @@ pub struct Words {
 
 impl Words {
     pub fn new(t: &dyn Fn(Message) -> String) -> Words {
-        let field = |name: &str| -> Message {
-            match name {
-                "rating" => Message::new("gui-rule-field-rating", "rating"),
-                "label" => Message::new("gui-rule-field-label", "colour label"),
-                "tag" => Message::new("gui-rule-field-tag", "tag"),
-                "flag" => Message::new("gui-rule-field-flag", "flag"),
-                "folder" => Message::new("gui-rule-field-folder", "folder"),
-                "album" => Message::new("gui-rule-field-album", "album"),
-                "captured" => Message::new("gui-rule-field-captured", "capture date"),
-                "import" => Message::new("gui-rule-field-import", "import session"),
-                "imported" => Message::new("gui-rule-field-imported", "import date"),
-                "camera" => Message::new("gui-rule-field-camera", "camera"),
-                "make" => Message::new("gui-rule-field-make", "camera make"),
-                "lens" => Message::new("gui-rule-field-lens", "lens"),
-                "file_type" => Message::new("gui-rule-field-file-type", "file type"),
-                "title" => Message::new("gui-rule-field-title", "title"),
-                "description" => Message::new("gui-rule-field-description", "description"),
-                "iso" => Message::new("gui-rule-field-iso", "ISO"),
-                "focal_length" => Message::new("gui-rule-field-focal-length", "focal length"),
-                "aperture" => Message::new("gui-rule-field-aperture", "aperture"),
-                "shutter" => Message::new("gui-rule-field-shutter", "shutter speed"),
-                "focus" => Message::new("gui-rule-field-focus", "sharpness (focus)"),
-                "clip_white" => {
-                    Message::new("gui-rule-field-clip-white", "blown highlights (share)")
-                }
-                "clip_black" => {
-                    Message::new("gui-rule-field-clip-black", "crushed shadows (share)")
-                }
-                "presence" => Message::new("gui-rule-field-presence", "presence"),
-                "backup" => Message::new("gui-rule-field-backup", "backup"),
-                "cull" => Message::new("gui-rule-field-cull", "culling state"),
-                "text" => Message::new("gui-rule-field-text", "name or tag"),
-                "keyword" => Message::new("gui-rule-field-keyword", "keyword"),
-                other => Message::plain(other),
-            }
-        };
-        let op = |name: &str| -> Message {
-            match name {
-                "=" => Message::new("gui-rule-op-eq", "is"),
-                "!=" => Message::new("gui-rule-op-ne", "is not"),
-                "<" => Message::new("gui-rule-op-lt", "is below"),
-                "<=" => Message::new("gui-rule-op-le", "is at most"),
-                ">" => Message::new("gui-rule-op-gt", "is above"),
-                ">=" => Message::new("gui-rule-op-ge", "is at least"),
-                "between" => Message::new("gui-rule-op-between", "is between"),
-                "within" => Message::new("gui-rule-op-within", "is in"),
-                "has" => Message::new("gui-rule-op-has", "has"),
-                "lacks" => Message::new("gui-rule-op-lacks", "lacks"),
-                "is" => Message::new("gui-rule-op-is", "is"),
-                "is_not" => Message::new("gui-rule-op-is-not", "is not"),
-                "contains" => Message::new("gui-rule-op-contains", "contains"),
-                "in" => Message::new("gui-rule-op-in", "is in"),
-                "not_in" => Message::new("gui-rule-op-not-in", "is not in"),
-                other => Message::plain(other),
-            }
-        };
         let mut ops: Vec<&'static str> = Vec::new();
         for f in RULE_FIELDS {
             for o in f.kind.ops() {
@@ -136,9 +80,9 @@ impl Words {
             ],
             fields: RULE_FIELDS
                 .iter()
-                .map(|f| (f.name, t(field(f.name))))
+                .map(|f| (f.name, t(field_message(f.name))))
                 .collect(),
-            ops: ops.into_iter().map(|o| (o, t(op(o)))).collect(),
+            ops: ops.into_iter().map(|o| (o, t(op_message(o)))).collect(),
             periods: vec![
                 ("today", t(Message::new("gui-rule-period-today", "today"))),
                 (
@@ -487,4 +431,60 @@ fn small(ui: &mut Ui, enabled: bool, label: &str) -> egui::Response {
         helios_ui::row_action(ui, Action::Secondary, label)
     })
     .inner
+}
+
+/// A rule field's name in words (`camera`, `capture date`).
+pub(crate) fn field_message(name: &str) -> Message {
+    match name {
+        "rating" => Message::new("gui-rule-field-rating", "rating"),
+        "label" => Message::new("gui-rule-field-label", "colour label"),
+        "tag" => Message::new("gui-rule-field-tag", "tag"),
+        "flag" => Message::new("gui-rule-field-flag", "flag"),
+        "folder" => Message::new("gui-rule-field-folder", "folder"),
+        "album" => Message::new("gui-rule-field-album", "album"),
+        "captured" => Message::new("gui-rule-field-captured", "capture date"),
+        "import" => Message::new("gui-rule-field-import", "import session"),
+        "imported" => Message::new("gui-rule-field-imported", "import date"),
+        "camera" => Message::new("gui-rule-field-camera", "camera"),
+        "make" => Message::new("gui-rule-field-make", "camera make"),
+        "lens" => Message::new("gui-rule-field-lens", "lens"),
+        "file_type" => Message::new("gui-rule-field-file-type", "file type"),
+        "title" => Message::new("gui-rule-field-title", "title"),
+        "description" => Message::new("gui-rule-field-description", "description"),
+        "iso" => Message::new("gui-rule-field-iso", "ISO"),
+        "focal_length" => Message::new("gui-rule-field-focal-length", "focal length"),
+        "aperture" => Message::new("gui-rule-field-aperture", "aperture"),
+        "shutter" => Message::new("gui-rule-field-shutter", "shutter speed"),
+        "focus" => Message::new("gui-rule-field-focus", "sharpness (focus)"),
+        "clip_white" => Message::new("gui-rule-field-clip-white", "blown highlights (share)"),
+        "clip_black" => Message::new("gui-rule-field-clip-black", "crushed shadows (share)"),
+        "presence" => Message::new("gui-rule-field-presence", "presence"),
+        "backup" => Message::new("gui-rule-field-backup", "backup"),
+        "cull" => Message::new("gui-rule-field-cull", "culling state"),
+        "text" => Message::new("gui-rule-field-text", "name or tag"),
+        "keyword" => Message::new("gui-rule-field-keyword", "keyword"),
+        other => Message::plain(other),
+    }
+}
+
+/// A rule operator in words (`is at least`).
+pub(crate) fn op_message(name: &str) -> Message {
+    match name {
+        "=" => Message::new("gui-rule-op-eq", "is"),
+        "!=" => Message::new("gui-rule-op-ne", "is not"),
+        "<" => Message::new("gui-rule-op-lt", "is below"),
+        "<=" => Message::new("gui-rule-op-le", "is at most"),
+        ">" => Message::new("gui-rule-op-gt", "is above"),
+        ">=" => Message::new("gui-rule-op-ge", "is at least"),
+        "between" => Message::new("gui-rule-op-between", "is between"),
+        "within" => Message::new("gui-rule-op-within", "is in"),
+        "has" => Message::new("gui-rule-op-has", "has"),
+        "lacks" => Message::new("gui-rule-op-lacks", "lacks"),
+        "is" => Message::new("gui-rule-op-is", "is"),
+        "is_not" => Message::new("gui-rule-op-is-not", "is not"),
+        "contains" => Message::new("gui-rule-op-contains", "contains"),
+        "in" => Message::new("gui-rule-op-in", "is in"),
+        "not_in" => Message::new("gui-rule-op-not-in", "is not in"),
+        other => Message::plain(other),
+    }
 }

@@ -87,6 +87,7 @@ mod metadata;
 mod pairing;
 mod search_keys;
 mod sources;
+pub mod suggest;
 mod versions;
 
 /// The batch a change was asked in, if any
