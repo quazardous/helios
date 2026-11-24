@@ -317,11 +317,10 @@ fn the_window_s_results_are_the_vault_s_for_every_search_text() {
         "rating:2..4 -label:blue",
     ];
     for (i, text) in texts.iter().enumerate() {
-        // As the field hands it: the text whole.
-        let typed = helios_gui::recent_filters::filter_arg(&json!({ "query": text }))
-            .unwrap()
-            .unwrap();
-        h.state_mut().library_mut().set_filter(typed);
+        // Applied through the bus: the shell's commands run at the next
+        // frame, which also asks the vault the filter's query.
+        run(&mut h, "library.filter.apply", json!({ "query": text }));
+        h.run();
         persist.frame_settled(h.state_mut(), 10.0 + i as f64);
         let mut shown = h.state().library().shown();
         shown.sort();
