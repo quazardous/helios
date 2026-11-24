@@ -8,7 +8,7 @@
 //! thumbnails wait while held. Its fetches can meet a quota
 //! (`AlbumsProvider::quota`: "asked to wait" with a `Retry-After`, until
 //! that time has passed) or a refused sign-in (`AlbumsProvider::refused`:
-//! a token's refresh refused, until [`AlbumsProvider::sign_in`]).
+//! a token's refresh refused, until `AlbumsProvider::sign_in`).
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};

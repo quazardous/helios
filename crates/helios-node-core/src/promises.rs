@@ -115,9 +115,12 @@ fn now() -> u64 {
 /// promise's handle, it reports through it and settles it.
 pub type Run<S> = Arc<dyn Fn(Handle<S>) + Send + Sync>;
 
+/// The promises held, by id: what each waits for, and its signal.
+type Held = HashMap<String, (Wait, Arc<Hold>)>;
+
 /// The promises held in this process, by id: what they wait for, and the
 /// signal that lets them go on.
-static HELD: LazyLock<Mutex<HashMap<String, (Wait, Arc<Hold>)>>> = LazyLock::new(Mutex::default);
+static HELD: LazyLock<Mutex<Held>> = LazyLock::new(Mutex::default);
 
 /// A held promise's signal: set once it may go on.
 #[derive(Default)]
