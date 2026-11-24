@@ -135,3 +135,28 @@ fn the_panels_list_ticks_shown_panels_and_reopens_a_closed_one_in_place() {
         "at its place among the tabs: {back:?}"
     );
 }
+
+#[test]
+fn view_lists_the_photos_zoom_and_the_scopes() {
+    let mut h = shell();
+    let app = h.state().app().handle().clone();
+    let scopes = PanelId::new("helios.scopes").unwrap();
+    click(&mut h, "View");
+    for item in [
+        "Image: zoom in",
+        "Image: zoom out",
+        "Image: fit to the view",
+        "Image: actual pixels",
+        "Show or hide Scopes",
+    ] {
+        assert!(shows(&h, item), "View has {item}");
+    }
+    // The scopes' entry shows or closes the panel.
+    let before = app.panel_visible(&scopes);
+    h.query_all_by_label_contains("Show or hide Scopes")
+        .last()
+        .expect("the scopes' entry")
+        .click();
+    h.run_steps(3);
+    assert_ne!(app.panel_visible(&scopes), before, "the scopes toggled");
+}
