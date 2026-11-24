@@ -887,6 +887,12 @@ fn matched_sql(
     if let Some(rule) = facet {
         ctes.push(backup_cte("fk", rule, &mut args));
     }
+    // The strategy the rules' `backup` conditions are measured against.
+    let rules_backup = query.rules.as_ref().is_some_and(tests_backup);
+    let rules_rule = query.backup_rule.clone().unwrap_or_default();
+    if rules_backup {
+        ctes.push(backup_cte("rb", &rules_rule, &mut args));
+    }
     // The capture time, joined only to sort by it.
     let captured = if query.order.by == Sort::Captured {
         format!("LEFT JOIN fields c ON c.image = i.id AND c.name = '{CAPTURED}'")
@@ -907,6 +913,9 @@ fn matched_sql(
     }
     if facet.is_some() {
         sql.push_str(" LEFT JOIN fk ON fk.image = i.id");
+    }
+    if rules_backup {
+        sql.push_str(" LEFT JOIN rb ON rb.image = i.id");
     }
     sql.push_str(" WHERE i.in_library = 1");
     if let Some(min) = query.min_rating {
@@ -1030,7 +1039,7 @@ fn matched_sql(
     // statement.
     if let Some(rule) = &query.rules {
         sql.push_str(" AND ");
-        sql.push_str(&rule_sql(rule, &mut args));
+        sql.push_str(&rule_sql(rule, &rules_rule, &mut args));
     }
     if !query.presence.is_empty() {
         let _ = write!(sql, " AND {PRESENCE} IN ({})", marks(query.presence.len()));
@@ -1089,24 +1098,33 @@ fn cull_state_sql(alias: &str, state: &str) -> String {
 /// A rule tree as one SQL expression on `i`, never NULL (each condition
 /// answers 0 or 1, so `none` negates what the memory store negates); its
 /// arguments pushed to `args` in the order of the text.
-fn rule_sql(rule: &Rule, args: &mut Vec<Sql>) -> String {
+fn rule_sql(rule: &Rule, backups: &Backups, args: &mut Vec<Sql>) -> String {
     match rule {
         Rule::Group { mode, rules } => {
             if rules.is_empty() {
                 return if *mode == Match::Any { "0" } else { "1" }.into();
             }
-            let parts: Vec<String> = rules.iter().map(|r| rule_sql(r, args)).collect();
+            let parts: Vec<String> = rules.iter().map(|r| rule_sql(r, backups, args)).collect();
             match mode {
                 Match::All => format!("({})", parts.join(" AND ")),
                 Match::Any => format!("({})", parts.join(" OR ")),
                 Match::None => format!("NOT ({})", parts.join(" OR ")),
             }
         }
-        Rule::Condition(c) => condition_sql(c, args),
+        Rule::Condition(c) => condition_sql(c, backups, args),
     }
 }
 
-fn condition_sql(c: &Condition, args: &mut Vec<Sql>) -> String {
+/// Whether a rule tree holds a `backup` condition (its query then
+/// measures each photo's backups, the table `rb`).
+fn tests_backup(rule: &Rule) -> bool {
+    match rule {
+        Rule::Condition(c) => c.field.kind == RuleKind::Backup,
+        Rule::Group { rules, .. } => rules.iter().any(tests_backup),
+    }
+}
+
+fn condition_sql(c: &Condition, backups: &Backups, args: &mut Vec<Sql>) -> String {
     let field = c.field.field;
     let positive = match c.field.kind {
         RuleKind::Number | RuleKind::Date => {
@@ -1213,9 +1231,42 @@ fn condition_sql(c: &Condition, args: &mut Vec<Sql>) -> String {
                 helios_vault::collections::COLLECTIONS
             )
         }
+        RuleKind::Presence => {
+            args.push(Sql::Text(c.text().to_string()));
+            format!("({PRESENCE} = ?)")
+        }
+        RuleKind::Backup => {
+            let states = helios_vault::rules::backup_states(c.text());
+            let marks = marks(states.len());
+            args.extend(states.iter().map(|s| Sql::Text(s.name().into())));
+            format!("(({}) IN ({marks}))", backup_state("rb", backups))
+        }
+        RuleKind::Cull => format!("COALESCE({}, 0)", cull_state_sql("i", c.text())),
+        RuleKind::Words => {
+            let word = helios_vault::fields::fold_case(c.text());
+            args.push(Sql::Text(word.clone()));
+            args.push(Sql::Text(word));
+            format!(
+                "(instr({FOLD}({}), ?) > 0
+                  OR EXISTS (SELECT 1 FROM fields f, json_each(f.value) j
+                             WHERE f.image = i.id AND f.name = '{TAGS}' AND instr({FOLD}(j.value), ?) > 0))",
+                shown_name()
+            )
+        }
+        RuleKind::Keyword => {
+            let branch = c.text();
+            args.push(Sql::Text(branch.to_string()));
+            args.push(Sql::Text(format!("{branch}|")));
+            args.push(Sql::Text(format!("{branch}}}")));
+            format!(
+                "EXISTS (SELECT 1 FROM fields f, json_each(f.value) j
+                         WHERE f.image = i.id AND f.name = '{TAGS}'
+                         AND (j.value = ? OR (j.value >= ? AND j.value < ?)))"
+            )
+        }
     };
     // `lacks`, `is_not`, `not_in`: the photo without the value too.
-    if matches!(c.op, "has" | "is" | "in") {
+    if matches!(c.op, "has" | "is" | "in" | "contains") {
         positive
     } else {
         format!("NOT {positive}")

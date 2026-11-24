@@ -81,6 +81,11 @@ impl Words {
                 "clip_black" => {
                     Message::new("gui-rule-field-clip-black", "crushed shadows (share)")
                 }
+                "presence" => Message::new("gui-rule-field-presence", "presence"),
+                "backup" => Message::new("gui-rule-field-backup", "backup"),
+                "cull" => Message::new("gui-rule-field-cull", "culling state"),
+                "text" => Message::new("gui-rule-field-text", "name or tag"),
+                "keyword" => Message::new("gui-rule-field-keyword", "keyword"),
                 other => Message::plain(other),
             }
         };
@@ -427,12 +432,15 @@ fn value(
             ui.text_role(TextRole::Body, &words.and);
             ask(typed(ui, &d.high, "high", 96.0));
         }
-        (RuleKind::Flag, _) => {
-            let flags: Vec<(String, String)> = helios_vault::fields::FLAGS
+        // A flag, a presence, a backup or a culling state: one of a list.
+        (k, _) if k.values().is_some() => {
+            let values: Vec<(String, String)> = k
+                .values()
+                .unwrap_or_default()
                 .iter()
-                .map(|f| (f.to_string(), f.to_string()))
+                .map(|v| (v.to_string(), v.to_string()))
                 .collect();
-            ask(choose(ui, id("flag"), &flags));
+            ask(choose(ui, id("flag"), &values));
         }
         (RuleKind::Set, _) if d.field == "label" => {
             let labels: Vec<(String, String)> = crate::smart_album::SmartForm::labels()

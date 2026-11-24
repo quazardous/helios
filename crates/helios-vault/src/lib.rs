@@ -56,6 +56,7 @@ pub mod promises;
 pub mod read_order;
 pub mod rotation;
 pub mod rules;
+mod rules_text;
 pub mod settings;
 pub mod sightings;
 pub mod snapshots;
@@ -663,7 +664,7 @@ impl MemoryStore {
             && query
                 .rules
                 .as_ref()
-                .is_none_or(|r| r.holds(&mut |c| self.condition_holds(id, c)))
+                .is_none_or(|r| r.holds(&mut |c| self.condition_holds(id, c, query)))
             && query
                 .label
                 .as_ref()
@@ -711,7 +712,7 @@ impl MemoryStore {
 impl MemoryStore {
     /// Whether a photo passes one condition of a rule tree, as the SQL
     /// driver compiles it.
-    fn condition_holds(&self, id: &ImageId, c: &rules::Condition) -> bool {
+    fn condition_holds(&self, id: &ImageId, c: &rules::Condition, query: &Query) -> bool {
         use rules::RuleKind;
         let field = |name: &str| self.fields.get(&(*id, name.to_string()));
         let yes = |name: &str| {
@@ -772,6 +773,24 @@ impl MemoryStore {
                 .and_then(|d| d.get("images"))
                 .and_then(serde_json::Value::as_array)
                 .is_some_and(|a| a.iter().any(|i| i.as_str() == Some(id.hex().as_str()))),
+            RuleKind::Presence => self.presence_of(id).as_str() == c.text(),
+            RuleKind::Backup => {
+                let rule = query.backup_rule.clone().unwrap_or_default();
+                rules::backup_states(c.text()).contains(&self.backup_state(id, &rule))
+            }
+            RuleKind::Cull => self.cull_states(id).contains(&c.text()),
+            RuleKind::Words => {
+                let w = fields::fold_case(c.text());
+                fields::fold_case(&self.shown_name(id)).contains(&w)
+                    || self
+                        .items_of(id, fields::TAGS)
+                        .iter()
+                        .any(|t| fields::fold_case(t).contains(&w))
+            }
+            RuleKind::Keyword => self
+                .items_of(id, fields::TAGS)
+                .iter()
+                .any(|t| keywords::in_branch(t, c.text())),
         };
         // `lacks`, `is_not`, `not_in`: the photo without the value too.
         positive == matches!(c.op, "has" | "is" | "in" | "contains")
