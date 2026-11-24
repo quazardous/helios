@@ -41,6 +41,10 @@ tip-helios-scopes-linear =
     .text = The histogram is drawn in stops, a log scale that gives the shadows as much room as the highlights. { $key } makes it linear, { $key-scopes-stops } brings the stops back.
     .title = Scopes in stops
 
+tip-helios-studio =
+    .text = Window ▸ Studio shows or hides the side bars and the bottom panel, and saves how your panels are arranged, to switch back to it later. A closed panel comes back where it was from Window ▸ Panels, or from the + at the end of a tab bar.
+    .title = Your Studio
+
 tip-helios-system-menu =
     .text = { $key }, or the button at the start of the title bar, opens the Helios menu: profiles, themes, keyboard shortcuts and About.
     .title = The Helios menu
