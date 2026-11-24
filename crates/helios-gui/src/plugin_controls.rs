@@ -93,6 +93,18 @@ pub fn install(app: &AppHandle, broker: &Arc<Broker>, values: &Arc<Mutex<Store>>
         }
         cards.insert(id.to_owned(), d);
     }
+    crate::plugin_tools::set(
+        cards
+            .iter()
+            .flat_map(|(id, d)| {
+                d.tools.iter().map(|t| crate::plugin_tools::Declared {
+                    plugin: id.clone(),
+                    keys: d.values.iter().map(|(k, _)| k.clone()).collect(),
+                    tool: t.clone(),
+                })
+            })
+            .collect(),
+    );
     if cards.is_empty() {
         return;
     }

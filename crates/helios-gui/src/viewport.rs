@@ -310,6 +310,8 @@ pub struct Viewport {
     readout: Option<Readout>,
     /// Editing the drawn masks: drags, hooks, what was drawn.
     masks: crate::masks::Masks,
+    /// The plugins' tools over the image: drags, what was drawn.
+    plugin_tools: crate::plugin_tools::PluginTools,
     /// What the viewport's window wants to be drawn in.
     wanted: DisplayTarget,
     /// The mask shown over the image, when the mask display is on and
@@ -390,6 +392,7 @@ impl Viewport {
             gesture: None,
             readout: None,
             masks: crate::masks::Masks::default(),
+            plugin_tools: crate::plugin_tools::PluginTools::default(),
             wanted: DisplayTarget::srgb(),
             layer: None,
             gpu,
@@ -464,6 +467,11 @@ impl Viewport {
     /// The mask editing: what was drawn last frame.
     pub fn masks(&self) -> &crate::masks::Masks {
         &self.masks
+    }
+
+    /// The plugins' tools over the image: what was drawn last frame.
+    pub fn plugin_tools(&self) -> &crate::plugin_tools::PluginTools {
+        &self.plugin_tools
     }
 
     /// The part of the image in view, in image pixels (the whole image
@@ -1268,6 +1276,7 @@ impl Viewport {
                 self.state.mapping().as_ref(),
                 pointer,
             );
+            self.plugin_tools.prepare(&store, self.edited.is_some());
             // The status line says a hovered handle's gestures: drawn
             // before the viewport, it shows them at the next frame.
             if self.masks.hovered() != hovered {
@@ -1275,7 +1284,8 @@ impl Viewport {
             }
             (view_of(&store), compare_of(&store))
         };
-        let drawn = self.masks.drawn();
+        let mut drawn = self.masks.drawn();
+        drawn.extend(self.plugin_tools.drawn());
         let out = egui_pop::viewport::Viewport::new("helios.viewport")
             .source(&self.after)
             .before(&self.before)
@@ -1310,12 +1320,14 @@ impl Viewport {
         self.declare_areas(ui, &out.response, out.mapping.as_ref(), &store);
         let now = ui.input(|i| i.time);
         self.masks.signals(&out.signals, &mut store, now);
+        self.plugin_tools.signals(&out.signals, &mut store, now);
         if self.masks.take_left() {
             self.leave = true;
         }
         if let Some(m) = out.mapping {
             if out.response.clicked()
                 && !self.masks.dragging()
+                && !self.plugin_tools.dragging()
                 && let Some(pos) = out.response.interact_pointer_pos()
                 && self.masks.click(pos, &m, &mut store).is_some()
                 && let Err(e) = self.mask(crate::masks::Command::Close, Origin::User, &mut store)

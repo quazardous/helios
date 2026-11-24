@@ -187,3 +187,32 @@ fn capture_controls_are_set_on_the_camera() {
     assert_eq!(config, "iso=800\nshutterspeed=1/250\n");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn the_focus_tool_s_drag_sets_the_zoom_position_once() {
+    let (b, root, camera) = setup("focus");
+    let notices = b.subscribe();
+    b.grant(CAMERA, "device.usb").unwrap();
+    b.grant(CAMERA, "process.spawn").unwrap();
+    b.device_list().unwrap();
+    // A drag of the focus point on the image: both values, one change.
+    let values = serde_json::json!({"focus-x": 1200.4, "focus-y": 800.0});
+    let told = b
+        .ui_changed(CAMERA, values.as_object().unwrap().clone(), "edit")
+        .unwrap();
+    assert_eq!(told, helios_plugin::Told::Notified);
+    let said =
+        std::iter::from_fn(|| notices.recv_timeout(Duration::from_secs(10)).ok()).find_map(|n| {
+            match n {
+                Notice::Log { message, .. } if message.starts_with("ui/changed") => Some(message),
+                _ => None,
+            }
+        });
+    assert_eq!(
+        said.as_deref(),
+        Some("ui/changed: eoszoomposition=1200,800")
+    );
+    let config = std::fs::read_to_string(format!("{}.config", camera.display())).unwrap();
+    assert_eq!(config, "eoszoomposition=1200,800\n");
+    let _ = std::fs::remove_dir_all(&root);
+}

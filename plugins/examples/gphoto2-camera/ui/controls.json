@@ -20,12 +20,70 @@
       "precision": 4,
       "unit": "s",
       "logarithmic": true
+    },
+    "focus-show": {
+      "type": "bool",
+      "label": "io-github-quazardous-helios-gphoto2-camera-focus-show",
+      "description": "io-github-quazardous-helios-gphoto2-camera-focus-show-about",
+      "default": false
+    },
+    "focus-x": {
+      "type": "float",
+      "label": "io-github-quazardous-helios-gphoto2-camera-focus-x",
+      "min": 0,
+      "max": 100000,
+      "default": 500,
+      "precision": 0,
+      "unit": "px"
+    },
+    "focus-y": {
+      "type": "float",
+      "label": "io-github-quazardous-helios-gphoto2-camera-focus-y",
+      "min": 0,
+      "max": 100000,
+      "default": 500,
+      "precision": 0,
+      "unit": "px"
     }
   },
   "case": {
     "items": [
-      { "part": { "name": "iso", "control": "implicit" } },
-      { "part": { "name": "shutter", "control": "implicit" } }
+      {
+        "part": {
+          "name": "iso",
+          "control": "implicit"
+        }
+      },
+      {
+        "part": {
+          "name": "shutter",
+          "control": "implicit"
+        }
+      },
+      {
+        "part": {
+          "name": "focus-show",
+          "control": "implicit"
+        }
+      }
     ]
-  }
+  },
+  "tools": [
+    {
+      "name": "focus",
+      "label": "io-github-quazardous-helios-gphoto2-camera-focus",
+      "when": "focus-show",
+      "handles": {
+        "format": "egui_hud-handles/1",
+        "handles": [
+          {
+            "name": "focus",
+            "kind": "point",
+            "centre": { "x": "focus-x", "y": "focus-y" },
+            "look": "move"
+          }
+        ]
+      }
+    }
+  ]
 }
