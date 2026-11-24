@@ -30,7 +30,10 @@ fn workspace_scope() -> history::ScopeId {
 /// The focus leaves the view for a place naming no history (the focused
 /// widget lets go of it, as after a click on an empty spot).
 fn lose_focus(h: &mut Harness<'static, Shell>) {
-    let focused = h.ctx.memory(|m| m.focused()).expect("a widget focused");
+    let focused = h
+        .ctx
+        .memory(egui::Memory::focused)
+        .expect("a widget focused");
     h.ctx.memory_mut(|m| m.surrender_focus(focused));
     follow(h);
     assert_eq!(
