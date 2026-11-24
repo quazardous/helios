@@ -137,6 +137,7 @@ mod themes;
 mod thumb_budget;
 mod thumbnails;
 mod tips;
+mod undo_routing;
 mod values_changed;
 mod view_undo;
 mod viewport;
