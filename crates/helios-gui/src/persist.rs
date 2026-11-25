@@ -2710,12 +2710,18 @@ impl<S: Store + 'static> Persist<S> {
             )
         });
         let (values, snapshots) = (shell.values().clone(), shell.snapshots().clone());
-        let scoped = io::listen_local(&*bus, io::SCOPE, move |_, _| {
+        let scoped = io::listen_local(&*bus, io::SCOPE, move |switch, _| {
             // The next image's values take this one's paths: its steps
             // must not be undone into them, nor its snapshots restored.
+            // They are parked under the image, back when it opens again.
             // The workspace's steps (graph edits) are not the image's:
             // they stay.
-            held(&values).leave_image();
+            let mut store = held(&values);
+            match &switch.from {
+                Some(image) => store.park_image(image),
+                None => store.leave_image(),
+            }
+            drop(store);
             crate::edit_snapshots::lock(&snapshots).clear();
             Ok(())
         });
@@ -2741,7 +2747,15 @@ impl<S: Store + 'static> Persist<S> {
             }
         });
         let workshop = shell.listen_workshop_photo(&*bus);
-        for e in [saved, scoped, book, marks, workshop]
+        // Last, once the image's values, marks included, are loaded: its
+        // parked steps come back onto them.
+        let values = shell.values().clone();
+        let resumed = io::listen_follower_local(&*bus, io::HISTORY, move |shown| {
+            if let Some(image) = &shown.image {
+                held(&values).resume_image(image);
+            }
+        });
+        for e in [saved, scoped, book, marks, workshop, resumed]
             .into_iter()
             .filter_map(Result::err)
         {

@@ -21,7 +21,9 @@
 //! [`Store::leave_image`] is what a photo switch does: the image's line
 //! goes; the workspace's stays, each step without the image values it
 //! moved (a graph edit that carried values into a new node), which an
-//! undo would otherwise write into the next image.
+//! undo would otherwise write into the next image. [`Store::park_image`]
+//! keeps the image's line aside first, found again when the image opens
+//! again ([`Store::resume_image`], in `image_lines`).
 
 use crate::points::Branch;
 use crate::{Step, Store};
@@ -68,9 +70,9 @@ impl HistoryScope {
 /// A scope's line while the store's lists hold another's.
 #[derive(Debug, Default)]
 pub(crate) struct Parked {
-    undo: Vec<Step>,
-    redo: Vec<Step>,
-    replaced: Vec<Branch>,
+    pub(crate) undo: Vec<Step>,
+    pub(crate) redo: Vec<Step>,
+    pub(crate) replaced: Vec<Branch>,
 }
 
 /// The lines not held, by scope (the one held is left empty).
@@ -227,6 +229,11 @@ impl Store {
                 self.parked
                     .iter()
                     .flat_map(|p| p.undo.iter().chain(&p.redo)),
+            )
+            .chain(
+                self.images
+                    .iter()
+                    .flat_map(|(_, p)| p.undo.iter().chain(&p.redo)),
             )
             .filter_map(|s| s.group)
             .collect();

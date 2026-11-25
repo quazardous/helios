@@ -7,9 +7,9 @@
 //! the step it saves pinned and kept with it; a save that fails refuses
 //! the request with its reason, and the image stays open), then the edit's
 //! history leaves the image (`history.scope`: the image's steps of the
-//! value store and the snapshot book cleared, so the next image's undo
-//! never walks into this one's steps; the workspace's steps, graph edits,
-//! stay). Only a request that went through is acted on: the
+//! value store parked under the image, the snapshot book cleared, so the
+//! next image's undo never walks into this one's steps; the workspace's
+//! steps, graph edits, stay). Only a request that went through is acted on: the
 //! next image loads (its saved edit, the viewport's network: pixels, the
 //! listed exception), and `image.closed` / `image.opened` are said on the
 //! journal with the listeners that ran (`ran`). A listener refuses with
@@ -30,7 +30,9 @@
 //! [`ImageClosed`], when no image follows), its followers in the order
 //! [`FOLLOWERS`] declares: the image's pinned snapshots loaded
 //! (`snapshots.book`), the labels and locks its edit was saved with
-//! (`mask.marks`), the workshop session's photo (`workshop.photo`). Each
+//! (`mask.marks`), the workshop session's photo (`workshop.photo`), the
+//! image's history parked when it was left, back once its values are
+//! loaded (`history.resume`). Each
 //! follower holds its own state behind a handle (`Rc` or `Arc`) and does
 //! its part inside the pass ([`listen_follower_local`]); none compares
 //! the image open at each pass.
@@ -60,8 +62,9 @@ pub const BUS_OWNER: &str = "helios.darkroom";
 /// snapshots pending at its step kept: a refused write refuses the
 /// request.
 pub const SAVE: &str = "helios.edit.save";
-/// The edit's history (the image's steps of the value store, the snapshot
-/// book) leaves the image; the workspace's steps stay.
+/// The edit's history leaves the image: the image's steps of the value
+/// store parked under it (found again when it opens again), the snapshot
+/// book cleared; the workspace's steps stay.
 pub const SCOPE: &str = "helios.history.scope";
 
 /// How long `edit.save` may run before the bus counts it late (a late
@@ -86,6 +89,10 @@ pub const MARKS: &str = "helios.mask.marks";
 /// The workshop session's photo: the vault image its steps are recorded
 /// on.
 pub const WORKSHOP: &str = "helios.workshop.photo";
+/// The image's history parked when it was left, back as its edit's
+/// history now that its values are loaded (dropped when they moved
+/// meanwhile).
+pub const HISTORY: &str = "helios.history.resume";
 
 /// The followers of [`ImageOpened`] and [`ImageClosed`], each with the
 /// one it runs after: the order they run in.
@@ -93,6 +100,7 @@ pub const FOLLOWERS: &[(&str, Option<&str>)] = &[
     (SNAPSHOTS, None),
     (MARKS, Some(SNAPSHOTS)),
     (WORKSHOP, Some(MARKS)),
+    (HISTORY, Some(WORKSHOP)),
 ];
 
 /// What a switch is: the image open (none when nothing is edited) and the

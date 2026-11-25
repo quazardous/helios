@@ -305,7 +305,7 @@ step is).
 
 | Line (egui-pop scope) | Holds | Views that route to it | Kept |
 |---|---|---|---|
-| `edit` | the open photo's edit: module values, masks, a workshop applied to the photo | the viewport, the modules, masks, parameters, scopes and navigator panels (`helios_gui::history::EDIT_FOCUS`) | left on a photo switch (per-photo stacks kept across switches come with R4) |
+| `edit` | the open photo's edit: module values, masks, a workshop applied to the photo | the viewport, the modules, masks, parameters, scopes and navigator panels (`helios_gui::history::EDIT_FOCUS`) | per photo: parked on a switch (`helios.history.scope`), back when the photo opens again (`helios.history.resume`), for the session, 20 photos of 500 steps at most; dropped when the photo's values moved meanwhile |
 | `workspace` | the workspace's real edits: the network, macros, sub-workspaces, workshop design, name, icon, keys, tools, a reset | the graph and the Workshops (`WORKSPACE_FOCUS`) | across photos, for the session |
 | `library` | imports, albums, removals, rotations, keywords, metadata, stacks, command batches | the Library's grid, filters, filmstrip and duplicates (`library_history::FOCUS`) | for the session |
 
@@ -352,8 +352,7 @@ the open step until something seals it, and an explicit Commit
   history: the `workspace` line, or a workshop's local scope where it
   has one. A photo's history never holds a diagram edit.
 - The library's history stays its own line, never a photo's.
-- Per-photo stacks kept across switches and rebuilt from the versions
-  (R4, R5), `helios.photo.history` (R6), amend and Commit (R7), compare
+- Per-photo stacks rebuilt from the versions after a restart (R5), `helios.photo.history` (R6), amend and Commit (R7), compare
   any step with the live edit (R8, credited to darktable PR #23136).
 
 ### Slices
@@ -363,7 +362,7 @@ the open step until something seals it, and an explicit Commit
 | R1 | View state off the undo path | done (2026-11-20) |
 | R2 | The `workspace` line split from `edit` | done (2026-11-20), persistence to the undo records to do |
 | R3 | Ctrl+Z follows the focused view (egui-pop's `Routing::Focus` and `pop.history.target`, Helios's focus sets) | done (2026-11-21) |
-| R4 | Per-photo stacks kept across switches | to do |
+| R4 | Per-photo stacks kept across switches | done (2026-11-25), session only; the RAM budget in `helios-cache` to do |
 | R5 | Step markers in the versions; undo rebuilt after a restart | to do |
 | R6 | `helios.photo.history`, read-only | to do |
 | R7 | Amend and seal (B), Commit | to do |

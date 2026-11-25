@@ -133,6 +133,53 @@ fn switching_photos_saves_the_unsaved_edit_before_the_next_loads() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Each photo keeps its history across a switch: image 1 edited twice,
+/// image 2 edited, back on image 1, Ctrl+Z undoes image 1's last step
+/// (its steps parked by `history.scope`, back by `history.resume`), and
+/// back on image 2 its own step is there to undo.
+#[test]
+fn a_photo_keeps_its_history_across_a_switch() {
+    let dir = scratch("per-photo");
+    let path = vault_file(&dir);
+    let (mut shell, mut persist) = open(&path, &Options::default());
+    let user = helios_shell::commands::Origin::User;
+    let undo = |shell: &Shell| shell.values().lock().unwrap().undo(&user).unwrap();
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    set(&shell, 1.0);
+    persist.settle(&mut shell);
+    set(&shell, 1.5);
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(2), graph, exp, "output")
+        .unwrap();
+    assert!(
+        shell.values().lock().unwrap().undo_steps().is_empty(),
+        "image 2 starts with no step"
+    );
+    set(&shell, -0.5);
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    assert_eq!(shown(&shell), 1.5, "image 1's edit loaded");
+    assert_eq!(shell.values().lock().unwrap().undo_steps().len(), 2);
+    assert!(undo(&shell).is_some());
+    assert_eq!(shown(&shell), 1.0, "image 1's last step undone");
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(2), graph, exp, "output")
+        .unwrap();
+    assert_eq!(shown(&shell), -0.5);
+    assert!(undo(&shell).is_some());
+    assert_eq!(shown(&shell), 0.0, "image 2's own step undone");
+    assert!(undo(&shell).is_none(), "and nothing of image 1's");
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The save of image 1's edit fails (another writer holds the vault): the
 /// switch is refused with the save's reason, image 1 stays open with its
 /// edit shown, and nothing of image 2 is loaded.
@@ -298,9 +345,9 @@ fn a_switch_is_said_on_the_journal_with_the_listeners_that_ran() {
 
 /// A switch runs each follower of the image open once, in its declared
 /// order, inside the pass: `image.closed` follows nothing (an image is
-/// asked), `image.opened` runs `snapshots.book`, `mask.marks`, then
+/// asked), `image.opened` runs `snapshots.book`, `mask.marks`,
 /// `workshop.photo`, which names the image to the workshop session before
-/// any frame ran (no compare at a later pass). A close with none after it
+/// any frame ran (no compare at a later pass), then `history.resume`. A close with none after it
 /// passes `image.closed` once.
 #[test]
 fn a_switch_runs_each_follower_once_in_order() {
@@ -344,7 +391,8 @@ fn a_switch_runs_each_follower_once_in_order() {
     let followers = serde_json::json!([
         "helios.snapshots.book",
         "helios.mask.marks",
-        "helios.workshop.photo"
+        "helios.workshop.photo",
+        "helios.history.resume"
     ]);
     assert_eq!(said[0].1["followed"], followers);
     assert_eq!(said[1].1["followed"], serde_json::Value::Null);
