@@ -65,10 +65,17 @@ fn mark(h: &Harness<'_, Shell>) -> Option<indicator::Record> {
 #[test]
 fn the_scopes_are_marked_stale_until_the_new_photo_s_data_lands() {
     let (graph, node) = network(0.2);
-    let mut shell = Shell::new(helios_panels(), None);
-    shell.set_view_source(graph, node, "output").unwrap();
+    let shell = Shell::new(helios_panels(), None);
+    // The harness runs its first frames as it is built, on egui's clock
+    // (a quarter of a second a step): a photo already shown there could
+    // render past the busy mark's delay on a slow adapter, and the mark
+    // then shown would be held for its minimum by a clock frozen before
+    // it. So the clock is frozen first, and the photo shown after.
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
     let clock = motion::freeze(&h.ctx, 0.0);
+    h.state_mut()
+        .set_view_source(graph, node, "output")
+        .unwrap();
     h.state_mut()
         .run("helios.scopes.focus", serde_json::Value::Null, Origin::User)
         .expect("the scopes shown");
