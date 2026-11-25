@@ -276,6 +276,7 @@ command-library-stack-ungroup.title 9c5161dff0696632
 command-library-storage.title 5a2f966a38856217
 command-library-trash.title 6fb6defb78678f5c
 command-library-view-close.title f42b8c4fbf8a72bd
+command-library-view-link.title 82b5d5930d8c4075
 command-library-view-open.title 5abffaad8e7430f1
 command-library-view-selection.title 2e613237f1fcb553
 command-library-window.title 6d7e88ea6aaf5346
@@ -1297,6 +1298,7 @@ gui-library-version-not-changed 5e359e73ab5dd059
 gui-library-versions-strip e2b7a3b085ebe75a
 gui-library-view 1b9882236d79995e
 gui-library-view-details 6b7485aa06c674c5
+gui-library-view-link e396ca50ee60777d
 gui-library-view-list 52d27082aa325209
 gui-library-view-per-row d8afb42eb5d373ba
 gui-library-view-tip 0f0d790fc91d9686

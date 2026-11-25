@@ -1798,7 +1798,12 @@ impl Shell {
                     match view {
                         // The main explorer: its Filters feed its Results,
                         // both drawing the main gallery.
-                        0 => library.show(ui, &crate::library::GalleryOptions::RESULTS_PANEL),
+                        0 => {
+                            library.show(ui, &crate::library::GalleryOptions::RESULTS_PANEL);
+                            // Its selection and cursor kept with the
+                            // layout, as the other views' are.
+                            views.borrow_mut().keep_main(app, drawn, &mut library);
+                        }
                         3 => library.show(ui, &crate::library::GalleryOptions::FILTERS_PANEL),
                         1 => library.filmstrip(ui),
                         _ if drawn.is_instance() => {
@@ -3672,6 +3677,19 @@ impl Shell {
             Box::new(|a, _| {
                 Ok(Action::LibraryView(
                     crate::library_views::SELECTION_COMMAND,
+                    a.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
+                crate::library_views::LINK_COMMAND,
+                "Link a Library view to the main one, or unlink it (`view`; `linked`: true or false, none: the other way round): linked, it follows the main view's selection",
+                "Library",
+            ),
+            Box::new(|a, _| {
+                Ok(Action::LibraryView(
+                    crate::library_views::LINK_COMMAND,
                     a.clone(),
                 ))
             }),
@@ -7978,6 +7996,8 @@ impl Shell {
                 let app = self.core.app.handle();
                 return if command == crate::library_views::OPEN_COMMAND {
                     crate::library_views::open_command(app, &args)
+                } else if command == crate::library_views::LINK_COMMAND {
+                    crate::library_views::link_command(app, &args)
                 } else if command == crate::library_views::SELECTION_COMMAND {
                     crate::library_views::selection_command(app, &mut self.library_mut(), &args)
                 } else {
