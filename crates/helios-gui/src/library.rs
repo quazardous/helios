@@ -3998,6 +3998,23 @@ impl Library {
         self.view.state.reveal_cursor();
     }
 
+    /// Selects images by id with the cursor on `cursor` (a photo of its
+    /// own, in the selection or not), as a view kept them: an id the
+    /// Library does not hold is left out.
+    pub fn select_kept(&mut self, ids: &[String], cursor: Option<&str>) {
+        self.shown_changed();
+        let known: Vec<String> = ids
+            .iter()
+            .filter(|id| self.index.contains_key(*id))
+            .cloned()
+            .collect();
+        let cursor = cursor
+            .filter(|c| self.index.contains_key(*c))
+            .map(str::to_string);
+        self.view.state.set_selection(known, cursor);
+        self.view.state.reveal_cursor();
+    }
+
     /// Moves the cursor by `step` among the images shown, within bounds.
     pub fn step(&mut self, step: i64) {
         self.shown_changed();

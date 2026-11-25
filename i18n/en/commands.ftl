@@ -601,6 +601,9 @@ command-library-view-close =
 command-library-view-open =
     .title = Open another Library view (`place`: last, here or an area): its own filter and cursor, kept with the layout. Answers its id (`view`)
 
+command-library-view-selection =
+    .title = Say a Library view's selection and cursor (`view`: its id or main; none: every view), as kept with the layout
+
 command-library-window =
     .title = Library
 
