@@ -10,6 +10,7 @@
 //! the topmost one registered there, declared `edit`, and, when it names
 //! the path it writes, writing that path.
 
+use crate::host::Settle as _;
 use egui::{Event, Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
@@ -427,7 +428,7 @@ fn an_edit_from_an_undeclared_area_fails_the_audit() {
                     areas::register(ui, &r, AreaSpec::new("test.slider", kind).path(EV));
                 }
             });
-        h.run();
+        h.settle();
         let mut a = Audit::new(&store.lock().unwrap());
         let at = h.get_by_role(egui::accesskit::Role::Slider).rect().center();
         h.hover_at(at);

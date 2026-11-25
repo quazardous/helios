@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use helios_core::{Image, Region, Value};
@@ -49,7 +50,7 @@ fn window(root: &Path) -> Harness<'static, Shell> {
         .unwrap();
     crate::host::listen_network(&shell);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h
 }
 

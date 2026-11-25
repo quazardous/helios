@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::kittest::Queryable;
 use helios_core::Bus;
@@ -196,9 +197,9 @@ fn a_suggestion_asked_in_the_panel_is_heard_in_the_pass_it_is_made() {
     h.state_mut()
         .run("helios.stacks.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     persist.frame_settled(h.state_mut(), 1.0);
-    h.run();
+    h.settle();
     assert!(!persist.busy(), "nothing waits before the click");
     h.get_by_label("Suggest stacks").click();
     // One pass: the click seen while the panel draws, heard after.
@@ -266,11 +267,11 @@ fn stacks_show_collapsed_and_expand_on_demand() {
         .unwrap();
     shell.library_mut().select(place);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h.state_mut()
         .run("vault.stack.toggle", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     assert!(h.state().library().is_expanded(&burst[1].hex()));
     persist.frame_settled(h.state_mut(), 12.0);
     let kept = persist.vault().stack(&stack.id).unwrap().unwrap();
@@ -279,7 +280,7 @@ fn stacks_show_collapsed_and_expand_on_demand() {
     h.state_mut()
         .run("helios.stacks.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }

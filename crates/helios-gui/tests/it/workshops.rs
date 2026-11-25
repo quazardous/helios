@@ -13,7 +13,7 @@ use serde_json::json;
 fn harness(on: bool) -> Harness<'static, Shell> {
     let panels = helios_panels_with(Experimental { workshops: on });
     let mut h = headless::harness(Shell::new(panels, None), vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h
 }
 
@@ -44,7 +44,7 @@ fn on_the_panel_opens_and_says_it_is_experimental() {
     h.state_mut()
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     assert!(h.state().app().handle().panel_visible(&id));
     h.get_by_label_contains("Experimental: may change");
 }
@@ -55,6 +55,7 @@ fn on_the_panel_opens_and_says_it_is_experimental() {
 
 use std::path::{Path, PathBuf};
 
+use crate::host::Settle as _;
 use helios_core::{Image, Region};
 use helios_gui::templates;
 use helios_template::Source;
@@ -98,7 +99,7 @@ fn window(root: &Path, on: bool) -> Harness<'static, Shell> {
         .unwrap();
     crate::host::listen_network(&shell);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h
 }
 
@@ -270,7 +271,7 @@ fn open_panel(h: &mut Harness<'static, Shell>) {
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
 }
 
@@ -284,16 +285,16 @@ fn the_panel_lists_the_shipped_workshop_and_applies_it() {
     h.get_by_label("Brighter midtones without losing the highlights");
     // Words found nowhere: nothing listed.
     h.get_by_label("Find").focus();
-    h.run();
+    h.settle();
     h.get_by_label("Find").type_text("landscape");
-    h.run();
+    h.settle();
     h.get_by_label_contains("No workshop found");
     assert!(h.query_by_label("Lift midtones").is_none());
     // A keyword finds it again.
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    h.run();
+    h.settle();
     h.get_by_label("Find").type_text("underexposed");
-    h.run();
+    h.settle();
     h.get_by_label("Lift midtones");
     // Apply, from its row: one undo step, its node selected.
     let steps = h.state().values().lock().unwrap().all_undo_steps().len();
@@ -517,7 +518,7 @@ fn the_save_form_asks_with_the_target_prefilled_from_the_image() {
         .run("helios.modules.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label("Save as workshop…");
     let asked = answer(&mut h, "workshop.save", json!({ "node": "look" })).unwrap();
@@ -550,7 +551,7 @@ fn the_save_form_asks_with_the_target_prefilled_from_the_image() {
     );
     // A workshop now: the panel no longer offers it.
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     assert!(h.query_by_label("Save as workshop…").is_none());
     // No target chosen: a workshop without targets.
@@ -572,7 +573,7 @@ fn off_save_as_workshop_is_not_offered() {
         .run("helios.modules.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label("Publish…");
     assert!(h.query_by_label("Save as workshop…").is_none());
@@ -596,7 +597,7 @@ fn workshops_snapshots() {
     let mut h = window(&root, true);
     open_panel(&mut h);
     h.get_by_label("Describe what you want").focus();
-    h.run();
+    h.settle();
     h.get_by_label("Describe what you want")
         .type_text("brighter midtones");
     h.run_steps(3);

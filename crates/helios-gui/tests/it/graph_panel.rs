@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -40,7 +41,7 @@ fn window(root: &Path) -> (Harness<'static, Shell>, Files) {
     shell.load_layout().unwrap();
     shell.open_workspace(&config, &dir).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     run(&mut h, "helios.graph.focus", json!(null));
     (h, Files::new(&config, &dir))
 }
@@ -547,7 +548,7 @@ fn the_wire_style_is_kept_between_sessions() {
         )
         .unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     run(&mut h, "helios.graph.focus", json!(null));
     assert_eq!(
         wires(&h),
@@ -643,7 +644,7 @@ fn under_a_popup(h: &mut Harness<'static, Shell>, labels: &[Found]) {
         let (rect, _) = overlay(h, label);
         let at = rect.left_top() - vec2(4.0, 4.0);
         h.hover_at(at);
-        h.run();
+        h.settle();
         for pressed in [true, false] {
             h.event(egui::Event::PointerButton {
                 pos: at,
@@ -699,7 +700,7 @@ fn under_the_import_window(h: &mut Harness<'static, Shell>, labels: &[Found]) {
         let shown = headless::window_rect(h, title).unwrap();
         let grip = egui::pos2(shown.center().x, shown.top() + 10.0);
         h.hover_at(grip);
-        h.run();
+        h.settle();
         h.drag_at(grip);
         h.step();
         for k in 1..=8 {
@@ -788,7 +789,7 @@ fn the_graph_overview_lies_under_the_windows_over_the_canvas() {
     // Zoomed in far enough that the network is much larger than the
     // view: the overview shows.
     h.hover_at(graph.center());
-    h.run();
+    h.settle();
     for _ in 0..6 {
         h.event(egui::Event::Zoom(2.0));
         h.step();

@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::{By, Queryable as _};
@@ -154,7 +155,7 @@ impl World {
             self.link.settle(Duration::from_secs(10)),
             "the node answers"
         );
-        h.run();
+        h.settle();
     }
 }
 
@@ -242,9 +243,9 @@ fn the_page_lists_online_and_offline_volumes_and_saves_edits() {
         h.query(name()).is_some()
     });
     h.get(name()).focus();
-    h.run();
+    h.settle();
     h.get(name()).type_text("-SSD");
-    h.run();
+    h.settle();
     h.key_press(egui::Key::Enter);
     // Where the cursor lands on focus is egui's: the new name holds
     // what was typed.
@@ -288,7 +289,7 @@ fn the_caches_in_use_fills_in_from_the_read_kernel() {
     let mut shell = shell;
     helios_gui::caches::register(&mut shell).unwrap();
     let mut h = headless::harness(shell, vec2(1600.0, 900.0));
-    h.run();
+    h.settle();
     h.state_mut()
         .run(
             "admin.open",
@@ -312,7 +313,7 @@ fn an_offline_photo_shows_its_badge_and_plugging_its_disk_in_clears_it() {
     let (mut world2, mut shell) = World::new("badge");
     world2.persist.fill_library(&mut shell).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     let photo = world2.photo.clone();
     let badges = |h: &Harness<'_, Shell>| h.state().library().badges_of(&h.ctx, &photo);
     assert!(badges(&h).is_empty(), "present: no badge");
@@ -404,12 +405,12 @@ fn now() -> u64 {
 fn the_import_windows_strategy_line_says_what_backups_the_photos_get() {
     let (world, shell) = World::new("line");
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     // None: "No backup set up:", its button opens the Storage page.
     h.state_mut()
         .run("library.importWindow", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     assert_eq!(
         h.state().import_backup_line(),
         ("No backup set up:".to_string(), true)
@@ -437,7 +438,7 @@ fn the_import_windows_strategy_line_says_what_backups_the_photos_get() {
             false
         )
     );
-    h.run();
+    h.settle();
     let _ = h.get_by_label("2 copies: Backup (plugged in), Studio (plugged in)");
 
     // The studio disk last seen three days ago, unplugged since.
@@ -480,7 +481,7 @@ fn photos_show_their_backups_and_the_search_filters_on_them() {
     give_roles(&world.vault, "uuid:backup", &[Role::Backup]);
     world.persist.fill_library(&mut shell).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     let photo = world.photo.clone();
     let badges = |h: &Harness<'_, Shell>, id: &str| h.state().library().badges_of(&h.ctx, id);
     // No strategy: no backup badge.
@@ -564,7 +565,7 @@ fn a_card_short_of_its_backups_is_said_safe_once_a_backup_ends() {
     std::fs::create_dir_all(&dcim).unwrap();
     std::fs::write(dcim.join("IMG_0001.JPG"), b"a photo on the card, to copy").unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     let jobs = h.state().jobs();
     let options = Options {
         placement: Placement::Copy {
@@ -661,7 +662,7 @@ fn a_backup_ended_says_a_card_safe_everywhere_from_one_list() {
         Duration::from_millis(30),
     ));
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     let (studio, backup_disk) = (world.studio.clone(), world.backup.clone());
     world.plug(
         &mut h,

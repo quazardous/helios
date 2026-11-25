@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use crate::host::Settle as _;
 use egui::{Key, Modifiers, vec2};
 use egui_pop::model::ids::CommandId;
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
@@ -55,16 +56,16 @@ fn every_helios_command_is_in_the_palette_with_its_title_category_and_keys() {
 #[test]
 fn the_palette_runs_a_helios_command() {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1024.0, 700.0));
-    h.run();
+    h.settle();
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::P);
-    h.run();
+    h.settle();
     assert!(h.state().palette_open());
     // Typed into the focused field (the Vault has a search field too).
     h.event(egui::Event::Text("before and after side".into()));
-    h.run();
+    h.settle();
     h.key_press(Key::Enter);
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     let history = h.state().history();
     let last = history.last().unwrap();
     assert_eq!(last.id, "viewport.compare");
@@ -119,9 +120,9 @@ fn shell() -> (Shell, PathBuf) {
 fn quick_open_opens_an_image_by_its_name() {
     let (shell, beach) = shell();
     let mut h = headless::harness(shell, vec2(1024.0, 700.0));
-    h.run();
+    h.settle();
     h.key_press_modifiers(Modifiers::CTRL, Key::P);
-    h.run();
+    h.settle();
     let current = h
         .state_mut()
         .run("dialog.current", json!(null), Origin::User)
@@ -133,15 +134,15 @@ fn quick_open_opens_an_image_by_its_name() {
     // The picker's filter has the keyboard (the library has a search
     // field of its own).
     h.input_mut().events.push(egui::Event::Text("beach".into()));
-    h.run();
+    h.settle();
     let current = h
         .state_mut()
         .run("dialog.current", json!(null), Origin::User)
         .unwrap();
     assert_eq!(current["filter"], json!("beach"), "{current}");
     h.key_press(Key::Enter);
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     assert_eq!(h.state().take_opens(), vec![Open::Image(beach)]);
 }
 
@@ -149,7 +150,7 @@ fn quick_open_opens_an_image_by_its_name() {
 fn quick_open_selects_a_module_and_agents_go_there_too() {
     let (shell, _) = shell();
     let mut h = headless::harness(shell, vec2(1024.0, 700.0));
-    h.run();
+    h.settle();
     let agent = Origin::Agent("a1".into());
     h.state_mut()
         .run(
@@ -158,8 +159,8 @@ fn quick_open_selects_a_module_and_agents_go_there_too() {
             agent.clone(),
         )
         .unwrap();
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     {
         let store = h.state().values().lock().unwrap();
         let selected = store.get(helios_gui::params::SELECTION).unwrap();
@@ -174,7 +175,7 @@ fn quick_open_selects_a_module_and_agents_go_there_too() {
             agent,
         )
         .unwrap();
-    h.run();
+    h.settle();
     assert!(h.state().take_opens().is_empty());
     assert!(
         h.state().notes.iter().any(|n| n.contains("nope")),

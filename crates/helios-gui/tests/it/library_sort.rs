@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -95,7 +96,7 @@ fn window(
     let persist = Persist::new(SqliteStore::open(path).unwrap(), Arc::new(Bus::new()));
     persist.fill_library(&mut shell).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     (h, persist)
 }
 
@@ -112,10 +113,10 @@ fn grid(h: &Harness<'_, Shell>) -> Vec<String> {
 /// A few frames, the host's turn between them (as the desktop's loop).
 fn settle(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, at: f64) {
     for i in 0..3 {
-        h.run();
+        h.settle();
         persist.frame_settled(h.state_mut(), at + f64::from(i));
     }
-    h.run();
+    h.settle();
 }
 
 fn kept(config: &Path, workspace: &Path) -> Option<SortDesc> {
@@ -146,10 +147,10 @@ fn the_sort_orders_the_grid_in_the_vault_and_is_the_workspace_s() {
     h.state_mut()
         .run("view.library", Value::Null, Origin::User)
         .unwrap();
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     h.get_by_label("Sort by").click();
-    h.run();
+    h.settle();
     h.get_by_label("File name").click();
     settle(&mut h, &mut persist, 1.0);
     assert_eq!(h.state().library().sort(), Order::asc(Sort::Name));

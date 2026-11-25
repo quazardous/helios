@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::host::Settle as _;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -186,7 +187,7 @@ fn the_darkroom_docks_the_history_beside_the_modules_and_its_rows_walk_the_edit(
 fn the_window_menu_the_palette_and_ctrl_shift_h_open_the_history() {
     use egui_pop::model::menus::Item;
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     let app = h.state().app().handle().clone();
     let toggle = "egui_pop.history.toggle";
     // Outside the darkroom, closed until asked for.
@@ -214,14 +215,14 @@ fn the_window_menu_the_palette_and_ctrl_shift_h_open_the_history() {
     h.state_mut()
         .run(toggle, json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     assert!(app.panel_visible(&PANEL_HISTORY));
     // Ctrl+Shift+H closes it and opens it again.
     h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::H);
-    h.run();
+    h.settle();
     assert!(!app.panel_visible(&PANEL_HISTORY));
     h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::H);
-    h.run();
+    h.settle();
     assert!(app.panel_visible(&PANEL_HISTORY));
     egui_pop_test::assert_keymap_clean(h.state().app());
 }

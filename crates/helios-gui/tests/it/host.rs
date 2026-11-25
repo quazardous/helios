@@ -45,9 +45,24 @@ pub fn follow(h: &mut Harness<'static, Shell>) {
 /// Frames until a run settles, within a minute: a deadline, not a guess
 /// at how long the work takes.
 fn settle(h: &mut Harness<'static, Shell>) {
-    let end = Instant::now() + Duration::from_mins(1);
-    while h.run_ok().is_none() {
-        assert!(Instant::now() < end, "the window settles");
-        std::thread::sleep(Duration::from_millis(10));
+    h.settle();
+}
+
+/// [`Harness::run`] for a window whose panels may be busy with work on
+/// threads of their own (the preview, the scopes, the navigator): a run
+/// that does not settle within the harness's steps (more frames on a
+/// slower machine, a software adapter) is run again, within a minute,
+/// not failed. A run that settles is the same as `run`.
+pub trait Settle {
+    fn settle(&mut self);
+}
+
+impl<S> Settle for Harness<'_, S> {
+    fn settle(&mut self) {
+        let end = Instant::now() + Duration::from_mins(1);
+        while self.run_ok().is_none() {
+            assert!(Instant::now() < end, "the window settles");
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }

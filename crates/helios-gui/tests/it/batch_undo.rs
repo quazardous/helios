@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_pop::api::history::{Answer, Request};
@@ -90,12 +91,12 @@ fn desktop(root: &Path) -> Desktop {
     let persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
     persist.fill_library(&mut shell).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h.state_mut()
         .run("view.library", Value::Null, Origin::User)
         .unwrap();
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     let vault = persist.vault().clone();
     h.state()
         .library_history()

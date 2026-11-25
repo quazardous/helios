@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use crate::host::Settle as _;
 use helios_core::{Bus, ContentHash};
 use helios_gui::persist::Persist;
 use helios_gui::{Shell, helios_panels};
@@ -445,7 +446,7 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
     shell.values().lock().unwrap().end(drag);
     persist.frame_settled(&mut shell, 10.0);
     let mut h = helios_gui::headless::harness(shell, egui::vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     // Ctrl+Z goes to the focused view's history (egui-pop's focus
     // routing), so the image's view takes the focus, as a click does.
     h.state_mut()
@@ -455,7 +456,7 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
             Origin::User,
         )
         .unwrap();
-    h.run();
+    h.settle();
     // Edit > Undo names the step it would take back.
     let undo = h
         .state()
@@ -469,11 +470,11 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
         "Undo Exposure +1.50 EV"
     );
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
-    h.run();
+    h.settle();
     assert!((shown(h.state()) - start).abs() < 1e-9, "the drag undone");
     persist.frame_settled(h.state_mut(), 11.0);
     h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
-    h.run();
+    h.settle();
     assert!((shown(h.state()) - (start + 1.5)).abs() < 1e-9, "redone");
     persist.frame_settled(h.state_mut(), 12.0);
     assert_eq!(
@@ -495,7 +496,7 @@ fn ctrl_z_undoes_a_drag_as_a_version_redo_replays_it_and_a_drag_going_on_stops_i
         .begin_gesture(Origin::User, "drag exposure");
     set(h.state(), start + 2.0, Some(drag));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
-    h.run();
+    h.settle();
     assert!((shown(h.state()) - (start + 2.0)).abs() < 1e-9);
     let failed = h
         .state()

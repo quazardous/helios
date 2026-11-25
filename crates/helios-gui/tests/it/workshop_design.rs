@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -281,7 +282,7 @@ fn window(root: &Path) -> Harness<'static, Shell> {
         .unwrap();
     crate::host::listen_network(&shell);
     let mut h = headless::harness(shell, vec2(1280.0, 900.0));
-    h.run();
+    h.settle();
     h
 }
 
@@ -316,13 +317,13 @@ fn an_agent_designs_the_backlit_workshop_and_the_panel_shows_only_its_sliders() 
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     // The user says what they want, and asks.
     h.get_by_label("Describe what you want").focus();
-    h.run();
+    h.settle();
     h.get_by_label("Describe what you want").type_text(INTENT);
-    h.run();
+    h.settle();
     h.get_by_label("Design a workshop").click();
     crate::host::follow(&mut h);
     h.get_by_label_contains("Waiting for your agent");
@@ -414,7 +415,7 @@ fn an_agent_designs_the_backlit_workshop_and_the_panel_shows_only_its_sliders() 
 
     // The panel shows the workshop's sliders, and only those.
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label_contains("Designed: user.backlit-mountain@1");
     for name in ["backlight_lift", "sky", "mountain_detail"] {
@@ -673,7 +674,7 @@ fn a_piloted_session_records_who_set_what_why_and_what_the_zones_measured() {
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label_contains("Session recorded: 5 steps");
     h.get_by_label("Keep");
@@ -742,7 +743,7 @@ fn a_session_not_kept_leaves_nothing_and_a_kept_one_survives_a_reopen() {
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label("Keep").click();
     crate::host::follow(&mut h);
@@ -821,7 +822,7 @@ fn the_agent_proposes_the_user_accepts_one_ghost_and_rejects_another() {
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label_contains("backlight_lift: 0.80 proposed by agent:");
     h.get_by_label_contains("sky: -0.30 proposed by agent:");
@@ -1005,13 +1006,13 @@ fn make_it_automatic_writes_the_next_version_once_the_user_confirms() {
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label_contains("AI per photo: 1 junctions, 1 calls");
     h.get_by_label("Make it automatic").click();
     crate::host::follow(&mut h);
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label_contains("AI per photo: none");
     h.get_by_label("Confirm");
@@ -1243,7 +1244,7 @@ fn workshops_session_snapshots() {
         .run("helios.workshops.focus", json!(null), Origin::User)
         .unwrap();
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label_contains("sky: -0.30 proposed by agent:");
     h.run_steps(3);
@@ -1253,7 +1254,7 @@ fn workshops_session_snapshots() {
     h.get_by_label("Make it automatic").click();
     crate::host::follow(&mut h);
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
     h.get_by_label("Confirm");
     h.run_steps(3);

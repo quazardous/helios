@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::host::Settle as _;
 use egui_pop::model::layout::Layout;
 use helios_gui::{Shell, helios_panels};
 use helios_shell::commands::Origin;
@@ -27,7 +28,7 @@ fn exit_runs_on_exit_then_the_exit_step_saves() {
         .unwrap();
     // The queued detach applies at the next frame; a harness draws one.
     let mut h = helios_gui::headless::harness(shell, egui::vec2(800.0, 500.0));
-    h.run();
+    h.settle();
     h.state_mut().exit().unwrap();
     // The workspace's layout, as the window closed.
     let layout = seen.borrow().clone().expect("on_exit ran");
@@ -91,7 +92,7 @@ fn desktop(name: &str) -> (Desktop, egui_kittest::Harness<'static, Shell>) {
     shell.library_mut().select(0);
     let mut h = helios_gui::headless::harness(shell, egui::vec2(800.0, 500.0));
     h.ctx.set_embed_viewports(false);
-    h.run();
+    h.settle();
     let d = Desktop {
         dir,
         node,
@@ -235,7 +236,7 @@ fn quitting_during_an_export_asks_then_the_node_cancels_it() {
             Origin::User,
         )
         .unwrap();
-    h.run();
+    h.settle();
     let bundle = h
         .state()
         .workspace_bundle()
