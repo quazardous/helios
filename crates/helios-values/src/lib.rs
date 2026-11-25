@@ -56,12 +56,14 @@
 mod commands;
 mod graph;
 mod history_scope;
+mod image_lines;
 mod points;
 mod preview;
 
 pub use commands::{register, value_from_json, value_to_json};
 pub use graph::{BYPASS, Keep, Rebound, bind_node, bypass_path, node_path, rebind, sync};
 pub use history_scope::{HistoryScope, PLUGIN_PATHS, WORKSPACE_PATHS};
+pub use image_lines::{PARKED_IMAGES, PARKED_STEPS};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -715,6 +717,9 @@ pub struct Store {
     active: HistoryScope,
     /// The other history scopes' lines, parked meanwhile.
     parked: history_scope::Lines,
+    /// The image lines parked when another image opened, by image, the
+    /// one left last at the back ([`Store::park_image`]).
+    images: image_lines::Images,
     /// The groups named by their origin (a request id an agent gives),
     /// by origin and name.
     named: BTreeMap<(String, String), u64>,

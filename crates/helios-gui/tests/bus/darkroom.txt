@@ -8,7 +8,9 @@ helios.image.opened
   1. helios.snapshots.book (owner helios.darkroom): local
   2. helios.mask.marks (owner helios.darkroom): local; after helios.snapshots.book
   3. helios.workshop.photo (owner helios.darkroom): local; after helios.mask.marks
+  4. helios.history.resume (owner helios.darkroom): local; after helios.workshop.photo
 helios.image.closed
   1. helios.snapshots.book (owner helios.darkroom): local
   2. helios.mask.marks (owner helios.darkroom): local; after helios.snapshots.book
   3. helios.workshop.photo (owner helios.darkroom): local; after helios.mask.marks
+  4. helios.history.resume (owner helios.darkroom): local; after helios.workshop.photo
