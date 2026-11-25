@@ -6938,7 +6938,7 @@ impl Shell {
         };
         self.focus.library.borrow_mut().set_surfaces(seen);
         // The panel zen mode shows when none is named.
-        let culling = crate::contexts::state(&app).mode_of(crate::contexts::ORIENTATION.as_str())
+        let culling = crate::contexts::state(app).mode_of(crate::contexts::ORIENTATION.as_str())
             == Some(&crate::contexts::CULLING);
         *self
             .focus

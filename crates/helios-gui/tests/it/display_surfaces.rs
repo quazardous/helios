@@ -421,7 +421,12 @@ fn zen_while_culling_shows_compare_alone_and_escape_restores_the_layout() {
 
     zen_key(&mut h);
     assert!(app.zen());
-    assert_eq!(app.zen_panel().as_ref().map(|p| p.as_str()), Some(COMPARE));
+    assert_eq!(
+        app.zen_panel()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(COMPARE)
+    );
     assert!(tabs(&h).is_empty(), "Compare alone: {:?}", tabs(&h));
 
     h.key_press(egui::Key::Escape);
@@ -441,7 +446,12 @@ fn zen_outside_culling_shows_the_surface_a_double_click_reaches() {
     ));
     h.run_steps(3);
     // The primary strategy: the Image.
-    assert_eq!(app.zen_target().as_ref().map(|p| p.as_str()), Some(IMAGE));
+    assert_eq!(
+        app.zen_target()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(IMAGE)
+    );
     // The last focused one: Compare, once it had the focus.
     set_strategy(&mut h, "last_focused");
     app.focus_panel(&egui_pop::model::ids::PanelId::from_static(COMPARE));
@@ -450,7 +460,12 @@ fn zen_outside_culling_shows_the_surface_a_double_click_reaches() {
         "helios.modules",
     ));
     h.run_steps(3);
-    assert_eq!(app.zen_target().as_ref().map(|p| p.as_str()), Some(COMPARE));
+    assert_eq!(
+        app.zen_target()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(COMPARE)
+    );
 }
 
 #[test]
@@ -470,7 +485,12 @@ fn zen_on_the_focused_compare_shows_it_alone_and_leaving_restores_the_panels() {
     // The focused view wins over Helios's choice, culling or not.
     zen_key(&mut h);
     assert!(app.zen());
-    assert_eq!(app.zen_panel().as_ref().map(|p| p.as_str()), Some(COMPARE));
+    assert_eq!(
+        app.zen_panel()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(COMPARE)
+    );
     assert!(tabs(&h).is_empty(), "Compare alone: {:?}", tabs(&h));
 
     // The same key leaves zen: every panel back, the layout untouched.
