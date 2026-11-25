@@ -760,7 +760,9 @@ impl Accounts {
                             .0 += items.len();
                     }
                 }
-                if !items.is_empty() {
+                if items.is_empty() {
+                    wake_listing();
+                } else {
                     given += items.len();
                     let known = known_of
                         .as_ref()
@@ -778,8 +780,6 @@ impl Accounts {
                         }));
                     // The grid shows the photos from the first page on.
                     set(PickStatus::Chosen);
-                } else {
-                    wake_listing();
                 }
             };
             let listed = helios_plugin::source::pick_and_stream(
