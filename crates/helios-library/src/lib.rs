@@ -40,6 +40,7 @@
 //!   files to the system trash as a journaled job, refused on cards and
 //!   backup volumes.
 
+pub mod aggregate;
 pub mod auto_import;
 pub mod backup;
 pub mod capture;

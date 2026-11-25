@@ -10,7 +10,8 @@
 //! (`library.images.rotate`), their files moved to the
 //! system trash as a journaled job (`library.images.trash`, its jobs
 //! read with `library.trash.jobs`), the facet counts of
-//! a query (`library.facets`), the photos changed outside Helios
+//! a query (`library.facets`), one value per group of a set of photos
+//! from their stored measures (`library.aggregate`), the photos changed outside Helios
 //! (`library.changed.list`), the import history listed
 //! (`import.history.list`) and one import run again
 //! (`import.history.again`, run as `library.import` by whoever serves
@@ -58,6 +59,7 @@ pub const IDS: &[&str] = &[
     TRASH_JOBS,
     "library.fields.get",
     "library.facets",
+    helios_library::aggregate::COMMAND,
     "library.changed.list",
     "library.stacks.list",
     "library.stacks.create",
@@ -453,6 +455,37 @@ pub fn specs() -> Vec<CommandSpec> {
                 ),
             ]))
             .read_only(),
+        library(
+            helios_library::aggregate::COMMAND,
+            "Aggregate a stored measure over a set of photos",
+        )
+        .params(object(&[
+            (
+                "query",
+                json!({ "type": "string",
+                        "description": "the photos a search finds (`rating:>=3 camera:~Z`; empty: every photo); `images` instead" }),
+                false,
+            ),
+            ("images", images(), false),
+            (
+                "measure",
+                json!({ "type": "string",
+                        "description": "a stored numeric field (`focus`, `clip_white`, `rating`, `iso`…); optional for `count` and `best`" }),
+                false,
+            ),
+            (
+                "op",
+                json!({ "type": "string", "enum": helios_library::aggregate::Op::ALL }),
+                true,
+            ),
+            (
+                "by",
+                json!({ "type": "string", "enum": helios_library::aggregate::GroupBy::ALL,
+                        "description": "how the set is split (default `all`)" }),
+                false,
+            ),
+        ]))
+        .read_only(),
         library(
             "library.changed.list",
             "List the photos changed outside Helios",
@@ -1138,6 +1171,26 @@ fn named<S: Store>(vault: &Vault<S>, params: &Value, field: &str) -> Result<Vec<
         .collect()
 }
 
+/// `library.aggregate`: the set (`query` or `images`), the measure, the
+/// op and the grouping read from `params`.
+fn aggregate<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, String> {
+    use helios_library::aggregate::{self as agg, GroupBy, Op, Set};
+    let set = match (&params["query"], &params["images"]) {
+        (Value::Null, Value::Null) => return Err("`query` or `images` is missing".into()),
+        (Value::Null, _) => Set::Images(named(vault, params, "images")?),
+        (Value::String(q), Value::Null) => Set::Query(q.clone()),
+        _ => return Err("`query` and `images` both given: one only".into()),
+    };
+    let op = text(params, "op");
+    let op = Op::parse(op).ok_or_else(|| format!("unknown op `{op}`"))?;
+    let by = match params["by"].as_str() {
+        None => GroupBy::All,
+        Some(b) => GroupBy::parse(b).ok_or_else(|| format!("unknown grouping `{b}`"))?,
+    };
+    let answer = agg::aggregate(vault, &set, params["measure"].as_str(), op, by)?;
+    Ok(to_json(&answer))
+}
+
 /// What one change of `library.fields.set` does: its `op` (`set` when
 /// not given) with its `value`.
 fn op_of(change: &Value) -> Result<helios_vault::fields::Op, String> {
@@ -1441,6 +1494,7 @@ pub fn run<S: Store>(
                 .facets(&query, rule.as_ref())
                 .map(|facets| json!({ "facets": to_json(&facets) }))
         }
+        helios_library::aggregate::COMMAND => aggregate(vault, params),
         "library.changed.list" => vault.changed_outside_images().map(|images| {
             json!({
                 "images": images
@@ -1800,6 +1854,7 @@ mod tests {
             json!({ "job": "trash-1700000000-1" }),
             json!({ "images": ["/p/a.raf", "0a"], "fields": ["rating", "label"] }),
             json!({ "query": {} }),
+            json!({ "query": "rating:>=3", "measure": "focus", "op": "max", "by": "stack" }),
             json!({}),
             json!({}),
             json!({ "images": ["/p/a.raf", "0a"], "top": null }),
