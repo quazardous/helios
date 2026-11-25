@@ -1891,12 +1891,14 @@ impl ImportWindow {
                 .album_shown()
                 .map(|(_, _, photos)| photos)
                 .filter(super::import_albums::Photos::listing)
-                .map(|photos| {
+                .map(|photos| photos.count())
+                .or_else(|| self.pick_listing())
+                .map(|count| {
                     t(Message::new(
                         "gui-import-window-listing",
                         "Listing… { $count } photos so far",
                     )
-                    .with("count", photos.count()))
+                    .with("count", count))
                 }),
             empty: t(Message::new(
                 "gui-import-window-empty",

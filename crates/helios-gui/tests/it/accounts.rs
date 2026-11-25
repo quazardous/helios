@@ -751,6 +751,15 @@ struct Picks {
     end: End,
     /// How many pickings saw their cancel.
     cancelled: Arc<std::sync::atomic::AtomicU32>,
+    slow: SlowPick,
+}
+
+/// A picking listed in two pages (`p1`, `p2`, then `p3`, `p4`), the
+/// second held while `hold` is set; `ends` counts the pickings ended.
+#[derive(Clone, Default)]
+struct SlowPick {
+    hold: Option<Arc<std::sync::atomic::AtomicBool>>,
+    ends: Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// How the fake service's page ends.
@@ -813,6 +822,7 @@ impl helios_connect::ConnectorProvider for Picks {
             end: self.end,
             current: std::sync::Mutex::new(0),
             cancelled: self.cancelled.clone(),
+            slow: self.slow.clone(),
         }))
     }
 }
@@ -823,6 +833,7 @@ struct PickConnector {
     end: End,
     current: std::sync::Mutex<u32>,
     cancelled: Arc<std::sync::atomic::AtomicU32>,
+    slow: SlowPick,
 }
 
 impl helios_connect::Connector for PickConnector {
@@ -835,6 +846,7 @@ impl helios_connect::Connector for PickConnector {
                 expired: 0,
                 end: End::Wait,
                 cancelled: Arc::default(),
+                slow: SlowPick::default(),
             }
             .manifest()
             .caps,
@@ -853,10 +865,30 @@ impl helios_connect::Connector for PickConnector {
     fn list(
         &self,
         _source: &helios_connect::SourceRef,
-        _from: Option<&helios_connect::Cursor>,
+        from: Option<&helios_connect::Cursor>,
         _page: usize,
-        _cancel: &helios_connect::Cancel,
+        cancel: &helios_connect::Cancel,
     ) -> Result<helios_connect::Page, helios_connect::ConnectorError> {
+        if let Some(hold) = &self.slow.hold {
+            if from.is_none() {
+                return Ok(helios_connect::Page {
+                    items: ["p1", "p2"].iter().map(|id| chosen_item(id)).collect(),
+                    next: Some(helios_connect::Cursor("2".into())),
+                    complete: false,
+                });
+            }
+            while hold.load(std::sync::atomic::Ordering::SeqCst) {
+                if cancel.is_cancelled() {
+                    return Err(helios_connect::ConnectorError::Cancelled);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            return Ok(helios_connect::Page {
+                items: ["p3", "p4"].iter().map(|id| chosen_item(id)).collect(),
+                next: None,
+                complete: true,
+            });
+        }
         let ids: &[&str] = if *self.current.lock().unwrap() <= 1 {
             &["p1", "p2"]
         } else {
@@ -932,6 +964,13 @@ impl helios_connect::Connector for PickConnector {
         Ok(false)
     }
 
+    fn end_pick(&self) -> Result<(), helios_connect::ConnectorError> {
+        self.slow
+            .ends
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
     fn access(&self, _item: &helios_connect::ItemRef) -> helios_connect::Access {
         helios_connect::Access::Fetch
     }
@@ -962,6 +1001,7 @@ fn a_picking_opens_its_page_at_once_and_an_expired_session_is_replaced() {
         expired: 1,
         end: End::Wait,
         cancelled: Arc::default(),
+        slow: SlowPick::default(),
     }));
     shell.set_import_browser(opened.opener());
     shell.set_import_remote(Arc::new(
@@ -1230,6 +1270,16 @@ const PICK_TOKEN: &str = "tok-picks-fake";
 /// [`picking_world_with`], with the fakes' handles: the account signed
 /// in with [`PICK_TOKEN`] in the keyring.
 fn picking_world_whole(sources: Option<String>, end: End, state: AccountState) -> PickingWorld {
+    picking_world_slow(sources, end, state, SlowPick::default())
+}
+
+/// [`picking_world_whole`] with the picking listed as `slow` says.
+fn picking_world_slow(
+    sources: Option<String>,
+    end: End,
+    state: AccountState,
+    slow: SlowPick,
+) -> PickingWorld {
     let book = Arc::new(MemoryAccounts::default());
     let secrets = Arc::new(MemorySecrets::default());
     let mut account = helios_connect::account::Account::new(PICKS, "ann@example.org", &[]);
@@ -1254,6 +1304,7 @@ fn picking_world_whole(sources: Option<String>, end: End, state: AccountState) -
         expired: 0,
         end,
         cancelled: cancelled.clone(),
+        slow,
     }));
     shell.set_import_browser(opened.opener());
     let seen = imported.clone();
@@ -1961,6 +2012,7 @@ fn an_account_shows_its_address_and_one_signed_in_before_offers_a_reconnection()
         expired: 0,
         end: End::Done,
         cancelled: Arc::default(),
+        slow: SlowPick::default(),
     })));
     shell.set_import_remote(Arc::new(
         |_: helios_gui::shell::RemoteImport, _: &mut dyn FnMut(&Value)| {
@@ -2131,6 +2183,7 @@ fn a_failed_picking_and_a_warning_notice_are_written_to_the_log_file() {
         expired: 1,
         end: End::Wait,
         cancelled: Arc::default(),
+        slow: SlowPick::default(),
     }));
     shell.set_import_browser(Opened::default().opener());
     shell.set_import_remote(Arc::new(
@@ -2465,6 +2518,57 @@ fn photos_chosen_are_imported_as_the_node_s_promise() {
         imported.lock().unwrap().is_empty(),
         "the desktop's own download never ran"
     );
+    assert!(h.state().import_window_open(), "the window stays");
+}
+
+/// A picking listed in pages shows its first page before the rest is
+/// listed, with the count so far; an Import of the photos listed does not
+/// end the picking, whose later pages still join the grid; the picking
+/// ends once they are imported too.
+#[test]
+fn a_slow_picking_shows_its_first_page_and_an_early_import_keeps_the_rest() {
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    let hold = Arc::new(AtomicBool::new(true));
+    let slow = SlowPick {
+        hold: Some(hold.clone()),
+        ..SlowPick::default()
+    };
+    let ends = slow.ends.clone();
+    let w = picking_world_slow(None, End::Done, AccountState::Connected, slow);
+    let mut h = w.h;
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    h.state_mut()
+        .follow_activity(picking_node(requests.clone()));
+    until(&mut h, CHOOSE, |h| shown(h, CHOOSE));
+    h.get_by_label(CHOOSE).click();
+    // The first page in the grid while the second is held.
+    until(&mut h, "the first page in the grid", |h| {
+        h.state().import_cells().len() == 2
+    });
+    until(&mut h, "the count so far", |h| {
+        shown(h, "Listing… 2 photos so far")
+    });
+    // Import takes `p2` (`p1` is in the Library), the listing still held.
+    click(&mut h, "Import 1");
+    until(&mut h, "the node's import asked", |_| {
+        requests.lock().unwrap().len() == 1
+    });
+    h.run_steps(4);
+    assert_eq!(ends.load(SeqCst), 0, "the picking still listing: not ended");
+    // The rest of the picking joins the grid.
+    hold.store(false, SeqCst);
+    until(&mut h, "the second page in the grid", |h| {
+        h.state().import_cells().len() == 2 && shown(h, "Import 2")
+    });
+    assert!(
+        !h.query_all_by_label_contains("so far").any(|_| true),
+        "the listing over"
+    );
+    assert_eq!(ends.load(SeqCst), 0, "pages left to import: not ended");
+    click(&mut h, "Import 2");
+    until(&mut h, "the second import asked", |_| {
+        requests.lock().unwrap().len() == 2
+    });
     assert!(h.state().import_window_open(), "the window stays");
 }
 

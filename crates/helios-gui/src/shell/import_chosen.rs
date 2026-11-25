@@ -199,8 +199,8 @@ impl ChosenContents {
     }
 }
 
-/// The pages of one source (an album's, listed page by page) as one
-/// batch: one import, one promise, one history record for the album.
+/// The pages of one source (an album's or a picking's, listed page by
+/// page) as one batch: one import, one promise, one history record.
 fn one_batch(pages: &[Arc<Batch>]) -> Option<Arc<Batch>> {
     let first = pages.first()?;
     if pages.len() == 1 {
@@ -309,6 +309,19 @@ impl ImportWindow {
             .is_some_and(|c| c.account == account && c.album.is_none())
     }
 
+    /// How many photos of a picking are listed so far while its pages
+    /// are still being listed, when the grid shows that account's photos
+    /// chosen.
+    pub(super) fn pick_listing(&self) -> Option<usize> {
+        let account = &self.chosen.as_ref().filter(|c| c.album.is_none())?.account;
+        self.accounts
+            .listing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(account)
+            .map(|(count, _)| *count)
+    }
+
     /// Whether the grid shows the photos of the album selected.
     pub(super) fn shows_album(&self) -> bool {
         self.chosen.as_ref().is_some_and(|c| c.album.is_some())
@@ -366,17 +379,29 @@ impl Shell {
                     .into_iter()
                     .collect()
             } else {
-                w.accounts
-                    .take_chosen(&account)
+                // A picking listed page by page is one import: its pages
+                // (batches sharing its connector) merged, as an album's.
+                let mut picks: Vec<(Vec<Arc<Batch>>, Vec<helios_connect::Item>)> = Vec::new();
+                for batch in w.accounts.take_chosen(&account) {
+                    let items = listed
+                        .iter()
+                        .position(|b| Arc::ptr_eq(b, &batch))
+                        .map(|b| per[b].clone())
+                        .unwrap_or_default();
+                    match picks
+                        .iter_mut()
+                        .find(|(p, _)| Arc::ptr_eq(&p[0].connector, &batch.connector))
+                    {
+                        Some((pages, taken)) => {
+                            pages.push(batch);
+                            taken.extend(items);
+                        }
+                        None => picks.push((vec![batch], items)),
+                    }
+                }
+                picks
                     .into_iter()
-                    .map(|batch| {
-                        let items = listed
-                            .iter()
-                            .position(|b| Arc::ptr_eq(b, &batch))
-                            .map(|b| per[b].clone())
-                            .unwrap_or_default();
-                        (batch, items)
-                    })
+                    .filter_map(|(pages, items)| one_batch(&pages).map(|b| (b, items)))
                     .collect()
             };
             (hook, jobs, args, w.waker(), album)
