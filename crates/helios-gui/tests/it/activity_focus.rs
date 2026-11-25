@@ -80,7 +80,7 @@ fn run(gate: &Gate, handle: &Handle<MemoryStore>) {
         // Held on a service's quota for an hour, until resumed.
         "hold-hour" => {
             handle.progress(5, Some(10), Some("IMG_0005.JPG"));
-            let hour = Some(Duration::from_secs(3600));
+            let hour = Some(Duration::from_hours(1));
             if !handle.hold(Wait::Quota, "rate limited", hour, &|| false) {
                 return handle.cancelled();
             }
