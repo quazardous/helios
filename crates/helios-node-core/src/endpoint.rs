@@ -705,6 +705,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_aggregate_is_asked_as_a_read_only_request() {
+        let bus = Arc::new(Bus::new());
+        let vault = Arc::new(Vault::new(helios_vault::MemoryStore::default()));
+        let dir = std::env::temp_dir().join(format!("helios-aggregate-ask-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ids = Vec::new();
+        for (n, focus) in [(1, Some(2.0)), (2, Some(6.0)), (3, None)] {
+            let file = dir.join(format!("{n}.raw"));
+            std::fs::write(&file, format!("frame {n}")).unwrap();
+            let id = vault.import_file(&file, 1).unwrap();
+            let signals = match focus {
+                Some(f) => json!({ "taken": f64::from(n), "focus": f }),
+                None => json!({ "taken": f64::from(n) }),
+            };
+            vault.set_signals(&id, Some(&signals)).unwrap();
+            ids.push(id.hex());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        let service = VaultService::new(vault, bus.clone(), Jobs::new(bus.clone()), "test");
+        let client = Client::in_process(Arc::new(service)).with_origin("cli");
+        let answer = client
+            .request(
+                "library.aggregate",
+                json!({ "query": "", "measure": "focus", "op": "max" }),
+            )
+            .unwrap();
+        assert_eq!(answer["images"], 3, "{answer}");
+        let group = &answer["groups"][0];
+        assert_eq!(group["value"], 6.0);
+        assert_eq!(group["holders"], json!([ids[1]]));
+        assert_eq!(group["missing"], json!([ids[2]]));
+        let spec = crate::library::specs()
+            .into_iter()
+            .find(|s| s.id == "library.aggregate")
+            .unwrap();
+        assert!(spec.read_only);
+        assert!(
+            client
+                .request("library.aggregate", json!({ "query": "", "op": "sum" }))
+                .is_err()
+        );
+    }
+
+    #[test]
     fn the_service_runs_the_library_commands_and_announces_them() {
         let bus = Arc::new(Bus::new());
         let heard = bus.subscribe();

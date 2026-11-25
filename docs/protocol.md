@@ -269,6 +269,14 @@ never pulls a whole collection.
 (`facets`: each facet, each value, how many photos); `rule` is the backup
 rule the `backup` facet counts against (`{"volumes": [{"id", "drive",
 "off_site"}], "copies", "off_site_required"}`), none: no `backup` facet.
+`library.aggregate` (`query`, a search text, or `images`; `measure`, a
+stored numeric field such as `focus`; `op`: `count`, `min`, `max`,
+`mean`, `rank`, `best`; `by`: `all`, `stack`, `burst`) answers one value
+per group of a set of photos, read-only and from stored fields only:
+`groups` with each `key`, `members` (capture order), `measured`,
+`missing` (members without the measure, skipped), `value` and `holders`
+(every photo at the `min` or `max`, the ranked photos, or the one on top
+for `best`, with `why`). An empty set has no value.
 `library.changed.list` lists the photos another application changed
 (`images`: `image`, `at`), until acknowledged.
 
