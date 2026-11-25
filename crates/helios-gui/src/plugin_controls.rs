@@ -45,7 +45,9 @@ pub const PLUGINS: &str = "helios.plugins.ui";
 /// the catalogue; `None` when it declares none. A tool on the host's
 /// parameters the plugin may not use yet (`edit.controls` not declared
 /// or not granted) stays declared, its refusal among the problems
-/// ([`crate::plugin_tools::refusal`]): it shows once granted.
+/// ([`crate::plugin_tools::refusal`]): it shows once granted. The
+/// plugin's tool refusals are kept for the doctor
+/// ([`crate::plugin_refusals`]).
 pub fn read(broker: &Broker, id: &str) -> Option<Declared> {
     let m = broker.manifest(id)?;
     if m.ui.rack.is_empty() {
@@ -60,12 +62,21 @@ pub fn read(broker: &Broker, id: &str) -> Option<Declared> {
             Err(e) => d.problems.push(format!("{file}: not read: {e}")),
         }
     }
-    let refused: Vec<String> = d
+    let held: Vec<(String, String)> = d
         .tools
         .iter()
-        .filter_map(|t| crate::plugin_tools::refusal(broker, id, t))
+        .filter_map(|t| {
+            crate::plugin_tools::refusal_reason(broker, id, t)
+                .map(|why| (t.tool.control.clone(), why))
+        })
         .collect();
-    d.problems.extend(refused);
+    for (tool, why) in &held {
+        d.problems.push(format!("tool `{tool}` {why}"));
+    }
+    // What `helios doctor plugins` lists (`helios.plugins.refusals`).
+    let mut refused = d.refused_tools.clone();
+    refused.extend(held);
+    crate::plugin_refusals::Refusals::global().record(id, &refused, &crate::plugin_refusals::now());
     for p in &d.problems {
         log::warn!("plugin `{id}`'s controls: {p}");
     }

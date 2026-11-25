@@ -80,11 +80,16 @@ impl Declared {
 /// edits them and the plugin does not hold `edit.controls`: it does
 /// not declare it, or the user has not granted it.
 pub fn refusal(broker: &Broker, plugin: &str, tool: &PluginTool) -> Option<String> {
+    refusal_reason(broker, plugin, tool).map(|why| format!("tool `{}` {why}", tool.tool.control))
+}
+
+/// [`refusal`]'s reason alone, without the tool's name.
+pub fn refusal_reason(broker: &Broker, plugin: &str, tool: &PluginTool) -> Option<String> {
     let module = tool.host()?;
     broker
         .allowed(plugin, EDIT_CONTROLS)
         .err()
-        .map(|e| format!("tool `{}` on `{module}`: {e}, not shown", tool.tool.control))
+        .map(|e| format!("on `{module}`: {e}, not shown"))
 }
 
 thread_local! {

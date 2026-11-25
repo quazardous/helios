@@ -2710,6 +2710,9 @@ fn main() -> Result<(), String> {
             if let Err(e) = helios_gui::caches::register(&mut shell) {
                 shell.notes.push(format!("cache commands: {e}"));
             }
+            if let Err(e) = helios_gui::plugin_refusals::register(&mut shell) {
+                shell.notes.push(format!("plugin refusal command: {e}"));
+            }
             let calibration_node = persist.as_ref().map(|p| p.node().clone());
             let library_history = shell.library_history();
             if let Err(e) =

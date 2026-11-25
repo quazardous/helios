@@ -59,6 +59,7 @@
 //!
 //!     helios doctor display
 //!     helios doctor ai
+//!     helios doctor plugins [--vault FILE|--node ADDRESS]
 //! ```
 //!
 //! `batch` applies a network to many images, each exported to a file in
@@ -117,6 +118,12 @@
 //! provider (local or remote, reachable, where its key is), the routing
 //! map with why a capability or a prompt is unavailable, and the local
 //! runtime's health (see `docs/ai-models.md`).
+//!
+//! `doctor plugins` lists the plugin tools the running desktop refused
+//! (plugin, tool, reason, when first seen), as JSON: it asks the desktop
+//! holding the library (`--vault FILE`, else the default one) for them
+//! (its `helios.plugins.refusals` command) and starts no node. With no
+//! desktop holding it, it says so: the refusals are then unknown.
 //!
 //! `import-darktable` keeps a folder's darktable edits in a vault: every
 //! image file, and a version per sidecar, duplicates (`IMG_0001_01.CR2.xmp`)
@@ -230,7 +237,8 @@ const USAGE: &str = "usage:
   helios run --vault FILE|--node ADDRESS 'ID [KEY=VALUE]...' -- 'ID ...' [-- ...] | --file SCRIPT|-
              [--keep-going] [--json] [--window W] [--request-id KEY]
   helios doctor display
-  helios doctor ai";
+  helios doctor ai
+  helios doctor plugins [--vault FILE|--node ADDRESS]";
 
 fn usage(error: &str) -> ExitCode {
     eprintln!("helios: {error}\n{USAGE}");
@@ -1695,7 +1703,97 @@ fn doctor(args: &[String]) -> ExitCode {
                 }
             }
         }
-        _ => usage("doctor takes `display` or `ai`"),
+        [what, rest @ ..] if what == "plugins" => doctor_plugins(rest),
+        _ => usage("doctor takes `display`, `ai` or `plugins`"),
+    }
+}
+
+/// The desktop's command answering its plugin tool refusals.
+const REFUSALS_COMMAND: &str = "helios.plugins.refusals";
+
+/// What `doctor plugins` says with no desktop to ask.
+const NO_DESKTOP: &str = "no desktop running: plugin refusals unknown";
+
+/// `helios doctor plugins`: the running desktop's plugin tool refusals.
+fn doctor_plugins(args: &[String]) -> ExitCode {
+    let (mut vault, mut node) = (None, None);
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--vault" => match words.next() {
+                Some(v) => vault = Some(PathBuf::from(v)),
+                None => return usage("--vault takes a FILE"),
+            },
+            "--node" => match words.next() {
+                Some(n) => node = Some(n.clone()),
+                None => return usage("--node takes an ADDRESS"),
+            },
+            other => return usage(&format!("doctor plugins: unknown `{other}`")),
+        }
+    }
+    let answer = desktop_client(vault, node.as_deref()).and_then(|client| {
+        client
+            .call(
+                "command.run",
+                serde_json::json!({ "id": REFUSALS_COMMAND, "origin": "cli", "params": {} }),
+            )
+            .wait()
+            .ok()
+    });
+    out!(
+        "{}",
+        serde_json::to_string_pretty(&plugins_report(answer.as_ref()))
+            .expect("JSON values serialize")
+    );
+    ExitCode::SUCCESS
+}
+
+/// A client of the desktop holding the library (`vault`, else the
+/// default one), or of the endpoint `node` names: found through its
+/// rendezvous file, none started. `None` when none answers.
+fn desktop_client(vault: Option<PathBuf>, node: Option<&str>) -> Option<Client> {
+    if let Some(address) = helios_node::connect::explicit(node) {
+        let token = std::env::var(helios_node::connect::TOKEN_ENV).ok();
+        let address = Address::parse(&address, token).ok()?;
+        return Client::connect(&address).ok().map(|c| c.with_origin("cli"));
+    }
+    let library = match vault {
+        Some(v) => std::path::absolute(&v).unwrap_or(v),
+        None => helios_node_core::reset::Places::from_env(|n| std::env::var(n).ok(), None)?
+            .data
+            .join("library.db"),
+    };
+    let files = helios_inspect::discovery::files(&library);
+    let rendezvous = helios_inspect::discovery::Rendezvous::read(&files.rendezvous).ok()??;
+    let client = Client::connect(&rendezvous.address().ok()?).ok()?;
+    Some(client.with_origin("cli"))
+}
+
+/// `doctor plugins`' report from the desktop's answer: its refusals, or
+/// [`NO_DESKTOP`] when no desktop answered (none running, or a node
+/// without a window).
+fn plugins_report(answer: Option<&serde_json::Value>) -> serde_json::Value {
+    match answer
+        .and_then(|a| a.get("refusals"))
+        .and_then(|r| r.as_array())
+    {
+        Some(refusals) => {
+            let lines: Vec<String> = refusals
+                .iter()
+                .map(|r| {
+                    let text = |k: &str| r[k].as_str().unwrap_or("?").to_owned();
+                    format!(
+                        "plugin `{}`, tool `{}`: {} (since {})",
+                        text("plugin"),
+                        text("tool"),
+                        text("reason"),
+                        text("at")
+                    )
+                })
+                .collect();
+            serde_json::json!({ "desktop": true, "refusals": refusals, "said": lines })
+        }
+        None => serde_json::json!({ "desktop": false, "refusals": null, "said": [NO_DESKTOP] }),
     }
 }
 
@@ -1792,6 +1890,37 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn doctor_plugins_lists_the_desktop_s_refusals() {
+        let answer = json!({ "refusals": [{ "plugin": "org.example.spot", "tool": "ring",
+            "reason": "kind `custom` is not drawn by Helios", "at": "2026-11-25T10:00:00Z" }] });
+        let report = plugins_report(Some(&answer));
+        assert_eq!(report["desktop"], true);
+        assert_eq!(report["refusals"], answer["refusals"]);
+        assert_eq!(
+            report["said"],
+            json!([
+                "plugin `org.example.spot`, tool `ring`: kind `custom` is not drawn by Helios (since 2026-11-25T10:00:00Z)"
+            ])
+        );
+        let none = plugins_report(Some(&json!({ "refusals": [] })));
+        assert_eq!(none["refusals"], json!([]));
+        assert_eq!(none["said"], json!([]));
+    }
+
+    #[test]
+    fn doctor_plugins_says_when_no_desktop_answers() {
+        for answer in [None, Some(json!({ "ok": false }))] {
+            let report = plugins_report(answer.as_ref());
+            assert_eq!(report["desktop"], false);
+            assert_eq!(report["refusals"], serde_json::Value::Null);
+            assert_eq!(
+                report["said"],
+                json!(["no desktop running: plugin refusals unknown"])
+            );
+        }
+    }
 
     #[test]
     fn a_running_promise_shows_its_progress() {
