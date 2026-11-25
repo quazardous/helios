@@ -894,7 +894,7 @@ pub enum Command {
 /// A handle of the selected shape, as an edit area of the image
 /// (`docs/design/panel-kinds.md`): where it is in image pixels, its
 /// area id, and the parameter its drag writes.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct HandleArea {
     pub at: [f64; 2],
     /// `mask.handle.<node>.<handle>`.
@@ -903,6 +903,43 @@ pub struct HandleArea {
     /// its first parameter (the one it adjusts), a path's point the
     /// path's points.
     pub path: String,
+    /// What the keyboard edits on it once focused (a case's handle; a
+    /// path's are not keyed yet).
+    pub keys: Option<Keyed>,
+}
+
+/// A handle the keyboard edits (`egui_hud::render::handle_keys`): its
+/// tool's handle on a node, with the parameters it reads this frame.
+#[derive(Clone, Debug)]
+pub struct Keyed {
+    pub tool: tools::Tool,
+    /// The node (or the plugin) its paths are under.
+    pub node: String,
+    /// The tool's handle (`centre`, `radius`).
+    pub handle: String,
+    pub params: Params,
+}
+
+impl Keyed {
+    /// Applies what the keyboard asked: a change as one undo step through
+    /// the value flow ([`tools::keyed`]).
+    pub fn apply(&self, writes: &[(String, f64)], store: &mut Store) {
+        let steps = crate::controls::steps()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(e) = tools::keyed(
+            store,
+            crate::controls::registry(),
+            &steps,
+            &self.tool,
+            &self.node,
+            &self.handle,
+            writes,
+            Origin::User,
+        ) {
+            log::debug!("handle keys: {e}");
+        }
+    }
 }
 
 impl Masks {
@@ -929,10 +966,17 @@ impl Masks {
                     },
                     None => "points".to_string(),
                 };
+                let keys = case.as_ref().map(|t| Keyed {
+                    tool: t.clone(),
+                    node: o.id.clone(),
+                    handle: h.name.clone(),
+                    params: m.params.clone(),
+                });
                 out.push(HandleArea {
                     at: k.at,
                     id: format!("mask.handle.{}.{}", o.id, h.name),
                     path: node_path(&o.id, &param),
+                    keys,
                 });
             }
         }
@@ -1391,6 +1435,14 @@ impl Masks {
     /// view since the last call.
     pub fn take_left(&mut self) -> bool {
         std::mem::take(&mut self.double.borrow_mut().left)
+    }
+
+    /// Escape on a focused handle: gives a drag under way up (no undo
+    /// step).
+    pub fn cancel_drag(&mut self, store: &mut Store) {
+        if let Some(d) = self.drag.take() {
+            d.cancel(store);
+        }
     }
 
     /// Whether a drag is under way.

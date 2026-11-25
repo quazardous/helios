@@ -439,3 +439,129 @@ fn ellipse_radii_turn_it_and_its_feather_resets_and_wheels() {
     );
     no_gesture_left(&h);
 }
+
+// ---------------------------------------------------------------- keyboard
+
+/// The AccessKit node of the handle declared as the edit area `area`
+/// (`mask.handle.<node>.<handle>`): named by the area's control, where
+/// the area is.
+fn handle_node<'a>(h: &'a Harness<'_, Shell>, area: &str) -> egui_kittest::Node<'a> {
+    use egui_kittest::kittest::Queryable as _;
+    let a = egui_pop::core::areas::find(&h.ctx, area).unwrap_or_else(|| panic!("no area `{area}`"));
+    let name = a.control.expect("a handle names its control");
+    let at = a.rect.center();
+    let node = h
+        .query_all_by(move |n| {
+            n.label().as_deref() == Some(name.as_str())
+                && n.bounding_box().is_some_and(|b| {
+                    (f64::midpoint(b.x0, b.x1) as f32 - at.x).abs() < 1.0
+                        && (f64::midpoint(b.y0, b.y1) as f32 - at.y).abs() < 1.0
+                })
+        })
+        .next();
+    node.unwrap_or_else(|| panic!("no AccessKit node on `{area}`"))
+}
+
+/// Focuses the handle declared as `area`, by AccessKit.
+fn focus(h: &mut Harness<'_, Shell>, area: &str) {
+    handle_node(h, area).focus();
+    h.step();
+    h.step();
+    assert!(
+        handle_node(h, area).is_focused(),
+        "`{area}` takes the focus"
+    );
+}
+
+fn key(h: &mut Harness<'_, Shell>, k: Key) {
+    h.key_press(k);
+    h.step();
+    h.step();
+}
+
+#[test]
+fn a_focused_point_moves_by_arrow_and_one_undo_puts_x_and_y_back() {
+    let mut h = with("circle");
+    away(&mut h);
+    let centre = "mask.handle.circle.centre";
+    focus(&mut h, centre);
+    // AccessKit holds the point's x and y under its node.
+    {
+        use egui_kittest::kittest::NodeT as _;
+        let node = handle_node(&h, centre);
+        let labels: Vec<String> = node
+            .children_recursive()
+            .filter_map(|c| c.accesskit_node().label())
+            .collect();
+        assert!(
+            labels.iter().any(|l| l == "x") && labels.iter().any(|l| l == "y"),
+            "{labels:?}"
+        );
+    }
+    let (x0, y0) = (f(&h, "node/circle/x"), f(&h, "node/circle/y"));
+    let n = steps(&h).len();
+    key(&mut h, Key::ArrowRight);
+    key(&mut h, Key::ArrowDown);
+    let (x1, y1) = (f(&h, "node/circle/x"), f(&h, "node/circle/y"));
+    assert!(x1 > x0 && y1 > y0, "({x0}, {y0}) -> ({x1}, {y1})");
+    assert_eq!(steps(&h).len(), n + 2, "one undo step per key");
+    no_gesture_left(&h);
+    // Each step takes back its own move, x and y together.
+    undo(&mut h);
+    assert!((f(&h, "node/circle/y") - y0).abs() < 1e-9);
+    assert!((f(&h, "node/circle/x") - x1).abs() < 1e-9);
+    undo(&mut h);
+    assert!((f(&h, "node/circle/x") - x0).abs() < 1e-9);
+    assert!((f(&h, "node/circle/y") - y0).abs() < 1e-9);
+}
+
+#[test]
+fn tab_walks_the_handles_and_plus_minus_step_a_radius() {
+    let mut h = with("circle");
+    away(&mut h);
+    focus(&mut h, "mask.handle.circle.centre");
+    // Tab reaches another of the shape's handles.
+    h.key_press(Key::Tab);
+    h.step();
+    h.step();
+    let focused = egui_pop::core::areas::list(&h.ctx)
+        .into_iter()
+        .filter(|a| a.id.starts_with("mask.handle.circle."))
+        .find(|a| handle_node(&h, &a.id).is_focused())
+        .map(|a| a.id);
+    assert!(
+        focused
+            .as_deref()
+            .is_some_and(|id| id != "mask.handle.circle.centre"),
+        "{focused:?}"
+    );
+    let radius = "mask.handle.circle.radius";
+    focus(&mut h, radius);
+    let r0 = f(&h, "node/circle/radius");
+    let n = steps(&h).len();
+    key(&mut h, Key::Plus);
+    let r1 = f(&h, "node/circle/radius");
+    assert!(r1 > r0, "{r0} -> {r1}");
+    key(&mut h, Key::Minus);
+    assert!(f(&h, "node/circle/radius") < r1);
+    assert_eq!(steps(&h).len(), n + 2, "one undo step per key");
+    no_gesture_left(&h);
+}
+
+#[test]
+fn escape_on_a_focused_handle_cancels_and_lets_the_focus_go() {
+    let mut h = with("circle");
+    away(&mut h);
+    let radius = "mask.handle.circle.radius";
+    focus(&mut h, radius);
+    let r0 = f(&h, "node/circle/radius");
+    let n = steps(&h).len();
+    key(&mut h, Key::Escape);
+    assert!(
+        !handle_node(&h, radius).is_focused(),
+        "the focus is given up"
+    );
+    assert!((f(&h, "node/circle/radius") - r0).abs() < 1e-12);
+    assert_eq!(steps(&h).len(), n, "no undo step");
+    no_gesture_left(&h);
+}

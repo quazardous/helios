@@ -300,7 +300,7 @@ impl PluginTools {
     /// is, and the path of the value it adjusts.
     pub fn handle_areas(&self) -> Vec<crate::masks::HandleArea> {
         let mut out = Vec::new();
-        for (s, o) in self.shown.iter().zip(&self.overlays) {
+        for ((s, o), params) in self.shown.iter().zip(&self.overlays).zip(&self.params) {
             let d = &s.decl;
             for (h, k) in d.tool.tool.handles.iter().zip(&o.handles) {
                 let Some(p) = h.writes().into_iter().next() else {
@@ -319,6 +319,12 @@ impl PluginTools {
                         h.name()
                     ),
                     path: d.tool.tool.target.path(&s.node, &p),
+                    keys: Some(crate::masks::Keyed {
+                        tool: d.tool.tool.clone(),
+                        node: s.node.clone(),
+                        handle: h.name().to_owned(),
+                        params: params.clone(),
+                    }),
                 });
             }
         }
@@ -333,6 +339,14 @@ impl PluginTools {
     /// The tools' overlays drawn last frame, one per tool shown.
     pub fn overlays(&self) -> &[Overlay] {
         &self.overlays
+    }
+
+    /// Escape on a focused handle: gives a drag under way up (no undo
+    /// step).
+    pub fn cancel_drag(&mut self, store: &mut Store) {
+        if let Some(d) = self.drag.take() {
+            d.cancel(store);
+        }
     }
 
     /// Whether a drag is under way.

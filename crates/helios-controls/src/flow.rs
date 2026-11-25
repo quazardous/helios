@@ -6,7 +6,8 @@ use helios_shell::commands::Origin;
 use helios_values::{GestureId, Store};
 
 pub use egui_hud::flow::{
-    CHANGE_STEP, Cause, ChangeEvent, Outcome, SharedSteps, Steps, Verdict, node_of,
+    CHANGE_STEP, Cause, ChangeEvent, MultiOutcome, Outcome, PathChange, SharedSteps, Steps,
+    Verdict, node_of,
 };
 
 use crate::model::Control;
@@ -14,6 +15,9 @@ use crate::values::StoreMut;
 
 /// A one-shot change: the value asked, who asks and why.
 pub type OneShot<'a> = egui_hud::flow::OneShot<'a, Origin>;
+
+/// A one-shot change of several values: who asks and why.
+pub type MultiShot<'a> = egui_hud::flow::MultiShot<'a, Origin>;
 
 /// An open gesture of one control on one path.
 #[derive(Debug)]
@@ -66,4 +70,16 @@ pub fn apply(
     ask: OneShot<'_>,
 ) -> Result<Outcome, String> {
     egui_hud::flow::apply(&mut StoreMut(store), steps, control, path, ask)
+}
+
+/// A one-shot change of several values (a point's x and y) as one undo
+/// step: begin on every path of `writes`, write them, commit.
+pub fn apply_multi(
+    store: &mut Store,
+    steps: &Steps,
+    control: &Control,
+    writes: &[(String, f64)],
+    ask: MultiShot<'_>,
+) -> Result<MultiOutcome, String> {
+    egui_hud::flow::apply_multi(&mut StoreMut(store), steps, control, writes, ask)
 }
