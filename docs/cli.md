@@ -610,6 +610,21 @@ version and models), the privacy settings and where the AI files are. An
 agent sets all of this up through the `helios_ai_*` MCP tools. See
 [AI models](ai-models.md).
 
+```sh
+helios doctor plugins [--vault FILE|--node ADDRESS]
+```
+
+Lists the plugin tools the running desktop refused, as JSON: each
+`plugin`, `tool`, `reason` (an unknown or `custom` handle kind, a handle
+writing anything but a declared number, no handle left, a tool on the
+host's parameters while the plugin lacks `edit.controls`) and `at`, when
+it was first seen; `said` holds the same as lines. It asks the desktop
+holding the library (`--vault FILE`, else the default one) through its
+`helios.plugins.refusals` command, and starts no node: with no desktop
+holding it, `desktop` is `false`, `refusals` `null`, and it says "no
+desktop running: plugin refusals unknown". The same reasons show in
+Settings > Plugins and in the log.
+
 ## Reset
 
 ```sh

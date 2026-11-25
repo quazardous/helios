@@ -90,6 +90,9 @@ pub struct Declared {
     pub tools: Vec<PluginTool>,
     /// What was left out, each with its reason.
     pub problems: Vec<String>,
+    /// Its tools' refusals, each `(tool, reason)`: a handle left out,
+    /// or a tool left out whole. Each is among the problems too.
+    pub refused_tools: Vec<(String, String)>,
 }
 
 impl Declared {
@@ -232,11 +235,10 @@ impl Declared {
             match self.tool_of(decl, &prefix) {
                 Ok((tool, problems)) => {
                     let ok = !tool.tool.handles.is_empty();
-                    self.problems.extend(
-                        problems
-                            .into_iter()
-                            .map(|p| format!("{file}: tool `{name}`: {p}")),
-                    );
+                    for p in problems {
+                        self.problems.push(format!("{file}: tool `{name}`: {p}"));
+                        self.refused_tools.push((name.clone(), p));
+                    }
                     if self.items() + tool.tool.handles.len() > MAX_ITEMS {
                         self.problems
                             .push(format!("{file}: more than {MAX_ITEMS} values and parts"));
@@ -247,9 +249,14 @@ impl Declared {
                     } else {
                         self.problems
                             .push(format!("{file}: tool `{name}`: no handle left, left out"));
+                        self.refused_tools
+                            .push((name, "no handle left, left out".into()));
                     }
                 }
-                Err(e) => self.problems.push(format!("{file}: tool `{name}`: {e}")),
+                Err(e) => {
+                    self.problems.push(format!("{file}: tool `{name}`: {e}"));
+                    self.refused_tools.push((name, e));
+                }
             }
         }
     }
@@ -701,6 +708,14 @@ mod tests {
                 .any(|p| p.contains("`module` names no module")),
             "{:?}",
             d.problems
+        );
+        // The refusal, by tool, for the doctor.
+        assert!(
+            d.refused_tools
+                .iter()
+                .any(|(tool, why)| tool == "bad" && why.contains("`module` names no module")),
+            "{:?}",
+            d.refused_tools
         );
     }
 
