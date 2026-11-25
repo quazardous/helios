@@ -595,6 +595,7 @@ pub fn keyed(
     writes: &[(String, f64)],
     origin: Origin,
 ) -> Result<bool, String> {
+    const DEVICE: &str = "keyboard";
     use helios_controls::flow::{self, MultiOutcome, MultiShot, OneShot, Outcome};
     let h = tool
         .handle(handle)
@@ -612,7 +613,6 @@ pub fn keyed(
             .ok_or_else(|| format!("no value at `{first}`"))?;
         control_of(registry, &first, &e.descriptor)
     };
-    const DEVICE: &str = "keyboard";
     if writes.len() == 1 {
         let ask = OneShot {
             to,

@@ -454,8 +454,8 @@ fn handle_node<'a>(h: &'a Harness<'_, Shell>, area: &str) -> egui_kittest::Node<
         .query_all_by(move |n| {
             n.label().as_deref() == Some(name.as_str())
                 && n.bounding_box().is_some_and(|b| {
-                    (((b.x0 + b.x1) / 2.0) as f32 - at.x).abs() < 1.0
-                        && (((b.y0 + b.y1) / 2.0) as f32 - at.y).abs() < 1.0
+                    (f64::midpoint(b.x0, b.x1) as f32 - at.x).abs() < 1.0
+                        && (f64::midpoint(b.y0, b.y1) as f32 - at.y).abs() < 1.0
                 })
         })
         .next();
@@ -487,8 +487,8 @@ fn a_focused_point_moves_by_arrow_and_one_undo_puts_x_and_y_back() {
     focus(&mut h, centre);
     // AccessKit holds the point's x and y under its node.
     {
-        let node = handle_node(&h, centre);
         use egui_kittest::kittest::NodeT as _;
+        let node = handle_node(&h, centre);
         let labels: Vec<String> = node
             .children_recursive()
             .filter_map(|c| c.accesskit_node().label())
