@@ -94,6 +94,23 @@ fn options(root: &Path) -> Options {
     }
 }
 
+/// The connector's own `describe` reports the caps Helios reads from
+/// its manifest (`picks` with the `picker` browser above all), so a host
+/// reading either knows Google picks.
+#[test]
+fn the_connector_describes_what_its_manifest_declares() {
+    let p = Place::new("caps");
+    let broker = broker(&p.0, "http://127.0.0.1:9");
+    let manifest = SourceProvider::new(broker, PLUGIN).unwrap().manifest();
+    let photos = helios_plugin_google_photos::GooglePhotos::new(
+        helios_plugin_google_photos::Picker::new("http://127.0.0.1:9", "t"),
+        "s",
+    );
+    let caps = photos.describe().caps;
+    assert!(caps.picks);
+    assert_eq!(manifest.disagreements(&caps), Vec::<String>::new());
+}
+
 #[test]
 fn a_picking_through_the_broker_imports_the_two_photos_picked() {
     let p = Place::new("pick");

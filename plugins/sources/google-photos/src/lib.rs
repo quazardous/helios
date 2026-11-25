@@ -634,6 +634,9 @@ impl Connector for GooglePhotos {
                 accounts: true,
                 originals: Originals::Rendered,
                 thumbnails: true,
+                // Its items are picked in Google Photos' own page: the
+                // manifest declares the `picker` browser.
+                picks: true,
                 limits: LIMITS,
                 ..Caps::default()
             },
