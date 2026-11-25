@@ -646,6 +646,41 @@ impl ConnectorManifest {
             vec![Browser::Folder]
         }
     }
+
+    /// Where `described` (the caps a connector's `describe` reports)
+    /// and this manifest disagree, so the two cannot drift: the caps
+    /// themselves, the `picker` browser declared exactly when it picks,
+    /// and the `collections` browser offered when it lists albums.
+    /// Empty: they agree.
+    pub fn disagreements(&self, described: &Caps) -> Vec<String> {
+        let mut out = Vec::new();
+        if described != &self.caps {
+            out.push(format!(
+                "`{}`: describe() reports {described:?}, the manifest {:?}",
+                self.id, self.caps
+            ));
+        }
+        let browsers = self.browsers();
+        if self.caps.picks != browsers.contains(&Browser::Picker) {
+            out.push(format!(
+                "`{}`: caps.picks is {} but the `picker` browser is {}",
+                self.id,
+                self.caps.picks,
+                if self.caps.picks {
+                    "not declared"
+                } else {
+                    "declared"
+                }
+            ));
+        }
+        if self.caps.collections && !browsers.contains(&Browser::Collections) {
+            out.push(format!(
+                "`{}`: caps.collections without the `collections` browser",
+                self.id
+            ));
+        }
+        out
+    }
 }
 
 /// A way of browsing a source in the import window.
@@ -949,6 +984,39 @@ pub fn registry() -> BTreeMap<&'static str, ProviderRef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every bundled connector reports, through `describe`, the caps its
+    /// manifest declares, and its browsers agree with them.
+    #[test]
+    fn every_bundled_connector_describes_what_its_manifest_declares() {
+        let mut providers: Vec<ProviderRef> = registry().into_values().collect();
+        providers.push(Arc::new(fake::FakeProvider));
+        providers.push(Arc::new(fake_albums::AlbumsProvider::new(
+            &[("Trip", 1)],
+            2,
+        )));
+        for provider in providers {
+            let manifest = provider.manifest();
+            let connector = provider
+                .create(&Settings::Null, &ConnectorServices::default())
+                .unwrap();
+            let caps = connector.describe().caps;
+            assert_eq!(manifest.disagreements(&caps), Vec::<String>::new());
+        }
+    }
+
+    #[test]
+    fn a_picker_without_picks_or_picks_without_a_picker_disagree() {
+        let mut m = fake::FakeProvider.manifest();
+        m.browsers = vec![Browser::Picker];
+        let caps = m.caps.clone();
+        assert_eq!(m.disagreements(&caps).len(), 1);
+        m.caps.picks = true;
+        assert_eq!(m.disagreements(&caps).len(), 1, "describe() lags");
+        assert!(m.disagreements(&m.caps.clone()).is_empty());
+        m.browsers = vec![Browser::Folder];
+        assert_eq!(m.disagreements(&m.caps.clone()).len(), 1);
+    }
 
     #[test]
     fn a_daily_quota_starts_again_at_midnight_pacific_time() {
