@@ -9,6 +9,8 @@
 //! - [`Suggestions`]: the keyboard of section 5 over a suggestion list
 //!   (Up, Down, Enter, Tab, and the Esc sequence: close the list, clear
 //!   the text, back to the grid).
+//! - [`commit`]: the terms typed in full that become chips, the words
+//!   staying text.
 //! - [`chips`]: the parsed search text (`helios_vault::rules::parse_text`)
 //!   in words, one chip per term (`camera is Z 8`).
 
@@ -217,6 +219,42 @@ fn words(rule: &Rule, t: &dyn Fn(Message) -> String) -> String {
     }
 }
 
+/// The terms of `text` that become chips: each key term (`camera:R5`,
+/// `-flag:reject`, a group) in the grammar, and the words left as the text
+/// (with a space after them when `text` ended with one). `None` when the
+/// text holds no key term, or the grammar refuses it (a `(` not closed).
+pub fn commit(text: &str) -> Option<(Vec<String>, String)> {
+    use helios_vault::rules::{parse_text, to_text};
+    let rule = parse_text(text.trim()).ok()?;
+    let terms = match rule {
+        Rule::Group {
+            mode: Match::All,
+            rules,
+        } => rules,
+        other => vec![other],
+    };
+    let is_word = |r: &Rule| matches!(r, Rule::Condition(c) if c.field.name == "text");
+    if terms.iter().all(is_word) {
+        return None;
+    }
+    let (words, keys): (Vec<Rule>, Vec<Rule>) = terms.into_iter().partition(is_word);
+    let mut rest = words.iter().map(to_text).collect::<Vec<_>>().join(" ");
+    if !rest.is_empty() && text.ends_with(char::is_whitespace) {
+        rest.push(' ');
+    }
+    Some((keys.iter().map(to_text).collect(), rest))
+}
+
+/// The search text the rules and the text typed make: the rules first.
+pub fn search_text(rules: &[String], typed: &str) -> String {
+    rules
+        .iter()
+        .map(String::as_str)
+        .chain(Some(typed.trim()).filter(|t| !t.is_empty()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// A JSON value as plain text (a number without quotes).
 fn plain(v: &serde_json::Value) -> String {
     match v {
@@ -320,6 +358,25 @@ mod tests {
         );
         let range = helios_vault::rules::parse_text("iso:100..800").unwrap();
         assert_eq!(chips(&range, &english), ["ISO is between 100 and 800"]);
+    }
+
+    #[test]
+    fn key_terms_typed_in_full_become_rules_the_words_stay_text() {
+        let (rules, rest) = commit("beach camera:R5 ").unwrap();
+        assert_eq!(rules, ["camera:R5"]);
+        assert_eq!(rest, "beach ");
+        let (rules, rest) = commit("-flag:reject rating:3").unwrap();
+        assert_eq!(rules, ["-flag:reject", "rating:>=3"]);
+        assert_eq!(rest, "");
+        // Words alone, a key with no value yet, a `(` not closed: no rule.
+        assert_eq!(commit("beach sunset "), None);
+        assert_eq!(commit("camera:"), None);
+        assert_eq!(commit("(camera:R5 "), None);
+        assert_eq!(
+            search_text(&["camera:R5".into()], " beach "),
+            "camera:R5 beach"
+        );
+        assert_eq!(search_text(&[], ""), "");
     }
 
     #[test]

@@ -1,0 +1,3 @@
+kind: added
+
+Library: the search field suggests the keys the word typed starts (`ca` offers "Camera — camera:"; Down and Enter, Tab or a click takes one), and each key term typed in full (a space after it, or Enter) becomes a chip in words ("camera is R5"), the words staying text. Backspace in the empty field selects the last chip and removes it at a second press, Ctrl+Backspace at once; Escape closes the suggestions, then clears the text, then goes back to the grid, the chips kept.

@@ -335,6 +335,10 @@ pub struct Gallery {
     pub(super) state: LibraryState<String>,
     /// The search field's text and criteria.
     pub(super) search: SearchState,
+    /// The search's rules the field shows as chips, each a term of the
+    /// grammar (`camera:R5`), before the text typed
+    /// ([`super::suggest::commit`]).
+    pub(super) rules: Vec<String>,
     pub(super) filter: Filter,
     /// What the views show, in order: the filter's matches, a stack's
     /// members right after its top image.
@@ -393,6 +397,7 @@ impl Gallery {
         Gallery {
             state: LibraryState::new(id),
             search: SearchState::new(),
+            rules: Vec::new(),
             filter: Filter::default(),
             order: Vec::new(),
             matches: None,
