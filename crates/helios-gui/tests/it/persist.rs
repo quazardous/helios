@@ -306,6 +306,32 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
         .collect();
     assert_eq!(history.len(), 5);
     assert_eq!(vault.heads(&id(1)).unwrap().len(), 1, "one line of history");
+    // Each version says what kind of step it was (#5258 R5), and the
+    // undo history comes back from them: two steps, none undone.
+    {
+        use helios_vault::edit_steps::{StepKind, rebuild};
+        let head = vault.heads(&id(1)).unwrap()[0].id;
+        let line = vault.history(&head).unwrap();
+        let kinds: Vec<_> = line.iter().map(StepKind::of).collect();
+        assert_eq!(
+            kinds,
+            [
+                StepKind::Do,
+                StepKind::Progress,
+                StepKind::Do,
+                StepKind::Undo,
+                StepKind::Redo
+            ]
+        );
+        let rebuilt = rebuild(&line);
+        let labels: Vec<_> = rebuilt
+            .undo()
+            .iter()
+            .map(|s| s.version.label.as_deref().unwrap())
+            .collect();
+        assert_eq!(labels, [format!("set {EV}").as_str(), "drag exposure"]);
+        assert!(rebuilt.redo().is_empty());
+    }
     drop((shell, persist, vault));
 
     // Reopened: the viewport's network has the head's values.

@@ -45,6 +45,7 @@ pub mod contract;
 pub mod copies;
 pub mod cull;
 pub mod edit;
+pub mod edit_steps;
 pub mod extract;
 pub mod fields;
 pub mod files;
