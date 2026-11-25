@@ -54,12 +54,24 @@ struct Node {
 
 impl Node {
     fn start(name: &str, network: &str, debug: bool) -> Self {
+        Self::start_in(Self::dir(name), network, debug, &[])
+    }
+
+    /// The node's directory, made empty.
+    fn dir(name: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("helios-workflow-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A node in `dir` (made by [`Node::dir`]), started with `extra`
+    /// arguments.
+    fn start_in(dir: PathBuf, network: &str, debug: bool, extra: &[&str]) -> Self {
         std::fs::write(dir.join("network.json"), network).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_helios-node"));
+        command.args(extra);
         command
             .arg("--graph")
             .arg(dir.join("network.json"))
@@ -632,4 +644,81 @@ fn a_picture_shot_in_portrait_comes_out_upright() {
     let size = |name: &str| image::image_dimensions(out.join(name)).unwrap();
     assert_eq!(size("portrait.png"), (3, 6));
     assert_eq!(size("level.png"), (6, 3));
+}
+
+/// A library photo submitted as `image:` and its content hash: the node
+/// exports the copy its vault holds on disk; with no copy on disk (its
+/// file gone, or a hash the vault does not know) it is refused saying
+/// why, and a node without a vault refuses library photos.
+#[test]
+fn library_photos_are_exported_from_the_copy_on_disk_else_refused() {
+    let dir = Node::dir("image-items");
+    // Two different pictures: the same content would be one photo.
+    let picture = |name: &str, green: u8| {
+        let path = dir.join(name);
+        image::RgbImage::from_fn(6, 3, |x, _| image::Rgb([(x * 40) as u8, green, 30]))
+            .save(&path)
+            .unwrap();
+        path
+    };
+    let (kept, gone) = (picture("kept.png", 90), picture("gone.png", 150));
+    let vault_file = dir.join("vault.db");
+    let (kept_id, gone_id) = {
+        let vault =
+            helios_vault::Vault::new(helios_vault_sqlite::SqliteStore::open(&vault_file).unwrap());
+        (
+            vault.import_file(&kept, 1).unwrap().hex(),
+            vault.import_file(&gone, 1).unwrap().hex(),
+        )
+    };
+    std::fs::remove_file(&gone).unwrap();
+    let vault_arg = vault_file.to_str().unwrap().to_string();
+    let node = Node::start_in(dir, NETWORK, false, &["--vault", &vault_arg]);
+    let out = node.dir.join("out");
+    let submit = |image: &str| {
+        node.batch(&[
+            "workflow-submit",
+            "--format",
+            "png",
+            "--to",
+            out.to_str().unwrap(),
+            &format!("image:{image}"),
+        ])
+    };
+    // On disk: exported, under its file's name.
+    let answer = submit(&kept_id);
+    assert_eq!(answer["ok"], true, "{answer}");
+    let run = answer["run"].as_str().unwrap().to_string();
+    let done = node.finished(&run);
+    assert_eq!(done["nodes"]["exp"]["done"], 1, "{done}");
+    assert!(out.join("kept.png").exists(), "{done}");
+    // Its file gone, or a photo the vault does not know: no copy at hand.
+    let unknown = "ab".repeat(32);
+    for id in [&gone_id, &unknown] {
+        let refused = submit(id);
+        assert_ne!(refused["ok"], true, "{refused}");
+        assert!(
+            refused
+                .to_string()
+                .contains("no copy of this library photo is at hand"),
+            "{refused}"
+        );
+    }
+    drop(node);
+
+    // A node without a vault.
+    let bare = Node::start("image-no-vault", NETWORK, false);
+    let refused = bare.batch(&[
+        "workflow-submit",
+        "--format",
+        "png",
+        "--to",
+        bare.dir.join("out").to_str().unwrap(),
+        &format!("image:{kept_id}"),
+    ]);
+    assert_ne!(refused["ok"], true, "{refused}");
+    assert!(
+        refused.to_string().contains("needs the node's vault"),
+        "{refused}"
+    );
 }

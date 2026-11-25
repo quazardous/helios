@@ -338,6 +338,66 @@ fn an_export_is_a_batch_with_an_export_per_image_and_a_failure_in_the_log() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Photos dragged out of the library and dropped on the Queue panel
+/// where no run queues start one with the last export's settings
+/// (`library.export` with `again`), never asked; hovering, the panel
+/// says so.
+#[test]
+fn photos_dropped_on_an_empty_queue_export_with_the_last_settings() {
+    let dir = temp("drop-again");
+    let mut d = desk(&dir, &["a.png", "b.png"], 1);
+    let out = dir.join("out");
+    run(
+        &mut d.h,
+        "library.export",
+        json!({ "scope": "shown", "format": "png", "pattern": "{stem}-web", "folder": out }),
+    );
+    let first = d.kept.take();
+    assert_eq!(first.len(), 1);
+    let photo = first[0].ask.images[1].clone();
+    // Not run: nothing queues at the node exported.
+    run(&mut d.h, "helios.queue.focus", json!(null));
+    let node = d.h.state().queue_panel().node().unwrap().to_string();
+    let at =
+        d.h.get_by_label(&format!("Nothing queued at {node}"))
+            .rect()
+            .center();
+    // Carried with the button down, as out of the library's grid.
+    d.h.event(egui::Event::PointerMoved(at));
+    d.h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    d.h.run_steps(2);
+    egui_pop::api::bus::drag::start(
+        &d.h.ctx,
+        "photos",
+        helios_gui::library::DraggedPhotos::of(vec![photo.clone()]),
+    );
+    for step in [4.0, 0.0] {
+        d.h.event(egui::Event::PointerMoved(at + vec2(step, 0.0)));
+        d.h.run_steps(2);
+    }
+    assert!(d.h.state().queue_panel().drop_hovered());
+    d.h.get_by_label("Export 1 photos with the last export settings");
+    d.h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    d.h.run_steps(4);
+    let again = d.kept.take();
+    assert_eq!(again.len(), 1, "a run started, no dialog");
+    assert_eq!(again[0].ask.images, [photo]);
+    assert_eq!(again[0].ask.settings, first[0].ask.settings);
+    assert_eq!(again[0].ask.settings.folder, out);
+    drop(d);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn cancelling_the_batch_cancels_its_exports() {
     let dir = temp("cancel");

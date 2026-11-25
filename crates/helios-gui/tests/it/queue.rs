@@ -511,6 +511,9 @@ fn photos_dropped_on_the_panel_join_the_run() {
         h.event(egui::Event::PointerMoved(at + egui::vec2(step, 0.0)));
         h.run_steps(2);
     }
+    // Hovering: the panel takes them, and says what a drop does.
+    assert!(h.state().queue_panel().drop_hovered());
+    h.get_by_label("Add 1 photos to the run queued at export");
     h.event(egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
@@ -518,6 +521,7 @@ fn photos_dropped_on_the_panel_join_the_run() {
         modifiers: egui::Modifiers::NONE,
     });
     h.run_steps(2);
+    assert!(!h.state().queue_panel().drop_hovered());
     until(&mut h, "the photo submitted", |_| !node.verbs().is_empty());
     assert_eq!(node.verbs(), [photo_submitted()]);
     until(&mut h, "the photo's row", |h| items(h).len() == 4);

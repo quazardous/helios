@@ -37,6 +37,7 @@ the workspace's export settings (`library.export` in its template, see
 | `pattern` | the file names, as an import renames: `{stem}`, `{date}`, `{time}`, `{year}`, `{month}`, `{day}`, `{camera}`, `{maker}`, `{frame}`, `{seq}`, `{seq:N}`; the extension follows the format | `{stem}` |
 | `clash` | a name taken: `number` (`name-2.jpg`), `overwrite`, or `skip` the photo | `number` |
 | `remember` | make these the workspace's export settings (one undo step) | off |
+| `again` | start from the last export's settings this session (else the workspace's, else the defaults into `<Pictures>/Export`), never asked: what photos dropped on an empty Queue panel run | off |
 
 The version exported is each photo's **head** when the export is asked
 for: its newest edit, as the darkroom opens it. Later edits do not change

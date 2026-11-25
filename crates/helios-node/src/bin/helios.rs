@@ -523,7 +523,14 @@ fn parse(args: Vec<String>) -> Result<Call, String> {
                     title: None,
                     items: images
                         .iter()
-                        .map(|i| absolute(i).map(RunItem::Path))
+                        .map(|i| {
+                            // A library photo (`image:` and its hash) as it is.
+                            if i.starts_with("image:") {
+                                Ok(RunItem::Path(PathBuf::from(i)))
+                            } else {
+                                absolute(i).map(RunItem::Path)
+                            }
+                        })
                         .collect::<Result<_, _>>()?,
                     out: to.ok_or("workflow-submit needs --to DIR")?,
                     format: format.ok_or("workflow-submit needs --format jpeg|png|tiff")?,

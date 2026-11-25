@@ -285,6 +285,7 @@ pub fn schema(command: &str) -> Option<Json> {
                 ("clash", json!({ "enum": ["number", "overwrite", "skip"] })),
                 ("remember", boolean()),
                 ("ask", boolean()),
+                ("again", boolean()),
             ],
         ),
         // Other photo commands.

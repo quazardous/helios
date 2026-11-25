@@ -110,6 +110,10 @@ pub(super) struct Core {
         std::sync::mpsc::Sender<helios_export::batch::Line>,
         std::sync::mpsc::Receiver<helios_export::batch::Line>,
     ),
+    /// The settings of the last export started this session: what photos
+    /// dropped on an empty Queue panel export with (`library.export`'s
+    /// `again`). Session memory, never a workspace's.
+    pub(super) last_export: Option<helios_template::ExportDesc>,
     /// The Log panel's entries.
     pub(super) log: Rc<RefCell<crate::log_panel::Log>>,
     /// The library's images on disk, by id, for quick open.

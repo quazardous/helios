@@ -1333,6 +1333,7 @@ impl Shell {
             workshop_reviewer: None,
             workshop_waiting: Vec::new(),
             export_lines: std::sync::mpsc::channel(),
+            last_export: None,
             log: Rc::default(),
             image_files: BTreeMap::new(),
             dialogs,
@@ -4180,7 +4181,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 "library.export",
-                "Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)",
+                "Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; `again`: from the last export's settings, never asked; asked when `folder` is absent or `ask` is true)",
                 "Library",
             )
             .when(IN_LIBRARY),

@@ -1532,7 +1532,8 @@ gui-queue-column-item 2ec86d203d6111fc
 gui-queue-column-since 399295bb086ea05d
 gui-queue-column-state c3a81a0c833e315c
 gui-queue-column-where 5b0d24deb7aac3ce
-gui-queue-drop-no-run ca61ae576c11c6c9
+gui-queue-drop-join c8c5845d3e697e0b
+gui-queue-drop-start e42623e97b294795
 gui-queue-empty fdc6cf63ab0477bc
 gui-queue-here 057fed6ef864cda9
 gui-queue-hours f2b2b9260972944f
