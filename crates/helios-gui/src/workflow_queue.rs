@@ -744,7 +744,7 @@ fn submit_request(args: &Value) -> Result<ControlRequest, String> {
         .map(|i| {
             i.as_str()
                 .filter(|i| !i.is_empty())
-                .map(|i| RunItem::Path(format!("{}{i}", IMAGE).into()))
+                .map(|i| RunItem::Path(format!("{IMAGE}{i}").into()))
                 .ok_or("`images` are library photo ids")
         })
         .collect::<Result<Vec<_>, _>>()?;
