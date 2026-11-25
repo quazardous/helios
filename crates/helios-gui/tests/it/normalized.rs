@@ -22,6 +22,9 @@ const FORBIDDEN: &[&str] = &[
 /// settings window are egui-pop's.
 const SHELL: &[&str] = &[
     "crates/helios-gui/src/shell.rs",
+    // The menus of commands panels ask for, drawn in the window they were
+    // asked from (a block of egui-pop's window overlays).
+    "crates/helios-gui/src/shell/menus.rs",
     "crates/helios-gui/src/workbench.rs",
     "crates/helios-gui/src/plugins.rs",
     // The import window, the shell's own (`library.importWindow`).
@@ -31,9 +34,9 @@ const SHELL: &[&str] = &[
     "crates/helios-gui/src/shell/import_window/source_list.rs",
     // The import window's accounts: its Sources column's account rows
     // and the connection dialog over the window. They
-    // are drawn in the import window's own viewport, where the shell's
-    // menus (`dialogs::Request::Menu`, opened in the main window) would
-    // not show.
+    // are drawn in the import window's own viewport; they predate the
+    // shell's menus opening in the window they are asked from
+    // (`dialogs::Request::menu`).
     "crates/helios-gui/src/shell/import_accounts.rs",
     // The Storage page, the shell's own (`library.storage`).
     "crates/helios-gui/src/shell/storage.rs",

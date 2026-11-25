@@ -5370,7 +5370,7 @@ impl Library {
                 Message::new("gui-library-delete-rejected", "Delete Rejected…"),
             )),
         ]);
-        crate::dialogs::request(ctx, crate::dialogs::Request::Menu { at, items });
+        crate::dialogs::request(ctx, crate::dialogs::Request::menu(ctx, at, items));
     }
 
     /// The Filmstrip panel: one row, the grid's selection.

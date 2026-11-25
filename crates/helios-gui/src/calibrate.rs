@@ -1500,16 +1500,17 @@ fn presets_ui(ui: &mut egui::Ui, enabled: bool) {
     if r.clicked() {
         crate::dialogs::request(
             &ctx,
-            crate::dialogs::Request::Menu {
-                at: r.rect.left_bottom(),
-                items: vec![
+            crate::dialogs::Request::menu(
+                &ctx,
+                r.rect.left_bottom(),
+                vec![
                     crate::dialogs::MenuItem::run(
                         LOOK_CHOOSE,
                         serde_json::json!({ "look": "camera" }),
                     )
                     .labeled(camera),
                 ],
-            },
+            ),
         );
     }
 }

@@ -27,7 +27,6 @@ use egui_pop::model::ids::PanelId;
 use helios_core::Engine;
 
 use super::{Shot, workshop_edit, workspace_edit};
-use crate::dialogs::MenuItem;
 use crate::host::Workspace;
 use crate::snapshot::Recorder;
 use crate::workbench::Contents;
@@ -104,8 +103,6 @@ pub(super) struct Focus {
     /// What the imports leave the Library, shared with the shell's
     /// listeners of their ends.
     pub(super) imports: Rc<RefCell<super::import::Imports>>,
-    /// A menu of commands asked for, open at a point.
-    pub(super) menu: Option<(egui::Pos2, Vec<MenuItem>)>,
     pub(super) viewport: Rc<RefCell<crate::viewport::Viewport>>,
     /// The library's image being opened in the viewport, while its large
     /// thumbnail is awaited (the loupe's first frame).
@@ -221,7 +218,6 @@ impl Focus {
             decisions: Rc::default(),
             import_source: Rc::default(),
             imports: Rc::default(),
-            menu: None,
             viewport: seed.viewport,
             opening: None,
             surfaces: crate::display_surfaces::Surfaces::default(),

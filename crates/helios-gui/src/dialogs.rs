@@ -172,14 +172,30 @@ pub enum Request {
     Confirm(Confirm),
     Form(Form),
     Picker(Picker),
+    /// A menu of commands at `at`, in the points of `window`, the window
+    /// it was asked from: it opens there ([`Request::menu`]).
     Menu {
         at: egui::Pos2,
         items: Vec<MenuItem>,
+        window: egui::ViewportId,
     },
     Notify(Level, helios_core::Message),
     /// A command to run as whom (a paste whose edit is the shell's: the
     /// workspace's network, the image's masks).
     Run(String, serde_json::Value, helios_shell::commands::Origin),
+}
+
+impl Request {
+    /// A menu at `at` in the window `ctx` draws now (the window the
+    /// click came from, a detached panel's or a focus window's): the
+    /// shell opens it in that window, never in another one.
+    pub fn menu(ctx: &egui::Context, at: egui::Pos2, items: Vec<MenuItem>) -> Self {
+        Request::Menu {
+            at,
+            items,
+            window: ctx.viewport_id(),
+        }
+    }
 }
 
 fn requests_id() -> Id {
@@ -201,7 +217,7 @@ pub fn context_menu(response: &egui::Response, items: Vec<MenuItem>) {
         let at = response
             .interact_pointer_pos()
             .unwrap_or(response.rect.left_bottom());
-        request(&response.ctx, Request::Menu { at, items });
+        request(&response.ctx, Request::menu(&response.ctx, at, items));
     }
 }
 
