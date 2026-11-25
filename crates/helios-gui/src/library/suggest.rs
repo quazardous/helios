@@ -245,16 +245,6 @@ pub fn commit(text: &str) -> Option<(Vec<String>, String)> {
     Some((keys.iter().map(to_text).collect(), rest))
 }
 
-/// The search text the rules and the text typed make: the rules first.
-pub fn search_text(rules: &[String], typed: &str) -> String {
-    rules
-        .iter()
-        .map(String::as_str)
-        .chain(Some(typed.trim()).filter(|t| !t.is_empty()))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// A JSON value as plain text (a number without quotes).
 fn plain(v: &serde_json::Value) -> String {
     match v {
@@ -372,11 +362,6 @@ mod tests {
         assert_eq!(commit("beach sunset "), None);
         assert_eq!(commit("camera:"), None);
         assert_eq!(commit("(camera:R5 "), None);
-        assert_eq!(
-            search_text(&["camera:R5".into()], " beach "),
-            "camera:R5 beach"
-        );
-        assert_eq!(search_text(&[], ""), "");
     }
 
     #[test]

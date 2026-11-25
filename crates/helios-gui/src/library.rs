@@ -4468,7 +4468,9 @@ impl Library {
             .map(|(k, rule)| {
                 let words = helios_vault::rules::parse_text(rule)
                     .map_or_else(|_| rule.clone(), |r| suggest::chips(&r, &t).join(", "));
-                AppChip::new(k.to_string(), words)
+                // Its rule is part of the field's filter: the
+                // `library.filter` step sees the whole search.
+                AppChip::new(k.to_string(), words).term(rule.clone())
             })
             .collect();
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -4482,7 +4484,6 @@ impl Library {
             field = field.app(app);
         }
         let out = field.show(ui, &mut self.view.search);
-        let mut rules_changed = false;
         let mut picked = false;
         for event in self.view.search.take_events() {
             match event {
@@ -4493,9 +4494,11 @@ impl Library {
                         && k < self.view.rules.len()
                     {
                         self.view.rules.remove(k);
-                        rules_changed = true;
                     }
                 }
+                // Set whole (a command, a hook): its rules are in the
+                // text now.
+                SearchEvent::FilterSet => self.view.rules.clear(),
                 _ => {}
             }
         }
@@ -4507,21 +4510,12 @@ impl Library {
             if let Some((rules, rest)) = suggest::commit(&text) {
                 self.view.rules.extend(rules);
                 self.view.search.set_text(rest);
-                rules_changed = true;
             }
         }
-        // Without chips the field's filter is the search, as before; with
-        // them, the rules come first in its text.
-        let asked = match out.changed {
-            Some(f) if self.view.rules.is_empty() && !rules_changed => Some(f),
-            changed => changed
-                .or_else(|| rules_changed.then(|| self.view.search.filter().clone()))
-                .map(|f| Filter {
-                    text: suggest::search_text(&self.view.rules, self.view.search.text()),
-                    ..f
-                })
-                .filter(|f| *f != self.view.filter),
-        };
+        // The field's filter is the whole search: the chips' rules, then
+        // the words typed. A chip made or removed reaches it at the next
+        // pass.
+        let asked = out.changed;
         let now = ctx.input(|i| i.time);
         if let Some(filter) = asked {
             self.view.typed = Some((filter.clone(), now));
