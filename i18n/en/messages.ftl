@@ -1493,6 +1493,14 @@ gui-library-badge-versions = versions
 
 gui-library-cannot-open = The library cannot be opened: { $error }
 
+gui-library-chip = { $field } { $op } { $value }
+
+gui-library-chip-not = not { $terms }
+
+gui-library-chip-or = or
+
+gui-library-chip-range = { $low } and { $high }
+
 gui-library-column-flag = Flag
 
 gui-library-column-iso = ISO
@@ -1830,6 +1838,8 @@ gui-library-stack-not-changed = The stack was not changed: { $error }
 gui-library-stack-top = Move to Top of Stack
 
 gui-library-stack-ungroup = Unstack
+
+gui-library-suggest-key = { $label } — { $key }:
 
 gui-library-sync = Sync zoom and pan
 

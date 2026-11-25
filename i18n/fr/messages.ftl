@@ -1707,6 +1707,16 @@ xmp-reason-unsupported-version = version non prise en charge (lit { $known })
 
 gui-library-auto-advance-tip = Avance automatique : après une note, un drapeau ou un rejet au clavier, passer à la photo suivante
 
+gui-library-chip = { $field } { $op } { $value }
+
+gui-library-chip-not = pas { $terms }
+
+gui-library-chip-or = ou
+
+gui-library-chip-range = { $low } et { $high }
+
+gui-library-suggest-key = { $label } — { $key }:
+
 gui-library-compare-add = Ajouter à la comparaison
 
 gui-library-compare-leave = Retour à la grille

@@ -1097,6 +1097,10 @@ gui-library-badge-quick d3602fbd519917ca
 gui-library-badge-soft a3be16c56c2993f9
 gui-library-badge-versions e6e739b5295225ba
 gui-library-cannot-open 2702ccb4eb8511ba
+gui-library-chip 601de05df7adcfe5
+gui-library-chip-not 69bdcebe4e48c0d5
+gui-library-chip-or c98b4c29f7910a12
+gui-library-chip-range 5d54c0b634b93926
 gui-library-column-flag 5213c254531bca8f
 gui-library-column-iso b3ad656d0ec905f4
 gui-library-column-labels 3914048478504858
@@ -1266,6 +1270,7 @@ gui-library-stack-group 4c9d9df46949e0d0
 gui-library-stack-not-changed 920a7518ca6e1686
 gui-library-stack-top b1a57d326a19a81b
 gui-library-stack-ungroup 7fdaa277408e1d88
+gui-library-suggest-key f77d94f41e7bc5b4
 gui-library-sync 0b5c87b7f38a10af
 gui-library-tags 3a2949d46a7b5995
 gui-library-trash 6cddaea29caba8b5
