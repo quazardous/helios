@@ -364,6 +364,8 @@ enum Action {
     ImportAgain(Value, Origin),
     /// Open the Activity focus (`activity.show`'s arguments).
     Activity(Value),
+    /// Let a held promise go on now (`activity.resume`'s arguments).
+    ActivityResume(Value),
     /// Open the Library focus in its own window (`library.window`).
     LibraryWindow,
     /// Export photos (`library.export`'s arguments), as whom.
@@ -4141,6 +4143,14 @@ impl Shell {
                 "View",
             ),
             Box::new(|a, _| Ok(Action::Activity(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                crate::activity::RESUME,
+                "Resume a held task now (`id`: a promise of `promises.list` held on a service's quota or a refused sign-in)",
+                "View",
+            ),
+            Box::new(|a, _| Ok(Action::ActivityResume(a.clone()))),
         );
         add(
             // The Library in a window of its own, brought to the front
@@ -8006,6 +8016,7 @@ impl Shell {
                 self.open_activity(&args);
                 return Ok(Value::Null);
             }
+            Action::ActivityResume(args) => return self.resume_activity(&args),
             Action::LibraryWindow => {
                 self.open_library_window();
                 return Ok(Value::Null);

@@ -28,7 +28,7 @@ use helios_node_core::endpoint::VaultService;
 use helios_node_core::job_promises::{JobPromises, Standing};
 use helios_node_core::promises::{Handle, Promises};
 use helios_shell::commands::Origin;
-use helios_vault::promises::{Promise, State};
+use helios_vault::promises::{Promise, State, Wait};
 use helios_vault::{MemoryStore, Vault};
 use serde_json::{Value, json};
 
@@ -69,6 +69,14 @@ fn run(gate: &Gate, handle: &Handle<MemoryStore>) {
             }));
         }
         "spin" => handle.progress(3, None, Some("scanning")),
+        // Held on a service's quota until resumed, then done.
+        "hold" => {
+            handle.progress(5, Some(10), Some("IMG_0005.JPG"));
+            if !handle.hold(Wait::Quota, "rate limited", None, &|| false) {
+                return handle.cancelled();
+            }
+            return handle.done(json!({ "report": { "added": 10 } }));
+        }
         _ => handle.progress(120, Some(412), Some("IMG_0120.JPG")),
     }
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -704,4 +712,31 @@ fn with_no_job_the_quiet_indicator_opens_the_focus() {
     until(&mut h, "the focus open", |h| focus(h)["open"] == true);
     let view = h.state_mut().menu_items("app.menu.view").to_string();
     assert!(view.contains("activity.show"), "{view}");
+}
+
+#[test]
+fn a_held_import_says_why_and_resume_lets_it_go_on() {
+    let gate = Arc::new(Gate::default());
+    let (client, promises) = node(&gate);
+    let import = start(&promises, "import", "Import 10 photos", "hold");
+    let mut h = shell_on(client);
+    open(&mut h, &import.id);
+    until(&mut h, "the held import says why", |h| {
+        // In its row and in the detail's state.
+        h.query_all_by_label("Paused: the service asks to wait")
+            .count()
+            >= 1
+    });
+    in_detail(&h, "Resume").click();
+    let vault = promises.vault().clone();
+    let id = import.id.clone();
+    until(&mut h, "resumed, the import goes on and ends", move |_| {
+        matches!(
+            vault.promise(&id).unwrap().map(|p| p.state),
+            Some(State::Done { .. })
+        )
+    });
+    until(&mut h, "no Resume once it ended", |h| {
+        h.query_by_label("Resume").is_none()
+    });
 }

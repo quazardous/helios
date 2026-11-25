@@ -46,7 +46,7 @@ use egui_pop::core::icon::{IconWidget, Source};
 use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
 use helios_core::Message;
 use helios_ui::{Progress, Scroll};
-use helios_vault::promises::{Promise, State};
+use helios_vault::promises::{Paused, Promise, State, Wait};
 use serde_json::{Value, json};
 
 use super::Shell;
@@ -312,6 +312,28 @@ fn started_by(p: &Promise) -> Message {
     }
 }
 
+/// A held job's state: what it waits for (`Promise::paused`).
+fn paused_message(paused: &Paused) -> Message {
+    match paused.wait {
+        Wait::Quota => Message::new(
+            "gui-promise-paused-quota",
+            "Paused: the service asks to wait",
+        ),
+        Wait::SignIn => Message::new(
+            "gui-promise-paused-sign-in",
+            "Paused: the service refused the sign-in",
+        ),
+    }
+}
+
+/// A job's state, held or not.
+fn promise_state_message(p: &Promise) -> Message {
+    match &p.paused {
+        Some(paused) if !p.state.is_settled() => paused_message(paused),
+        _ => state_message(&p.state),
+    }
+}
+
 fn state_message(s: &State) -> Message {
     match s {
         State::Pending => Message::new("gui-promise-pending", "Waiting to start"),
@@ -537,6 +559,12 @@ impl Jobs {
                 ui.text_role(TextRole::Body, text(ui, state_message(s)));
             }
         }
+        // Held: why, beside its progress.
+        if let Some(paused) = &p.paused
+            && !p.state.is_settled()
+        {
+            ui.text_tone(Tone::Warning, text(ui, paused_message(paused)));
+        }
     }
 
     /// Folds the journal's `helios.job.log` lines since the last call into the
@@ -612,8 +640,20 @@ impl Jobs {
         }
         let by = text(ui, started_by(&p));
         field(Message::new("gui-jobs-started-by", "Started by"), by);
-        let state = text(ui, state_message(&p.state));
+        let state = text(ui, promise_state_message(&p));
         field(Message::new("gui-jobs-state", "State"), state);
+        if let Some(until) = p.paused.as_ref().and_then(|w| w.until)
+            && !p.state.is_settled()
+        {
+            let at = chrono::DateTime::from_timestamp(until.cast_signed(), 0)
+                .map(|t| {
+                    t.with_timezone(&chrono::Local)
+                        .format("%H:%M:%S")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            field(Message::new("gui-jobs-goes-on", "Goes on at"), at);
+        }
         let start = chrono::DateTime::from_timestamp(p.created.cast_signed(), 0)
             .map(|t| {
                 t.with_timezone(&chrono::Local)
@@ -677,6 +717,12 @@ impl Jobs {
         ui.space_role(Space::Group);
         ui.horizontal(|ui| {
             let secondary = helios_ui::Action::Secondary;
+            if p.paused.is_some() && !p.state.is_settled() {
+                let resume = text(ui, Message::new("gui-promise-resume", "Resume"));
+                if helios_ui::action(ui, helios_ui::Action::Primary, &resume).clicked() {
+                    self.events.push(Event::Ask(Action::Retry, p.id.clone()));
+                }
+            }
             if cancellable(&p) {
                 let cancel = text(ui, Message::new("gui-promise-cancel", "Cancel"));
                 if helios_ui::action(ui, secondary, &cancel).clicked() {
@@ -888,6 +934,19 @@ impl Shell {
             j.state = StateFilter::All;
             j.cleared.remove(id);
         }
+    }
+
+    /// `activity.resume`: held promise `id` goes on now (`promises.retry`
+    /// on the node).
+    pub(super) fn resume_activity(&mut self, args: &Value) -> Result<Value, String> {
+        let id = args["id"]
+            .as_str()
+            .ok_or("`id`: the held promise to resume")?;
+        if !self.core.activity.has_node() {
+            return Err("no library open: its tasks run on its node".into());
+        }
+        self.core.activity.ask(Action::Retry, id);
+        Ok(Value::Null)
     }
 
     /// Cancel or Retry asked on promise `id`: of the node's promises; a job

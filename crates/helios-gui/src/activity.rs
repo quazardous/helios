@@ -41,6 +41,9 @@ use serde_json::{Value, json};
 /// The command the indicator runs: the Activity focus shown (`id`: the
 /// job selected), the failures marked seen.
 pub const COMMAND: &str = "activity.show";
+/// The command that lets a held promise go on now (`id`: a promise of
+/// `promises.list`): `promises.retry` on the node.
+pub const RESUME: &str = "activity.resume";
 /// The indicator of the running tasks, for tests and agents.
 pub const MARK: &str = "helios.status.activity";
 /// The badge of the failed tasks.

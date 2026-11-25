@@ -112,8 +112,12 @@ enum Target {
         run: String,
         item: String,
     },
-    /// A job, through its promise.
-    Job(String),
+    /// A job, through its promise (when it has one: a held promise
+    /// resumes through it).
+    Job {
+        job: String,
+        promise: Option<String>,
+    },
 }
 
 /// A node read whole, or why it could not be.
@@ -505,9 +509,10 @@ impl WorkflowQueue {
             return None;
         }
         let mut state = match &p.state {
+            // Held: its work waits on the service (a quota, a sign-in),
+            // before its first progress too.
+            State::Pending | State::Running { .. } if p.paused.is_some() => ItemState::Paused,
             State::Pending => ItemState::Waiting,
-            // Held: its work waits on the service (a quota, a sign-in).
-            State::Running { .. } if p.paused.is_some() => ItemState::Paused,
             State::Running { .. } => ItemState::Running,
             State::Done { .. } => ItemState::Done,
             State::Failed { .. } => ItemState::Failed,
@@ -518,11 +523,13 @@ impl WorkflowQueue {
         }
         let cancellable = p.request["cancellable"].as_bool().unwrap_or(true)
             || p.request[helios_node_core::job_promises::RELAYED] == true;
-        let actions = if state.active() && state != ItemState::Cancelling && cancellable {
-            vec![Action::Cancel]
-        } else {
-            Vec::new()
-        };
+        let mut actions = Vec::new();
+        if state == ItemState::Paused {
+            actions.push(Action::Resume);
+        }
+        if state.active() && state != ItemState::Cancelling && cancellable {
+            actions.push(Action::Cancel);
+        }
         let place = match crate::relay::split_node_job(job) {
             Some((node, _)) => Place::Node(node.to_string()),
             None => Place::Here,
@@ -542,7 +549,11 @@ impl WorkflowQueue {
             paused: p.paused.clone(),
             actions,
         };
-        Some((item, Target::Job(job.to_string())))
+        let target = Target::Job {
+            job: job.to_string(),
+            promise: Some(p.id.clone()),
+        };
+        Some((item, target))
     }
 }
 
@@ -636,7 +647,7 @@ impl QueueSource for WorkflowQueue {
             // Oldest first, as the queue lists its items.
             for p in followed.promises().iter().rev() {
                 if let Some((item, target)) = self.promise_item(p, node) {
-                    if let Target::Job(job) = &target {
+                    if let Target::Job { job, .. } = &target {
                         promised.insert(job.clone());
                     }
                     targets.insert(item.id.clone(), target);
@@ -655,7 +666,13 @@ impl QueueSource for WorkflowQueue {
                     continue;
                 }
                 let item = job_item(&job, offset);
-                targets.insert(item.id.clone(), Target::Job(job.id.clone()));
+                targets.insert(
+                    item.id.clone(),
+                    Target::Job {
+                        job: job.id.clone(),
+                        promise: None,
+                    },
+                );
                 items.push(item);
             }
         }
@@ -676,16 +693,26 @@ impl QueueSource for WorkflowQueue {
             return;
         };
         match target {
-            Target::Job(job) => {
-                if action == Action::Cancel {
-                    egui_pop::api::jobs::ask(app, &job, Request::Cancel);
+            Target::Job { job, promise } => match action {
+                Action::Cancel => egui_pop::api::jobs::ask(app, &job, Request::Cancel),
+                // A held promise goes on now, through the node.
+                Action::Resume => {
+                    if let Some(id) = promise {
+                        app.run(
+                            CommandId::from_static(crate::activity::RESUME),
+                            json!({ "id": id }),
+                        );
+                    }
                 }
-            }
+                _ => {}
+            },
             Target::Item { node, run, item } => {
                 let base = json!({ "node": node, "run": run, "items": [item] });
                 let (command, args) = match action {
                     Action::Cancel => (CANCEL, base),
                     Action::Retry => (RETRY, base),
+                    // A run's item is never held on its own: its run is.
+                    Action::Resume => return,
                     Action::Top | Action::Bottom => {
                         let mut args = base;
                         args["to"] = json!(if action == Action::Top {

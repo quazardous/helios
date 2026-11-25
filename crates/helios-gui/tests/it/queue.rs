@@ -516,6 +516,73 @@ fn a_job_that_is_not_a_run_shows_as_its_promise_and_cancel_goes_through_the_jobs
 }
 
 #[test]
+fn a_held_import_offers_resume_which_lets_it_go_on() {
+    use helios_node_core::endpoint::VaultService;
+    use helios_node_core::promises::Promises;
+    use helios_vault::promises::Wait;
+    use helios_vault::{MemoryStore, Vault};
+
+    // The desktop's node, its import held on a service's quota until
+    // resumed.
+    let bus = Arc::new(Bus::new());
+    let vault = Arc::new(Vault::new(MemoryStore::default()));
+    let jobs = helios_core::jobs::Jobs::new(bus.clone());
+    let promises =
+        Arc::new(
+            Promises::new(vault.clone(), jobs.clone()).kind("import", true, |handle| {
+                if handle.hold(Wait::Quota, "rate limited", None, &|| false) {
+                    handle.done(json!({ "report": { "added": 3 } }));
+                } else {
+                    handle.cancelled();
+                }
+            }),
+        );
+    let service =
+        VaultService::new(vault.clone(), bus, jobs, "test").with_promises(promises.clone());
+    let client = Arc::new(helios_inspect::client::Client::in_process(Arc::new(
+        service,
+    )));
+    let held = promises
+        .start(
+            "import",
+            "Import 3 photos",
+            json!({ "job": "import-held", "cancellable": true }),
+        )
+        .unwrap();
+
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.follow_activity(client);
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run_steps(4);
+    // Its job named the node, as an import's does.
+    h.state().jobs().bus().publish_value(
+        "test",
+        None,
+        helios_core::jobs::STARTED,
+        json!({ "id": "import-held", "title": "Import 3 photos", "kind": "import",
+                "node": "grade" }),
+    );
+    select(&mut h, "grade");
+    show_queue(&mut h);
+    until(&mut h, "the held import, paused", |h| {
+        items(h) == [("Import 3 photos".to_string(), ItemState::Paused)]
+    });
+    assert_eq!(
+        h.state().queue_panel().queue().unwrap().items[0].actions,
+        [Action::Resume, Action::Cancel]
+    );
+    h.get_by_label("Resume Import 3 photos").click();
+    until(&mut h, "resumed, the import ends", |h| {
+        items(h) == [("Import 3 photos".to_string(), ItemState::Done)]
+    });
+    assert!(matches!(
+        vault.promise(&held.id).unwrap().unwrap().state,
+        State::Done { .. }
+    ));
+    assert!(h.query_by_label("Resume Import 3 photos").is_none());
+}
+
+#[test]
 fn a_connected_node_s_job_says_where_it_runs() {
     let mut h = harness(true);
     let bus = h.state().jobs().bus().clone();
