@@ -842,6 +842,54 @@ fn pick_export(
 
 /// Submission.
 impl Workflows {
+    /// The items with each library image (`image:` and its content hash,
+    /// as a photo dragged out of the library names it) made the file of
+    /// its first present copy, its parameters kept; files stay as given.
+    /// A library image needs the node's vault, and a copy at hand.
+    fn library_images(&self, items: &[RunItem]) -> Result<Vec<RunItem>, Message> {
+        items
+            .iter()
+            .map(|item| {
+                let Some(hex) = item
+                    .path()
+                    .to_str()
+                    .and_then(|p| p.strip_prefix(super::extract::IMAGE))
+                else {
+                    return Ok(item.clone());
+                };
+                let vault = self.ctx.vault.as_ref().ok_or_else(|| {
+                    Message::new(
+                        "workflow-image-no-vault",
+                        "{ $image }: a library photo needs the node's vault (start it with --vault)",
+                    )
+                    .with("image", hex)
+                })?;
+                let not_at_hand = || {
+                    Message::new(
+                        "workflow-image-not-at-hand",
+                        "{ $image }: no copy of this library photo is at hand",
+                    )
+                    .with("image", hex)
+                };
+                let id = helios_vault::ImageId::from_hex(hex).map_err(|_| not_at_hand())?;
+                let path = vault
+                    .locations(&id)
+                    .map_err(Message::plain)?
+                    .into_iter()
+                    .find(helios_vault::Location::present)
+                    .ok_or_else(not_at_hand)?
+                    .path;
+                Ok(match item {
+                    RunItem::Path(_) => RunItem::Path(path),
+                    RunItem::With { params, .. } => RunItem::With {
+                        path,
+                        params: params.clone(),
+                    },
+                })
+            })
+            .collect()
+    }
+
     /// Submits a batch: creates the run, or extends the one with the same
     /// network and settings. Answers the run's id, its workflow, the
     /// counts (new, already there, merged) and each item's output path.
@@ -852,6 +900,11 @@ impl Workflows {
         first_export: Option<&str>,
         ask: &Submit<'_>,
     ) -> Result<Value, Message> {
+        let resolved = self.library_images(ask.items)?;
+        let ask = &Submit {
+            items: &resolved,
+            ..*ask
+        };
         if !ask.out.is_absolute() {
             return Err(not_absolute(ask.out));
         }

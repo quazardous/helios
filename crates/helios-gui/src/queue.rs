@@ -13,6 +13,9 @@
 //!   and Cancel run `helios.workflow.retry`, `helios.workflow.prioritize`
 //!   and `helios.workflow.cancel` (the node's `workflow.*`), a promise's
 //!   Cancel `job.cancel`. The rows change when the node says they did.
+//! - Photos dragged out of the library and dropped on the panel join the
+//!   run queued at the node: `helios.workflow.submit` extends it on its
+//!   node with them, as library photos.
 //! - Empty (no node selected, or nothing queued at it), the panel shows an
 //!   empty state; with `interface.panels.queue_when_empty` off it closes
 //!   instead, and opens again once the node has work.
@@ -201,6 +204,14 @@ pub trait QueueSource {
     fn due(&mut self, _app: &AppHandle) -> bool {
         false
     }
+
+    /// The arguments of [`crate::workflow_queue::SUBMIT`] that add photos
+    /// to the queue of `node` (the connected node, the run's export
+    /// settings), all but `images`; `None` when no run queues there, and
+    /// photos dropped on the panel are refused.
+    fn submit_args(&self, _node: &str) -> Option<serde_json::Value> {
+        None
+    }
 }
 
 /// Whether the panel shows when empty, from the resolved settings
@@ -321,8 +332,63 @@ impl QueuePanel {
         }
     }
 
-    /// Draws the panel.
+    /// Draws the panel; photos dragged out of the library and dropped on
+    /// it join the queue shown ([`QueuePanel::take_drop`]).
     pub fn ui(&mut self, ui: &mut Ui, app: &AppHandle) {
+        let area = ui.max_rect();
+        self.draw(ui, app);
+        self.take_drop(ui.ctx(), area);
+    }
+
+    /// Photos dropped on the panel (`area`), from any window (egui-pop's
+    /// drag session): they join the run queued at the followed node,
+    /// through [`crate::workflow_queue::SUBMIT`], the command an agent
+    /// runs, which extends the run on its node with them as library
+    /// photos (`image:` items). With no run there the drop is refused,
+    /// saying why. Never an undo step: the node's queue is work, not the
+    /// library's state.
+    fn take_drop(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        use egui_pop::api::bus::drag::{self, Seen};
+        let Some(node) = self.node.clone() else {
+            return;
+        };
+        let args = self.source.submit_args(&node);
+        let refusal = args.is_none().then(|| {
+            Message::new(
+                "gui-queue-drop-no-run",
+                "Not here: no run queues at { $node } yet",
+            )
+            .with("node", node.as_str())
+        });
+        let seen = drag::target::<crate::library::DraggedPhotos>(ctx, PANEL, area, |_| {
+            refusal.clone().map(|m| crate::i18n::text(ctx, m))
+        });
+        match (seen, args) {
+            (Seen::Dropped(photos), Some(mut args)) => {
+                args["images"] = serde_json::json!(photos.0);
+                crate::dialogs::request(
+                    ctx,
+                    crate::dialogs::Request::Run(
+                        crate::workflow_queue::SUBMIT.into(),
+                        args,
+                        helios_shell::commands::Origin::User,
+                    ),
+                );
+            }
+            (Seen::Refused { .. }, _) => {
+                if let Some(m) = refusal {
+                    crate::dialogs::request(
+                        ctx,
+                        crate::dialogs::Request::Notify(crate::dialogs::Level::Warning, m),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Draws the queue.
+    fn draw(&mut self, ui: &mut Ui, app: &AppHandle) {
         let ctx = ui.ctx().clone();
         // Read when it changes; its waits counted to now.
         if let (Some(queue), Some(now)) = (&mut self.queue, self.source.now(app)) {
