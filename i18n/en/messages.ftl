@@ -201,11 +201,15 @@ gui-account-status-refused = Access refused
 
 gui-activity-failed = { $count } background tasks failed
 
+gui-activity-goes-on = Goes on at { $time }
+
 gui-activity-idle = Activity: no background task running
 
 gui-activity-importing = Importing { $done }/{ $total }
 
 gui-activity-importing-start = Importing…
+
+gui-activity-paused = { $count } background tasks paused
 
 gui-activity-percent = { $label } { $percent } %
 

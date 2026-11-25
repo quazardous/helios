@@ -46,13 +46,13 @@ use egui_pop::core::icon::{IconWidget, Source};
 use egui_pop::core::ui::{Space, TextRole, Tone, UiPop as _};
 use helios_core::Message;
 use helios_ui::{Progress, Scroll};
-use helios_vault::promises::{Paused, Promise, State, Wait};
+use helios_vault::promises::{Promise, State};
 use serde_json::{Value, json};
 
 use super::Shell;
 use super::focus_window::{FocusWindow, WindowFocus};
 use crate::activity::Ask as Action;
-use crate::activity::{LogLine, Logged};
+use crate::activity::{LogLine, Logged, paused_message};
 
 /// The focus's OS window: its id, under which egui-pop keeps its size.
 pub const WINDOW: &str = "activity";
@@ -309,20 +309,6 @@ fn started_by(p: &Promise) -> Message {
         Some("agent") => Message::new("gui-jobs-by-agent", "An agent"),
         Some("cli") => Message::new("gui-jobs-by-cli", "The command line"),
         _ => Message::new("gui-jobs-by-node", "Automatic"),
-    }
-}
-
-/// A held job's state: what it waits for (`Promise::paused`).
-fn paused_message(paused: &Paused) -> Message {
-    match paused.wait {
-        Wait::Quota => Message::new(
-            "gui-promise-paused-quota",
-            "Paused: the service asks to wait",
-        ),
-        Wait::SignIn => Message::new(
-            "gui-promise-paused-sign-in",
-            "Paused: the service refused the sign-in",
-        ),
     }
 }
 

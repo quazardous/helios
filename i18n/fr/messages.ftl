@@ -2660,6 +2660,13 @@ gui-activity-failed = { $count ->
    *[other] { $count } tâches de fond ont échoué
 }
 
+gui-activity-paused = { $count ->
+    [one] { $count } tâche de fond en pause
+   *[other] { $count } tâches de fond en pause
+}
+
+gui-activity-goes-on = Reprise à { $time }
+
 gui-health-checking = Vérification…
 
 gui-health-check-now = Vérifier maintenant

@@ -77,6 +77,15 @@ fn run(gate: &Gate, handle: &Handle<MemoryStore>) {
             }
             return handle.done(json!({ "report": { "added": 10 } }));
         }
+        // Held on a service's quota for an hour, until resumed.
+        "hold-hour" => {
+            handle.progress(5, Some(10), Some("IMG_0005.JPG"));
+            let hour = Some(Duration::from_hours(1));
+            if !handle.hold(Wait::Quota, "rate limited", hour, &|| false) {
+                return handle.cancelled();
+            }
+            return handle.done(json!({ "report": { "added": 10 } }));
+        }
         _ => handle.progress(120, Some(412), Some("IMG_0120.JPG")),
     }
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -738,5 +747,46 @@ fn a_held_import_says_why_and_resume_lets_it_go_on() {
     });
     until(&mut h, "no Resume once it ended", |h| {
         h.query_by_label("Resume").is_none()
+    });
+}
+
+#[test]
+fn the_status_bar_reads_a_held_import_as_paused() {
+    let gate = Arc::new(Gate::default());
+    let (client, promises) = node(&gate);
+    let import = start(&promises, "import", "Import 10 photos", "hold-hour");
+    let mut h = shell_on(client);
+    // The status bar says why, with a pause mark and no spinner.
+    until(&mut h, "the paused import in the status bar", |h| {
+        h.query_by_label("Paused: the service asks to wait")
+            .is_some()
+            && shown(h, helios_gui::activity::PAUSED_MARK).is_some()
+    });
+    let mark = shown(&h, helios_gui::activity::PAUSED_MARK).unwrap();
+    assert_eq!(mark.kind, "icon");
+    assert_eq!(mark.name.as_deref(), Some("1 background tasks paused"));
+    assert!(shown(&h, helios_gui::activity::MARK).is_none());
+    assert!(h.query_by_label("1 background tasks running").is_none());
+    // Its tooltip says when it goes on by itself.
+    let [x, y, w, hh] = mark.rect;
+    h.hover_at(egui::pos2(x + w / 2.0, y + hh / 2.0));
+    until(&mut h, "the tooltip with the time it goes on", |h| {
+        h.query_by_label_contains("Goes on at").is_some()
+    });
+    // A click opens the Activity window on it.
+    click(&mut h, helios_gui::activity::PAUSED_MARK);
+    until(&mut h, "the focus open on the held import", |h| {
+        focus(h)["open"] == true && focus(h)["selected"] == json!(import.id)
+    });
+    h.state_mut()
+        .run("activity.resume", json!({ "id": import.id }), Origin::User)
+        .unwrap();
+    let vault = promises.vault().clone();
+    let id = import.id.clone();
+    until(&mut h, "resumed, the import ends", move |_| {
+        matches!(
+            vault.promise(&id).unwrap().map(|p| p.state),
+            Some(State::Done { .. })
+        )
     });
 }

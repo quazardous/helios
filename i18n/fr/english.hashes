@@ -451,9 +451,11 @@ gui-account-status-ok e055ee2a95ee5237
 gui-account-status-reconnect 46f1fc371bf4cfa9
 gui-account-status-refused 717c0d1ec961c487
 gui-activity-failed a31c4dc6b36a1ad5
+gui-activity-goes-on f22ceda72e887e1c
 gui-activity-idle ce37a19190b32e1f
 gui-activity-importing 724ccbc427c4b08d
 gui-activity-importing-start ad3266023257d7d6
+gui-activity-paused 322799f788d6baa0
 gui-activity-percent 97220c481430cc33
 gui-activity-running 6f09ed8460211387
 gui-activity-show cb047eaae7922caf

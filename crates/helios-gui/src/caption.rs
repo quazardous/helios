@@ -3,8 +3,9 @@
 //!
 //! - the background tasks going on, as the node's promises (the
 //!   status bar's Activity summary, `crate::activity`): a ring with the
-//!   main one's progress (turning while it cannot say), a cross when some
-//!   failed unseen; a click opens the Activity focus on that task, as the
+//!   main one's progress (turning while it cannot say), a still pause
+//!   mark when every task left is held (a service's quota, a refused
+//!   sign-in), a cross when some failed unseen; a click opens the Activity focus on that task, as the
 //!   status bar's item does;
 //! - the decisions waiting for an answer (the stack suggestions): a
 //!   count on a bell; a click opens the Stacks panel;
@@ -111,14 +112,22 @@ fn jobs_item(ui: &mut Ui, app: &AppHandle, activity: Option<&crate::activity::Su
     };
     let ctx = ui.ctx().clone();
     let main = summary.running.first();
-    let pip = match main.map(|p| &p.state) {
-        Some(State::Running {
-            done,
-            total: Some(total),
-            ..
-        }) if *total > 0 => Pip::Progress((*done as f32 / *total as f32).min(1.0)),
-        Some(_) => Pip::Busy,
-        None => Pip::Failed,
+    let held = summary.paused.first();
+    let mark = match (main.map(|p| &p.state), held) {
+        (
+            Some(State::Running {
+                done,
+                total: Some(total),
+                ..
+            }),
+            _,
+        ) if *total > 0 => Indicator::pip(Pip::Progress((*done as f32 / *total as f32).min(1.0))),
+        (Some(_), _) => Indicator::pip(Pip::Busy),
+        // Every task left is held: no turning ring.
+        (None, Some(_)) => {
+            Indicator::icon("phosphor:pause").tone(egui_pop::core::indicator::Tone::Warning)
+        }
+        (None, None) => Indicator::pip(Pip::Failed),
     };
     let running = (!summary.running.is_empty()).then(|| {
         text(
@@ -130,6 +139,19 @@ fn jobs_item(ui: &mut Ui, app: &AppHandle, activity: Option<&crate::activity::Su
             .with("count", summary.running.len()),
         )
     });
+    let paused = (!summary.paused.is_empty()).then(|| {
+        let said = text(
+            &ctx,
+            Message::new("gui-activity-paused", "{ $count } background tasks paused")
+                .with("count", summary.paused.len()),
+        );
+        let lines: Vec<String> = summary
+            .paused
+            .iter()
+            .map(|p| crate::activity::paused_line(&ctx, p))
+            .collect();
+        (said, lines.join("\n"))
+    });
     let failed = (summary.failed > 0).then(|| {
         text(
             &ctx,
@@ -137,16 +159,23 @@ fn jobs_item(ui: &mut Ui, app: &AppHandle, activity: Option<&crate::activity::Su
                 .with("count", summary.failed),
         )
     });
-    let meaning = match (running, failed) {
-        (Some(running), Some(failed)) => format!("{running}, {failed}"),
-        (Some(said), None) | (None, Some(said)) => said,
-        (None, None) => return,
+    let (paused, why) = paused.unzip();
+    let meaning = [running, paused, failed]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if meaning.is_empty() {
+        return;
+    }
+    let tip = match why {
+        Some(why) => format!("{meaning}\n{why}"),
+        None => meaning.clone(),
     };
     let r = ui.add(
-        Indicator::pip(pip)
-            .id(JOBS_MARK)
-            .name(meaning.clone())
-            .tooltip(meaning)
+        mark.id(JOBS_MARK)
+            .name(meaning)
+            .tooltip(tip)
             .interactive(text(
                 &ctx,
                 Message::new("gui-caption-jobs", "Show the jobs"),
@@ -154,6 +183,7 @@ fn jobs_item(ui: &mut Ui, app: &AppHandle, activity: Option<&crate::activity::Su
     );
     if r.clicked() {
         let id = main
+            .or(held)
             .map(|p| p.id.clone())
             .or_else(|| summary.newest_failed.clone());
         app.run(
