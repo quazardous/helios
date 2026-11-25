@@ -39,7 +39,7 @@ use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::{CommandId, PluginId};
 use egui_pop::model::jobs::{Job, JobState, Request};
-use helios_inspect::control::{ControlRequest, MoveTo};
+use helios_inspect::control::{ControlRequest, MoveTo, RunItem};
 use helios_vault::promises::{Promise, State};
 use serde_json::{Value, json};
 
@@ -58,6 +58,10 @@ pub const RETRY: &str = "helios.workflow.retry";
 /// Moves a run's items to the top or the bottom of the claim order:
 /// `workflow.prioritize`.
 pub const PRIORITIZE: &str = "helios.workflow.prioritize";
+/// Adds library photos (`images`, by id) to a run, or starts one, on
+/// the node running it: `workflow.submit` with `image:` items and the
+/// run's export settings (the same settings extend the same run).
+pub const SUBMIT: &str = "helios.workflow.submit";
 /// Stops a run claiming items: `workflow.pause`.
 pub const PAUSE: &str = "helios.workflow.pause";
 /// Claims a paused run's items again: `workflow.resume`.
@@ -99,6 +103,9 @@ struct RunView {
     titles: BTreeMap<String, String>,
     /// Its queueing graph nodes.
     nodes: BTreeSet<String>,
+    /// What its exports write (`out`, `format`, `quality`, `name`, the
+    /// export `node`, the `source`), as `workflow.runs` says it.
+    export: Value,
     /// Rows by graph node, then item.
     rows: BTreeMap<String, BTreeMap<String, Row>>,
 }
@@ -299,6 +306,7 @@ impl WorkflowQueue {
                 title: summary["title"].as_str().unwrap_or(id).to_string(),
                 state: summary["state"].as_str().unwrap_or_default().to_string(),
                 created,
+                export: summary["export"].clone(),
                 ..RunView::default()
             };
             for page in pages {
@@ -688,6 +696,17 @@ impl QueueSource for WorkflowQueue {
         self.take_in(app)
     }
 
+    fn submit_args(&self, node: &str) -> Option<Value> {
+        // The run created last that queues at the node and says what it
+        // writes.
+        let ((host, _), view) = self
+            .runs
+            .iter()
+            .filter(|(_, v)| v.nodes.contains(node) && v.export.is_object())
+            .max_by(|a, b| a.1.created.total_cmp(&b.1.created))?;
+        submit_args_of(host, &view.export)
+    }
+
     fn act(&mut self, app: &AppHandle, id: &str, action: Action) {
         let Some(target) = self.targets.get(id).cloned() else {
             return;
@@ -728,6 +747,58 @@ impl QueueSource for WorkflowQueue {
         }
     }
 }
+
+/// [`SUBMIT`]'s arguments (all but `images`) that extend a run of the
+/// node `host` exporting with `export` (its `workflow.runs` settings).
+fn submit_args_of(host: &str, export: &Value) -> Option<Value> {
+    Some(json!({
+        "node": host,
+        "out": export["out"].as_str()?,
+        "format": export["format"].as_str()?,
+        "quality": export["quality"],
+        "name": export["name"].as_str()?,
+        "export": export["node"].as_str()?,
+        "source": export["source"].as_str()?,
+    }))
+}
+
+/// [`SUBMIT`]'s request from its arguments: each image an `image:` item.
+fn submit_request(args: &Value) -> Result<ControlRequest, String> {
+    let text = |k: &str| args[k].as_str().map(str::to_string);
+    let images = args["images"].as_array().ok_or("`images` is missing")?;
+    let items = images
+        .iter()
+        .map(|i| {
+            i.as_str()
+                .filter(|i| !i.is_empty())
+                .map(|i| RunItem::Path(format!("{IMAGE}{i}").into()))
+                .ok_or("`images` are library photo ids")
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if items.is_empty() {
+        return Err("`images` is empty".into());
+    }
+    let format = serde_json::from_value(args["format"].clone())
+        .map_err(|_| "`format` is jpeg, png or tiff")?;
+    Ok(ControlRequest::WorkflowSubmit {
+        title: None,
+        items,
+        out: text("out").ok_or("`out` is missing")?.into(),
+        format,
+        quality: args["quality"]
+            .as_u64()
+            .map(|q| u8::try_from(q.min(100)).unwrap_or(100)),
+        name: text("name").unwrap_or_else(|| "{stem}.{ext}".into()),
+        node: text("export"),
+        source: text("source"),
+        again: false,
+        concurrency: None,
+    })
+}
+
+/// The prefix of a library photo's item, as the node reads it
+/// (`helios_node::workflow::extract::IMAGE`).
+const IMAGE: &str = "image:";
 
 /// Declares the queue verbs ([`CANCEL`], [`RETRY`], [`PRIORITIZE`],
 /// [`PAUSE`], [`RESUME`]): each sends its `workflow.*` request to the
@@ -840,6 +911,38 @@ impl Plugin for Commands {
                 schema(&[], &[]),
             ),
         ];
+        let relays = self.relays.clone();
+        ctx.command(
+            CommandSpec::new(
+                CommandId::from_static(SUBMIT),
+                "Adds library photos to a workflow run on a connected node (`workflow.submit` with `image:` items): the run with the same network and export settings is extended, else one starts",
+                "Queue",
+            )
+            .schema(json!({
+                "type": "object",
+                "properties": {
+                    "node": { "type": "string", "minLength": 1, "description": "The connected node running the run" },
+                    "images": { "type": "array", "items": { "type": "string" }, "description": "The library photos, by id" },
+                    "out": { "type": "string", "description": "The folder written to, absolute" },
+                    "format": { "enum": ["jpeg", "png", "tiff"] },
+                    "quality": { "type": ["integer", "null"], "minimum": 1, "maximum": 100 },
+                    "name": { "type": "string", "description": "The file name: {stem} and {ext} replaced" },
+                    "export": { "type": "string", "description": "The graph node exported; the network's first export when left out" },
+                    "source": { "type": "string", "description": "The source given each item; the network's only source when left out" },
+                },
+                "required": ["node", "images", "out", "format"],
+            }))
+            .hidden(),
+            move |call| {
+                let node = call.args["node"].as_str().ok_or("`node` is missing")?;
+                let request = submit_request(call.args)?;
+                relays
+                    .borrow()
+                    .get(node)
+                    .ok_or_else(|| format!("node `{node}` is not followed"))?
+                    .request(&request)
+            },
+        )?;
         for (id, about, schema) in verbs {
             let relays = self.relays.clone();
             ctx.command(

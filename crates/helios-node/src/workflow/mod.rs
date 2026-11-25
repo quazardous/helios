@@ -32,10 +32,19 @@ pub mod extract;
 pub mod lifecycle;
 pub mod runs;
 
+/// An item: a file by its absolute path, or a library photo by
+/// `image:` and its content hash, alone or with node parameters.
 fn run_item() -> Value {
+    let file = || {
+        json!({ "anyOf": [
+            absolute(),
+            { "type": "string", "pattern": "^image:[0-9a-f]{64}$",
+              "description": "a library photo: image: and its content hash" },
+        ] })
+    };
     json!({ "anyOf": [
-        absolute(),
-        object(&[("path", absolute(), true), ("params", node_params(), false)]),
+        file(),
+        object(&[("path", file(), true), ("params", node_params(), false)]),
     ] })
 }
 

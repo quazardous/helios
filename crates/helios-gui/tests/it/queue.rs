@@ -22,10 +22,11 @@ use egui_kittest::kittest::Queryable;
 use egui_pop::model::ids::PanelId;
 use helios_core::jobs::Start;
 use helios_core::{Bus, Value};
+use helios_gui::library::DraggedPhotos;
 use helios_gui::queue::{Action, ItemState, PANEL, Place};
 use helios_gui::relay::{NodeLink, Timing};
 use helios_gui::{Shell, headless, helios_panels};
-use helios_inspect::control::{ControlRequest, MoveTo};
+use helios_inspect::control::{ControlRequest, FileFormat, MoveTo, RunItem};
 use helios_inspect::{Address, Inspector, Listen};
 use helios_shell::commands::Origin;
 use helios_values::{Change, Set};
@@ -251,6 +252,8 @@ fn answer(runs: &Mutex<Runs>, bus: &Bus, request: ControlRequest) -> serde_json:
             "id": "run-1", "title": "Export 3 photos", "state": "running",
             "read_only": false, "created": AHEAD_MS, "items": runs.items.len(),
             "nodes": { "export": { "queue": "export" } },
+            "export": { "out": "/out", "format": "png", "quality": null,
+                        "name": "{stem}.{ext}", "node": "export", "source": "src" },
         }]}),
         ControlRequest::WorkflowItems { .. } => {
             let items: Vec<_> = runs
@@ -304,6 +307,27 @@ fn answer(runs: &Mutex<Runs>, bus: &Bus, request: ControlRequest) -> serde_json:
                         "items": which, "to": to }),
             );
             json!({ "ok": true, "run": "run-1" })
+        }
+        ControlRequest::WorkflowSubmit { items, .. } => {
+            let ids: Vec<String> = items
+                .iter()
+                .map(|i| format!("path:{}", i.path().display()))
+                .collect();
+            for id in &ids {
+                runs.items.push(Item {
+                    id: id.clone(),
+                    status: "waiting",
+                    attempts: 0,
+                    error: None,
+                });
+            }
+            bus.publish_value(
+                "workflow",
+                None,
+                "helios.workflow.run",
+                json!({ "run": "run-1", "title": "Export 3 photos", "state": "extended" }),
+            );
+            json!({ "ok": true, "run": "run-1", "new": ids.len() })
         }
         _ => json!({ "ok": false, "error": "not served here" }),
     };
@@ -443,6 +467,77 @@ fn an_agent_runs_the_same_verbs() {
         items(h)[0] == ("a.jpg".to_string(), ItemState::Waiting)
     });
     assert_eq!(node.verbs().len(), 1);
+}
+
+/// A library photo's id (its content hash) and the item the node makes
+/// of it.
+const PHOTO: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+/// The run's submission with the photo, as the node is asked it.
+fn photo_submitted() -> ControlRequest {
+    ControlRequest::WorkflowSubmit {
+        title: None,
+        items: vec![RunItem::Path(format!("image:{PHOTO}").into())],
+        out: "/out".into(),
+        format: FileFormat::Png,
+        quality: None,
+        name: "{stem}.{ext}".into(),
+        node: Some("export".into()),
+        source: Some("src".into()),
+        again: false,
+        concurrency: None,
+    }
+}
+
+/// Photos dragged out of the library and dropped on the panel join the
+/// run queued at the node: `workflow.submit` with the run's settings and
+/// the photos as `image:` items, and the new row shows.
+#[test]
+fn photos_dropped_on_the_panel_join_the_run() {
+    let node = Node::start("drop");
+    let mut h = following(&node);
+    let at = h.get_by_label("Queue of export").rect().center();
+    // Carried with the button down, as out of the library's grid.
+    h.event(egui::Event::PointerMoved(at));
+    h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(2);
+    egui_pop::api::bus::drag::start(&h.ctx, "photos", DraggedPhotos::of(vec![PHOTO.into()]));
+    for step in [4.0, 0.0] {
+        h.event(egui::Event::PointerMoved(at + egui::vec2(step, 0.0)));
+        h.run_steps(2);
+    }
+    h.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(2);
+    until(&mut h, "the photo submitted", |_| !node.verbs().is_empty());
+    assert_eq!(node.verbs(), [photo_submitted()]);
+    until(&mut h, "the photo's row", |h| items(h).len() == 4);
+}
+
+/// An agent adds photos to a run through the same command.
+#[test]
+fn an_agent_adds_photos_to_a_run() {
+    let node = Node::start("agent-submit");
+    let mut h = following(&node);
+    h.state_mut()
+        .run(
+            "helios.workflow.submit",
+            json!({ "node": "box", "images": [PHOTO], "out": "/out", "format": "png",
+                    "name": "{stem}.{ext}", "export": "export", "source": "src" }),
+            Origin::Agent("helper".into()),
+        )
+        .unwrap();
+    until(&mut h, "the photo submitted", |_| !node.verbs().is_empty());
+    assert_eq!(node.verbs(), [photo_submitted()]);
 }
 
 #[test]

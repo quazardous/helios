@@ -1629,6 +1629,10 @@ workflow-no-item = l’exécution `{ $run }` n’a pas d’élément `{ $item }`
 
 workflow-no-items = une exécution demande au moins un élément
 
+workflow-image-no-vault = { $image } : une photo de la bibliothèque demande le coffre du nœud (le lancer avec --vault)
+
+workflow-image-not-at-hand = { $image } : aucune copie de cette photo de la bibliothèque n’est à portée de main
+
 workflow-no-node = l’exécution `{ $run }` ne passe pas par une file à `{ $node }`
 
 workflow-no-run = aucune exécution `{ $run }`
@@ -2205,6 +2209,8 @@ gui-queue-column-state = État
 gui-queue-column-where = Où
 
 gui-queue-empty = Rien en file d’attente à { $node }
+
+gui-queue-drop-no-run = Pas ici : aucune exécution n’attend encore à { $node }
 
 gui-queue-here = Ce poste
 

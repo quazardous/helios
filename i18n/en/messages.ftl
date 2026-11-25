@@ -2331,6 +2331,8 @@ gui-queue-column-state = State
 
 gui-queue-column-where = Where
 
+gui-queue-drop-no-run = Not here: no run queues at { $node } yet
+
 gui-queue-empty = Nothing queued at { $node }
 
 gui-queue-here = This desktop
@@ -3726,6 +3728,10 @@ ui-empty-no-source-text = Add a folder, a card or an account to import from.
 ui-empty-nothing-queued = Nothing queued
 
 ui-empty-nothing-queued-text = Edits waiting to be rendered show here.
+
+workflow-image-no-vault = { $image }: a library photo needs the node's vault (start it with --vault)
+
+workflow-image-not-at-hand = { $image }: no copy of this library photo is at hand
 
 workflow-newer-format = run `{ $run }` was kept by a newer Helios: it cannot be worked here
 
