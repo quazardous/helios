@@ -63,6 +63,7 @@ use helios_vault::cull;
 use helios_vault::fields::{LABELS, PICKED, Query, RATING, REJECTED, ROTATION, TAGS, TITLE};
 use helios_vault::{
     EditSession, ImageId, LibraryRow, Location, Order, Presence, Store, Version, edit,
+    edit_steps::StepKind,
 };
 use serde_json::{Value, json};
 
@@ -3075,7 +3076,7 @@ fn next_step(
     force: bool,
 ) -> Option<EditStep> {
     let at = now.max(0.0) as u64;
-    let (committed, label, origin, gesture, current, edited) = {
+    let (committed, label, origin, gesture, current, edited, replayed) = {
         let mut modules: BTreeMap<String, (String, Params)> = BTreeMap::new();
         for (path, entry) in store.list("node/") {
             let Some((node, param)) = path
@@ -3122,6 +3123,15 @@ fn next_step(
             gesture,
             current,
             crate::edit_marks::Marks::read(store).edited(),
+            // An undo or a redo (a jump ends with one): marked so in the
+            // version, for the history rebuilt after a restart.
+            store.last_replayed().then(|| {
+                if store.last_committed().starts_with("undo ") {
+                    StepKind::Undo
+                } else {
+                    StepKind::Redo
+                }
+            }),
         )
     };
     let step = if committed == e.committed {
@@ -3141,6 +3151,7 @@ fn next_step(
             if !e.session.in_progress() {
                 return None;
             }
+            e.session.mark(StepKind::Cancel);
             e.session
                 .step(current, &format!("{gesture} (cancelled)"), &by, at)
         }
@@ -3148,6 +3159,9 @@ fn next_step(
         e.committed = committed;
         e.flushed_at = None;
         e.gesture = None;
+        if let Some(kind) = replayed {
+            e.session.mark(kind);
+        }
         e.session.step(current, &label, &origin, at)
     };
     e.unsaved = false;

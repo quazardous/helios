@@ -44,6 +44,7 @@ use helios_core::{Event, Graph, ModuleKind, Params};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::edit_steps::{self, StepKind};
 use crate::{ImageId, Store, Vault, Version, VersionId};
 
 /// The parameters of a graph's modules, by node name, with each node's
@@ -297,6 +298,9 @@ pub struct EditSession {
     /// The metadata each version saved carries (the workshop session the
     /// step was made in), until changed.
     meta: Option<Value>,
+    /// The kind of the next committed step saved
+    /// ([`EditSession::mark`]): a new step unless said otherwise.
+    kind: StepKind,
 }
 
 impl EditSession {
@@ -323,6 +327,7 @@ impl EditSession {
                 in_progress: false,
                 steps: 0,
                 meta: None,
+                kind: StepKind::Do,
             },
             head,
         ))
@@ -345,6 +350,13 @@ impl EditSession {
     /// The metadata the versions saved from now on carry (none: none).
     pub fn set_meta(&mut self, meta: Option<Value>) {
         self.meta = meta;
+    }
+
+    /// The next committed step saved is of `kind` (an undo, a redo, a
+    /// gesture given up), marked so in its version
+    /// ([`crate::edit_steps`]); the one after it is a new step again.
+    pub fn mark(&mut self, kind: StepKind) {
+        self.kind = kind;
     }
 
     /// Saves a committed step made by `origin` (`user`, `agent:<id>`,
@@ -431,6 +443,7 @@ impl EditSession {
             in_progress: false,
             steps: 0,
             meta: None,
+            kind: StepKind::Do,
         }
     }
 
@@ -447,6 +460,11 @@ impl EditSession {
         force: bool,
         in_progress: bool,
     ) -> Option<Version> {
+        let kind = if in_progress {
+            StepKind::Progress
+        } else {
+            std::mem::replace(&mut self.kind, StepKind::Do)
+        };
         if !force && self.saved.as_ref() == Some(&edit) {
             return None;
         }
@@ -458,7 +476,7 @@ impl EditSession {
             now,
         )
         .labelled(label)
-        .with_meta(self.meta.clone());
+        .with_meta(Some(edit_steps::marked(self.meta.clone(), kind)));
         self.head = Some(version.id);
         self.saved = Some(version.edit.clone());
         self.in_progress = in_progress;
