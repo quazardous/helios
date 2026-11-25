@@ -17,7 +17,9 @@
 //!   history (View › Activity…, Ctrl+Shift+J, do too); while promises run, a spinner,
 //!   their count and the main one's progress ("Importing 120/412"); a
 //!   promise that failed during this run, a warning badge until it is
-//!   seen. A click runs [`COMMAND`] with the job clicked (the main one,
+//!   seen; a held one (a service's quota, a refused sign-in) a pause
+//!   mark whose tooltip says why and when it goes on, with no spinner
+//!   while every task left is held. A click runs [`COMMAND`] with the job clicked (the main one,
 //!   or the newest failure): the failures are marked seen and the
 //!   Activity focus opens with that job selected (`crate::shell`'s
 //!   `activity_focus`: every kind of task in one place).
@@ -35,7 +37,7 @@ use std::time::Duration;
 use egui_pop::api::AppHandle;
 use helios_core::Message;
 use helios_inspect::client::Client;
-use helios_vault::promises::{Promise, State};
+use helios_vault::promises::{Paused, Promise, State, Wait};
 use serde_json::{Value, json};
 
 /// The command the indicator runs: the Activity focus shown (`id`: the
@@ -46,6 +48,8 @@ pub const COMMAND: &str = "activity.show";
 pub const RESUME: &str = "activity.resume";
 /// The indicator of the running tasks, for tests and agents.
 pub const MARK: &str = "helios.status.activity";
+/// The pause mark of the held tasks.
+pub const PAUSED_MARK: &str = "helios.status.activity.paused";
 /// The badge of the failed tasks.
 pub const FAILED_MARK: &str = "helios.status.activity.failed";
 
@@ -180,8 +184,11 @@ impl Default for Activity {
 /// What the status bar shows of the activity.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Summary {
-    /// The promises running, the oldest (the main one) first.
+    /// The promises running, the oldest (the main one) first; not the
+    /// held ones.
     pub running: Vec<Promise>,
+    /// The promises held ([`held`]), the oldest first.
+    pub paused: Vec<Promise>,
     /// The failures of this run not seen yet.
     pub failed: usize,
     /// The newest of them, which the badge's click selects.
@@ -311,18 +318,20 @@ impl Activity {
     /// failed unseen.
     pub fn summary(&self) -> Option<Summary> {
         let shared = lock(&self.shared);
-        let mut running: Vec<Promise> = shared
+        let (mut paused, mut running): (Vec<Promise>, Vec<Promise>) = shared
             .promises
             .iter()
             .filter(|p| runs(p))
             .cloned()
-            .collect();
+            .partition(held);
         running.reverse();
+        paused.reverse();
         let mut unseen = shared.promises.iter().filter(|p| self.unseen_failure(p));
         let newest_failed = unseen.next().map(|p| p.id.clone());
         let failed = usize::from(newest_failed.is_some()) + unseen.count();
-        (!running.is_empty() || failed > 0).then_some(Summary {
+        (!running.is_empty() || !paused.is_empty() || failed > 0).then_some(Summary {
             running,
+            paused,
             failed,
             newest_failed,
         })
@@ -359,6 +368,51 @@ pub fn runs(p: &Promise) -> bool {
     !p.state.is_settled() && !helios_node_core::job_promises::is_standing(&p.request)
 }
 
+/// Whether `p` is held: still running, but waiting for a service's
+/// quota or a sign-in (`Promise::paused`).
+pub fn held(p: &Promise) -> bool {
+    p.paused.is_some() && !p.state.is_settled()
+}
+
+/// A held job's state: what it waits for (`Promise::paused`).
+pub fn paused_message(paused: &Paused) -> Message {
+    match paused.wait {
+        Wait::Quota => Message::new(
+            "gui-promise-paused-quota",
+            "Paused: the service asks to wait",
+        ),
+        Wait::SignIn => Message::new(
+            "gui-promise-paused-sign-in",
+            "Paused: the service refused the sign-in",
+        ),
+    }
+}
+
+/// A held promise in a line: its label, why it waits, and when it goes on
+/// by itself when the service said.
+pub fn paused_line(ctx: &egui::Context, p: &Promise) -> String {
+    let text = |m: Message| crate::i18n::text(ctx, m);
+    let Some(paused) = &p.paused else {
+        return p.label.clone();
+    };
+    let why = text(paused_message(paused));
+    let at = paused.until.and_then(|until| {
+        chrono::DateTime::from_timestamp(until.cast_signed(), 0).map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%H:%M:%S")
+                .to_string()
+        })
+    });
+    match at {
+        Some(time) => format!(
+            "{}: {why}. {}",
+            p.label,
+            text(Message::new("gui-activity-goes-on", "Goes on at { $time }").with("time", time))
+        ),
+        None => format!("{}: {why}", p.label),
+    }
+}
+
 /// Reads the promises of `node` until the activity is gone.
 fn follow(node: &Client, shared: &Weak<Mutex<Shared>>, kick: &AtomicBool) {
     loop {
@@ -375,7 +429,8 @@ fn follow(node: &Client, shared: &Weak<Mutex<Shared>>, kick: &AtomicBool) {
         let busy = match read {
             Ok(promises) => {
                 let mut shared = lock(&held);
-                let busy = promises.iter().any(runs);
+                // Held work waits minutes: read it as seldom as none.
+                let busy = promises.iter().any(|p| runs(p) && !self::held(p));
                 if shared.promises != promises {
                     shared.log(&promises, now());
                     shared.promises = promises;
@@ -496,8 +551,44 @@ pub fn indicator(ui: &mut egui::Ui, app: &AppHandle, summary: Option<&Summary>) 
             clicked = Some(main.id.clone());
         }
     }
-    if summary.failed > 0 {
+    if let Some(first) = summary.paused.first() {
+        // Held: a still pause mark, no spinner; why and until when in its
+        // tooltip.
         if !summary.running.is_empty() {
+            ui.divider();
+        }
+        let list = summary
+            .paused
+            .iter()
+            .map(|p| paused_line(&ctx, p))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let meaning = text(
+            Message::new("gui-activity-paused", "{ $count } background tasks paused")
+                .with("count", summary.paused.len()),
+        );
+        let r = ui.add(
+            Indicator::icon("phosphor:pause")
+                .tone(Tone::Warning)
+                .id(PAUSED_MARK)
+                .name(meaning.clone())
+                .tooltip(format!("{meaning}\n{list}"))
+                .interactive(action.clone()),
+        );
+        let mut hit = r.clicked();
+        if summary.running.is_empty()
+            && let Some(paused) = &first.paused
+        {
+            let label = egui_pop::core::widgets::bar_text_button(ui, text(paused_message(paused)))
+                .tip(list);
+            hit |= label.clicked();
+        }
+        if hit {
+            clicked = Some(first.id.clone());
+        }
+    }
+    if summary.failed > 0 {
+        if !summary.running.is_empty() || !summary.paused.is_empty() {
             ui.divider();
         }
         let meaning = text(
