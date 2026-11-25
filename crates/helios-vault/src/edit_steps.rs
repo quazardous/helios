@@ -137,11 +137,11 @@ impl<'a> Rebuilt<'a> {
 /// undone, it goes back to where it started. `progress` and `cancel` versions are no step.
 pub fn rebuild(line: &[Version]) -> Rebuilt<'_> {
     // The states, `None` the unedited image first.
-    let mut states: Vec<Option<&Version>> = vec![None];
-    let mut at = 0usize;
-    fn edit_of<'v>(s: &Option<&'v Version>) -> Option<&'v Value> {
+    fn edit_of(s: Option<&Version>) -> Option<&Value> {
         s.map(|v| &v.edit)
     }
+    let mut states: Vec<Option<&Version>> = vec![None];
+    let mut at = 0usize;
     for version in line {
         let kind = StepKind::of(version);
         let replay = match kind {
@@ -153,32 +153,31 @@ pub fn rebuild(line: &[Version]) -> Rebuilt<'_> {
                 // which has no version to compare.
                 let below = (1..at)
                     .rev()
-                    .find(|&i| edit_of(&states[i]) == Some(&version.edit));
+                    .find(|&i| edit_of(states[i]) == Some(&version.edit));
                 below.or((at == 1).then_some(0))
             }
             StepKind::Redo => {
                 let above =
-                    (at + 1..states.len()).find(|&i| edit_of(&states[i]) == Some(&version.edit));
+                    (at + 1..states.len()).find(|&i| edit_of(states[i]) == Some(&version.edit));
                 above.or_else(|| {
                     (0..at)
                         .rev()
-                        .find(|&i| edit_of(&states[i]) == Some(&version.edit))
+                        .find(|&i| edit_of(states[i]) == Some(&version.edit))
                 })
             }
         };
-        match replay {
-            Some(i) => at = i,
-            None => {
-                states.truncate(at + 1);
-                states.push(Some(version));
-                at = states.len() - 1;
-            }
+        if let Some(i) = replay {
+            at = i;
+        } else {
+            states.truncate(at + 1);
+            states.push(Some(version));
+            at = states.len() - 1;
         }
     }
     let steps = states
         .windows(2)
         .map(|w| RebuiltStep {
-            before: edit_of(&w[0]),
+            before: edit_of(w[0]),
             version: w[1].expect("a step has its version"),
         })
         .collect::<Vec<_>>();
