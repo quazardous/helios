@@ -269,12 +269,11 @@ fn grouped(
     let mut at: HashMap<String, usize> = HashMap::new();
     for id in ordered {
         let key = key_of(id).unwrap_or_else(|| id.hex());
-        match at.get(&key) {
-            Some(&i) => groups[i].1.push(*id),
-            None => {
-                at.insert(key.clone(), groups.len());
-                groups.push((key, vec![*id]));
-            }
+        if let Some(&i) = at.get(&key) {
+            groups[i].1.push(*id);
+        } else {
+            at.insert(key.clone(), groups.len());
+            groups.push((key, vec![*id]));
         }
     }
     groups
