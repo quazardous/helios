@@ -575,6 +575,65 @@ pub fn reset(
     finish(store, registry, steps, g, &before, &origin, Cause::Reset)
 }
 
+/// A key on the focused `handle` of `node`: its `writes` (parameter
+/// names, as `egui_hud::render::HandleKeys::Change` gives them) held in
+/// the handle's range and applied as one undo step through the value
+/// flow, cause `Key`: a size or an angle as one value
+/// ([`helios_controls::flow::apply`]), a point's x and y together
+/// ([`helios_controls::flow::apply_multi`]). Whether anything was kept.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the same tool, node and handle the drag, reset and wheel take"
+)]
+pub fn keyed(
+    store: &mut Store,
+    registry: &Registry,
+    steps: &Steps,
+    tool: &Tool,
+    node: &str,
+    handle: &str,
+    writes: &[(String, f64)],
+    origin: Origin,
+) -> Result<bool, String> {
+    use helios_controls::flow::{self, MultiOutcome, MultiShot, OneShot, Outcome};
+    let h = tool
+        .handle(handle)
+        .ok_or_else(|| format!("no handle `{handle}` on `{}`", tool.control))?;
+    let writes: Vec<(String, f64)> = writes
+        .iter()
+        .map(|(p, v)| (tool.target.path(node, p), h.held(p, *v)))
+        .collect();
+    let Some((first, to)) = writes.first().cloned() else {
+        return Ok(false);
+    };
+    let control = {
+        let e = store
+            .get(&first)
+            .ok_or_else(|| format!("no value at `{first}`"))?;
+        control_of(registry, &first, &e.descriptor)
+    };
+    const DEVICE: &str = "keyboard";
+    if writes.len() == 1 {
+        let ask = OneShot {
+            to,
+            force: false,
+            origin,
+            cause: Cause::Key,
+            device: DEVICE,
+        };
+        let out = flow::apply(store, steps, &control, &first, ask)?;
+        return Ok(matches!(out, Outcome::Committed { .. }));
+    }
+    let ask = MultiShot {
+        force: false,
+        origin,
+        cause: Cause::Key,
+        device: DEVICE,
+    };
+    let out = flow::apply_multi(store, steps, &control, &writes, ask)?;
+    Ok(matches!(out, MultiOutcome::Committed { .. }))
+}
+
 /// The wheel over a handle: one group while it turns (the caller ends it
 /// after a pause with [`Turn::end`]).
 #[derive(Debug)]

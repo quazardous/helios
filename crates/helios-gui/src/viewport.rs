@@ -36,6 +36,7 @@
 //!   `viewport.scene` is the float data of the view before the display
 //!   transform.
 
+use helios_controls::render::HandleKeys;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::Ui;
@@ -1191,21 +1192,26 @@ impl Viewport {
     /// with its value in its hover card. The viewport keeps sensing the
     /// handles' drags (its overlays) and their cursor: each handle is
     /// declared through `egui_hud`'s `declare_handle`, which senses the
-    /// hover alone over the overlay's hit target.
+    /// hover alone over the overlay's hit target. Tab reaches each
+    /// handle; once focused, `egui_hud`'s `handle_keys` reads its keys
+    /// (arrows move a point, `+` and `-` step a size or an angle, Escape
+    /// cancels): returned with the handle they ask of, applied by the
+    /// caller.
     fn declare_areas(
         &self,
         ui: &mut Ui,
         response: &egui::Response,
         mapping: Option<&egui_pop::viewport::Mapping>,
         store: &Store,
-    ) {
+    ) -> Vec<(crate::masks::Keyed, HandleKeys)> {
+        let mut asked = Vec::new();
         let image = if crate::masks::tool(store) == "path" {
             AreaSpec::new("viewport.image", AreaKind::Edit)
         } else {
             AreaSpec::navigate("viewport.image")
         };
         areas::register(ui, response, image);
-        let Some(m) = mapping else { return };
+        let Some(m) = mapping else { return asked };
         let ctx = ui.ctx().clone();
         let locale = crate::i18n::locale(&ctx);
         for h in self
@@ -1228,8 +1234,17 @@ impl Viewport {
             if let Some(e) = entry.filter(|e| matches!(e.value, Value::Float(_) | Value::Int(_))) {
                 spec = spec.value(crate::params::shown_in(&locale, &e.descriptor, &e.value));
             }
-            helios_controls::render::declare_handle(ui, at, id, spec);
+            let r = helios_controls::render::declare_handle(ui, at, id, spec);
+            let Some(k) = h.keys else { continue };
+            let Some(th) = k.tool.handle(&k.handle) else {
+                continue;
+            };
+            let params = helios_rack::tools::ParamsOf(&k.params);
+            if let Some(keys) = helios_controls::render::handle_keys(ui, &r, &th.handle, &params) {
+                asked.push((k, keys));
+            }
         }
+        asked
     }
 
     pub fn ui(&mut self, ui: &mut Ui, store: &Mutex<Store>) {
@@ -1326,7 +1341,16 @@ impl Viewport {
         }
         self.readout = out.readout;
         let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
-        self.declare_areas(ui, &out.response, out.mapping.as_ref(), &store);
+        let asked = self.declare_areas(ui, &out.response, out.mapping.as_ref(), &store);
+        for (k, keys) in asked {
+            match keys {
+                HandleKeys::Change(writes) => k.apply(&writes, &mut store),
+                HandleKeys::Cancel => {
+                    self.masks.cancel_drag(&mut store);
+                    self.plugin_tools.cancel_drag(&mut store);
+                }
+            }
+        }
         let now = ui.input(|i| i.time);
         self.masks.signals(&out.signals, &mut store, now);
         self.plugin_tools.signals(&out.signals, &mut store, now);
