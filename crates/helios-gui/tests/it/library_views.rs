@@ -54,6 +54,25 @@ fn view(h: &Harness<'_, Shell>, id: &str) -> (String, Option<String>) {
         .with_gallery(id, |l| (l.filter().text.clone(), l.cursor()))
 }
 
+/// A command's answer: the shell queues it for its frame, then its
+/// history has the result.
+fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Result<Value, String> {
+    let out = h.state_mut().run(id, args, Origin::Agent("test".into()));
+    h.run_steps(3);
+    match out {
+        Ok(v) if v == json!({ "queued": true }) => {
+            h.state()
+                .history()
+                .into_iter()
+                .rev()
+                .find(|r| r.id == id)
+                .unwrap_or_else(|| panic!("{id} never ran"))
+                .result
+        }
+        other => other,
+    }
+}
+
 fn payload(h: &Harness<'_, Shell>, id: &str) -> Value {
     h.state()
         .app()
@@ -185,8 +204,12 @@ fn each_view_s_selection_and_cursor_read_back_the_same_after_a_restart() {
     assert_eq!(payload(&h, &first)["cursor"], "c");
     // A lone cursor is its own selection: not written twice.
     assert_eq!(payload(&h, &second).get("selection"), None);
-    let agent = || Origin::Agent("test".into());
-    let before = run(&mut h, SELECTION_COMMAND, json!({}), agent());
+    let before = answer(&mut h, SELECTION_COMMAND, json!({})).unwrap();
+    assert_eq!(
+        before["views"].as_array().map(Vec::len),
+        Some(3),
+        "{before}"
+    );
     assert_eq!(
         before["views"][1],
         json!({ "view": first, "selection": ["a", "c", "e"], "cursor": "c" })
@@ -201,18 +224,17 @@ fn each_view_s_selection_and_cursor_read_back_the_same_after_a_restart() {
     drop(h);
     let mut h = harness(Some(Layout::from_json(&saved).unwrap()));
     h.run_steps(3);
-    let after = run(&mut h, SELECTION_COMMAND, json!({}), agent());
+    let after = answer(&mut h, SELECTION_COMMAND, json!({})).unwrap();
     assert_eq!(after, before, "the agent's snapshot reads back the same");
-    let one = run(&mut h, SELECTION_COMMAND, json!({ "view": first }), agent());
+    let one = answer(&mut h, SELECTION_COMMAND, json!({ "view": first })).unwrap();
     assert_eq!(one, before["views"][1]);
     assert!(
-        h.state_mut()
-            .run(
-                SELECTION_COMMAND,
-                json!({ "view": "helios.vault#99" }),
-                agent()
-            )
-            .is_err(),
+        answer(
+            &mut h,
+            SELECTION_COMMAND,
+            json!({ "view": "helios.vault#99" })
+        )
+        .is_err(),
         "no such view"
     );
 }
