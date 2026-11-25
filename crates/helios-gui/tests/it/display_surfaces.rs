@@ -6,11 +6,13 @@
 //! the same request an agent does, with the same answer and effect, and
 //! the surface a double click reaches wears a target mark. Compare opens
 //! as many times as asked ("New surface", "New window", the always-new
-//! strategy), each with a comparison of its own.
+//! strategy), each with a comparison of its own. Zen mode without a panel
+//! named, the keyboard in a control panel, shows that surface alone (a
+//! Compare while culling).
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use helios_gui::dialogs::MenuItem;
 use helios_gui::display_surfaces::{
     COMPARE, IMAGE, NEW, NEW_WINDOW, SHOW_COMMAND, STRATEGY_SETTING,
@@ -382,4 +384,150 @@ fn the_compare_keys_act_on_the_focused_compare_else_the_last_focused() {
     h.run_steps(2);
     assert_eq!(active_in(&mut h, COMPARE), json!("b"));
     assert_eq!(active_in(&mut h, second), json!("c"));
+}
+
+/// The tabs drawn, by their accessible names.
+fn tabs(h: &Harness<'_, Shell>) -> Vec<String> {
+    h.query_all_by_role(egui::accesskit::Role::Tab)
+        .filter_map(|n| n.accesskit_node().label())
+        .collect()
+}
+
+/// `Ctrl+K Z`, Helios's zen key.
+fn zen_key(h: &mut Harness<'_, Shell>) {
+    h.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::K);
+    h.run();
+    h.key_press(egui::Key::Z);
+    h.run_steps(3);
+}
+
+#[test]
+fn zen_while_culling_shows_compare_alone_and_escape_restores_the_layout() {
+    let mut h = harness();
+    // Culling arranges its own layout: Compare opens within it.
+    h.state_mut()
+        .run("view.culling", json!({ "on": true }), Origin::User)
+        .unwrap();
+    h.run_steps(2);
+    open_compare(&mut h);
+    // The keyboard in a control panel: zen asks Helios for its panel.
+    let app = h.state().app().handle().clone();
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
+        "helios.modules",
+    ));
+    h.run_steps(3);
+    assert!(tabs(&h).iter().any(|t| t == "Compare"), "{:?}", tabs(&h));
+    let before = serde_json::to_value(app.layout()).unwrap();
+
+    zen_key(&mut h);
+    assert!(app.zen());
+    assert_eq!(
+        app.zen_panel()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(COMPARE)
+    );
+    assert!(tabs(&h).is_empty(), "Compare alone: {:?}", tabs(&h));
+
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!app.zen());
+    assert!(tabs(&h).iter().any(|t| t == "Compare"));
+    assert_eq!(serde_json::to_value(app.layout()).unwrap(), before);
+}
+
+#[test]
+fn zen_outside_culling_shows_the_surface_a_double_click_reaches() {
+    let mut h = harness();
+    open_compare(&mut h);
+    let app = h.state().app().handle().clone();
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
+        "helios.modules",
+    ));
+    h.run_steps(3);
+    // The primary strategy: the Image.
+    assert_eq!(
+        app.zen_target()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(IMAGE)
+    );
+    // The last focused one: Compare, once it had the focus.
+    set_strategy(&mut h, "last_focused");
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(COMPARE));
+    h.run_steps(2);
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
+        "helios.modules",
+    ));
+    h.run_steps(3);
+    assert_eq!(
+        app.zen_target()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(COMPARE)
+    );
+}
+
+#[test]
+fn zen_on_the_focused_compare_shows_it_alone_and_leaving_restores_the_panels() {
+    let mut h = harness();
+    open_compare(&mut h);
+    let app = h.state().app().handle().clone();
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(COMPARE));
+    h.run_steps(3);
+    let before_tabs = tabs(&h);
+    assert!(
+        before_tabs.iter().any(|t| t == "Compare"),
+        "{before_tabs:?}"
+    );
+    let before = serde_json::to_value(app.layout()).unwrap();
+
+    // The focused view wins over Helios's choice, culling or not.
+    zen_key(&mut h);
+    assert!(app.zen());
+    assert_eq!(
+        app.zen_panel()
+            .as_ref()
+            .map(egui_pop::prelude::PanelId::as_str),
+        Some(COMPARE)
+    );
+    assert!(tabs(&h).is_empty(), "Compare alone: {:?}", tabs(&h));
+
+    // The same key leaves zen: every panel back, the layout untouched.
+    zen_key(&mut h);
+    assert!(!app.zen());
+    assert_eq!(tabs(&h), before_tabs);
+    assert_eq!(serde_json::to_value(app.layout()).unwrap(), before);
+}
+
+#[test]
+fn zen_with_no_panel_to_choose_falls_back_to_the_centre() {
+    let mut h = harness();
+    open_compare(&mut h);
+    // Ask: no surface a double click reaches, so Helios names none.
+    set_strategy(&mut h, "ask");
+    let app = h.state().app().handle().clone();
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
+        "helios.modules",
+    ));
+    h.run_steps(3);
+    let centre = app
+        .layout()
+        .active_in(egui_pop::model::panels::Area::Center)
+        .first()
+        .map(|p| p.as_str().to_string());
+    assert!(centre.is_some());
+    assert_eq!(
+        app.zen_target().as_ref().map(|p| p.as_str().to_string()),
+        centre
+    );
+    zen_key(&mut h);
+    assert!(app.zen());
+    assert_eq!(
+        app.zen_panel().as_ref().map(|p| p.as_str().to_string()),
+        centre
+    );
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(!app.zen());
 }
