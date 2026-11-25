@@ -51,6 +51,9 @@ struct State {
     running: u32,
     /// Downloads waiting for a place.
     downloads: u32,
+    /// The daily quota started again then ([`Budget::new_day`]): the
+    /// requests before it no longer count for the day.
+    day_from: Option<Instant>,
 }
 
 /// A place in the budget: the request it was given for is under way until
@@ -186,6 +189,29 @@ impl Budget {
         state.hold = Some(state.hold.map_or(until, |h| h.max(until)));
     }
 
+    /// The daily quota ([`Limits::per_day`]) is spent at `now`: how long
+    /// until its oldest request counted is a day old. `None`: requests are
+    /// left for the day, or no daily quota is declared.
+    pub fn day_spent(&self, now: Instant) -> Option<Duration> {
+        let n = self.limits.per_day? as usize;
+        let state = lock(&self.state);
+        if day_count(&state, now) < n {
+            return None;
+        }
+        let oldest = state
+            .at
+            .iter()
+            .find(|t| now.saturating_duration_since(**t) < DAY && day_counts(&state, **t))?;
+        Some(DAY.saturating_sub(now.saturating_duration_since(*oldest)))
+    }
+
+    /// The service's daily quota started again at `now` (its
+    /// [`Limits::day_reset`] passed, or the person asked to go on): the
+    /// requests before no longer count for the day.
+    pub fn new_day(&self, now: Instant) {
+        lock(&self.state).day_from = Some(now);
+    }
+
     /// A place at `now`; `queued`: the request is one of the waiting
     /// counted (a download's ticket does not wait behind itself).
     fn grant(self: &Arc<Self>, use_: Use, now: Instant, queued: bool) -> Option<Permit> {
@@ -194,6 +220,7 @@ impl Budget {
             per_minute,
             per_day,
             parallel,
+            ..
         } = self.limits;
         let mut state = lock(&self.state);
         if use_ == Use::Thumbnail && state.downloads > 0 {
@@ -233,16 +260,33 @@ impl Budget {
                     .take_while(|t| now.saturating_duration_since(**t) < span)
                     .count()
             };
-            for (n, span) in [(per_second, SECOND), (per_minute, MINUTE), (per_day, DAY)] {
+            for (n, span) in [(per_second, SECOND), (per_minute, MINUTE)] {
                 if n.is_some_and(|n| within(span) >= n as usize) {
                     return None;
                 }
+            }
+            if per_day.is_some_and(|n| day_count(&state, now) >= n as usize) {
+                return None;
             }
             state.at.push_back(now);
         }
         state.running += 1;
         Some(Permit(self.clone()))
     }
+}
+
+/// Whether a request made `at` counts for the day ([`State::day_from`]).
+fn day_counts(state: &State, at: Instant) -> bool {
+    state.day_from.is_none_or(|from| at >= from)
+}
+
+/// Requests counted for the day at `now`.
+fn day_count(state: &State, now: Instant) -> usize {
+    state
+        .at
+        .iter()
+        .filter(|t| now.saturating_duration_since(**t) < DAY && day_counts(state, **t))
+        .count()
 }
 
 #[cfg(test)]
@@ -298,6 +342,25 @@ mod tests {
         drop(ticket);
         let u = s + SECOND;
         assert!(b.try_take(Use::Thumbnail, u).is_some());
+    }
+
+    #[test]
+    fn a_spent_day_says_so_until_a_new_day_starts() {
+        let b = Budget::new(Limits {
+            per_day: Some(2),
+            ..Limits::default()
+        });
+        let t = Instant::now();
+        assert!(b.try_take(Use::Download, t).is_some());
+        assert_eq!(b.day_spent(t), None);
+        let s = t + Duration::from_hours(1);
+        assert!(b.try_take(Use::Download, s).is_some());
+        assert!(b.try_take(Use::Download, s).is_none());
+        assert_eq!(b.day_spent(s), Some(Duration::from_hours(23)));
+        let u = s + Duration::from_hours(2);
+        b.new_day(u);
+        assert_eq!(b.day_spent(u), None);
+        assert!(b.try_take(Use::Download, u).is_some());
     }
 
     #[test]

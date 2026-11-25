@@ -22,8 +22,10 @@ thumbnails = true
 one_source_per_account = true
 # What Helios asks of Google at most: reading glances ahead pauses here.
 # Every install shares the OAuth client's project quota, so these stay
-# well under it (`LIMITS` in src/lib.rs says the same).
-limits = { per_minute = 120, per_day = 10000, parallel = 2 }
+# well under it (`LIMITS` in src/lib.rs says the same). Its daily quota
+# starts again at midnight Pacific time: an import that spent it pauses
+# until then.
+limits = { per_minute = 120, per_day = 10000, parallel = 2, day_reset = "us-pacific" }
 
 [compat]
 helios = ">=0.92.0, <0.93.0"

@@ -78,6 +78,12 @@ pub enum Hold {
     /// The service asks to wait (a rate limit, a quota met): `wait` is its
     /// `Retry-After`, else a doubling backoff.
     Quota { wait: Duration, said: bool },
+    /// The account's daily quota is spent ([`Budget::day_spent`]): no
+    /// request until it starts again at `until` (the connector's
+    /// [`helios_connect::DayReset`], else a day after the oldest request
+    /// counted), `now` being the clock's time, both in seconds since the
+    /// epoch.
+    DailyQuota { until: u64, now: u64 },
     /// The service refused the account's sign-in (its token's refresh):
     /// a sign-in is needed.
     SignIn,
@@ -105,6 +111,16 @@ pub struct Remote<'a> {
     /// is waited out at most [`CUTS`] times, a refused sign-in fails the
     /// item.
     pub holder: Option<&'a dyn Holder>,
+    /// The wall clock, in seconds since the epoch, a daily quota's reset
+    /// is told on; none: the system's (tests give a fake one).
+    pub clock: Option<&'a (dyn Fn() -> u64 + Sync)>,
+}
+
+/// The system's wall clock, in seconds since the epoch.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// The volume a connector's source is: one per account or source.
@@ -449,9 +465,7 @@ impl<S: Store> Run<'_, S> {
             if self.stopped() {
                 return Err(format!("{name}: cancelled"));
             }
-            let Some(permit) =
-                budget.take(Use::Download, &std::time::Instant::now, &|| self.stopped())
-            else {
+            let Some(permit) = self.place(&budget) else {
                 return Err(format!("{name}: cancelled"));
             };
             let mut landing = Landing::open(part, offset, item.claim.as_ref())
@@ -563,6 +577,42 @@ impl<S: Store> Run<'_, S> {
                 e => return Err(format!("{name}: {e}")),
             }
             offset = if self.caps.resume { got } else { 0 };
+        }
+    }
+
+    /// A download's place in the account's `budget`, waited for: `None`
+    /// once cancelled. A daily quota spent holds the import until it
+    /// starts again, when a [`Holder`] is there to say so.
+    fn place(&mut self, budget: &Arc<Budget>) -> Option<helios_connect::budget::Permit> {
+        let ticket = budget.queue(Use::Download);
+        loop {
+            if self.stopped() {
+                return None;
+            }
+            let now = std::time::Instant::now();
+            if let Some(permit) = ticket.try_take(now) {
+                return Some(permit);
+            }
+            if self.remote.holder.is_some()
+                && let Some(frees) = budget.day_spent(now)
+            {
+                let wall = self.remote.clock.map_or_else(unix_now, |c| c());
+                let until = match budget.limits().day_reset {
+                    Some(reset) => reset.next_after(wall),
+                    None => wall + frees.as_secs().max(1),
+                };
+                self.log.push(format!(
+                    "{}: the daily quota is reached, the import holds until it starts again",
+                    self.remote.source.label
+                ));
+                if !self.held(&Hold::DailyQuota { until, now: wall }) {
+                    return None;
+                }
+                // Its reset passed, or the person asked to go on.
+                budget.new_day(std::time::Instant::now());
+                continue;
+            }
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 

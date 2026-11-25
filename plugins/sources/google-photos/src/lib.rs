@@ -61,12 +61,14 @@ pub const API_CHECK: &str = "google-photos.api-check";
 /// it (`[limits]`): an import's downloads and the import window's
 /// read-ahead of glances share one budget per account held to them, two
 /// requests at a time. Every install shares the OAuth client's project
-/// quota, so these stay well under it.
+/// quota, so these stay well under it. Google's daily quota starts again
+/// at midnight Pacific time.
 pub const LIMITS: Limits = Limits {
     per_second: None,
     per_minute: Some(120),
     per_day: Some(10_000),
     parallel: Some(2),
+    day_reset: Some(helios_connect::DayReset::UsPacific),
 };
 
 /// The scope reading the items the person picks.
