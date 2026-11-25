@@ -1606,10 +1606,7 @@ impl MaskTree {
             if add.clicked() {
                 request(
                     ui.ctx(),
-                    Request::Menu {
-                        at: add.rect.left_bottom(),
-                        items: add_items(),
-                    },
+                    Request::menu(ui.ctx(), add.rect.left_bottom(), add_items()),
                 );
             }
         });

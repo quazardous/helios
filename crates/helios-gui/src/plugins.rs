@@ -618,6 +618,9 @@ impl Plugin for History {
 /// the bar's `CAPTION` zone, kept in full screen (`crate::caption`).
 pub struct Frame {
     pub status: crate::jobs::Status,
+    /// The shell's menus of commands, a block of the `WINDOW_OVERLAYS`
+    /// zone: each window draws the one asked from it.
+    pub(crate) menus: crate::shell::menus::Menus,
 }
 
 /// Helios's status line in the status bar (keys pending, a recording,
@@ -677,6 +680,7 @@ impl Plugin for Frame {
                 crate::caption::block(self.status.clone()),
             ),
         );
+        ctx.block(zones::WINDOW_OVERLAYS, self.menus.block());
         ctx.replace(STEP_SYSTEM_MENU, |app, args| {
             let x = args["x"].as_f64().unwrap_or(0.0) as f32;
             let y = args["y"].as_f64().unwrap_or(0.0) as f32;

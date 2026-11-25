@@ -352,6 +352,15 @@ fn the_metadata_section_fits_the_narrow_library_panel() {
 /// One pass of the Library window's own OS window (egui's deferred
 /// viewport), as eframe runs it apart from the main window's: no input.
 fn window_pass(h: &mut Harness<'static, Shell>, window: ViewportId) -> egui::FullOutput {
+    window_pass_with(h, window, Vec::new())
+}
+
+/// [`window_pass`] given input events (a click), the window focused.
+fn window_pass_with(
+    h: &mut Harness<'static, Shell>,
+    window: ViewportId,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
     use egui::{Pos2, RawInput, Rect, ViewportInfo};
     let cb = h.output().viewport_output[&window]
         .viewport_ui_cb
@@ -362,12 +371,15 @@ fn window_pass(h: &mut Harness<'static, Shell>, window: ViewportId) -> egui::Ful
         viewport_id: window,
         screen_rect: Some(rect),
         time: Some(h.ctx.input(|i| i.time) + 1.0 / 60.0),
+        focused: !events.is_empty(),
+        events,
         ..Default::default()
     };
     input.viewports.insert(
         window,
         ViewportInfo {
             inner_rect: Some(rect),
+            focused: Some(input.focused),
             ..Default::default()
         },
     );
@@ -447,5 +459,100 @@ fn the_library_window_draws_only_when_something_came_in_for_it() {
     assert!(
         window_passes_after_main(&mut h, window) > 0,
         "the Library window not drawn after a mark came in"
+    );
+}
+
+/// The accessible names a window's pass drew, with their rectangles.
+fn drawn_names(out: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+    let Some(update) = &out.platform_output.accesskit_update else {
+        return Vec::new();
+    };
+    update
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| {
+            let name = n.label()?.to_string();
+            let b = n.bounds()?;
+            Some((
+                name,
+                egui::Rect::from_min_max(
+                    egui::pos2(b.x0 as f32, b.y0 as f32),
+                    egui::pos2(b.x1 as f32, b.y1 as f32),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// A right click on a photo of the Library window, in its own OS window,
+/// opens the photo's menu in that window, at the pointer: never in the
+/// main window (owner report on 0.92: the menu showed at the main
+/// window's top left).
+#[test]
+fn a_right_click_in_the_library_window_opens_the_menu_there_at_the_pointer() {
+    let mut shell = Shell::new(helios_panels(), None);
+    shell.set_library(entries());
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.ctx.set_embed_viewports(false);
+    h.run();
+    run(&mut h, LIBRARY_WINDOW_COMMAND, Value::Null);
+    let windows = declared(&h);
+    assert_eq!(windows.len(), 1, "the focus's own window: {windows:?}");
+    let window = windows[0];
+    let mut names = Vec::new();
+    for _ in 0..6 {
+        let out = window_pass(&mut h, window);
+        names = drawn_names(&out);
+        h.run_steps(1);
+        if names.iter().any(|(n, _)| n == "b.jpg") {
+            break;
+        }
+    }
+    let cell = names
+        .iter()
+        .find(|(n, _)| n == "b.jpg")
+        .unwrap_or_else(|| panic!("no cell b in the Library window: {names:?}"))
+        .1;
+    let at = cell.center();
+    window_pass_with(&mut h, window, vec![egui::Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        window_pass_with(
+            &mut h,
+            window,
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    // The main window's pass answers what the window asked.
+    h.run_steps(2);
+    assert_eq!(h.state().menu_window(), Some(window), "the menu's window");
+    // The window's passes draw it (the first one sizes it unseen).
+    let mut names = Vec::new();
+    for _ in 0..3 {
+        names = drawn_names(&window_pass(&mut h, window));
+        h.run_steps(1);
+        assert!(
+            h.query_by_label("Group into Stack").is_none(),
+            "the Library window's menu drawn in the main window"
+        );
+    }
+    assert!(
+        names.iter().any(|(n, _)| n == "Group into Stack"),
+        "no menu in the Library window: {names:?}"
+    );
+    // At the pointer, moved only as far as the window's edges ask.
+    let menu = h.state().target_rect("helios.menu").unwrap();
+    assert!(
+        menu.expand(2.0).contains(at),
+        "the menu at {menu:?}, not at the pointer {at:?}"
+    );
+    assert_eq!(
+        h.state().target_window("helios.menu"),
+        window,
+        "the menu's window, as agents read it"
     );
 }

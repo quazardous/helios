@@ -175,6 +175,9 @@ pub(super) struct Core {
     pub(super) _library_walks: crate::library_history::Walks,
     /// Helios's status line, drawn in egui-pop's status bar.
     pub(super) status: crate::jobs::Status,
+    /// The menu of commands open (a photo's, an album's), drawn in the
+    /// window it was asked from.
+    pub(super) menus: super::menus::Menus,
     /// The jobs' ends read up to here, for the desktop notification.
     pub(super) ended: crate::jobs::Ended,
     /// The nodes followed, whose jobs show in the jobs centre.

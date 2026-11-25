@@ -88,6 +88,7 @@ pub use activity_focus::WINDOW as ACTIVITY_WINDOW;
 mod focus_window;
 mod library_focus;
 mod main_pass;
+pub(crate) mod menus;
 pub use library_focus::{COMMAND as LIBRARY_WINDOW_COMMAND, WINDOW as LIBRARY_WINDOW};
 mod calibrate_focus;
 mod camera_look;
@@ -618,6 +619,8 @@ struct Parts {
     jobs: helios_core::jobs::Jobs,
     library_history: crate::library_history::LibraryHistory,
     status: crate::jobs::Status,
+    /// The menu of commands open, drawn in its window's pass.
+    menus: menus::Menus,
     relays: crate::jobs::Relays,
     /// What checks a restored darkroom's image is still there.
     images: crate::contexts::Images,
@@ -952,6 +955,7 @@ impl Shell {
         // reads as its journal (its jobs centre).
         let jobs = helios_core::jobs::Jobs::new(bus.clone());
         let status = crate::jobs::Status::default();
+        let menus = menus::Menus::default();
         let relays = crate::jobs::Relays::default();
         // Helios's values: what widgets and agents edit, and what Edit >
         // Undo walks back through the host.
@@ -1111,6 +1115,7 @@ impl Shell {
             )
             .plugin(plugins::Frame {
                 status: status.clone(),
+                menus: menus.clone(),
             })
             // The jobs centre, its status bar item and each job's log
             // console as a terminal.
@@ -1200,6 +1205,7 @@ impl Shell {
                 jobs,
                 library_history,
                 status,
+                menus,
                 relays,
                 images,
                 subworkspaces,
@@ -1232,6 +1238,7 @@ impl Shell {
             jobs,
             library_history,
             status,
+            menus,
             relays,
             images: _,
             subworkspaces,
@@ -1352,6 +1359,7 @@ impl Shell {
             _library_walks: library_history.walks(),
             library_history,
             status,
+            menus,
             ended: crate::jobs::Ended::default(),
             node_events: crate::node_events::NodeEvents::new(shell_bus),
             relays,
@@ -2371,7 +2379,7 @@ impl Shell {
                     Request::Confirm(c) => self.confirm(c),
                     Request::Form(f) => self.form(f),
                     Request::Picker(p) => self.pick(p),
-                    Request::Menu { at, items } => self.open_menu(at, items),
+                    Request::Menu { at, items, window } => self.open_menu_in(window, at, items),
                     Request::Notify(level, text) => self.notify(level, text),
                     Request::Run(id, args, origin) => {
                         let _ = self.run(&id, args, origin);
@@ -5295,8 +5303,20 @@ impl Shell {
 
     /// Opens a menu of commands at a position.
     pub fn open_menu(&mut self, at: egui::Pos2, items: Vec<MenuItem>) {
+        self.open_menu_in(self.focus.window, at, items);
+    }
+
+    /// Opens a menu of commands in `window`, at `at` of its points: the
+    /// window a panel asked it from (`dialogs::Request::menu`). It is
+    /// drawn in that window's pass ([`menus`]), never in another one.
+    pub fn open_menu_in(&mut self, window: egui::ViewportId, at: egui::Pos2, items: Vec<MenuItem>) {
         egui_pop::api::menus::close_popup(self.core.app.handle());
-        self.focus.menu = Some((at, items));
+        self.core.menus.open(window, at, items);
+    }
+
+    /// The window the menu of commands open belongs to, if one is open.
+    pub fn menu_window(&self) -> Option<egui::ViewportId> {
+        self.core.menus.window()
     }
 
     /// A declared menu as data, as it would open now: each entry's
@@ -7721,7 +7741,7 @@ impl Shell {
             Action::SystemMenu => {
                 // Under the title bar's start, where its menu button is
                 // (the window's top left when the system draws the frame).
-                self.focus.menu = None;
+                self.core.menus.close();
                 let at = HitTable::of(ctx)
                     .get(self.focus.window)
                     .and_then(|r| r.caption)
@@ -8564,7 +8584,6 @@ impl Shell {
                 .node_events
                 .set_wake(Arc::new(move || ctx.request_repaint()));
         }
-        self.menus_ui(&ctx);
         self.rule_editor_ui(&ctx);
         self.pointer_choice_ui(&ctx);
         // What the panels and windows asked while drawn, answered in the
@@ -8724,6 +8743,13 @@ impl Shell {
             };
             self.focus.rects.insert(name.into(), o.rect);
         }
+        // The shell's menu of commands, in the window it belongs to.
+        if let Some((rect, window)) = self.core.menus.shown() {
+            if window != self.focus.window {
+                self.focus.rect_windows.insert(menus::RECT.into(), window);
+            }
+            self.focus.rects.insert(menus::RECT.into(), rect);
+        }
     }
 
     /// The first run's "Coming from darktable?" (`pointer_choice`), when
@@ -8746,39 +8772,6 @@ impl Shell {
         self.focus
             .rects
             .insert(crate::pointer_choice::RECT.into(), shown.response.rect);
-    }
-
-    /// Menus of commands asked for, in egui's popups (the system menu is
-    /// egui-pop's, `menus::popup_at`).
-    fn menus_ui(&mut self, ctx: &Egui) {
-        let h = self.core.app.handle().clone();
-        let layer = egui::LayerId::background();
-        if let Some((at, items)) = self.focus.menu.take() {
-            let mut open = true;
-            let mut chosen = None;
-            let cx = h.when_context();
-            let shown = egui::Popup::new(Id::unique("helios.menu"), ctx.clone(), at, layer)
-                .kind(egui::PopupKind::Menu)
-                .open_bool(&mut open)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| {
-                    ui.set_min_width(200.0);
-                    egui::containers::menu::menu_style(ui.style_mut());
-                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
-                        menu_rows(ui, &h, &cx, &items, &mut chosen);
-                    });
-                });
-            if let Some(r) = shown {
-                self.focus
-                    .rects
-                    .insert("helios.menu".into(), r.response.rect);
-            }
-            if let Some((id, args)) = chosen {
-                let _ = self.run(&id, args, Origin::User);
-            } else if open {
-                self.focus.menu = Some((at, items));
-            }
-        }
     }
 
     /// Offers the first run's choice of darktable's pointer profile
@@ -8974,63 +8967,6 @@ impl Shell {
         };
         relay.drop_link();
         true
-    }
-}
-
-/// The rows of a menu asked for: each command with its title and keys,
-/// greyed with the reason where it does not apply.
-fn menu_rows(
-    ui: &mut Ui,
-    h: &AppHandle,
-    cx: &egui_pop::model::when::WhenContext,
-    items: &[MenuItem],
-    chosen: &mut Option<(String, Value)>,
-) {
-    use egui_pop::core::ui::UiPop as _;
-    for item in items {
-        match item {
-            MenuItem::Separator => {
-                ui.divider();
-            }
-            MenuItem::Submenu { label, items } => {
-                egui_pop::api::menus::submenu(ui, label, |ui| menu_rows(ui, h, cx, items, chosen));
-            }
-            MenuItem::Command {
-                id,
-                args,
-                label,
-                enabled,
-            } => {
-                let Ok(cid) = CommandId::new(id.as_str()) else {
-                    continue;
-                };
-                let Some(spec) = h.command(&cid) else {
-                    continue;
-                };
-                let title = label.clone().unwrap_or_else(|| h.command_menu_title(&spec));
-                let keys = h.keys_for(&cid).first().cloned();
-                // A row whose command does not apply says why; one its
-                // owner greyed (an offline folder's) says nothing more.
-                let why = (*enabled && !h.applies(&cid, cx))
-                    .then(|| format!("Does not apply here ({})", spec.when));
-                // egui-pop's menu row: the kit's look, a menu item named by
-                // its title for screen readers and accesskit tests.
-                let r = ui
-                    .add_enabled_ui(*enabled, |ui| {
-                        egui_pop::api::menus::command_row(
-                            ui,
-                            &title,
-                            keys.as_deref(),
-                            why.as_deref(),
-                        )
-                    })
-                    .inner;
-                if r.clicked() {
-                    *chosen = Some((id.clone(), args.clone()));
-                    ui.close();
-                }
-            }
-        }
     }
 }
 
