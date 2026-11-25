@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use crate::host::Settle as _;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -182,7 +183,7 @@ fn the_bypass_refuses_what_has_nothing_to_pass() {
 #[test]
 fn ctrl_slash_bypasses_the_selected_module() {
     let mut h = headless::harness(shell(), vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     let keys = h
         .state()
         .app()
@@ -191,11 +192,11 @@ fn ctrl_slash_bypasses_the_selected_module() {
     assert!(keys.iter().any(|k| k == KEY), "{keys:?}");
     select(&mut h, "exp");
     h.key_press_modifiers(Modifiers::CTRL, Key::Slash);
-    h.run();
+    h.settle();
     h.step();
     assert!(bypassed(h.state()), "Ctrl+/ bypasses it");
     h.key_press_modifiers(Modifiers::CTRL, Key::Slash);
-    h.run();
+    h.settle();
     h.step();
     assert!(!bypassed(h.state()), "and brings it back");
 }
@@ -216,7 +217,7 @@ fn the_modules_panel_lists_the_modules_and_toggles_a_bypass() {
     h.state_mut()
         .run("helios.modules.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     let rows = {
         let s = h.state();
         let v = s.viewport();
@@ -229,7 +230,7 @@ fn the_modules_panel_lists_the_modules_and_toggles_a_bypass() {
 
     // The graph panel shows the node too: the row inside the Modules panel.
     in_panel(&h, "exp");
-    h.run();
+    h.settle();
     assert_eq!(
         h.state()
             .values()
@@ -241,10 +242,10 @@ fn the_modules_panel_lists_the_modules_and_toggles_a_bypass() {
         Value::Text("exp".into())
     );
     in_panel(&h, "Bypass");
-    h.run();
+    h.settle();
     assert!(bypassed(h.state()), "the row's toggle bypasses it");
     in_panel(&h, "Bypass");
-    h.run();
+    h.settle();
     assert!(!bypassed(h.state()));
 }
 
@@ -260,13 +261,13 @@ fn modules_snapshots() {
     h.state_mut()
         .run("helios.modules.focus", json!(null), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     in_panel(&h, "exp");
-    h.run();
+    h.settle();
     let rect = h.state().target_rect(modules::PANEL).unwrap();
     results.add(h.try_shot_of("modules-selected-pop-dark-1x", rect));
     in_panel(&h, "Bypass");
-    h.run();
+    h.settle();
     assert!(bypassed(h.state()));
     let rect = h.state().target_rect(modules::PANEL).unwrap();
     results.add(h.try_shot_of("modules-bypassed-pop-dark-1x", rect));

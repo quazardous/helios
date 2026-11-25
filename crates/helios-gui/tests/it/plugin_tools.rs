@@ -19,6 +19,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::host::Settle as _;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::Harness;
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
@@ -245,8 +246,8 @@ fn section(h: &mut Harness<'_, Shell>) -> String {
             Origin::User,
         )
         .unwrap();
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     format!("{:#?}", h.root())
 }
 

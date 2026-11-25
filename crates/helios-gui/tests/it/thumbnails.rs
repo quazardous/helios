@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use helios_gui::library::Entry;
 use helios_gui::{Shell, headless, helios_panels};
@@ -65,7 +66,7 @@ fn an_offline_photo_shows_its_cached_thumbnail_and_a_file_without_preview_its_pl
     let mut h = headless::harness(shell, vec2(1024.0, 700.0));
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        h.run();
+        h.settle();
         let s = h.state();
         let library = s.library();
         if library.has_thumbnail("off") && library.has_thumbnail("junk") {

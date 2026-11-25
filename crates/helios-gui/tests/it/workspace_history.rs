@@ -84,17 +84,9 @@ fn open(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, pho
 }
 
 /// The frames a step takes, then the image kept open through a network
-/// that changed (what the host does).
+/// that changed: [`crate::host::follow`], within its deadline.
 fn follow(h: &mut Harness<'static, Shell>) {
-    for _ in 0..3 {
-        h.run();
-    }
-    if crate::host::network_changed() > 0 {
-        assert!(h.state_mut().keep_image_open().unwrap(), "kept in place");
-    }
-    for _ in 0..2 {
-        h.run();
-    }
+    crate::host::follow(h);
 }
 
 fn run(h: &mut Harness<'static, Shell>, id: &str, args: Json) {

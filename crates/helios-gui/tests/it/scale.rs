@@ -3,6 +3,7 @@
 //! is egui-pop's, a `hidpi` profile variant follows the screen, and a
 //! detached panel's window follows its own screen's scale.
 
+use crate::host::Settle as _;
 use egui::{Key, Modifiers, vec2};
 use egui_kittest::kittest::Queryable;
 use egui_pop_test::at_scales;
@@ -22,7 +23,7 @@ fn the_frame_and_the_areas_keep_their_place_in_points_at_every_scale() {
     let mut at_one = None;
     at_scales(|s| {
         let mut h = headless::harness_at(framed(), vec2(1280.0, 800.0), s);
-        h.run();
+        h.settle();
         let title = h.get_by_label("photos — Helios").rect();
         let vault = h.state().target_rect("helios.vault").unwrap();
         let params = h.state().target_rect("helios.params").unwrap();
@@ -47,14 +48,14 @@ fn the_frame_and_the_areas_keep_their_place_in_points_at_every_scale() {
 fn the_interface_zoom_is_egui_pop_s_and_its_change_is_journaled() {
     use egui_pop::api::zoom;
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1024.0, 700.0));
-    h.run();
+    h.settle();
     // egui's own zoom keys are off: Ctrl and `=` leave the interface.
     h.key_press_modifiers(Modifiers::CTRL, Key::Equals);
-    h.run();
+    h.settle();
     assert!((h.ctx.zoom_factor() - 1.0).abs() < 1e-6);
     // egui-pop's keys move it a step, in every window.
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::ALT, Key::Equals);
-    h.run();
+    h.settle();
     let app = h.state().app().handle().clone();
     assert!((zoom::current(&app) - 1.1).abs() < 1e-6);
     assert!((h.ctx.zoom_factor() - 1.1).abs() < 1e-6);
@@ -66,7 +67,7 @@ fn the_interface_zoom_is_egui_pop_s_and_its_change_is_journaled() {
         .collect();
     assert_eq!(changed.len(), 1, "{changed:?}");
     h.key_press_modifiers(Modifiers::CTRL | Modifiers::ALT, Key::Num0);
-    h.run();
+    h.settle();
     assert!((h.ctx.zoom_factor() - 1.0).abs() < 1e-6);
 }
 
@@ -90,11 +91,11 @@ fn a_hidpi_variant_follows_the_screen_not_the_interface_zoom() {
     };
     // A dense screen: the variant applies from the first frame.
     let mut h = headless::harness_at(shell(&dir), vec2(800.0, 500.0), 2.0);
-    h.run();
+    h.settle();
     assert_eq!(h.state().theme_name(), "helios-light");
     // A plain screen zoomed to 200 %: still a plain screen.
     let mut h = headless::harness(shell(&dir), vec2(800.0, 500.0));
-    h.run();
+    h.settle();
     let s = h.state_mut();
     s.run(
         egui_pop::api::zoom::CMD_ZOOM_IN.as_str(),
@@ -102,14 +103,14 @@ fn a_hidpi_variant_follows_the_screen_not_the_interface_zoom() {
         Origin::User,
     )
     .unwrap();
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     assert!(h.state().pixels_per_point() > 1.0);
     assert_eq!(h.state().theme_name(), "helios-dark");
     // Moved to a dense screen: applied again.
     egui_pop_test::set_native_scale(&mut h, 2.0);
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     assert_eq!(h.state().theme_name(), "helios-light");
     std::fs::remove_dir_all(&dir).unwrap();
 }

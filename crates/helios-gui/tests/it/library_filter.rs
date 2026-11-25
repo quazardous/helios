@@ -32,6 +32,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::host::Settle as _;
 use egui::{Key, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -158,12 +159,12 @@ fn open(
     let persist = Persist::new(SqliteStore::open(path).unwrap(), Arc::new(Bus::new()));
     persist.fill_library(&mut shell).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h.state_mut()
         .run("view.library", Value::Null, Origin::User)
         .unwrap();
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     (h, persist)
 }
 
@@ -179,10 +180,10 @@ fn grid(h: &Harness<'_, Shell>) -> Vec<String> {
 /// A few frames, the host's turn between them (as the desktop's loop).
 fn settle(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, at: f64) {
     for i in 0..3 {
-        h.run();
+        h.settle();
         persist.frame_settled(h.state_mut(), at + f64::from(i));
     }
-    h.run();
+    h.settle();
 }
 
 fn filter(h: &mut Harness<'static, Shell>, persist: &mut Persist<SqliteStore>, text: &str) {
@@ -361,7 +362,7 @@ fn the_filters_docked_above_the_results_draw_one_line_with_the_sources_behind_a_
     // Opened, the same sections; a folder chosen scopes the grid, the
     // list still open to choose again.
     h.query_all_by_label("Sources").next().unwrap().click();
-    h.run();
+    h.settle();
     h.get_by_label("Folders").click();
     settle(&mut h, &mut persist, 3.0);
     let raw = root.join("raw").to_string_lossy().into_owned();
@@ -518,7 +519,7 @@ fn row_menu(h: &mut Harness<'static, Shell>, row: &str) {
         });
     }
     for _ in 0..3 {
-        h.run();
+        h.settle();
     }
 }
 
@@ -1021,7 +1022,7 @@ fn a_nested_tree_is_built_in_the_rule_editor_each_edit_undone() {
         json!({ "edit": "move", "at": [1], "to": 0 }),
     ] {
         run(&mut h, edit, args);
-        h.run();
+        h.settle();
     }
     settle(&mut h, &mut persist, 10.0);
     let expected = json!({"match": "any", "rules": [
@@ -1113,7 +1114,7 @@ fn b_toggles_the_quick_collection_which_scopes_the_grid_and_saves_as_an_album() 
         .library_mut()
         .select_ids(&[id(1).hex(), id(3).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     let before = steps(&h).len();
     h.key_press(Key::B);
     settle(&mut h, &mut persist, 2.0);
@@ -1155,7 +1156,7 @@ fn b_toggles_the_quick_collection_which_scopes_the_grid_and_saves_as_an_album() 
 
     // B typed in a text field does not toggle.
     h.get_by_label("Search images").click();
-    h.run();
+    h.settle();
     h.key_press(Key::B);
     settle(&mut h, &mut persist, 10.0);
     assert_eq!(h.state().library().quick_count(), 2);
@@ -1260,7 +1261,7 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
         if out != json!({ "queued": true }) {
             return out;
         }
-        h.run();
+        h.settle();
         h.state()
             .history()
             .into_iter()
@@ -1323,7 +1324,7 @@ fn named_quick_collections_take_b_and_drops_through_the_target_each_step_undone(
         .library_mut()
         .select_ids(&[id(2).hex(), id(3).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press(Key::B);
     settle(&mut h, &mut persist, 3.0);
     h.get_by_label("⚡ Maybe, + 2");
@@ -1416,7 +1417,7 @@ fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Value {
     if out != json!({ "queued": true }) {
         return out;
     }
-    h.run();
+    h.settle();
     h.state()
         .history()
         .into_iter()
@@ -1482,10 +1483,10 @@ fn filters_used_are_recent_pinned_kept_and_applied_from_ctrl_shift_k() {
     // Ctrl+Shift+K in the grid: the switcher, in this window; the
     // pinned filter chosen by its words applies to the grid.
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::K);
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     assert_eq!(main_dialog(&h).as_deref(), Some("Recent filters"));
     let current = answer(&mut h, "dialog.current", json!(null));
     let shown = current.to_string();
@@ -1496,7 +1497,7 @@ fn filters_used_are_recent_pinned_kept_and_applied_from_ctrl_shift_k() {
     h.input_mut()
         .events
         .push(egui::Event::Text("rating".into()));
-    h.run();
+    h.settle();
     h.key_press(Key::Enter);
     settle(&mut h, &mut persist, 6.0);
     assert_eq!(main_dialog(&h), None);
@@ -1504,10 +1505,10 @@ fn filters_used_are_recent_pinned_kept_and_applied_from_ctrl_shift_k() {
 
     // Typed in a text field, Ctrl+Shift+K does not open it.
     h.get_by_label("Search images").click();
-    h.run();
+    h.settle();
     h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::K);
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     assert_eq!(main_dialog(&h), None);
 
     // Unpinned and pinned again; kept across a restart, in the vault.
@@ -1729,15 +1730,15 @@ fn drag_onto(
     over: impl FnOnce(&Harness<'static, Shell>),
 ) {
     h.drag_at(from);
-    h.run();
+    h.settle();
     for i in 1..=6 {
         h.hover_at(from + (to - from) * (i as f32 / 6.0));
-        h.run();
+        h.settle();
     }
-    h.run();
+    h.settle();
     over(h);
     h.drop_at(to);
-    h.run();
+    h.settle();
 }
 
 #[test]
@@ -1888,7 +1889,7 @@ fn the_filter_is_read_through_the_node_and_shown_at_a_coming_frame() {
         .library_mut()
         .set_filter(Filter::parse("camera:R5"));
     for i in 0..3 {
-        h.run();
+        h.settle();
         persist.frame(h.state_mut(), f64::from(i));
         if persist.busy() {
             break;
@@ -1897,7 +1898,7 @@ fn the_filter_is_read_through_the_node_and_shown_at_a_coming_frame() {
     assert!(persist.busy(), "the query's read waits for a coming frame");
     assert!(h.state().library().facets().is_none(), "not shown yet");
     persist.settle(h.state_mut());
-    h.run();
+    h.settle();
     assert_eq!(grid(&h), ["c.nef"]);
     let facets = h.state().library().facets().cloned().unwrap();
     assert_eq!(facets.count("camera", "R5"), 1);
@@ -1949,7 +1950,7 @@ fn the_library_read_again_is_read_off_the_frame() {
     assert!(persist.busy(), "read on a thread of its own");
     assert!(persist.take_filled().is_none(), "not shown yet");
     persist.settle(h.state_mut());
-    h.run();
+    h.settle();
     assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
     assert_eq!(persist.take_filled().map(|f| f.len()), Some(3));
     drop((h, persist));
@@ -1995,7 +1996,7 @@ fn a_vault_held_locked_does_not_delay_the_filter_history_the_folders_or_the_albu
     let mut slowest = std::time::Duration::ZERO;
     for i in 0..3 {
         let started = std::time::Instant::now();
-        h.run();
+        h.settle();
         persist.frame(h.state_mut(), 2.0 + f64::from(i));
         slowest = slowest.max(started.elapsed());
     }
@@ -2081,15 +2082,15 @@ fn selection_commands_and_marks_pasted_merged_or_overwriting() {
     // In the grid: Ctrl+I inverts, Ctrl+Shift+A selects none.
     h.state_mut().library_mut().select_ids(&[id(1).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press_modifiers(egui::Modifiers::CTRL, Key::I);
     // The key queues the command; the next frame runs it.
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     assert_eq!(selection(&h), [id(2).hex(), id(3).hex()]);
     h.key_press_modifiers(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::A);
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     assert!(selection(&h).is_empty());
 
     // The same day as the first photo: the second, not the third.
@@ -2179,10 +2180,10 @@ fn delete_removes_the_selection_from_the_library_and_undo_puts_it_back() {
         .library_mut()
         .select_ids(&[id(1).hex(), id(3).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press(Key::Delete);
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     refill(&mut h, &mut persist, 1.0);
     assert!(!in_library(&persist, 1) && !in_library(&persist, 3));
     assert!(in_library(&persist, 2));
@@ -2262,7 +2263,7 @@ fn move_to_trash_asks_then_trashes_through_a_journaled_job_a_backup_refused() {
         .library_mut()
         .select_ids(&[id(1).hex(), id(2).hex(), id(3).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press_modifiers(
         Modifiers::CTRL | Modifiers::ALT | Modifiers::SHIFT,
         Key::Delete,
@@ -2339,7 +2340,7 @@ fn a_turn_asked_in_the_library_is_heard_in_the_pass_it_is_made() {
     assert!(!persist.busy(), "nothing waits before the ask");
     h.state_mut().library_mut().select_ids(&[id(1).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     settle(&mut h, &mut persist, 1.5);
     assert!(!persist.busy(), "nothing waits before the key");
     // Ctrl+] in the grid, seen while the Library draws: one pass, the
@@ -2398,7 +2399,7 @@ fn ctrl_brackets_rotate_the_selection_and_undo_turns_it_back() {
         .library_mut()
         .select_ids(&[id(1).hex(), id(3).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press_modifiers(egui::Modifiers::CTRL, Key::CloseBracket);
     settle(&mut h, &mut persist, 1.0);
     settle(&mut h, &mut persist, 5.0);
@@ -2477,7 +2478,7 @@ fn ctrl_quote_duplicates_the_selection_and_the_grid_counts_versions() {
     // Ctrl+' in the grid, on the first photo.
     h.state_mut().library_mut().select_ids(&[id(1).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press_modifiers(egui::Modifiers::CTRL, Key::Quote);
     settle(&mut h, &mut persist, 1.0);
     settle(&mut h, &mut persist, 5.0);
@@ -2790,7 +2791,7 @@ fn answer_err(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> bool {
         Err(_) => true,
         Ok(out) if out != json!({ "queued": true }) => false,
         Ok(_) => {
-            h.run();
+            h.settle();
             h.state()
                 .history()
                 .into_iter()
@@ -2839,7 +2840,7 @@ fn ctrl_z_walks_the_library_off_the_frame_while_the_vault_is_held() {
     };
     h.state_mut().library_mut().select_ids(&[id(1).hex()]);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     for at in [1.0, 5.0] {
         h.key_press_modifiers(egui::Modifiers::CTRL, Key::CloseBracket);
         settle(&mut h, &mut persist, at);
@@ -2852,7 +2853,7 @@ fn ctrl_z_walks_the_library_off_the_frame_while_the_vault_is_held() {
     for _ in 0..2 {
         let start = Instant::now();
         h.key_press_modifiers(egui::Modifiers::CTRL, Key::Z);
-        h.run();
+        h.settle();
         assert!(
             start.elapsed() < Duration::from_millis(500),
             "a frame waited on the vault: {:?}",
@@ -2880,7 +2881,7 @@ fn ctrl_z_walks_the_library_off_the_frame_while_the_vault_is_held() {
     // Redone, refused: the step goes back where it was, with a toast.
     refuse.store(true, Ordering::SeqCst);
     run(&mut h, "edit.redo", json!(null));
-    h.run();
+    h.settle();
     assert!(history.wait_idle(Duration::from_secs(30)));
     settle(&mut h, &mut persist, 20.0);
     let line = history.line();
@@ -2924,7 +2925,7 @@ fn the_sources_fold_by_keyboard_and_keep_one_choice_per_section() {
     settle(&mut h, &mut persist, 1.0);
     assert!(h.query_by_label("Dog, 1").is_none(), "closed at first");
     h.get_by_label("Animals, 1").focus();
-    h.run();
+    h.settle();
     h.key_press(Key::ArrowRight);
     settle(&mut h, &mut persist, 2.0);
     h.get_by_label("Dog, 1");
@@ -3487,7 +3488,7 @@ fn an_old_workspace_s_album_scopes_the_main_panel_only_and_the_window_keeps_its_
     h.get_by_role_and_label(egui::accesskit::Role::Window, "Library")
         .get_by_label("Search images")
         .click();
-    h.run();
+    h.settle();
     let folder = folder_of(&root, 1).display().to_string();
     run(&mut h, "library.folder", json!({ "path": folder }));
     settle(&mut h, &mut persist, 5.0);
@@ -3665,10 +3666,10 @@ fn drag_into_window(
 ) {
     let out = egui::pos2(1400.0, from.y);
     h.drag_at(from);
-    h.run();
+    h.settle();
     for i in 1..=8 {
         h.hover_at(from + (out - from) * (i as f32 / 8.0));
-        h.run();
+        h.settle();
     }
     h.drop_at(out);
     h.event(egui::Event::PointerGone);
@@ -3812,7 +3813,7 @@ fn quick_collection_panels_move_copy_and_feed_compare_and_come_back() {
     h.state_mut()
         .library_mut()
         .select_ids(std::slice::from_ref(&c));
-    h.run();
+    h.settle();
     let main = |h: &Harness<'_, Shell>| {
         h.state()
             .library_mut()
@@ -3918,7 +3919,7 @@ fn quick_collection_panels_move_copy_and_feed_compare_and_come_back() {
         .run("compare.active", json!({}), Origin::User)
         .unwrap();
     if compared == json!({ "queued": true }) {
-        h.run();
+        h.settle();
         compared = h
             .state()
             .history()

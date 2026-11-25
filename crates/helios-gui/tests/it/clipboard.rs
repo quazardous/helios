@@ -2,6 +2,7 @@
 //! parameter's value copied as text that pastes back, onto the same
 //! kind only, as one undo step; an agent's own slot.
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_pop::api::clipboard::{self, PasteRequest};
 use helios_core::{Graph, Image, ModuleRef, Params, Region, Value};
@@ -30,7 +31,7 @@ fn harness() -> egui_kittest::Harness<'static, Shell> {
     let shell = Shell::new(helios_panels(), None);
     helios_values::bind_node(&mut shell.values().lock().unwrap(), &g, exp).unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h
 }
 
@@ -128,7 +129,7 @@ fn a_path_copied_pastes_its_value_and_kinds_must_match() {
             Origin::User,
         )
         .unwrap();
-    h.run();
+    h.settle();
     assert_eq!(value(&h, BLACK), before, "{plan:?}");
     run(&mut h, "param.paste", json!({ "path": BLACK }));
     assert_eq!(value(&h, BLACK), Value::Float(0.75));
@@ -137,7 +138,7 @@ fn a_path_copied_pastes_its_value_and_kinds_must_match() {
     h.state_mut()
         .run("param.paste", json!({ "path": BIAS }), Origin::User)
         .unwrap();
-    h.run();
+    h.settle();
     assert_eq!(value(&h, BIAS), bias);
 }
 
@@ -192,7 +193,7 @@ fn images_copied_or_files_pasted_open_the_import_window_on_them() {
     shell.set_image_files([("b".to_string(), file.clone())]);
     shell.library_mut().select_ids(&["a".into(), "b".into()]);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     let app = h.state().app().handle().clone();
     let out = clipboard::copy(&app, CopyRequest::new(LIBRARY_ENDPOINT), &PopOrigin::User);
     assert!(out.ok(), "{out:?}");
@@ -211,14 +212,14 @@ fn images_copied_or_files_pasted_open_the_import_window_on_them() {
         name: "a.jpg".into(),
         ..Entry::default()
     }]);
-    h.run();
+    h.settle();
     let plan = clipboard::paste(
         &app,
         PasteRequest::new(LIBRARY_ENDPOINT).dry_run(),
         &PopOrigin::User,
     );
     assert!(plan.ok(), "{plan:?}");
-    h.run();
+    h.settle();
     assert!(
         h.state().target_rect("helios.dialog").is_err(),
         "a dry run asks nothing"
@@ -278,7 +279,7 @@ fn files_and_images_go_to_and_come_from_other_applications() {
     shell.set_image_files([("b".to_string(), file.clone())]);
     shell.library_mut().select_ids(&["a".into(), "b".into()]);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     // Copy files: the files at hand, `a` has none.
     run(&mut h, "library.copyFiles", json!(null));
     assert_eq!(system.held().files, std::slice::from_ref(&file));
@@ -300,7 +301,7 @@ fn files_and_images_go_to_and_come_from_other_applications() {
         name: "a.jpg".into(),
         ..Entry::default()
     }]);
-    h.run();
+    h.settle();
     run(&mut h, "library.pasteFiles", json!({ "dry_run": true }));
     assert!(
         h.state_mut().take_imports().is_empty(),
@@ -371,7 +372,7 @@ fn the_rendered_image_is_copied_whole_for_other_applications() {
     shell.set_system_clipboard(Box::new(system.clone()));
     shell.set_view_source(g, exp, "output").unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     run(&mut h, "viewport.copyImage", json!(null));
     // The frame that sees the render done puts it there; else wait for it.
     if let Some(done) = h

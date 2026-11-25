@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_pop::model::commands::Origin as PopOrigin;
@@ -31,7 +32,7 @@ fn window(dir: &Path) -> Harness<'static, Shell> {
         .build();
     shell.load_layout().unwrap();
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     h
 }
 
@@ -41,7 +42,7 @@ fn key(h: &Harness<'_, Shell>, k: &str) -> String {
 
 fn run(h: &mut Harness<'_, Shell>, command: &str, args: serde_json::Value) {
     h.state_mut().run(command, args, Origin::User).unwrap();
-    h.run();
+    h.settle();
 }
 
 fn panel(id: &str) -> PanelId {
@@ -69,7 +70,7 @@ fn places_have_their_arrangements_and_the_breadcrumb_says_where() {
         &Opened::File(photo.clone()),
         &PopOrigin::User,
     );
-    h.run();
+    h.settle();
     assert_eq!(key(&h, "place"), "helios.darkroom");
     assert_eq!(key(&h, "placeDepth"), "2");
     assert_eq!(
@@ -132,7 +133,7 @@ fn the_status_bar_says_where_and_its_items_follow_the_place() {
         &Opened::File(photo),
         &PopOrigin::User,
     );
-    h.run();
+    h.settle();
     assert_eq!(crumbs(&h), ["Helios", "Library", "Darkroom · photo.png"]);
     assert!(shows(&h, ZOOM) && shows(&h, HISTORY), "{:?}", items(&h));
     assert!(!shows(&h, IMAGES), "{:?}", items(&h));
@@ -182,7 +183,7 @@ fn darktable_s_double_click_on_the_image_leaves_the_darkroom() {
     for _ in 0..8 {
         h.step();
     }
-    h.run();
+    h.settle();
     assert_eq!(key(&h, "place"), "helios.darkroom");
     let at = h
         .state()
@@ -203,7 +204,7 @@ fn darktable_s_double_click_on_the_image_leaves_the_darkroom() {
         });
         h.step();
     }
-    h.run();
+    h.settle();
     assert_eq!(key(&h, "place"), "helios.library");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -250,13 +251,13 @@ fn compare_and_mask_editing_follow_the_image_and_the_stack() {
     };
     // The command turns compare on: its mode is pushed.
     run(&mut h, "viewport.compare", json!(null));
-    h.run();
+    h.settle();
     assert!(compare(&h));
     assert_eq!(key(&h, "mode.compare"), "helios.compare");
     assert_eq!(key(&h, "modePushed"), "true");
     // Back (Escape, a chip, an agent) pops it: compare goes off.
     run(&mut h, "nav.back", json!(null));
-    h.run();
+    h.settle();
     assert_eq!(key(&h, "mode.compare"), "");
     assert!(!compare(&h));
     // An agent pushes mask editing: the path tool is on, the Masks panel
@@ -268,8 +269,8 @@ fn compare_and_mask_editing_follow_the_image_and_the_stack() {
             Origin::Agent("a1".into()),
         )
         .unwrap();
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     let tool =
         |h: &Harness<'_, Shell>| helios_gui::masks::tool(&h.state().values().lock().unwrap());
     assert_eq!(tool(&h), "path");
@@ -280,7 +281,7 @@ fn compare_and_mask_editing_follow_the_image_and_the_stack() {
             .panel_visible(&panel("helios.masks"))
     );
     run(&mut h, "nav.back", json!(null));
-    h.run();
+    h.settle();
     assert_eq!(tool(&h), "none");
     assert_eq!(key(&h, "mode.tool"), "");
     let _ = std::fs::remove_dir_all(&dir);
@@ -301,7 +302,7 @@ fn the_workspace_comes_back_where_it_was_left_or_falls_back() {
         );
         run(&mut h, "view.culling", json!({ "on": true }));
         run(&mut h, "viewport.compare", json!(null));
-        h.run();
+        h.settle();
         assert_eq!(key(&h, "mode.compare"), "helios.compare");
         // Written beside the workspace's layout, inside each transition.
         let key = helios_gui::host::workspace_key(&dir.join("photos"));
@@ -317,7 +318,7 @@ fn the_workspace_comes_back_where_it_was_left_or_falls_back() {
     assert_eq!(key(&h, "place"), "helios.darkroom");
     assert_eq!(key(&h, "mode.orientation"), "helios.culling");
     assert_eq!(key(&h, "mode.compare"), "helios.compare");
-    h.run();
+    h.settle();
     assert!(
         h.state()
             .values()
@@ -454,7 +455,7 @@ fn a_detached_panel_stays_in_its_window_when_another_photo_opens() {
         .build();
     let (mut h, windows) = headless::harness_with_windows(shell, vec2(1280.0, 800.0), 1.0);
     h.state_mut().load_layout().unwrap();
-    h.run();
+    h.settle();
     run(&mut h, "view.library", json!(null));
     let open = |h: &mut Harness<'_, Shell>, name: &str| {
         let photo = dir.join(name);
@@ -467,7 +468,7 @@ fn a_detached_panel_stays_in_its_window_when_another_photo_opens() {
         for _ in 0..4 {
             h.step();
         }
-        h.run();
+        h.settle();
         assert_eq!(key(h, "place"), "helios.darkroom");
     };
     let detached = |h: &Harness<'_, Shell>| -> Vec<String> {

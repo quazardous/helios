@@ -8,6 +8,7 @@
 //! `quit`, a command closing the main window, and the system's close
 //! (the compositor's, as the desktop's host meets it).
 
+use crate::host::Settle as _;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
@@ -23,7 +24,7 @@ fn harness() -> Harness<'static, Shell> {
     let mut h = headless::harness(Shell::new(helios_panels(), None), vec2(1280.0, 800.0));
     h.ctx.set_embed_viewports(false);
     h.state_mut().set_last_window(LastWindow::Quit);
-    h.run();
+    h.settle();
     h
 }
 

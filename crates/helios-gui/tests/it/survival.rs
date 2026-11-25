@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
+use crate::host::Settle as _;
 use helios_core::{Bus, Graph, NodeId};
 use helios_gui::persist::{FLUSH_SECONDS, Persist};
 use helios_gui::{Shell, helios_panels};
@@ -105,11 +106,11 @@ fn survival_child() {
         writeln!(std::io::stdout(), "\nlistening").unwrap();
         std::io::stdout().flush().unwrap();
         assert!(h.state().wait_workspace_request(CHILD_DEADLINE));
-        h.run();
+        h.settle();
         h.state_mut()
             .edit_workspace(&json!({ "name": "Harbour" }), &Origin::User)
             .unwrap();
-        h.run();
+        h.settle();
         writeln!(std::io::stdout(), "\nready").unwrap();
         std::io::stdout().flush().unwrap();
         let mut line = String::new();
@@ -123,14 +124,14 @@ fn survival_child() {
         h.state_mut()
             .run("helios.log.detach", json!(null), Origin::User)
             .unwrap();
-        h.run();
+        h.settle();
         h.state_mut()
             .edit_workspace(
                 &json!({ "description": "Harbour", "library": { "auto_advance": true } }),
                 &Origin::User,
             )
             .unwrap();
-        h.run();
+        h.settle();
         // On a line of its own: the test harness may have started one
         // ("test survival_child ... ").
         writeln!(std::io::stdout(), "\nready").unwrap();
@@ -149,14 +150,14 @@ fn survival_child() {
             ("viewport.compare", json!(null)),
         ] {
             h.state_mut().run(command, args, Origin::User).unwrap();
-            h.run();
+            h.settle();
         }
         helios_gui::contexts::open(
             h.state().app().handle(),
             &helios_gui::contexts::Opened::File(dir.join("photo.png")),
             &egui_pop::model::commands::Origin::User,
         );
-        h.run();
+        h.settle();
         writeln!(std::io::stdout(), "\nready").unwrap();
         std::io::stdout().flush().unwrap();
         let mut line = String::new();
@@ -253,7 +254,7 @@ fn take_snapshot(shell: &Shell, name: &str) -> egui_pop::api::history::Snapshot 
 /// state opened for editing.
 fn workspace_window(dir: &Path) -> egui_kittest::Harness<'static, Shell> {
     let mut h = helios_gui::headless::harness(workspace_shell(dir), egui::vec2(800.0, 500.0));
-    h.run();
+    h.settle();
     h
 }
 

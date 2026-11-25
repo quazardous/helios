@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::host::Settle as _;
 use egui::{Key, vec2};
 use egui_kittest::Harness;
 use egui_pop::views::library::filter::Filter;
@@ -61,7 +62,7 @@ fn open(path: &Path) -> (Harness<'static, Shell>, Persist<SqliteStore>) {
     persist.fill_library(&mut shell).unwrap();
     shell.library_mut().select(0);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     (h, persist)
 }
 
@@ -84,26 +85,26 @@ fn culling_keys_mark_the_vault_through_the_library_steps() {
     let path = vault_file(&dir);
     let (mut h, mut persist) = open(&path);
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     // Lightroom's keys: P picks, 4 rates, 6 labels red.
     h.key_press(Key::P);
     h.key_press(Key::Num4);
     h.key_press(Key::Num6);
-    h.run();
+    h.settle();
     persist.frame_settled(h.state_mut(), 1.0);
     assert_eq!(stored(&path, 1, PICKED), Some(json!(true)));
     assert_eq!(stored(&path, 1, RATING), Some(json!(4)));
     assert_eq!(stored(&path, 1, LABELS), Some(json!(["red"])));
     // X rejects: the pick goes, the stars stay.
     h.key_press(Key::X);
-    h.run();
+    h.settle();
     persist.frame_settled(h.state_mut(), 2.0);
     assert_eq!(stored(&path, 1, PICKED), None);
     assert_eq!(stored(&path, 1, REJECTED), Some(json!(true)));
     assert_eq!(stored(&path, 1, RATING), Some(json!(4)));
     // U unflags.
     h.key_press(Key::U);
-    h.run();
+    h.settle();
     persist.frame_settled(h.state_mut(), 3.0);
     assert_eq!(stored(&path, 1, REJECTED), None);
     let entry = h.state().library().entries[0].clone();
@@ -143,8 +144,8 @@ fn an_agent_s_library_commands_reach_the_vault() {
         "library.rate",
         json!({ "library": library, "rating": 2 }),
     );
-    h.run();
-    h.run();
+    h.settle();
+    h.settle();
     persist.frame_settled(h.state_mut(), 1.0);
     assert_eq!(stored(&path, 1, TAGS), Some(json!(["beach", "sea"])));
     assert_eq!(stored(&path, 1, PICKED), Some(json!(true)));
@@ -169,14 +170,14 @@ fn auto_advance_moves_on_after_each_mark() {
     shell.set_library(entries);
     shell.library_mut().select(0);
     let mut h = headless::harness(shell, vec2(1280.0, 800.0));
-    h.run();
+    h.settle();
     run(&mut h, "vault.autoAdvance", json!({ "on": true }));
     run(&mut h, "helios.vault.focus", json!(null));
-    h.run();
+    h.settle();
     h.key_press(Key::Num5);
-    h.run();
+    h.settle();
     h.key_press(Key::X);
-    h.run();
+    h.settle();
     let s = h.state_mut();
     assert_eq!(s.library().selected(), Some(2), "two marks, two steps");
     let changes = s.take_library_changes();
@@ -195,7 +196,7 @@ fn auto_advance_moves_on_after_each_mark() {
     // Off again: a mark stays on its image.
     run(&mut h, "vault.autoAdvance", json!(null));
     h.key_press(Key::Num7);
-    h.run();
+    h.settle();
     let s = h.state_mut();
     assert_eq!(s.library().selected(), Some(2));
     assert_eq!(s.library().entries[2].labels, ["yellow"]);
@@ -275,7 +276,7 @@ fn the_search_filter_is_a_vault_query() {
     h.state_mut().library_mut().set_filter(Filter::default());
     persist.frame_settled(h.state_mut(), 4.0);
     assert_eq!(h.state().library().shown().len(), 3);
-    h.run();
+    h.settle();
     drop((h, persist, other));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -320,7 +321,7 @@ fn the_window_s_results_are_the_vault_s_for_every_search_text() {
         // Applied through the bus: the shell's commands run at the next
         // frame, which also asks the vault the filter's query.
         run(&mut h, "library.filter.apply", json!({ "query": text }));
-        h.run();
+        h.settle();
         persist.frame_settled(h.state_mut(), 10.0 + i as f64);
         let mut shown = h.state().library().shown();
         shown.sort();
@@ -339,7 +340,7 @@ fn the_window_s_results_are_the_vault_s_for_every_search_text() {
         want.sort();
         assert_eq!(shown, want, "`{text}`");
     }
-    h.run();
+    h.settle();
     drop((h, persist, other));
     let _ = std::fs::remove_dir_all(&dir);
 }
