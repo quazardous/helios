@@ -1082,6 +1082,11 @@ kind = "form"
         // declared limits.
         assert!(m.thumbnails);
         assert!(m.limits.per_minute.is_some() && m.limits.per_day.is_some());
+        // Its daily quota starts again at midnight Pacific time.
+        assert_eq!(
+            m.limits.day_reset,
+            Some(helios_connect::DayReset::UsPacific)
+        );
         let p = problems(&SOURCE.replace(
             "services = [\"import.source\"]",
             "services = [\"import.source\"]\nbrowsers = [\"collections\", \"timeline\"]",

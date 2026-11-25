@@ -880,7 +880,11 @@ requests its service allows `limits = { per_minute = 120, per_day =
 the connector, the account, the item's id and its revision, so a pick
 opened again reads nothing from the network; the read-ahead of items not
 shown pauses at the declared limits and at the cache's budget, never
-evicting a glance shown.
+evicting a glance shown. `day_reset` (`"utc"` or `"us-pacific"`) says
+when the daily quota starts again: an import that spends it pauses, its
+promise `paused` (kind `quota`, "daily quota reached") until that reset,
+and goes on by itself then, or at once on Resume. Without it the day is a
+sliding one, ending a day after the oldest request counted.
 
 The Contents column follows the source browsed: the account selected,
 else the folder or card ticked last. When its connector offers more than

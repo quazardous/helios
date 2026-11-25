@@ -578,6 +578,7 @@ fn fetched<S: Store + Send + 'static>(
             handle,
             service: &pick.source.label,
         }),
+        clock: None,
     };
     let mut done = 0u64;
     let mut failed = Vec::new();
@@ -627,6 +628,15 @@ where
                     wait.as_secs().max(1)
                 ),
                 Some(*wait),
+                stopped,
+            ),
+            Hold::DailyQuota { until, now } => self.handle.hold(
+                Wait::Quota,
+                &format!(
+                    "{}: daily quota reached, going on when it starts again",
+                    self.service
+                ),
+                Some(std::time::Duration::from_secs(until.saturating_sub(*now))),
                 stopped,
             ),
             Hold::SignIn => self.handle.hold(

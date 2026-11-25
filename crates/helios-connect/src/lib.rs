@@ -234,6 +234,86 @@ pub struct Limits {
     pub per_day: Option<u32>,
     /// Requests under way at once, downloads and thumbnails together.
     pub parallel: Option<u32>,
+    /// When the daily quota ([`Limits::per_day`]) starts again: an import
+    /// that spent it pauses until then. `None`: a day after the oldest
+    /// request counted (a sliding day).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub day_reset: Option<DayReset>,
+}
+
+/// When a service's daily quota starts again ([`Limits::day_reset`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DayReset {
+    /// At midnight UTC.
+    Utc,
+    /// At midnight Pacific time, daylight saving time included (Google's
+    /// APIs).
+    UsPacific,
+}
+
+impl DayReset {
+    /// The first reset after `now`, both in seconds since the epoch.
+    pub fn next_after(self, now: u64) -> u64 {
+        const DAY: i64 = 86_400;
+        let now = now as i64;
+        let offset = |t: i64| match self {
+            Self::Utc => 0,
+            Self::UsPacific => us_pacific_offset(t),
+        };
+        // The local day after the one `now` is in, its midnight on the
+        // offset of that moment (a day saving change happens at 2 am).
+        let next_day = (now + offset(now)).div_euclid(DAY) + 1;
+        let guess = next_day * DAY - offset(now);
+        (next_day * DAY - offset(guess)) as u64
+    }
+}
+
+/// Pacific time's offset from UTC at `t` (seconds since the epoch), in
+/// seconds: daylight saving from the second Sunday of March, 2 am, to the
+/// first Sunday of November, 2 am.
+fn us_pacific_offset(t: i64) -> i64 {
+    const HOUR: i64 = 3_600;
+    let year = civil_from_days(t.div_euclid(86_400)).0;
+    let sunday_from = |month: u32, first: u32| {
+        let day = days_from_civil(year, month, first);
+        // 1970-01-01 was a Thursday: 0 is a Sunday.
+        day + (7 - (day + 4).rem_euclid(7)) % 7
+    };
+    let starts = sunday_from(3, 8) * 86_400 + 10 * HOUR;
+    let ends = sunday_from(11, 1) * 86_400 + 9 * HOUR;
+    if (starts..ends).contains(&t) {
+        -7 * HOUR
+    } else {
+        -8 * HOUR
+    }
+}
+
+/// Days since 1970-01-01 of a date of the proleptic Gregorian calendar
+/// (Howard Hinnant's `days_from_civil`).
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let m = i64::from(month);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(day) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The year, month and day of a count of days since 1970-01-01 (Howard
+/// Hinnant's `civil_from_days`).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (year, month, day)
 }
 
 /// A hash algorithm a connector may claim.
@@ -869,6 +949,22 @@ pub fn registry() -> BTreeMap<&'static str, ProviderRef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_daily_quota_starts_again_at_midnight_pacific_time() {
+        let p = DayReset::UsPacific;
+        // Noon in November (PST): 08:00 UTC the next day.
+        assert_eq!(p.next_after(1_795_636_800), 1_795_680_000);
+        // Noon in July (PDT): 07:00 UTC the next day.
+        assert_eq!(p.next_after(1_782_907_200), 1_782_975_600);
+        // 1 am PST on the day summer time starts (2026-03-08): the next
+        // midnight is already PDT.
+        assert_eq!(p.next_after(1_772_960_400), 1_773_039_600);
+        // 1:30 am PDT on the day it ends (2026-11-01): the next midnight
+        // is PST.
+        assert_eq!(p.next_after(1_793_521_800), 1_793_606_400);
+        assert_eq!(DayReset::Utc.next_after(1_795_636_800), 1_795_651_200);
+    }
 
     #[test]
     fn the_registry_lists_cards_then_folders_each_under_its_manifest_id() {

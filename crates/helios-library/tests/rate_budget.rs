@@ -74,6 +74,7 @@ fn import(
             items,
             new_only: false,
             holder: None,
+            clock: None,
         };
         let jobs = Jobs::new(Arc::default());
         let report =
@@ -253,5 +254,70 @@ fn a_waiting_download_goes_before_the_waiting_thumbnails() {
     assert_eq!(kinds.len(), 1 + 2 + 6);
     assert_eq!(kinds[..2], [Use::Thumbnail, Use::Download], "{kinds:?}");
     assert!(provider.requests.most_at_once.load(Ordering::SeqCst) <= 1);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// What a holder was asked, and the wall clock it moves past each hold.
+struct DailyHolder {
+    clock: AtomicU64,
+    holds: Mutex<Vec<fetch::Hold>>,
+}
+
+impl fetch::Holder for DailyHolder {
+    fn hold(&self, why: &fetch::Hold, _stopped: &dyn Fn() -> bool) -> bool {
+        self.holds.lock().unwrap().push(why.clone());
+        if let fetch::Hold::DailyQuota { until, .. } = why {
+            // The day passes: the clock goes past its reset.
+            self.clock.store(until + 1, Ordering::SeqCst);
+        }
+        true
+    }
+}
+
+#[test]
+fn a_spent_daily_quota_pauses_the_import_until_midnight_pacific() {
+    let limits = Limits {
+        per_day: Some(2),
+        day_reset: Some(helios_connect::DayReset::UsPacific),
+        ..Limits::default()
+    };
+    let (provider, connector, source, items) = service("rate-daily", 4, limits);
+    let root = temp("daily");
+    // 2026-11-25 20:00 UTC, noon in Pacific time (PST).
+    let holder = DailyHolder {
+        clock: AtomicU64::new(1_795_636_800),
+        holds: Mutex::default(),
+    };
+    let clock = || holder.clock.load(Ordering::SeqCst);
+    let remote = Remote {
+        connector: &*connector,
+        source,
+        items,
+        new_only: false,
+        holder: Some(&holder),
+        clock: Some(&clock),
+    };
+    let vault = Vault::new(MemoryStore::default());
+    let options = Options {
+        placement: Placement::Copy {
+            into: Some(root.clone()),
+        },
+        layout: Layout::Flat,
+        duplicates: Duplicates::Keep,
+        ..Options::default()
+    };
+    let jobs = Jobs::new(Arc::default());
+    let report = fetch::import_remote(&vault, &jobs, &remote, &options, 1000, &mut |_| {}).unwrap();
+    // Two photos, the day's quota, then a pause until the next midnight
+    // Pacific (08:00 UTC), then the other two.
+    assert_eq!(
+        *holder.holds.lock().unwrap(),
+        [fetch::Hold::DailyQuota {
+            until: 1_795_680_000,
+            now: 1_795_636_800,
+        }]
+    );
+    assert_eq!(report.fetched, 4);
+    assert_eq!(provider.fetched.load(Ordering::SeqCst), 4);
     let _ = std::fs::remove_dir_all(&root);
 }

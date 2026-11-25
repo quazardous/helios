@@ -222,6 +222,7 @@ fn run(
         items,
         new_only,
         holder: None,
+        clock: None,
     };
     let mut lines = Vec::new();
     let report = fetch::import_remote(vault, &jobs, &remote, options, 1000, &mut |l: &Value| {
@@ -496,6 +497,7 @@ fn a_part_left_by_an_earlier_run_is_resumed() {
         items: vec![item("a", &a, None)],
         new_only: true,
         holder: None,
+        clock: None,
     };
     let report =
         fetch::import_remote(&vault, &jobs, &remote, &options(&p.0), 1000, &mut |_| {}).unwrap();
