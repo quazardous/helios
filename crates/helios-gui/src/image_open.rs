@@ -91,7 +91,8 @@ pub const MARKS: &str = "helios.mask.marks";
 pub const WORKSHOP: &str = "helios.workshop.photo";
 /// The image's history parked when it was left, back as its edit's
 /// history now that its values are loaded (dropped when they moved
-/// meanwhile).
+/// meanwhile); with none parked (after a restart), its history rebuilt
+/// from its saved versions (`library.edit.history`).
 pub const HISTORY: &str = "helios.history.resume";
 
 /// The followers of [`ImageOpened`] and [`ImageClosed`], each with the
@@ -164,6 +165,9 @@ pub struct Shown {
     pub saved: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     /// The labels and locks its edit was saved with (null: none).
     pub marks: Value,
+    /// Its network with no edit: where a history rebuilt from its
+    /// versions starts (`history.resume`, after a restart).
+    pub unedited: Value,
 }
 
 /// The followers that ran, in order.

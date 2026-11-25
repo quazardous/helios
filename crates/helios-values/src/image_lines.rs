@@ -15,8 +15,9 @@
 //!
 //! Memory is bounded: [`PARKED_IMAGES`] images, the least recently left
 //! dropped first, each with at most [`PARKED_STEPS`] undo steps, the
-//! oldest dropped first. Lines are kept for the session only; saving
-//! them with the image's versions is a later slice.
+//! oldest dropped first. Lines are kept for the session only: after a
+//! restart, the image's line is rebuilt from its saved versions and
+//! installed the same way ([`Store::install_image_line`]).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -106,6 +107,36 @@ impl Store {
         let Some((_, line)) = self.images.remove(at) else {
             return false;
         };
+        self.put_image_line(line)
+    }
+
+    /// The image's line rebuilt from its saved versions (a restart, a
+    /// crash: no line was parked), installed as its edit's history once
+    /// its values are loaded: `undo` oldest first, `redo` the next redo
+    /// first. Each step gets a new id; past [`PARKED_STEPS`] the oldest
+    /// undo steps are dropped. Installed only onto the values the line
+    /// reached and an image with no step of its own yet, as
+    /// [`Store::resume_image`] does; whether it was.
+    pub fn install_image_line(&mut self, undo: Vec<Step>, redo: Vec<Step>) -> bool {
+        let mut line = Parked {
+            undo,
+            redo: redo.into_iter().rev().collect(),
+            replaced: Vec::new(),
+        };
+        for step in line.undo.iter_mut().chain(line.redo.iter_mut()) {
+            self.next_step += 1;
+            step.id = self.next_step;
+        }
+        line.cap();
+        if line.is_empty() {
+            return false;
+        }
+        self.put_image_line(line)
+    }
+
+    /// `line` as the image's history, when it fits the values and the
+    /// image has no step of its own yet; whether it did.
+    fn put_image_line(&mut self, line: Parked) -> bool {
         let fits = line
             .head()
             .into_iter()
@@ -173,6 +204,56 @@ mod tests {
             Descriptor::float("Exposure", -100.0, 2000.0, 0.0),
             Value::Float(v),
         );
+    }
+
+    fn step(label: &str, before: f64, after: f64) -> Step {
+        Step {
+            id: 0,
+            label: label.into(),
+            origin: Origin::User,
+            changes: vec![(EV.into(), Value::Float(before), Value::Float(after))],
+            place: Vec::new(),
+            group: None,
+            aim: None,
+        }
+    }
+
+    #[test]
+    fn a_rebuilt_line_installed_is_undone_and_redone() {
+        let mut s = store();
+        load(&mut s, 2.0);
+        let undo = vec![step("a", 0.0, 1.0), step("b", 1.0, 2.0)];
+        let redo = vec![step("c", 2.0, 3.0), step("d", 3.0, 4.0)];
+        assert!(s.install_image_line(undo, redo));
+        let ids: Vec<u64> = s.undo_steps().iter().map(|s| s.id).collect();
+        assert!(ids.iter().all(|&i| i != 0) && ids[0] != ids[1]);
+        s.undo(&Origin::User).unwrap();
+        assert_eq!(ev(&s), Value::Float(1.0));
+        s.redo(&Origin::User).unwrap();
+        s.redo(&Origin::User).unwrap();
+        assert_eq!(ev(&s), Value::Float(3.0), "the next redo is c");
+        s.redo(&Origin::User).unwrap();
+        assert_eq!(ev(&s), Value::Float(4.0));
+    }
+
+    #[test]
+    fn a_rebuilt_line_off_the_values_or_over_steps_is_not_installed() {
+        let mut s = store();
+        load(&mut s, 7.0);
+        assert!(!s.install_image_line(vec![step("a", 0.0, 1.0)], Vec::new()));
+        assert!(s.undo_steps().is_empty());
+        set(&mut s, 1.0);
+        assert!(
+            !s.install_image_line(vec![step("a", 0.0, 1.0)], Vec::new()),
+            "the image has a step of its own"
+        );
+        let mut s = store();
+        load(&mut s, PARKED_STEPS as f64 + 10.0);
+        let long: Vec<Step> = (0..PARKED_STEPS + 10)
+            .map(|i| step("x", i as f64, i as f64 + 1.0))
+            .collect();
+        assert!(s.install_image_line(long, Vec::new()));
+        assert_eq!(s.undo_steps().len(), PARKED_STEPS);
     }
 
     #[test]

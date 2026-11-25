@@ -126,9 +126,17 @@ saves are one move). An undo of the first step reaches the unedited
 image. A replay that reaches no known state (a jump to a replaced line)
 reads as a new step. Versions saved in progress and cancels are no step.
 A version with no marker reads as `do` (or `progress` when its label
-says so), so older lines need no migration. Still to do: loading the
-rebuilt line into the value store when a photo opens with no parked
-line.
+says so), so older lines need no migration.
+
+Built (2026-11-25, #5522): when a photo opens with no parked line (after
+a restart or a crash), `history.resume` reads `library.edit.history` (the
+head's line rebuilt on the node) and installs it into the value store
+(`Store::install_image_line`, capped at 500 steps, only onto the values
+the line reached). Each step is the difference of its two edits as value
+paths (`node/…`, `bypass/…`, the marks' `label/…` and `lock/…` the store
+holds); a path one edit does not name holds its default. Rebuilt and
+loaded, a line of 300 versions has a test with a deadline: 20 ms in a
+release build, 2 s in a debug one (about 0.5 s measured there).
 
 ## Network edits
 
@@ -367,7 +375,7 @@ the open step until something seals it, and an explicit Commit
   history: the `workspace` line, or a workshop's local scope where it
   has one. A photo's history never holds a diagram edit.
 - The library's history stays its own line, never a photo's.
-- Per-photo stacks loaded into the store from the versions after a restart (the rest of R5), `helios.photo.history` (R6), amend and Commit (R7), compare
+- `helios.photo.history` (R6), amend and Commit (R7), compare
   any step with the live edit (R8, credited to darktable PR #23136).
 
 ### Slices
@@ -378,7 +386,7 @@ the open step until something seals it, and an explicit Commit
 | R2 | The `workspace` line split from `edit` | done (2026-11-20), persistence to the undo records to do |
 | R3 | Ctrl+Z follows the focused view (egui-pop's `Routing::Focus` and `pop.history.target`, Helios's focus sets) | done (2026-11-21) |
 | R4 | Per-photo stacks kept across switches | done (2026-11-25), session only; the RAM budget in `helios-cache` to do |
-| R5 | Step markers in the versions; undo rebuilt after a restart | markers and the rebuild done (2026-11-25, `helios_vault::edit_steps`); loading the rebuilt line into the store on open to do |
+| R5 | Step markers in the versions; undo rebuilt after a restart | done (2026-11-25): markers and the rebuild (`helios_vault::edit_steps`), the rebuilt line loaded into the store on open (#5522) |
 | R6 | `helios.photo.history`, read-only | to do |
 | R7 | Amend and seal (B), Commit | to do |
 | R8 | Compare any step with the live edit | to do |

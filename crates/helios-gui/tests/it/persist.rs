@@ -344,12 +344,32 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
         .unwrap();
     assert_eq!(head.label.as_deref(), Some("redo drag exposure"));
     assert!((shown(&shell) - 1.6).abs() < 1e-9, "{}", shown(&shell));
+    // Its undo history is back, rebuilt from the versions (#5522).
+    let labels: Vec<String> = shell
+        .values()
+        .lock()
+        .unwrap()
+        .undo_steps()
+        .iter()
+        .map(|s| s.label.clone())
+        .collect();
+    assert_eq!(labels, [format!("set {EV}"), "drag exposure".into()]);
     // And the next step continues it.
     set(&shell, 0.5, None);
     persist.frame_settled(&mut shell, 20.0);
     let next = persist.vault().heads(&id(1)).unwrap();
     assert_eq!(next.len(), 1);
     assert_eq!(next[0].parents, [head.id]);
+    // Ctrl+Z walks back the new step, then those made before the
+    // restart.
+    let undo = |shell: &Shell| {
+        shell.values().lock().unwrap().undo(&Origin::User).unwrap();
+    };
+    undo(&shell);
+    assert!((shown(&shell) - 1.6).abs() < 1e-9, "{}", shown(&shell));
+    undo(&shell);
+    assert!((shown(&shell) - 1.0).abs() < 1e-9, "{}", shown(&shell));
+    assert_eq!(shell.values().lock().unwrap().undo_steps().len(), 1);
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -596,7 +616,9 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
     );
     drop((shell, persist));
 
-    // Reopened: the spot has its label and its lock, not as undo steps.
+    // Reopened: the spot has its label and its lock, their restore no
+    // undo step of its own; the one step is the saved one, rebuilt from
+    // the versions (#5522), which names and locks it.
     let mut shell = Shell::new(helios_panels(), None);
     let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
     let (graph, blend) = masked_network();
@@ -607,7 +629,14 @@ fn mask_labels_and_locks_are_saved_with_the_edit() {
         let store = shell.values().lock().unwrap();
         assert_eq!(mask_tree::label_of(&store, "spot").as_deref(), Some("Face"));
         assert!(mask_tree::is_locked(&store, "spot"));
-        assert!(store.all_undo_steps().is_empty());
+        let steps = store.all_undo_steps();
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        let paths = steps[0].paths();
+        assert!(
+            paths.iter().any(|p| p.starts_with("label/"))
+                && paths.iter().any(|p| p.starts_with("lock/")),
+            "{paths:?}"
+        );
     }
     // Another image opened in this shell does not take them.
     let (graph, blend) = masked_network();
