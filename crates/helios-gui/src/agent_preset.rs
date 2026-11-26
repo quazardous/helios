@@ -476,7 +476,8 @@ mod tests {
         /// The queue's read is for every agent; its verbs for those who
         /// may write: an unpaired client (read only) reads the queue and is
         /// refused a cancel with the reason, the paired runner's cancel
-        /// passes the grants (and fails at the node: none is connected).
+        /// passes the grants and is queued (to fail at the node: none is
+        /// connected).
         #[test]
         fn the_queue_is_read_by_any_agent_and_acted_on_by_a_writer() {
             use crate::workflow_queue::{CANCEL, LIST};
@@ -516,7 +517,8 @@ mod tests {
             });
             let cancel = finish(&mut h, client);
             assert!(!cancel.to_string().contains("pop.agent.grants"), "{cancel}");
-            assert!(cancel.to_string().contains("not followed"), "{cancel}");
+            // Queued: it fails later at the node (none is connected).
+            assert_eq!(cancel["result"]["ok"], true, "{cancel}");
         }
 
         #[test]
