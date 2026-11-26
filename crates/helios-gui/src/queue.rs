@@ -15,7 +15,9 @@
 //!   Cancel `job.cancel`. The rows change when the node says they did.
 //! - Photos dragged out of the library and dropped on the panel join the
 //!   run queued at the node: `helios.workflow.submit` extends it on its
-//!   node with them, as library photos.
+//!   node with them, as library photos. With no run there, they start
+//!   one with the last export's settings (`library.export` with
+//!   `again`). Hovering, the panel's outline and what a drop does.
 //! - Empty (no node selected, or nothing queued at it), the panel shows an
 //!   empty state; with `interface.panels.queue_when_empty` off it closes
 //!   instead, and opens again once the node has work.
@@ -212,7 +214,7 @@ pub trait QueueSource {
     /// The arguments of [`crate::workflow_queue::SUBMIT`] that add photos
     /// to the queue of `node` (the connected node, the run's export
     /// settings), all but `images`; `None` when no run queues there, and
-    /// photos dropped on the panel are refused.
+    /// photos dropped on the panel start one (`library.export`).
     fn submit_args(&self, _node: &str) -> Option<serde_json::Value> {
         None
     }
@@ -237,6 +239,8 @@ pub struct QueuePanel {
     closed_empty: bool,
     /// Actions clicked, run after drawing.
     asked: Vec<(String, Action)>,
+    /// Photos hovered the panel in its last pass ([`QueuePanel::drop_hovered`]).
+    drop_hovered: bool,
 }
 
 impl Default for QueuePanel {
@@ -248,6 +252,7 @@ impl Default for QueuePanel {
             when_empty: true,
             closed_empty: false,
             asked: Vec::new(),
+            drop_hovered: false,
         }
     }
 }
@@ -341,51 +346,72 @@ impl QueuePanel {
     pub fn ui(&mut self, ui: &mut Ui, app: &AppHandle) {
         let area = ui.max_rect();
         self.draw(ui, app);
-        self.take_drop(ui.ctx(), area);
+        self.take_drop(ui, area);
+    }
+
+    /// Whether photos dragged out of the library hovered the panel in
+    /// its last pass, as a drop target that takes them (its outline and
+    /// what a drop would do shown by the pointer).
+    pub fn drop_hovered(&self) -> bool {
+        self.drop_hovered
     }
 
     /// Photos dropped on the panel (`area`), from any window (egui-pop's
     /// drag session): they join the run queued at the followed node,
     /// through [`crate::workflow_queue::SUBMIT`], the command an agent
     /// runs, which extends the run on its node with them as library
-    /// photos (`image:` items). With no run there the drop is refused,
-    /// saying why. Never an undo step: the node's queue is work, not the
-    /// library's state.
-    fn take_drop(&mut self, ctx: &egui::Context, area: egui::Rect) {
+    /// photos (`image:` items). With no run there they start one:
+    /// `library.export` with `again`, the last export's settings (else
+    /// the workspace's, else the defaults). Hovering, the panel shows
+    /// what a drop does ([`crate::library::drop_hint`]). Never an undo
+    /// step: a run is work, not the library's state.
+    fn take_drop(&mut self, ui: &Ui, area: egui::Rect) {
         use egui_pop::api::bus::drag::{self, Seen};
+        self.drop_hovered = false;
         let Some(node) = self.node.clone() else {
             return;
         };
+        let ctx = ui.ctx();
         let args = self.source.submit_args(&node);
-        let refusal = args.is_none().then(|| {
-            Message::new(
-                "gui-queue-drop-no-run",
-                "Not here: no run queues at { $node } yet",
-            )
-            .with("node", node.as_str())
-        });
-        let seen = drag::target::<crate::library::DraggedPhotos>(ctx, PANEL, area, |_| {
-            refusal.clone().map(|m| crate::i18n::text(ctx, m))
-        });
-        match (seen, args) {
-            (Seen::Dropped(photos), Some(mut args)) => {
-                args["images"] = serde_json::json!(photos.0);
+        match drag::target::<crate::library::DraggedPhotos>(ctx, PANEL, area, |_| None) {
+            Seen::Over { payload, .. } => {
+                self.drop_hovered = true;
+                let count = payload.0.len();
+                let hint = if args.is_some() {
+                    Message::new(
+                        "gui-queue-drop-join",
+                        "Add { $count } photos to the run queued at { $node }",
+                    )
+                } else {
+                    Message::new(
+                        "gui-queue-drop-start",
+                        "Export { $count } photos with the last export settings",
+                    )
+                }
+                .with("count", count)
+                .with("node", node.as_str());
+                let target = ui.interact(area, ui.scope_id().with(PANEL), egui::Sense::hover());
+                crate::library::drop_hint(&target, true, crate::i18n::text(ctx, hint));
+            }
+            Seen::Dropped(photos) => {
+                let (command, args) = match args {
+                    Some(mut args) => {
+                        args["images"] = serde_json::json!(photos.0);
+                        (crate::workflow_queue::SUBMIT, args)
+                    }
+                    None => (
+                        "library.export",
+                        serde_json::json!({ "images": photos.0, "again": true }),
+                    ),
+                };
                 crate::dialogs::request(
                     ctx,
                     crate::dialogs::Request::Run(
-                        crate::workflow_queue::SUBMIT.into(),
+                        command.into(),
                         args,
                         helios_shell::commands::Origin::User,
                     ),
                 );
-            }
-            (Seen::Refused { .. }, _) => {
-                if let Some(m) = refusal {
-                    crate::dialogs::request(
-                        ctx,
-                        crate::dialogs::Request::Notify(crate::dialogs::Level::Warning, m),
-                    );
-                }
             }
             _ => {}
         }

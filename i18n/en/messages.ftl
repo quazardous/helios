@@ -2335,7 +2335,9 @@ gui-queue-column-state = State
 
 gui-queue-column-where = Where
 
-gui-queue-drop-no-run = Not here: no run queues at { $node } yet
+gui-queue-drop-join = Add { $count } photos to the run queued at { $node }
+
+gui-queue-drop-start = Export { $count } photos with the last export settings
 
 gui-queue-empty = Nothing queued at { $node }
 

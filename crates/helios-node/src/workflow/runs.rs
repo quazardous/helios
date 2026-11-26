@@ -844,8 +844,9 @@ fn pick_export(
 impl Workflows {
     /// The items with each library image (`image:` and its content hash,
     /// as a photo dragged out of the library names it) made the file of
-    /// its first present copy, its parameters kept; files stay as given.
-    /// A library image needs the node's vault, and a copy at hand.
+    /// its first present copy (one the vault holds present and on disk),
+    /// its parameters kept; files stay as given. A library image needs
+    /// the node's vault, and a copy at hand.
     fn library_images(&self, items: &[RunItem]) -> Result<Vec<RunItem>, Message> {
         items
             .iter()
@@ -876,7 +877,7 @@ impl Workflows {
                     .locations(&id)
                     .map_err(Message::plain)?
                     .into_iter()
-                    .find(helios_vault::Location::present)
+                    .find(|l| l.present() && l.path.is_file())
                     .ok_or_else(not_at_hand)?
                     .path;
                 Ok(match item {

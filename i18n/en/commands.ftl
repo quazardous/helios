@@ -416,7 +416,7 @@ command-library-duplicateOriginal =
     .title = Duplicate Original: a new version of each photo with no edit, beside the others (`images`: ids, else the selection)
 
 command-library-export =
-    .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; asked when `folder` is absent or `ask` is true)
+    .title = Export… (`images`: ids, else `scope`: `selected` or `shown`, the selection by default, else every image shown; `format`: jpeg, png or tiff; `quality`, `bits`, `long_edge`, `space`, `folder`, `pattern`, `clash`: number, overwrite or skip; `remember`; `again`: from the last export's settings, never asked; asked when `folder` is absent or `ask` is true)
 
 command-library-files-pair =
     .title = Pair RAW+JPEG Files: each raw and JPEG of one shot among the photos (`images`: ids, else the selection; `all`: the whole Library) made one photo, the JPEG its camera file, the raw's marks kept where both have one, labels, tags and albums merged; `exact`: the two photos paired as they are; Ctrl+Z takes it back

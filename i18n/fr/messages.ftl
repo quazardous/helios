@@ -2210,7 +2210,9 @@ gui-queue-column-where = Où
 
 gui-queue-empty = Rien en file d’attente à { $node }
 
-gui-queue-drop-no-run = Pas ici : aucune exécution n’attend encore à { $node }
+gui-queue-drop-join = Ajouter { $count } photos à l’exécution en attente à { $node }
+
+gui-queue-drop-start = Exporter { $count } photos avec les derniers réglages d’export
 
 gui-queue-here = Ce poste
 

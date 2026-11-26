@@ -215,7 +215,7 @@ command-library-copyFiles.title deedc555cf326d6b
 command-library-deleteRejected.title 9b733bf20d4e0707
 command-library-duplicate.title e9d68fb1434cdb15
 command-library-duplicateOriginal.title 972872e3c27751da
-command-library-export.title c2dc933564069c87
+command-library-export.title 7ae90c01f14ff10a
 command-library-files-pair.title b5a280352c7e0f89
 command-library-files-unpair.title d626ff070b6343d4
 command-library-filter-apply.title 19abeee163bd677a
@@ -1532,7 +1532,8 @@ gui-queue-column-item 2ec86d203d6111fc
 gui-queue-column-since 399295bb086ea05d
 gui-queue-column-state c3a81a0c833e315c
 gui-queue-column-where 5b0d24deb7aac3ce
-gui-queue-drop-no-run ca61ae576c11c6c9
+gui-queue-drop-join c8c5845d3e697e0b
+gui-queue-drop-start e42623e97b294795
 gui-queue-empty fdc6cf63ab0477bc
 gui-queue-here 057fed6ef864cda9
 gui-queue-hours f2b2b9260972944f

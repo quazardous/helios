@@ -1730,29 +1730,9 @@ fn hover_over(
     hover: &std::cell::Cell<Option<(DropOn, bool)>>,
 ) {
     let ctx = &row.ctx;
-    let allowed = refusal.is_none();
-    hover.set(Some((target.clone(), allowed)));
-    let visuals = ctx.global_style().visuals.clone();
-    let colour = if allowed {
-        visuals.selection.stroke.color
-    } else {
-        visuals.error_fg_color
-    };
-    let painter = ctx.layer_painter(egui::LayerId::new(
-        egui::Order::Foreground,
-        egui::Id::unique("helios.library.drop"),
-    ));
-    painter.rect_stroke(
-        row.rect.expand(1.0),
-        2.0,
-        egui::Stroke::new(2.0, colour),
-        egui::StrokeKind::Inside,
-    );
+    hover.set(Some((target.clone(), refusal.is_none())));
     let text = match refusal {
-        Some(m) => {
-            ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
-            crate::i18n::text(ctx, m.clone())
-        }
+        Some(m) => crate::i18n::text(ctx, m.clone()),
         None => match target {
             DropOn::Keyword(path) => crate::i18n::text(
                 ctx,
@@ -1780,10 +1760,37 @@ fn hover_over(
             ),
         },
     };
-    // The row's own tooltip, at the pointer: egui hides hover tooltips
+    drop_hint(row, refusal.is_none(), text);
+}
+
+/// A drop target hovered by a drag (egui-pop's drag session): its
+/// outline, the accent when it takes what hovers it, else the error
+/// colour and a "not allowed" cursor; beside the pointer, `text`: what a
+/// drop would do, or why not. Shared by the drop targets of the
+/// desktop (the Albums rows, the Queue panel).
+pub(crate) fn drop_hint(target: &egui::Response, allowed: bool, text: String) {
+    let ctx = &target.ctx;
+    let visuals = ctx.global_style().visuals.clone();
+    let colour = if allowed {
+        visuals.selection.stroke.color
+    } else {
+        ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+        visuals.error_fg_color
+    };
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::unique("helios.library.drop"),
+    ));
+    painter.rect_stroke(
+        target.rect.expand(1.0),
+        2.0,
+        egui::Stroke::new(2.0, colour),
+        egui::StrokeKind::Inside,
+    );
+    // The target's own tooltip, at the pointer: egui hides hover tooltips
     // while something is dragged, so it is shown here, not through
     // `on_hover_text`; it is no window, popup or menu of the panel's.
-    egui::Tooltip::for_widget(row).at_pointer().show(|ui| {
+    egui::Tooltip::for_widget(target).at_pointer().show(|ui| {
         ui.text_role(TextRole::Body, text);
     });
 }

@@ -197,15 +197,40 @@ impl Shell {
         }
     }
 
+    /// The settings `library.export` with `again` starts from: the last
+    /// export started this session, else the workspace's, else the
+    /// defaults writing to `<Pictures>/Export`. Never asked: photos
+    /// dropped on an empty Queue panel start their run at once.
+    fn export_again(&self) -> ExportDesc {
+        let mut desc = self
+            .core
+            .last_export
+            .clone()
+            .unwrap_or_else(|| self.export_settings());
+        if desc.folder.as_deref().and_then(folder_path).is_none() {
+            let pictures = helios_library::import::pictures_folder()
+                .unwrap_or_else(|| PathBuf::from("Pictures"));
+            desc.folder = Some(pictures.join("Export").display().to_string());
+        }
+        desc
+    }
+
     /// `library.export`: the images (`images`, or `scope`) exported with
-    /// the settings given over the workspace's; without a folder (or with
+    /// the settings given over the workspace's (with `again`, over the
+    /// last export's: [`Shell::export_again`]); without a folder (or with
     /// `ask`), the export dialog asks for them.
     pub(super) fn export(&mut self, args: &Value, origin: &Origin) -> Result<Value, String> {
-        let base = self.export_settings();
-        let given = args
-            .get("folder")
-            .and_then(Value::as_str)
-            .is_some_and(|f| !f.trim().is_empty());
+        let again = args["again"] == true;
+        let base = if again {
+            self.export_again()
+        } else {
+            self.export_settings()
+        };
+        let given = again
+            || args
+                .get("folder")
+                .and_then(Value::as_str)
+                .is_some_and(|f| !f.trim().is_empty());
         if !given || args["ask"] == true {
             let images = self.export_images(args);
             if images.is_empty() {
@@ -261,6 +286,7 @@ impl Shell {
         if let Some(r) = started.refused {
             return Err(format!("the export did not start: {}", r.reason));
         }
+        self.core.last_export = Some(desc);
         self.select_exported_node(&node);
         self.note(
             Message::new(
