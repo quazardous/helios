@@ -247,7 +247,7 @@ fn each_view_s_selection_and_cursor_read_back_the_same_after_a_restart() {
 fn the_main_view_s_selection_survives_a_restart() {
     let mut h = harness(None);
     h.state().library_mut().with_gallery("main", |l| {
-        l.select_kept(&["b".to_string(), "d".to_string()], Some("d"))
+        l.select_kept(&["b".to_string(), "d".to_string()], Some("d"));
     });
     h.run_steps(3);
     let before = answer(&mut h, SELECTION_COMMAND, json!({ "view": "main" })).unwrap();
@@ -296,7 +296,7 @@ fn a_linked_view_follows_the_main_selection_and_an_unlinked_one_does_not() {
     assert_eq!(payload(&h, &linked)["link"], "main");
 
     h.state().library_mut().with_gallery("main", |l| {
-        l.select_kept(&["c".to_string(), "e".to_string()], Some("e"))
+        l.select_kept(&["c".to_string(), "e".to_string()], Some("e"));
     });
     h.run_steps(3);
     let read = |h: &mut Harness<'static, Shell>, v: &str| {
