@@ -39,6 +39,9 @@ command-helios-compare-detach =
 command-helios-compare-dock =
     .title = Remettre Comparer dans sa zone
 
+command-helios-compare-float =
+    .title = Faire flotter Comparer au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-compare-moveTo =
     .title = Déplacer Comparer vers une zone (`area`)
 
@@ -47,6 +50,9 @@ command-helios-decisions-detach =
 
 command-helios-decisions-dock =
     .title = Remettre Décisions dans sa zone
+
+command-helios-decisions-float =
+    .title = Faire flotter Décisions au-dessus de l’interface (`pos` : [x, y])
 
 command-helios-decisions-moveTo =
     .title = Déplacer Décisions vers une zone (`area`)
@@ -57,6 +63,9 @@ command-helios-duplicates-detach =
 command-helios-duplicates-dock =
     .title = Remettre Doublons dans sa zone
 
+command-helios-duplicates-float =
+    .title = Faire flotter Doublons au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-duplicates-moveTo =
     .title = Déplacer Doublons vers une zone (`area`)
 
@@ -65,6 +74,9 @@ command-helios-filmstrip-detach =
 
 command-helios-filmstrip-dock =
     .title = Remettre Pellicule dans sa zone
+
+command-helios-filmstrip-float =
+    .title = Faire flotter Pellicule au-dessus de l’interface (`pos` : [x, y])
 
 command-helios-filmstrip-moveTo =
     .title = Déplacer Pellicule vers une zone (`area`)
@@ -75,6 +87,9 @@ command-helios-filters-detach =
 command-helios-filters-dock =
     .title = Remettre Filtres dans sa zone
 
+command-helios-filters-float =
+    .title = Faire flotter Filtres au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-filters-moveTo =
     .title = Déplacer Filtres vers une zone (`area`)
 
@@ -84,6 +99,9 @@ command-helios-graph-detach =
 command-helios-graph-dock =
     .title = Remettre Graphe dans sa zone
 
+command-helios-graph-float =
+    .title = Faire flotter Graphe au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-graph-moveTo =
     .title = Déplacer Graphe vers une zone (`area`)
 
@@ -92,6 +110,9 @@ command-helios-log-detach =
 
 command-helios-log-dock =
     .title = Remettre Journal dans sa zone
+
+command-helios-log-float =
+    .title = Faire flotter Journal au-dessus de l’interface (`pos` : [x, y])
 
 command-helios-log-moveTo =
     .title = Déplacer Journal vers une zone (`area`)
@@ -114,6 +135,9 @@ command-helios-modules-detach =
 command-helios-modules-dock =
     .title = Remettre Modules dans sa zone
 
+command-helios-modules-float =
+    .title = Faire flotter Modules au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-modules-moveTo =
     .title = Déplacer Modules vers une zone (`area`)
 
@@ -135,6 +159,9 @@ command-helios-params-detach =
 command-helios-params-dock =
     .title = Remettre Paramètres dans sa zone
 
+command-helios-params-float =
+    .title = Faire flotter Paramètres au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-params-moveTo =
     .title = Déplacer Paramètres vers une zone (`area`)
 
@@ -143,6 +170,9 @@ command-helios-queue-detach =
 
 command-helios-queue-dock =
     .title = Remettre File d’attente dans sa zone
+
+command-helios-queue-float =
+    .title = Faire flotter File d’attente au-dessus de l’interface (`pos` : [x, y])
 
 command-helios-queue-moveTo =
     .title = Déplacer File d’attente vers une zone (`area`)
@@ -165,6 +195,9 @@ command-helios-stacks-detach =
 command-helios-stacks-dock =
     .title = Remettre Piles dans sa zone
 
+command-helios-stacks-float =
+    .title = Faire flotter Piles au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-stacks-moveTo =
     .title = Déplacer Piles vers une zone (`area`)
 
@@ -174,6 +207,9 @@ command-helios-vault-detach =
 command-helios-vault-dock =
     .title = Remettre Bibliothèque dans sa zone
 
+command-helios-vault-float =
+    .title = Faire flotter Bibliothèque au-dessus de l’interface (`pos` : [x, y])
+
 command-helios-vault-moveTo =
     .title = Déplacer Bibliothèque vers une zone (`area`)
 
@@ -182,6 +218,9 @@ command-helios-viewport-detach =
 
 command-helios-viewport-dock =
     .title = Remettre Image dans sa zone
+
+command-helios-viewport-float =
+    .title = Faire flotter Image au-dessus de l’interface (`pos` : [x, y])
 
 command-helios-viewport-moveTo =
     .title = Déplacer Image vers une zone (`area`)
@@ -591,6 +630,9 @@ command-helios-workshops-detach =
 
 command-helios-workshops-dock =
     .title = Remettre Ateliers dans sa zone
+
+command-helios-workshops-float =
+    .title = Faire flotter Ateliers au-dessus de l’interface (`pos` : [x, y])
 
 command-helios-workshops-moveTo =
     .title = Déplacer Ateliers vers une zone (`area`)
