@@ -185,6 +185,8 @@ pub struct ExtractRun<S: Store> {
     known: BTreeSet<String>,
     hits: u64,
     calls: u64,
+    /// Told the run's counts each time they are said on the bus.
+    on_tally: Option<Box<dyn Fn(Tally) + Send>>,
 }
 
 /// The pre-run check of `nodes` over `images` images.
@@ -248,6 +250,7 @@ impl<S: Store> ExtractRun<S> {
             known: BTreeSet::new(),
             hits: 0,
             calls: 0,
+            on_tally: None,
         };
         run.add(images, now);
         Ok(run)
@@ -339,6 +342,13 @@ impl<S: Store> ExtractRun<S> {
         t
     }
 
+    /// Tells `hook` the run's counts each time they are said on the bus
+    /// (each concluded row, and when the run stops or finishes): the
+    /// runner reports them as its job's progress.
+    pub fn on_tally(&mut self, hook: impl Fn(Tally) + Send + 'static) {
+        self.on_tally = Some(Box::new(hook));
+    }
+
     /// The row of `image` at `node`, for a client or a test.
     pub fn status(&self, image: &str, node: &str) -> Option<Status> {
         self.journal.row(&image_item(image), node).map(|r| r.status)
@@ -354,12 +364,16 @@ impl<S: Store> ExtractRun<S> {
     }
 
     fn publish(&self, bus: &Bus, state: &str) {
+        let tally = self.tally();
         bus.publish_value(
             SOURCE,
             None,
             "helios.extract.run",
-            json!({ "run": self.id, "state": state, "tally": self.tally() }),
+            json!({ "run": self.id, "state": state, "tally": tally }),
         );
+        if let Some(hook) = &self.on_tally {
+            hook(tally);
+        }
     }
 
     /// Works the run's rows, one at a time, node after node: each claimed
@@ -804,5 +818,407 @@ mod tests {
             .filter(|p| p["outcome"] == "failed")
             .count();
         assert_eq!(failed, 2);
+    }
+
+    mod runner {
+        use std::sync::mpsc;
+
+        use helios_core::jobs::Jobs;
+        use helios_vault_sqlite::SqliteStore;
+
+        use super::super::super::extract_runner::{ExtractRunner, ExtractState, ExtractSubmit};
+        use super::*;
+
+        fn runner(
+            bus: &Arc<Bus>,
+            vault: Option<crate::workflow::runs::SharedVault>,
+        ) -> Arc<ExtractRunner> {
+            Arc::new(ExtractRunner::new(
+                bus.clone(),
+                Jobs::new(bus.clone()),
+                vault,
+                "node-test",
+            ))
+        }
+
+        fn ask(ai: Ai, source: Arc<dyn ImageSource + Send + Sync>, n: usize) -> ExtractSubmit {
+            ExtractSubmit {
+                title: None,
+                nodes: vec![node("caption", caption("caption", true))],
+                images: images(n),
+                ai: Arc::new(ai),
+                source,
+            }
+        }
+
+        fn job_event(bus: &Bus, kind: &str) -> Vec<Value> {
+            kinds(bus, kind)
+                .into_iter()
+                .filter(|p| p["id"].as_str().is_some_and(|i| i.starts_with("extract-")))
+                .collect()
+        }
+
+        #[test]
+        fn a_submitted_run_is_worked_as_a_job_and_writes_its_document() {
+            let (ai, runtime) = ai("runner-done");
+            let bus = Arc::new(Bus::new());
+            let path = dir("runner-done").join("runs.sqlite");
+            let vault = Arc::new(helios_vault::Vault::new(SqliteStore::open(&path).unwrap()));
+            let runner = runner(&bus, Some(vault.clone()));
+            let answer = runner.submit(ask(ai, Arc::new(Cards), 3)).unwrap();
+            let id = answer["run"].as_str().unwrap().to_string();
+            assert!(id.starts_with("extract-"), "{answer}");
+            assert_eq!(answer["total"], 3);
+            assert_eq!(answer["already"], false);
+            runner.join(&id);
+
+            let status = runner.status(&id).unwrap();
+            assert_eq!(status["state"], json!(ExtractState::Finished));
+            assert_eq!(status["tally"]["done"], 3);
+            assert_eq!(status["tally"]["failed"], 0);
+            assert_eq!(chats(&runtime), 3);
+
+            // The job, which the node mirrors as a promise.
+            let started = job_event(&bus, "helios.job.started");
+            assert_eq!(started.len(), 1);
+            assert_eq!(started[0]["kind"], "extract");
+            assert_eq!(started[0]["total"], 3);
+            let finished = job_event(&bus, "helios.job.finished");
+            assert_eq!(finished.len(), 1, "{:?}", kinds(&bus, "helios.job.failed"));
+            assert_eq!(finished[0]["result"]["tally"]["done"], 3);
+
+            // The run document, which the export runner leaves alone.
+            let doc = vault.workflow_document("runs", &id).unwrap().unwrap();
+            assert!(crate::workflow::extract_runner::is_extract(&doc));
+            assert_eq!(doc["state"], "finished");
+            assert_eq!(doc["images"], 3);
+            assert_eq!(doc["owner"], "node-test");
+            assert_eq!(doc["nodes"][0]["extractor"], "caption");
+            assert!(doc["finished"].is_u64());
+        }
+
+        /// Sends the test card once the test lets each image go.
+        struct Gated(Mutex<mpsc::Receiver<()>>);
+
+        impl ImageSource for Gated {
+            fn image(&self, image: &str) -> Result<SentImage, String> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .recv()
+                    .map_err(|_| "the test is gone".to_string())?;
+                Cards.image(image)
+            }
+        }
+
+        use std::sync::Mutex;
+
+        #[test]
+        fn cancelling_the_job_stops_the_run_and_keeps_what_concluded() {
+            let (ai, _runtime) = ai("runner-cancel");
+            let bus = Arc::new(Bus::new());
+            let runner = runner(&bus, None);
+            let (go, gate) = mpsc::channel();
+            let answer = runner
+                .submit(ask(ai, Arc::new(Gated(Mutex::new(gate))), 3))
+                .unwrap();
+            let id = answer["run"].as_str().unwrap().to_string();
+            // The same run again, while at work: given back.
+            let (again_ai, _) = super::ai("runner-cancel-again");
+            let again = runner.submit(ask(again_ai, Arc::new(Cards), 3)).unwrap();
+            assert_eq!(again["run"], id.as_str());
+            assert_eq!(again["already"], true);
+
+            runner.cancel(&id).unwrap();
+            go.send(()).unwrap();
+            runner.join(&id);
+
+            let status = runner.status(&id).unwrap();
+            assert_eq!(status["state"], json!(ExtractState::Cancelled));
+            assert_eq!(status["tally"]["done"], 1, "{status}");
+            assert_eq!(status["tally"]["failed"], 2, "{status}");
+            assert_eq!(job_event(&bus, "helios.job.cancelled").len(), 1);
+            assert!(job_event(&bus, "helios.job.finished").is_empty());
+        }
+
+        #[test]
+        fn the_verb_submits_a_run_listed_with_its_items_beside_the_export_runs() {
+            use helios_inspect::control::ExtractUse;
+
+            use crate::workflow::runs::{Context, Workflows};
+
+            let (ai, runtime) = ai("runner-verb");
+            let bus = Arc::new(Bus::new());
+            let path = dir("runner-verb").join("runs.sqlite");
+            let vault = Arc::new(helios_vault::Vault::new(SqliteStore::open(&path).unwrap()));
+            let mut catalog = helios_extract::Catalog::default();
+            catalog.add(caption("caption", true)).unwrap();
+            let runner = Arc::new(
+                ExtractRunner::new(
+                    bus.clone(),
+                    Jobs::new(bus.clone()),
+                    Some(vault.clone()),
+                    "node-test",
+                )
+                .with_catalog(catalog),
+            );
+            let uses = vec![ExtractUse {
+                name: "caption".into(),
+                extractor: "caption@1".into(),
+                after: Vec::new(),
+                input: json!({ "language": "English", "keywords": 3 }),
+                overrides: Value::Null,
+            }];
+            let items: Vec<String> = images(2).iter().map(|i| image_item(i)).collect();
+
+            // No AI handed to the runner yet: refused, nothing entered.
+            assert!(runner.request(None, &uses, &items).is_err());
+            runner.set_engine(Arc::new(ai), Arc::new(Cards));
+            // An extractor the catalogue does not know, a file item: refused.
+            let mut unknown = uses.clone();
+            unknown[0].extractor = "caption@9".into();
+            assert!(runner.request(None, &unknown, &items).is_err());
+            assert!(
+                runner
+                    .request(None, &uses, &["/a.png".to_string()])
+                    .is_err()
+            );
+            assert!(job_event(&bus, "helios.job.started").is_empty());
+
+            let answer = runner.request(Some("Captions"), &uses, &items).unwrap();
+            let id = answer["run"].as_str().unwrap().to_string();
+            assert!(id.starts_with("extract-"), "{answer}");
+            assert_eq!(answer["total"], 2);
+            runner.join(&id);
+            assert_eq!(chats(&runtime), 2);
+
+            // The job of kind extract, and the run document.
+            let started = job_event(&bus, "helios.job.started");
+            assert_eq!(started.len(), 1);
+            assert_eq!(started[0]["kind"], "extract");
+            assert_eq!(started[0]["id"], answer["job"]);
+            let doc = vault.workflow_document("runs", &id).unwrap().unwrap();
+            assert_eq!(doc["kind"], "extract");
+            assert_eq!(doc["title"], "Captions");
+            assert_eq!(doc["state"], "finished");
+
+            // `workflow.runs` lists it beside the export runs.
+            let workflows = Workflows::new(Context {
+                bus: bus.clone(),
+                engine: Arc::new(helios_core::Engine::new(bus.clone())),
+                scheduler: Arc::new(helios_core::Scheduler::new(bus.clone(), 1)),
+                jobs: Jobs::new(bus.clone()),
+                vault: None,
+                workers: 1,
+                owner: "node-test".into(),
+                keep_ms: 0,
+            });
+            workflows.attach_extracts(runner.clone());
+            let runs = workflows.runs();
+            let listed: Vec<&Value> = runs["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["id"] == id.as_str())
+                .collect();
+            assert_eq!(listed.len(), 1, "{runs}");
+            let run = listed[0];
+            assert_eq!(run["kind"], "extract");
+            assert_eq!(run["title"], "Captions");
+            assert_eq!(run["state"], "finished");
+            assert_eq!(run["items"], 2);
+            assert_eq!(run["job"], answer["job"]);
+            assert_eq!(run["read_only"], false);
+            assert_eq!(run["nodes"]["caption"]["done"], 2, "{run}");
+            assert_eq!(run["nodes"]["caption"]["waiting"], 0, "{run}");
+            assert_eq!(run["nodes"]["caption"]["parents"], json!([SUBMIT]));
+
+            // `workflow.items` pages its items, at its node.
+            let page = workflows.items(&id, None, None, 0, 10).unwrap();
+            assert_eq!(page["node"], "caption");
+            assert_eq!(page["total"], 2);
+            let listed: Vec<&str> = page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| i["item"].as_str().unwrap())
+                .collect();
+            assert_eq!(listed, items.iter().map(String::as_str).collect::<Vec<_>>());
+            assert_eq!(page["items"][0]["state"], "done");
+            assert_eq!(page["items"][0]["row"]["status"], "done");
+            let second = workflows.items(&id, Some("caption"), None, 1, 10).unwrap();
+            assert_eq!(second["items"].as_array().unwrap().len(), 1);
+            assert_eq!(second["items"][0]["item"], items[1].as_str());
+            let waiting = workflows
+                .items(&id, Some("caption"), Some("waiting"), 0, 10)
+                .unwrap();
+            assert_eq!(waiting["total"], 0);
+            assert!(workflows.items(&id, Some("nope"), None, 0, 10).is_err());
+            assert!(workflows.items("extract-none", None, None, 0, 10).is_err());
+        }
+
+        /// The vault's promise of job `job`, once it satisfies `ok`.
+        fn promise_until(
+            vault: &crate::workflow::runs::SharedVault,
+            job: &str,
+            ok: impl Fn(&helios_vault::promises::State) -> bool,
+        ) -> helios_vault::promises::Promise {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                let found = vault
+                    .promises(&helios_vault::promises::Filter {
+                        owner: Some(job.into()),
+                        ..helios_vault::promises::Filter::default()
+                    })
+                    .unwrap();
+                if let Some(p) = found.into_iter().next()
+                    && ok(&p.state)
+                {
+                    return p;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "job `{job}`: its promise never got there"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        fn caption_use() -> Vec<helios_inspect::control::ExtractUse> {
+            vec![helios_inspect::control::ExtractUse {
+                name: "caption".into(),
+                extractor: "caption@1".into(),
+                after: Vec::new(),
+                input: json!({ "language": "English", "keywords": 3 }),
+                overrides: Value::Null,
+            }]
+        }
+
+        fn captions_runner(
+            bus: &Arc<Bus>,
+            vault: &crate::workflow::runs::SharedVault,
+        ) -> Arc<ExtractRunner> {
+            let mut catalog = helios_extract::Catalog::default();
+            catalog.add(caption("caption", true)).unwrap();
+            Arc::new(
+                ExtractRunner::new(
+                    bus.clone(),
+                    Jobs::new(bus.clone()),
+                    Some(vault.clone()),
+                    "node-test",
+                )
+                .with_catalog(catalog),
+            )
+        }
+
+        #[test]
+        fn the_verb_extracts_two_library_photos_through_the_opened_engine() {
+            use crate::workflow::library_source::LibraryPreviews;
+
+            let dir = dir("runner-library");
+            let vault = Arc::new(helios_vault::Vault::new(
+                SqliteStore::open(&dir.join("library.sqlite")).unwrap(),
+            ));
+            // Two photos in the library, two files.
+            let photos: Vec<String> = [24, 40]
+                .iter()
+                .map(|side| {
+                    let file = dir.join(format!("card-{side}.png"));
+                    std::fs::write(&file, helios_ai::images::test_card(*side)).unwrap();
+                    vault.import_file(&file, 1_000).unwrap().hex()
+                })
+                .collect();
+            let bus = Arc::new(Bus::new());
+            let mirror =
+                helios_node_core::job_promises::JobPromises::start(vault.clone(), bus.subscribe());
+            let runner = captions_runner(&bus, &vault);
+            let (ai, runtime) = ai("runner-library-ai");
+            let ai = Arc::new(ai);
+            let opened = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            {
+                let (ai, vault, opened) = (ai.clone(), vault.clone(), opened.clone());
+                runner.set_opener(Box::new(move || {
+                    opened.fetch_add(1, Ordering::SeqCst);
+                    let source: Arc<dyn ImageSource + Send + Sync> =
+                        Arc::new(LibraryPreviews::new(vault.clone()));
+                    Ok((ai.clone(), source))
+                }));
+            }
+            let items: Vec<String> = photos.iter().map(|i| image_item(i)).collect();
+            let answer = runner.request(None, &caption_use(), &items).unwrap();
+            let id = answer["run"].as_str().unwrap().to_string();
+            assert_eq!(answer["total"], 2);
+            runner.join(&id);
+
+            // Both photos concluded, each with one model call.
+            let status = runner.status(&id).unwrap();
+            assert_eq!(status["state"], json!(ExtractState::Finished));
+            let page = runner.items(&id, None, None, 0, 10).unwrap().unwrap();
+            assert_eq!(status["tally"]["done"], 2, "{status} {page}");
+            assert_eq!(status["tally"]["failed"], 0, "{status}");
+            assert_eq!(chats(&runtime), 2);
+            // Each result kept in the vault's cache, on its photo.
+            for photo in &photos {
+                let kept = vault.kept_extract("caption", photo).unwrap();
+                assert!(kept.is_some(), "no caption kept for {photo}");
+            }
+            // The run document and the job's promise end done.
+            let doc = vault.workflow_document("runs", &id).unwrap().unwrap();
+            assert_eq!(doc["state"], "finished");
+            let job = answer["job"].as_str().unwrap();
+            let promise = promise_until(&vault, job, helios_vault::promises::State::is_settled);
+            let helios_vault::promises::State::Done { result } = promise.state else {
+                panic!("{promise:?}")
+            };
+            assert_eq!(result["done"], 2, "{result}");
+            assert_eq!(promise.kind, "extract");
+
+            // The engine was opened once, on the first request.
+            let again = runner.request(Some("Again"), &caption_use(), &items[..1]);
+            assert!(again.is_ok(), "{again:?}");
+            assert_eq!(opened.load(Ordering::SeqCst), 1);
+            runner.join(again.unwrap()["run"].as_str().unwrap());
+            mirror.stop();
+        }
+
+        #[test]
+        fn a_missing_route_or_engine_refuses_the_verb_with_its_reason() {
+            let dir = dir("runner-refused");
+            let vault = Arc::new(helios_vault::Vault::new(
+                SqliteStore::open(&dir.join("library.sqlite")).unwrap(),
+            ));
+            let bus = Arc::new(Bus::new());
+            let runner = captions_runner(&bus, &vault);
+            let items = vec![image_item(&images(1)[0])];
+
+            // No library: the node says so.
+            runner.set_unavailable("this node has no library");
+            let refused = runner.request(None, &caption_use(), &items).unwrap_err();
+            assert!(format!("{refused:?}").contains("no library"), "{refused:?}");
+            // The AI service that does not open: its reason, tried again
+            // on the next request.
+            runner.set_opener(Box::new(|| Err("the AI service: no settings".into())));
+            let refused = runner.request(None, &caption_use(), &items).unwrap_err();
+            assert!(
+                format!("{refused:?}").contains("no settings"),
+                "{refused:?}"
+            );
+
+            // No route for the vision capability: the pre-run check names
+            // the node, nothing entered.
+            let unrouted = Ai::with_parts(
+                Paths::under(&super::dir("runner-unrouted")),
+                Arc::new(FakeRuntime::new()),
+                Arc::new(MemorySecrets::default()),
+                Arc::new(FakeSystem::linux()),
+            )
+            .unwrap();
+            runner.set_engine(Arc::new(unrouted), Arc::new(Cards));
+            let refused = runner.request(None, &caption_use(), &items).unwrap_err();
+            let reason = format!("{refused:?}");
+            assert!(reason.contains("caption"), "{reason}");
+            assert!(job_event(&bus, "helios.job.started").is_empty());
+            assert!(vault.workflow_documents("runs").unwrap().is_empty());
+        }
     }
 }

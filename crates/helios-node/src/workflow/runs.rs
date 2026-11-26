@@ -539,6 +539,8 @@ pub struct Workflows {
     base: Mutex<Option<Graph>>,
     /// This process, as the owner of its runs.
     me: Owner,
+    /// The node's extract runs, listed beside the export runs.
+    extracts: std::sync::OnceLock<Arc<super::extract_runner::ExtractRunner>>,
 }
 
 fn not_absolute(path: &Path) -> Message {
@@ -622,7 +624,14 @@ impl Workflows {
             state: Mutex::new(State::default()),
             faults: Mutex::new(Vec::new()),
             base: Mutex::new(None),
+            extracts: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Lists `runner`'s extract runs in `workflow.runs` and answers
+    /// `workflow.items` and `workflow.cancel` for them.
+    pub fn attach_extracts(&self, runner: Arc<super::extract_runner::ExtractRunner>) {
+        let _ = self.extracts.set(runner);
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -1432,6 +1441,10 @@ impl Workflows {
         let present: BTreeSet<&str> = docs.iter().map(|(id, _)| id.as_str()).collect();
         state.foreign.retain(|id, _| present.contains(id.as_str()));
         for (id, doc) in docs {
+            // An extract run's: its own runner's.
+            if super::extract_runner::is_extract(&doc) {
+                continue;
+            }
             // Only an owner's death changes what can be done with a run
             // listed read-only; another format or network stays so.
             let settled = state
@@ -1696,6 +1709,12 @@ impl Workflows {
         items: Option<&[String]>,
         node: Option<&str>,
     ) -> Result<Value, Message> {
+        // An extract run is cancelled whole, through its job: what
+        // concluded stays.
+        if let Some(extracts) = self.extracts.get().filter(|e| e.has(id)) {
+            extracts.cancel(id).map_err(Message::plain)?;
+            return Ok(json!({ "run": id, "cancelling": true }));
+        }
         let now = now_ms();
         let mut state = self.state();
         let answer = {
@@ -2282,7 +2301,12 @@ impl Workflows {
     pub fn runs(&self) -> Value {
         let now = now_ms();
         let state = self.state();
-        json!({ "runs": self.summaries(&state, now), "now": now })
+        let mut runs = self.summaries(&state, now);
+        drop(state);
+        if let Some(extracts) = self.extracts.get() {
+            runs.extend(extracts.summaries());
+        }
+        json!({ "runs": runs, "now": now })
     }
 
     /// `workflow.items`: one page of a run's items at a queueing node (the
@@ -2296,6 +2320,13 @@ impl Workflows {
         offset: usize,
         limit: usize,
     ) -> Result<Value, Message> {
+        if let Some(page) = self
+            .extracts
+            .get()
+            .and_then(|e| e.items(run, node, filter, offset, limit))
+        {
+            return page;
+        }
         let now = now_ms();
         let state = self.state();
         if let Some(foreign) = state.foreign.get(run) {
