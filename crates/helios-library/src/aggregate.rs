@@ -7,10 +7,13 @@
 //! together, by stack, or by burst with the grouping of
 //! [`crate::stacks`]), then each group gets one value of a stored
 //! numeric field (the culling `focus`, `clip_white`, `clip_black`, the
-//! `rating`, `iso`…): its `count`, `min`, `max`, `mean`, the photos
-//! ranked (`rank`), or the one proposed on top (`best`, the rule of
-//! [`crate::stacks::best_of`]). Nothing is rendered or measured here:
-//! a photo without the field is skipped and listed as `missing`.
+//! `rating`, `iso`…): its `count`, `min`, `max`, `mean`, `median`, a
+//! `percentile` (`p` from 0 to 100), the median absolute deviation
+//! (`mad`), the photos ranked (`rank`), or the one proposed on top
+//! (`best`, the rule of [`crate::stacks::best_of`]). Nothing is rendered
+//! or measured here: a photo without the field is skipped and listed as
+//! `missing`. Groups may also be shooting sessions (`session`): a new one
+//! starts when the time between two consecutive shots exceeds a gap.
 //!
 //! A diagram's aggregate node will read the same values later; the node
 //! answers them now as the read-only command `library.aggregate`.
@@ -47,6 +50,15 @@ pub enum Op {
     Min,
     Max,
     Mean,
+    /// The middle value (the mean of the two middle ones for an even
+    /// count): the 50th percentile.
+    Median,
+    /// The `p`th percentile ([`Knobs::percentile`], 0 to 100), linear
+    /// between the closest ranks (`p = 0`: the min, `100`: the max).
+    Percentile,
+    /// The median absolute deviation: the median of each value's distance
+    /// to the median (unscaled), a spread outliers barely move.
+    Mad,
     /// The measured photos, highest first.
     Rank,
     /// The one proposed on top of a burst ([`best_of`]: the sharpest by
@@ -56,7 +68,17 @@ pub enum Op {
 }
 
 impl Op {
-    pub const ALL: [&str; 6] = ["count", "min", "max", "mean", "rank", "best"];
+    pub const ALL: [&str; 9] = [
+        "count",
+        "min",
+        "max",
+        "mean",
+        "median",
+        "percentile",
+        "mad",
+        "rank",
+        "best",
+    ];
 
     pub fn parse(name: &str) -> Option<Op> {
         serde_json::from_value(Value::from(name)).ok()
@@ -75,14 +97,31 @@ pub enum GroupBy {
     /// Bursts and brackets as `stacks.suggest`'s rules find them (its
     /// default thresholds), each other photo alone.
     Burst,
+    /// Shooting sessions: a new one when the time between two consecutive
+    /// capture times exceeds [`Knobs::gap_minutes`]; a photo without a
+    /// capture time alone.
+    Session,
 }
 
 impl GroupBy {
-    pub const ALL: [&str; 3] = ["all", "stack", "burst"];
+    pub const ALL: [&str; 4] = ["all", "stack", "burst", "session"];
 
     pub fn parse(name: &str) -> Option<GroupBy> {
         serde_json::from_value(Value::from(name)).ok()
     }
+}
+
+/// The gap between two sessions when none is given, in minutes.
+pub const DEFAULT_GAP_MINUTES: f64 = 30.0;
+
+/// The settings some ops and groupings take.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Knobs {
+    /// The percentile `Op::Percentile` computes, 0 to 100 (required).
+    pub percentile: Option<f64>,
+    /// The gap that starts a new `GroupBy::Session`, in minutes
+    /// (default [`DEFAULT_GAP_MINUTES`]).
+    pub gap_minutes: Option<f64>,
 }
 
 /// One group's value.
@@ -115,6 +154,12 @@ pub struct Aggregate {
     pub measure: Option<String>,
     pub op: Op,
     pub by: GroupBy,
+    /// The percentile computed (`percentile` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p: Option<f64>,
+    /// The gap between sessions, in minutes (`session` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gap_minutes: Option<f64>,
     /// How many photos the set holds.
     pub images: usize,
     pub groups: Vec<Group>,
@@ -158,6 +203,30 @@ pub fn aggregate<S: Store>(
     op: Op,
     by: GroupBy,
 ) -> Result<Aggregate, String> {
+    aggregate_with(vault, set, measure, op, by, Knobs::default())
+}
+
+/// [`aggregate`] with the settings of `percentile` and `session`.
+pub fn aggregate_with<S: Store>(
+    vault: &Vault<S>,
+    set: &Set,
+    measure: Option<&str>,
+    op: Op,
+    by: GroupBy,
+    knobs: Knobs,
+) -> Result<Aggregate, String> {
+    let p = match (op, knobs.percentile) {
+        (Op::Percentile, Some(p)) if (0.0..=100.0).contains(&p) => Some(p),
+        (Op::Percentile, Some(p)) => return Err(format!("percentile {p} is not within 0 to 100")),
+        (Op::Percentile, None) => return Err("`percentile` needs `p` (0 to 100)".into()),
+        _ => None,
+    };
+    let gap_minutes = match (by, knobs.gap_minutes) {
+        (GroupBy::Session, Some(g)) if g.is_finite() && g >= 0.0 => Some(g),
+        (GroupBy::Session, Some(g)) => return Err(format!("gap {g} is not a number of minutes")),
+        (GroupBy::Session, None) => Some(DEFAULT_GAP_MINUTES),
+        _ => None,
+    };
     let measure = match (measure, op) {
         (Some(m), _) => {
             numeric(m)?;
@@ -199,7 +268,10 @@ pub fn aggregate<S: Store>(
             }
         }
     }
-    let groups = split(vault, &ordered, by, &signals)?;
+    let groups = match gap_minutes {
+        Some(gap) => sessions(&ordered, |id| facts[id].0, gap * 60.0),
+        None => split(vault, &ordered, by, &signals)?,
+    };
     let groups = groups
         .into_iter()
         .map(|(key, members)| {
@@ -207,13 +279,15 @@ pub fn aggregate<S: Store>(
                 .iter()
                 .filter_map(|id| facts[id].1.map(|v| (*id, v)))
                 .collect();
-            value_of(key, &members, &values, measure, op, &signals)
+            value_of(key, &members, &values, measure, (op, p), &signals)
         })
         .collect();
     Ok(Aggregate {
         measure: measure.map(str::to_string),
         op,
         by,
+        p,
+        gap_minutes,
         images: ids.len(),
         groups,
     })
@@ -237,6 +311,8 @@ fn split<S: Store>(
             }
             Ok(grouped(ordered, |id| of.get(&id.hex()).cloned()))
         }
+        // Grouped by `sessions`, which needs the capture times.
+        GroupBy::Session => Ok(vec![("all".into(), ordered.to_vec())]),
         GroupBy::Burst => {
             let candidates: Vec<Candidate> = ordered
                 .iter()
@@ -257,6 +333,49 @@ fn split<S: Store>(
             Ok(grouped(ordered, |id| of.get(&id.hex()).cloned()))
         }
     }
+}
+
+/// Splits `ordered` (capture order) into sessions: a new one when the
+/// time to the previous shot exceeds `gap` seconds. Keys `session-<n>`;
+/// a photo without a capture time is alone, keyed by its id.
+fn sessions(
+    ordered: &[ImageId],
+    time_of: impl Fn(&ImageId) -> Option<f64>,
+    gap: f64,
+) -> Vec<(String, Vec<ImageId>)> {
+    let mut groups: Vec<(String, Vec<ImageId>)> = Vec::new();
+    let mut last: Option<f64> = None;
+    let mut n = 0;
+    for id in ordered {
+        let Some(t) = time_of(id) else {
+            groups.push((id.hex(), vec![*id]));
+            continue;
+        };
+        match last {
+            Some(prev) if t - prev <= gap => groups.last_mut().expect("open").1.push(*id),
+            _ => {
+                n += 1;
+                groups.push((format!("session-{n}"), vec![*id]));
+            }
+        }
+        last = Some(t);
+    }
+    groups
+}
+
+/// The `p`th percentile (0 to 100) of `sorted` (ascending, not empty),
+/// linear between the closest ranks.
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    let at = p / 100.0 * (sorted.len() - 1) as f64;
+    let (lo, hi) = (at.floor() as usize, at.ceil() as usize);
+    sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo as f64)
+}
+
+/// `values` sorted ascending.
+fn sorted(values: impl Iterator<Item = f64>) -> Vec<f64> {
+    let mut v: Vec<f64> = values.collect();
+    v.sort_by(f64::total_cmp);
+    v
 }
 
 /// Groups `ordered` by the key `key_of` gives, a photo without one alone;
@@ -286,7 +405,7 @@ fn value_of(
     members: &[ImageId],
     values: &[(ImageId, f64)],
     measure: Option<&str>,
-    op: Op,
+    (op, p): (Op, Option<f64>),
     signals: &HashMap<ImageId, crate::Signals>,
 ) -> Group {
     let hex = |ids: &mut dyn Iterator<Item = ImageId>| ids.map(|i| i.hex()).collect::<Vec<_>>();
@@ -330,6 +449,16 @@ fn value_of(
                     Some(values.iter().map(|(_, v)| v).sum::<f64>() / values.len() as f64);
             }
         }
+        Op::Median | Op::Percentile | Op::Mad if !values.is_empty() => {
+            let all = sorted(values.iter().map(|(_, v)| *v));
+            let median = percentile(&all, 50.0);
+            group.value = Some(match op {
+                Op::Median => median,
+                Op::Percentile => percentile(&all, p.unwrap_or(50.0)),
+                _ => percentile(&sorted(all.iter().map(|v| (v - median).abs())), 50.0),
+            });
+        }
+        Op::Median | Op::Percentile | Op::Mad => {}
         Op::Rank => {
             // A stable sort keeps the capture order between equals.
             let mut ranked = values.to_vec();
@@ -543,6 +672,186 @@ mod tests {
         assert_eq!(best.groups[1].key, c.hex());
     }
 
+    fn knobs(p: Option<f64>, gap: Option<f64>) -> Knobs {
+        Knobs {
+            percentile: p,
+            gap_minutes: gap,
+        }
+    }
+
+    /// `op` of the focus over `set`, one group.
+    fn focus_of(f: &Fixture, set: &Set, op: Op, p: Option<f64>) -> Option<f64> {
+        let a = aggregate_with(
+            &f.vault,
+            set,
+            Some("focus"),
+            op,
+            GroupBy::All,
+            knobs(p, None),
+        );
+        one(&a.unwrap()).value
+    }
+
+    #[test]
+    fn median_of_an_odd_and_an_even_count() {
+        let f = fixture("median");
+        let ids = [
+            photo(&f, 1, 10.0, Some(9.0)),
+            photo(&f, 2, 11.0, Some(1.0)),
+            photo(&f, 3, 12.0, Some(4.0)),
+            photo(&f, 4, 13.0, Some(2.0)),
+        ];
+        let odd = Set::Images(ids[..3].to_vec());
+        assert_eq!(focus_of(&f, &odd, Op::Median, None), Some(4.0));
+        let even = Set::Images(ids.to_vec());
+        assert_eq!(focus_of(&f, &even, Op::Median, None), Some(3.0));
+    }
+
+    #[test]
+    fn percentiles_run_from_the_min_to_the_max() {
+        let f = fixture("percentile");
+        let ids = [
+            photo(&f, 1, 10.0, Some(30.0)),
+            photo(&f, 2, 11.0, Some(10.0)),
+            photo(&f, 3, 12.0, Some(20.0)),
+            photo(&f, 4, 13.0, Some(40.0)),
+            photo(&f, 5, 14.0, Some(50.0)),
+        ];
+        let set = Set::Images(ids.to_vec());
+        let at = |p| focus_of(&f, &set, Op::Percentile, Some(p));
+        assert_eq!(at(0.0), Some(10.0));
+        assert_eq!(at(50.0), Some(30.0));
+        assert_eq!(at(100.0), Some(50.0));
+        // Between ranks: 10% of the way from rank 0 (10) to 4 (50) is 14.
+        assert_eq!(at(10.0), Some(14.0));
+        let refused = |p: Option<f64>| {
+            aggregate_with(
+                &f.vault,
+                &set,
+                Some("focus"),
+                Op::Percentile,
+                GroupBy::All,
+                knobs(p, None),
+            )
+            .is_err()
+        };
+        assert!(refused(None));
+        assert!(refused(Some(101.0)));
+        assert!(refused(Some(-1.0)));
+    }
+
+    #[test]
+    fn mad_is_the_median_distance_to_the_median_and_resists_an_outlier() {
+        let f = fixture("mad");
+        let values = [1.0, 1.0, 2.0, 2.0, 4.0, 6.0, 9.0];
+        let ids: Vec<ImageId> = values
+            .iter()
+            .enumerate()
+            .map(|(n, v)| photo(&f, n as u32, 10.0 + n as f64, Some(*v)))
+            .collect();
+        // Median 2; distances 1 1 0 0 2 4 7; their median 1.
+        let set = Set::Images(ids.clone());
+        assert_eq!(focus_of(&f, &set, Op::Mad, None), Some(1.0));
+        assert_eq!(focus_of(&f, &set, Op::Median, None), Some(2.0));
+        // Ties only: no spread.
+        let ties = Set::Images(ids[..2].to_vec());
+        assert_eq!(focus_of(&f, &ties, Op::Mad, None), Some(0.0));
+        assert_eq!(focus_of(&f, &ties, Op::Median, None), Some(1.0));
+    }
+
+    #[test]
+    fn median_percentile_and_mad_skip_and_count_a_photo_without_the_measure() {
+        let f = fixture("robust-missing");
+        let a = photo(&f, 1, 10.0, Some(2.0));
+        let b = photo(&f, 2, 11.0, None);
+        let c = photo(&f, 3, 12.0, Some(4.0));
+        let set = Set::Images(vec![a, b, c]);
+        for (op, p, want) in [
+            (Op::Median, None, 3.0),
+            (Op::Percentile, Some(100.0), 4.0),
+            (Op::Mad, None, 1.0),
+        ] {
+            let agg = aggregate_with(
+                &f.vault,
+                &set,
+                Some("focus"),
+                op,
+                GroupBy::All,
+                knobs(p, None),
+            )
+            .unwrap();
+            let g = one(&agg);
+            assert_eq!(g.value, Some(want), "{op:?}");
+            assert_eq!(g.measured, 2, "{op:?}");
+            assert_eq!(g.missing, [b.hex()], "{op:?}");
+        }
+        let alone = Set::Images(vec![b]);
+        assert_eq!(focus_of(&f, &alone, Op::Median, None), None);
+        assert_eq!(focus_of(&f, &alone, Op::Mad, None), None);
+    }
+
+    #[test]
+    fn sessions_split_on_a_gap_and_join_within_it() {
+        let f = fixture("sessions");
+        let min = 60.0;
+        // Two shots 10 minutes apart, then 45 minutes later two more.
+        let a = photo(&f, 1, 0.0, Some(1.0));
+        let b = photo(&f, 2, 10.0 * min, Some(3.0));
+        let c = photo(&f, 3, 55.0 * min, Some(5.0));
+        let d = photo(&f, 4, 60.0 * min, None);
+        let set = Set::Images(vec![d, c, b, a]);
+        let run = |gap| {
+            aggregate_with(
+                &f.vault,
+                &set,
+                Some("focus"),
+                Op::Mean,
+                GroupBy::Session,
+                knobs(None, gap),
+            )
+            .unwrap()
+        };
+        let split = run(None);
+        assert_eq!(split.gap_minutes, Some(DEFAULT_GAP_MINUTES));
+        let keys: Vec<&str> = split.groups.iter().map(|g| g.key.as_str()).collect();
+        assert_eq!(keys, ["session-1", "session-2"]);
+        assert_eq!(split.groups[0].members, [a.hex(), b.hex()]);
+        assert_eq!(split.groups[0].value, Some(2.0));
+        assert_eq!(split.groups[1].members, [c.hex(), d.hex()]);
+        assert_eq!(split.groups[1].value, Some(5.0));
+        assert_eq!(split.groups[1].missing, [d.hex()]);
+        // A wider gap joins them all.
+        let joined = run(Some(45.0));
+        assert_eq!(one(&joined).members.len(), 4);
+        assert_eq!(one(&joined).value, Some(3.0));
+        // A narrower one splits each shot apart.
+        assert_eq!(run(Some(4.0)).groups.len(), 4);
+        assert!(
+            aggregate_with(
+                &f.vault,
+                &set,
+                None,
+                Op::Count,
+                GroupBy::Session,
+                knobs(None, Some(-1.0))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn sessions_leave_a_photo_without_a_capture_time_alone() {
+        let order = [
+            ImageId::from_hex(&"1".repeat(64)),
+            ImageId::from_hex(&"2".repeat(64)),
+        ];
+        let order: Vec<ImageId> = order.into_iter().map(Result::unwrap).collect();
+        let groups = sessions(&order, |id| (*id == order[0]).then_some(0.0), 60.0);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].0, "session-1");
+        assert_eq!(groups[1].0, order[1].hex());
+    }
+
     #[test]
     fn a_text_field_or_a_missing_measure_is_refused() {
         let f = fixture("refused");
@@ -553,5 +862,13 @@ mod tests {
         assert_eq!(Op::parse("rank"), Some(Op::Rank));
         assert_eq!(GroupBy::parse("burst"), Some(GroupBy::Burst));
         assert_eq!(Op::parse("sum"), None);
+        assert_eq!(Op::parse("mad"), Some(Op::Mad));
+        assert_eq!(GroupBy::parse("session"), Some(GroupBy::Session));
+        for name in Op::ALL {
+            assert!(Op::parse(name).is_some(), "{name}");
+        }
+        for name in GroupBy::ALL {
+            assert!(GroupBy::parse(name).is_some(), "{name}");
+        }
     }
 }

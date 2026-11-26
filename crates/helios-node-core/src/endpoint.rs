@@ -746,6 +746,28 @@ mod tests {
                 .request("library.aggregate", json!({ "query": "", "op": "sum" }))
                 .is_err()
         );
+        let median = client
+            .request(
+                "library.aggregate",
+                json!({ "query": "", "measure": "focus", "op": "median" }),
+            )
+            .unwrap();
+        assert_eq!(median["groups"][0]["value"], 4.0, "{median}");
+        let p = client
+            .request(
+                "library.aggregate",
+                json!({ "query": "", "measure": "focus", "op": "percentile", "p": 100 }),
+            )
+            .unwrap();
+        assert_eq!(p["groups"][0]["value"], 6.0, "{p}");
+        assert!(
+            client
+                .request(
+                    "library.aggregate",
+                    json!({ "query": "", "measure": "focus", "op": "percentile" }),
+                )
+                .is_err()
+        );
     }
 
     #[test]
