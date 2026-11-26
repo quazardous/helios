@@ -89,6 +89,7 @@ pub mod privacy;
 pub mod queue;
 pub mod quick_open;
 pub mod quit;
+pub mod rebuilt_history;
 pub mod recent_filters;
 pub mod relay;
 pub mod report;

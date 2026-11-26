@@ -586,6 +586,13 @@ cancelled: it stops before its next photo and writes nothing.
 `library.edit.head` (`image`) reads an image's newest edit: `head`, the
 whole version (`id`, also as `version`, `image`, `parents`, `edit`,
 `origin`, `at`, `label`, `meta`), null for an image never edited.
+`library.edit.history` (`image`) reads the undo history of an image's
+current head, rebuilt from the step markers of its line of versions:
+`undo`, the steps an undo walks back (oldest first), and `redo`, those a
+redo makes again (the next first), each with `version`, `edit` (the edit
+it reached), `label`, `origin` and `at`. A step starts from the edit of
+the one before it (`redo`'s first from `undo`'s last), the first from the
+unedited image.
 `library.edit.add` writes one step of an edit session a client keeps on
 its side (its versions' ids are computed from their content):
 `version`, in the form `head` has, `step`, the session's step number,
@@ -908,7 +915,7 @@ told apart by the lock: nobody holds it.
 The desktop's embedded node does the same while it holds its library
 (`helios_node_core::endpoint::advertise`): it serves the library's
 commands (`library.import`, `library.importDarktable`,
-`library.keepSidecar`, `library.edit.head`, `library.edit.save`,
+`library.keepSidecar`, `library.edit.head`, `library.edit.history`, `library.edit.save`,
 `library.edit.add`, `library.snapshots.*`, `library.stacks.*`, plus `node.hello`, `commands.list` and
 `command.run`) on a private socket (loopback TCP behind a session token where there are no Unix
 sockets), writes the rendezvous file, whose `inspect` names that same

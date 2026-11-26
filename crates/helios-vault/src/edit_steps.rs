@@ -123,6 +123,24 @@ impl<'a> Rebuilt<'a> {
     }
 }
 
+impl Rebuilt<'_> {
+    /// As `library.edit.history` answers it: `undo` (oldest first) and
+    /// `redo` (the next first), each step with its version, the edit it
+    /// reached (`edit`), its label, origin and time. The edit a step
+    /// started from is not sent: it is the step before's (`redo`'s first
+    /// continues `undo`'s last), the unedited image for the very first.
+    pub fn to_json(&self) -> Value {
+        let step = |s: &RebuiltStep| {
+            json!({ "version": s.version.id.hex(), "edit": s.version.edit, "label": s.version.label,
+                    "origin": s.version.origin, "at": s.version.at })
+        };
+        json!({
+            "undo": self.undo().iter().map(step).collect::<Vec<_>>(),
+            "redo": self.redo().iter().map(step).collect::<Vec<_>>(),
+        })
+    }
+}
+
 /// The undo history of `line` (an image's versions, oldest first, as
 /// [`crate::Vault::history`] reads them).
 ///

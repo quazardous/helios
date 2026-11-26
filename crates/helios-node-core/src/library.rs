@@ -43,6 +43,7 @@ pub const IDS: &[&str] = &[
     "library.importDarktable",
     "library.keepSidecar",
     "library.edit.head",
+    EDIT_HISTORY,
     "library.edit.save",
     "library.edit.add",
     "library.snapshots.get",
@@ -121,6 +122,12 @@ pub const HEADS: &str = "library.versions.heads";
 /// A photo's heads, numbered, the current one marked (the versions
 /// strip).
 pub const VERSIONS_LIST: &str = "library.versions.list";
+/// Reads an image's undo history, rebuilt from the step markers of its
+/// current head's line of versions (`helios_vault::edit_steps`): the
+/// steps an undo walks back (oldest first) and those a redo makes again
+/// (the next first), each with the edit it started from (null: the image
+/// with no edit) and the one it reached.
+pub const EDIT_HISTORY: &str = "library.edit.history";
 
 /// Makes one of a photo's heads its current version: the one an edit
 /// opens. Answers the step (`changes`) the vault's revert undoes.
@@ -280,6 +287,9 @@ pub fn specs() -> Vec<CommandSpec> {
             ("base", json!({ "type": "boolean" }), false),
         ])),
         library("library.edit.head", "Read an image's newest edit")
+            .params(object(&[("image", string(), true)]))
+            .read_only(),
+        library(EDIT_HISTORY, "Read an image's undo history, rebuilt from its versions")
             .params(object(&[("image", string(), true)]))
             .read_only(),
         library("library.edit.save", "Save a step of an image's edit").params(object(&[
@@ -1305,6 +1315,17 @@ pub fn run<S: Store>(
                 }),
             }))
         }
+        EDIT_HISTORY => {
+            let id = image(vault, text(params, "image"))?;
+            let (_, head) = helios_vault::EditSession::open(vault, id)?;
+            let line = match &head {
+                Some(head) => vault.history(&head.id)?,
+                None => Vec::new(),
+            };
+            let mut answer = helios_vault::edit_steps::rebuild(&line).to_json();
+            answer["image"] = json!(id.hex());
+            Ok(answer)
+        }
         "library.edit.save" => {
             let id = image(vault, text(params, "image"))?;
             let (mut session, _) = helios_vault::EditSession::open(vault, id)?;
@@ -1837,6 +1858,7 @@ mod tests {
         let examples = [
             json!({ "paths": ["/photos"] }),
             json!({ "image": "/p/a.raf", "sidecar": "/p/a.raf.xmp", "version": 0, "base": true }),
+            json!({ "image": "0a" }),
             json!({ "image": "0a" }),
             json!({ "image": "0a", "edit": {}, "label": "macro.make" }),
             json!({ "version": { "id": "0a" }, "step": 1, "inProgress": false }),

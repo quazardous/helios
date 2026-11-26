@@ -526,6 +526,25 @@ pub const PAGE: usize = helios_node_core::cursor::CHUNK;
 /// seconds: past it, the next refresh reads the library whole again.
 const SHOWN_LEASE: u64 = 3_600;
 
+/// The image's undo history rebuilt from its saved versions
+/// (`library.edit.history`) and installed into `values`, when it fits
+/// them and the image has no step yet ([`helios_values::Store::install_image_line`]):
+/// whether it was.
+pub fn resume_from_versions(
+    values: &Mutex<helios_values::Store>,
+    reader: &Reader,
+    image: &str,
+    unedited: &Value,
+) -> Result<bool, String> {
+    let answer = reader.read(
+        helios_node_core::library::EDIT_HISTORY,
+        json!({ "image": image }),
+    )?;
+    let mut store = held(values);
+    let (undo, redo) = crate::rebuilt_history::steps_of(&store, &answer, unedited)?;
+    Ok((!undo.is_empty() || !redo.is_empty()) && store.install_image_line(undo, redo))
+}
+
 /// The desktop's node as the library's reads reach it: its in-process
 /// client, and the cache of its answers ([`ReadCache`]) the bus's events
 /// keep true. Cloned to read on a thread of its own: the UI thread never
@@ -2474,6 +2493,7 @@ impl<S: Store + 'static> Persist<S> {
             marks: head
                 .as_ref()
                 .map_or(Value::Null, |h| h.edit["marks"].clone()),
+            unedited: unedited.clone(),
         };
         let followed = crate::image_open::follow(&*bus, shown);
         let committed = held(shell.values()).committed();
@@ -2750,10 +2770,18 @@ impl<S: Store + 'static> Persist<S> {
         let workshop = shell.listen_workshop_photo(&*bus);
         // Last, once the image's values, marks included, are loaded: its
         // parked steps come back onto them.
-        let values = shell.values().clone();
+        let (values, reader) = (shell.values().clone(), self.reader.clone());
         let resumed = io::listen_follower_local(&*bus, io::HISTORY, move |shown| {
-            if let Some(image) = &shown.image {
-                held(&values).resume_image(image);
+            let Some(image) = &shown.image else {
+                return;
+            };
+            if held(&values).resume_image(image) {
+                return;
+            }
+            // No line parked (a restart, a crash): the one its versions
+            // say, rebuilt from their step markers.
+            if let Err(e) = resume_from_versions(&values, &reader, image, &shown.unedited) {
+                log::warn!(target: "helios", "{}: {image}: {e}", io::HISTORY);
             }
         });
         for e in [saved, scoped, book, marks, workshop, resumed]
