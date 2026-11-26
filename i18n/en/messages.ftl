@@ -3401,6 +3401,10 @@ gui-workspace-template-toolbox = with its tools
 
 gui-workspace-template-version = version
 
+gui-zen-centre = Zen: centre
+
+gui-zen-panel = Zen: { $panel }
+
 health-card-short = { $card } is not safe to format yet
 
 health-card-short-detail = Photos on it short of their backups: { $count }. Keep the card.

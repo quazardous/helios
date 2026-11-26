@@ -3414,3 +3414,6 @@ gui-show-in-window = { $surface } (sa propre fenêtre)
 gui-show-in = Montrer dans
 gui-surface-target = ◎ Cible du double clic
 gui-surface-target-tip = Un double clic dans une galerie montre la photo ici (Réglages : Le double clic montre la photo dans)
+
+gui-zen-panel = Zen : { $panel }
+gui-zen-centre = Zen : centre
