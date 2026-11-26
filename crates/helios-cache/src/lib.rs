@@ -28,9 +28,9 @@ pub use disk::{CACHEDIR_TAG, Disk, user_cache_dir};
 pub use flight::{Begin, Flight, FlightError, Lead, Waiter};
 pub use lru::{Lru, Pin, Pins};
 pub use service::{
-    Cost, Counters, GLANCE_UNUSED, IMPORT_GLANCE, Identity, Kind, RENDER_STEP, Scope, ScopeRule,
-    Service, Share, Store, THUMB_LARGE, THUMB_SMALL, Tier, Usage, memory_share, physical_memory,
-    size_text,
+    Cost, Counters, GLANCE_UNUSED, HISTORY_BUDGET, IMAGE_HISTORY, IMPORT_GLANCE, Identity, Kind,
+    RENDER_STEP, Scope, ScopeRule, Service, Share, Store, THUMB_LARGE, THUMB_SMALL, Tier, Usage,
+    memory_share, physical_memory, size_text,
 };
 
 /// The share of physical memory the RAM tier may use by default, in

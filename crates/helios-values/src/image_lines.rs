@@ -13,30 +13,200 @@
 //! meanwhile (an agent, a batch, another node) moves them, and the line
 //! is dropped rather than undone into values it never made.
 //!
-//! Memory is bounded: [`PARKED_IMAGES`] images, the least recently left
-//! dropped first, each with at most [`PARKED_STEPS`] undo steps, the
-//! oldest dropped first. Lines are kept for the session only: after a
-//! restart, the image's line is rebuilt from its saved versions and
-//! installed the same way ([`Store::install_image_line`]).
+//! Memory is bounded: the parked lines are a kind of the cache service
+//! ([`helios_cache::IMAGE_HISTORY`]), each costed by its estimated bytes,
+//! within a budget of their own ([`helios_cache::HISTORY_BUDGET`] by
+//! default): past it, the least recently left go first. Each keeps at most
+//! [`PARKED_STEPS`] undo steps, the oldest dropped first. Lines are kept
+//! for the session only: after a restart, or once evicted, the image's
+//! line is rebuilt from its saved versions and installed the same way
+//! ([`Store::install_image_line`]).
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::mem::size_of;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
+use helios_cache::{Counters, IMAGE_HISTORY, Lru, Scope, Service, Tier, Usage};
 use helios_core::Value;
 
 use crate::history_scope::{HistoryScope, Parked};
-use crate::{Step, Store};
-
-/// How many images' lines stay parked: the least recently left goes
-/// first.
-pub const PARKED_IMAGES: usize = 20;
+use crate::points::Branch;
+use crate::{Place, Step, Store};
 
 /// The undo steps a parked line keeps: its oldest go first.
 pub const PARKED_STEPS: usize = 500;
 
-/// The parked image lines, the least recently left first.
-pub(crate) type Images = VecDeque<(String, Parked)>;
+/// The parked image lines, attached to the cache service while the store
+/// lives.
+pub(crate) struct Images(Arc<Parking>);
+
+/// The lines and their eviction order, shared with the cache service.
+struct Parking {
+    lines: Mutex<Lines>,
+    counters: Arc<Counters>,
+}
+
+struct Lines {
+    by_image: HashMap<String, Parked>,
+    /// Their bytes, the least recently left first (a counter clock).
+    order: Lru<String>,
+    clock: u64,
+    budget: Option<u64>,
+}
+
+impl Default for Images {
+    fn default() -> Self {
+        let parking = Arc::new(Parking {
+            lines: Mutex::new(Lines {
+                by_image: HashMap::new(),
+                order: Lru::new(),
+                clock: 0,
+                budget: Some(helios_cache::HISTORY_BUDGET),
+            }),
+            counters: Service::global().counters(&Scope::Shared, &IMAGE_HISTORY),
+        });
+        let weak: Weak<dyn helios_cache::Store> = Arc::downgrade(&parking) as _;
+        Service::global().attach(weak);
+        Images(parking)
+    }
+}
+
+impl Parking {
+    fn lock(&self) -> MutexGuard<'_, Lines> {
+        self.lines.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl helios_cache::Store for Parking {
+    fn usage(&self) -> Vec<Usage> {
+        let lines = self.lock();
+        vec![Usage {
+            scope: Scope::Shared,
+            kind: IMAGE_HISTORY,
+            tier: Tier::Ram,
+            entries: lines.order.len() as u64,
+            bytes: lines.order.bytes(),
+            pinned: 0,
+            budget: lines.budget,
+            shown: None,
+        }]
+    }
+
+    fn clear(&self, kind: Option<&str>) -> u64 {
+        if kind.is_some_and(|k| k != IMAGE_HISTORY.id) {
+            return 0;
+        }
+        let mut lines = self.lock();
+        let gone = lines.order.clear(|_| false);
+        Counters::add(&self.counters.cleared, gone.len() as u64);
+        lines.by_image.clear();
+        gone.iter().map(|(_, b)| b).sum()
+    }
+}
+
+impl Lines {
+    /// Evicts the least recently left lines past the budget, down to
+    /// [`helios_cache::eviction_target`]: how many went.
+    fn settle(&mut self) -> u64 {
+        let Some(budget) = self.budget else { return 0 };
+        if self.order.bytes() <= budget {
+            return 0;
+        }
+        let gone = self
+            .order
+            .evict(helios_cache::eviction_target(budget), |_| false);
+        for (image, _) in &gone {
+            self.by_image.remove(image);
+        }
+        gone.len() as u64
+    }
+}
+
+impl Images {
+    /// Parks `line` under `image` (replacing one there), then evicts past
+    /// the budget.
+    fn park(&self, image: &str, line: Parked) {
+        let mut lines = self.0.lock();
+        lines.order.remove(&image.to_owned());
+        lines.by_image.remove(image);
+        if line.is_empty() {
+            return;
+        }
+        lines.clock += 1;
+        let (bytes, now) = (line.bytes(image), lines.clock);
+        lines.order.insert(image.to_owned(), bytes, now, 0);
+        lines.by_image.insert(image.to_owned(), line);
+        let evicted = lines.settle();
+        Counters::add(&self.0.counters.evictions, evicted);
+    }
+
+    /// Takes `image`'s line out, if parked.
+    fn take(&self, image: &str) -> Option<Parked> {
+        let mut lines = self.0.lock();
+        lines.order.remove(&image.to_owned());
+        let line = lines.by_image.remove(image);
+        let counter = if line.is_some() {
+            &self.0.counters.hits
+        } else {
+            &self.0.counters.misses
+        };
+        Counters::add(counter, 1);
+        line
+    }
+
+    /// The images parked, the least recently left first.
+    fn keys(&self) -> Vec<String> {
+        self.0.lock().order.by_priority().cloned().collect()
+    }
+
+    /// The groups of the steps parked.
+    pub(crate) fn groups(&self) -> BTreeSet<u64> {
+        let lines = self.0.lock();
+        lines
+            .by_image
+            .values()
+            .flat_map(|p| p.undo.iter().chain(&p.redo))
+            .filter_map(|s| s.group)
+            .collect()
+    }
+}
+
+/// A value's estimated bytes beyond its own size.
+fn value_heap(v: &Value) -> usize {
+    match v {
+        Value::Choice(s) | Value::Text(s) => s.len(),
+        Value::List(l) => l.len() * size_of::<f64>(),
+        Value::Ints(l) => l.len() * size_of::<i64>(),
+        Value::Float(_) | Value::Int(_) | Value::Bool(_) => 0,
+    }
+}
+
+/// A step's estimated bytes in memory: its own size, its texts, places
+/// and changes.
+pub fn step_bytes(step: &Step) -> usize {
+    let place = |p: &Place| size_of::<Place>() + p.frame.len() + p.payload.to_string().len();
+    let change = |(path, before, after): &(String, Value, Value)| {
+        size_of::<(String, Value, Value)>() + path.len() + value_heap(before) + value_heap(after)
+    };
+    size_of::<Step>()
+        + step.label.len()
+        + step.aim.as_ref().map_or(0, String::len)
+        + step.place.iter().map(place).sum::<usize>()
+        + step.changes.iter().map(change).sum::<usize>()
+}
 
 impl Parked {
+    /// Its estimated bytes parked under `image`: its steps, its replaced
+    /// lines' and the key.
+    fn bytes(&self, image: &str) -> u64 {
+        let steps = self
+            .undo
+            .iter()
+            .chain(&self.redo)
+            .chain(self.replaced.iter().flat_map(|b: &Branch| &b.steps));
+        (image.len() + size_of::<Parked>() + steps.map(step_bytes).sum::<usize>()) as u64
+    }
+
     fn is_empty(&self) -> bool {
         self.undo.is_empty() && self.redo.is_empty() && self.replaced.is_empty()
     }
@@ -76,23 +246,18 @@ impl Parked {
 
 impl Store {
     /// The image `image` is left: its line (undo, redo and replaced) is
-    /// parked under it, capped, the least recently left image's dropped
-    /// past [`PARKED_IMAGES`]; then the image's history leaves as
-    /// [`Store::leave_image`] says. An empty line parks nothing.
+    /// parked under it, capped, the least recently left images' dropped
+    /// past the budget ([`Store::set_parked_budget`]); then the image's
+    /// history leaves as [`Store::leave_image`] says. An empty line parks
+    /// nothing.
     pub fn park_image(&mut self, image: &str) {
         let mut line = self.in_history(HistoryScope::Image, |s| Parked {
             undo: std::mem::take(&mut s.undo),
             redo: std::mem::take(&mut s.redo),
             replaced: std::mem::take(&mut s.replaced),
         });
-        self.images.retain(|(k, _)| k != image);
-        if !line.is_empty() {
-            line.cap();
-            self.images.push_back((image.to_owned(), line));
-            while self.images.len() > PARKED_IMAGES {
-                self.images.pop_front();
-            }
-        }
+        line.cap();
+        self.images.park(image, line);
         self.leave_image();
     }
 
@@ -101,10 +266,7 @@ impl Store {
     /// it left and the image has no step of its own yet. Whether it came
     /// back; a line that does not fit is dropped.
     pub fn resume_image(&mut self, image: &str) -> bool {
-        let Some(at) = self.images.iter().position(|(k, _)| k == image) else {
-            return false;
-        };
-        let Some((_, line)) = self.images.remove(at) else {
+        let Some(line) = self.images.take(image) else {
             return false;
         };
         self.put_image_line(line)
@@ -159,16 +321,31 @@ impl Store {
     }
 
     /// The images whose line is parked, the least recently left first.
-    pub fn parked_images(&self) -> impl Iterator<Item = &str> {
-        self.images.iter().map(|(k, _)| k.as_str())
+    pub fn parked_images(&self) -> Vec<String> {
+        self.images.keys()
     }
 
     /// The undo steps parked for `image`, oldest first.
-    pub fn parked_undo_steps(&self, image: &str) -> &[Step] {
-        self.images
-            .iter()
-            .find(|(k, _)| k == image)
-            .map_or(&[], |(_, p)| &p.undo)
+    pub fn parked_undo_steps(&self, image: &str) -> Vec<Step> {
+        let lines = self.images.0.lock();
+        lines
+            .by_image
+            .get(image)
+            .map_or_else(Vec::new, |p| p.undo.clone())
+    }
+
+    /// The bytes the parked lines are estimated to hold.
+    pub fn parked_bytes(&self) -> u64 {
+        self.images.0.lock().order.bytes()
+    }
+
+    /// The parked lines' budget in bytes (`None`: no limit); the least
+    /// recently left go at once when over it.
+    pub fn set_parked_budget(&mut self, budget: Option<u64>) {
+        let mut lines = self.images.0.lock();
+        lines.budget = budget;
+        let evicted = lines.settle();
+        Counters::add(&self.images.0.counters.evictions, evicted);
     }
 }
 
@@ -295,7 +472,7 @@ mod tests {
         load(&mut s, 3.0);
         assert!(!s.resume_image("a"));
         assert!(s.undo_steps().is_empty());
-        assert_eq!(s.parked_images().count(), 0, "dropped");
+        assert_eq!(s.parked_images().len(), 0, "dropped");
     }
 
     #[test]
@@ -316,34 +493,104 @@ mod tests {
     }
 
     #[test]
-    fn memory_is_bounded_in_images_and_steps() {
+    fn a_parked_line_keeps_its_newest_steps() {
         let mut s = store();
         for i in 1..=1000 {
             set(&mut s, f64::from(i));
         }
         s.park_image("first");
         assert_eq!(s.parked_undo_steps("first").len(), PARKED_STEPS);
-        for i in 0..PARKED_IMAGES {
-            set(&mut s, 2000.0 - i as f64);
-            s.park_image(&format!("img{i}"));
-        }
-        assert_eq!(s.parked_images().count(), PARKED_IMAGES);
-        assert!(
-            s.parked_images().all(|k| k != "first"),
-            "the least recently left went first"
-        );
         // A capped line still comes back and undoes its newest steps.
-        load(&mut s, 2000.0 - (PARKED_IMAGES - 1) as f64);
-        let last = format!("img{}", PARKED_IMAGES - 1);
-        assert!(s.resume_image(&last));
+        assert!(s.resume_image("first"));
+        s.undo(&Origin::User).unwrap();
+        assert_eq!(ev(&s), Value::Float(999.0));
+    }
+
+    #[test]
+    fn parked_lines_are_counted_by_their_bytes() {
+        let mut s = store();
+        assert_eq!(s.parked_bytes(), 0);
+        set(&mut s, 1.0);
+        s.park_image("a");
+        let one = s.parked_bytes();
+        let step = step_bytes(&s.parked_undo_steps("a")[0]) as u64;
+        assert!(one >= step && step > EV.len() as u64, "{one} {step}");
+        load(&mut s, 1.0);
+        set(&mut s, 2.0);
+        set(&mut s, 3.0);
+        s.park_image("b");
+        assert!(s.parked_bytes() > 2 * one, "b's two steps added");
+        load(&mut s, 1.0);
+        assert!(s.resume_image("a"));
+        assert!(s.parked_bytes() < 2 * one + step, "a's taken out");
+    }
+
+    #[test]
+    fn past_the_budget_the_least_recently_left_go_first() {
+        let line = {
+            let mut probe = store();
+            set(&mut probe, 1.0);
+            probe.park_image("probe");
+            probe.parked_bytes()
+        };
+        let mut s = store();
+        // Room for about four lines of one step.
+        s.set_parked_budget(Some(line * 4 + line / 2));
+        for i in 0..50 {
+            load(&mut s, 0.0);
+            set(&mut s, f64::from(i) + 1.0);
+            s.park_image(&format!("img{i}"));
+            assert!(s.parked_bytes() <= line * 4 + line / 2, "under the budget");
+        }
+        let kept = s.parked_images();
+        assert!((2..=4).contains(&kept.len()), "{kept:?}");
+        assert_eq!(kept.last().map(String::as_str), Some("img49"));
+        assert!(kept.iter().all(|k| k.as_str() >= "img46"), "{kept:?}");
+        // An evicted image's line is gone: it is rebuilt from its versions
+        // (`Store::install_image_line`) instead.
+        load(&mut s, 1.0);
+        assert!(!s.resume_image("img0"));
+        assert!(s.install_image_line(vec![step("a", 0.0, 1.0)], Vec::new()));
         assert_eq!(s.undo_steps().len(), 1);
+    }
+
+    #[test]
+    fn no_budget_keeps_every_line_and_a_lower_one_evicts_at_once() {
+        let mut s = store();
+        s.set_parked_budget(None);
+        for i in 0..30 {
+            load(&mut s, 0.0);
+            set(&mut s, f64::from(i) + 1.0);
+            s.park_image(&format!("img{i:02}"));
+        }
+        assert_eq!(s.parked_images().len(), 30, "no fixed count");
+        let all = s.parked_bytes();
+        s.set_parked_budget(Some(all / 2));
+        assert!(s.parked_bytes() <= all / 2);
+        assert!(s.parked_images().iter().all(|k| k.as_str() > "img10"));
+    }
+
+    #[test]
+    fn the_cache_service_sees_and_clears_the_parked_lines() {
+        use helios_cache::Store as _;
+        let mut s = store();
+        set(&mut s, 1.0);
+        s.park_image("a");
+        let usage = s.images.0.usage();
+        assert_eq!(usage[0].kind.id, helios_cache::IMAGE_HISTORY.id);
+        assert_eq!((usage[0].entries, usage[0].bytes), (1, s.parked_bytes()));
+        assert_eq!(usage[0].budget, Some(helios_cache::HISTORY_BUDGET));
+        assert_eq!(s.images.0.clear(Some("render.step")), 0);
+        let freed = s.images.0.clear(Some(helios_cache::IMAGE_HISTORY.id));
+        assert!(freed > 0 && s.parked_images().is_empty());
+        assert!(!s.resume_image("a"));
     }
 
     #[test]
     fn an_empty_line_parks_nothing() {
         let mut s = store();
         s.park_image("a");
-        assert_eq!(s.parked_images().count(), 0);
+        assert_eq!(s.parked_images().len(), 0);
         assert!(!s.resume_image("a"));
     }
 }
