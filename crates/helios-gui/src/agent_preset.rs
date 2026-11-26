@@ -103,10 +103,10 @@ impl Preset {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+    pub(crate) fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |n| {
             vars.iter()
                 .find(|(k, _)| *k == n)
@@ -115,7 +115,7 @@ mod tests {
     }
 
     /// A token as long as egui-pop asks (32 characters at least).
-    const TOKEN: &str = "0123456789abcdef0123456789abcdef-test";
+    pub(crate) const TOKEN: &str = "0123456789abcdef0123456789abcdef-test";
 
     #[test]
     fn the_preset_is_read_from_its_variable_and_the_old_switch_only_warns() {
@@ -170,7 +170,7 @@ mod tests {
     /// preset: a client thread speaks JSON-RPC while the test steps
     /// frames, as the socket's own tests do.
     #[cfg(unix)]
-    mod socket {
+    pub(crate) mod socket {
         use std::io::{BufRead as _, BufReader, Write as _};
         use std::os::unix::fs::PermissionsExt as _;
         use std::os::unix::net::UnixStream;
@@ -272,7 +272,7 @@ mod tests {
         }
 
         /// A JSON-RPC client over the socket.
-        struct Client {
+        pub(crate) struct Client {
             read: BufReader<UnixStream>,
             write: UnixStream,
             next: u64,
@@ -280,7 +280,7 @@ mod tests {
 
         impl Client {
             /// A client that says no `hello`.
-            fn unpaired(path: &Path) -> Self {
+            pub(crate) fn unpaired(path: &Path) -> Self {
                 let write = UnixStream::connect(path).expect("the socket answers");
                 write
                     .set_read_timeout(Some(Duration::from_secs(20)))
@@ -293,14 +293,14 @@ mod tests {
             }
 
             /// The scenario runner: says `hello` with the pre-issued token.
-            fn connect(path: &Path) -> Self {
+            pub(crate) fn connect(path: &Path) -> Self {
                 let mut c = Self::unpaired(path);
                 let hello = c.request("hello", json!({ "name": "runner", "token": TOKEN }));
                 assert_eq!(hello["result"]["agent"], RUNNER_ID, "{hello}");
                 c
             }
 
-            fn request(&mut self, method: &str, params: Json) -> Json {
+            pub(crate) fn request(&mut self, method: &str, params: Json) -> Json {
                 let n = self.next;
                 self.next += 1;
                 let req = json!({ "jsonrpc": "2.0", "id": n, "method": method, "params": params });
@@ -311,7 +311,7 @@ mod tests {
             }
 
             /// `commands.run` of `id`: the call's whole response.
-            fn run(&mut self, id: &str, args: Json) -> Json {
+            pub(crate) fn run(&mut self, id: &str, args: Json) -> Json {
                 let params = json!({
                     "collector": "commands",
                     "action": "run",
@@ -322,8 +322,12 @@ mod tests {
             }
         }
 
-        /// Steps frames until `thread` ends.
-        fn finish<T>(h: &mut Harness<'static, App>, thread: std::thread::JoinHandle<T>) -> T {
+        /// Steps frames until `thread` ends (an application's harness, or
+        /// the shell's).
+        pub(crate) fn finish<S, T>(
+            h: &mut Harness<'static, S>,
+            thread: std::thread::JoinHandle<T>,
+        ) -> T {
             let start = Instant::now();
             while !thread.is_finished() {
                 assert!(
