@@ -935,6 +935,48 @@ impl Shell {
         Ok(Value::Null)
     }
 
+    /// `activity.cancel`: running promise `id` cancelled. A job relayed
+    /// from a connected node is cancelled there, through its relay; a job
+    /// running in this process is stopped here, the way it gave when it
+    /// started; else the node is asked (`promises.cancel`).
+    pub(super) fn cancel_activity(&mut self, args: &Value) -> Result<Value, String> {
+        let id = args["id"]
+            .as_str()
+            .ok_or("`id`: the running promise to cancel")?;
+        let promise = self
+            .core
+            .activity
+            .promises()
+            .into_iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| format!("no task `{id}`"))?;
+        if promise.state.is_settled() {
+            return Err(format!("task `{id}` has ended"));
+        }
+        if let Some(job) = relayed(&promise) {
+            let (node, own) = crate::relay::split_node_job(job)
+                .ok_or_else(|| format!("`{job}` is not a node's job"))?;
+            return self
+                .core
+                .relays
+                .borrow()
+                .get(node)
+                .ok_or_else(|| format!("node `{node}` is not followed any more"))?
+                .cancel(own);
+        }
+        let job = promise.request[helios_node_core::job_promises::JOB]
+            .as_str()
+            .unwrap_or(&promise.owner);
+        if self.core.jobs.cancel(job).is_ok() {
+            return Ok(json!({ "cancelling": id }));
+        }
+        if !self.core.activity.has_node() {
+            return Err("no library open: its tasks run on its node".into());
+        }
+        self.core.activity.ask(Action::Cancel, id);
+        Ok(json!({ "cancelling": id }))
+    }
+
     /// Cancel or Retry asked on promise `id`: of the node's promises; a job
     /// relayed from a connected node is cancelled there, through its relay
     /// (`job.cancel` to its control endpoint).
