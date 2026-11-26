@@ -41,10 +41,12 @@ pub fn comparison() -> String {
 /// Where the arrows (and Delete, on a Compare) work on a Compare: the
 /// Compare place, or another Compare (`helios.compare#<n>`) focused. The
 /// command goes to the focused Compare, else the one focused last in the
-/// window (`display_surfaces::Surfaces::active_compare`).
+/// window (`display_surfaces::Surfaces::active_compare`). A Library view
+/// focused in the Compare place (the culling strip) keeps its arrows: they
+/// move its own cursor.
 pub fn compare_arrows() -> String {
     format!(
-        "{} || (focusedPanelKind == 'helios.compare' && focusedPanel != 'helios.compare')",
+        "({} && !(focusedPanelKind == 'helios.vault' && focusedPanel != 'helios.vault')) || (focusedPanelKind == 'helios.compare' && focusedPanel != 'helios.compare')",
         comparison()
     )
 }

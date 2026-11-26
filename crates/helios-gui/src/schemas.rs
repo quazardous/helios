@@ -312,7 +312,7 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.importSession" => object(&[], &[("id", any()), ("select", boolean())]),
         "library.importAutomatic.pause" => object(&[], &[("on", boolean())]),
         "library.select.similar" => object(&[], &[("by", any())]),
-        "library.view.open" => object(&[], &[("place", string_or_null())]),
+        "library.view.open" => object(&[], &[("place", string_or_null()), ("strip", boolean())]),
         "library.view.close" => object(&["view"], &[("view", string())]),
         "library.view.selection" => object(&[], &[("view", string_or_null())]),
         "library.view.link" => object(&["view"], &[("view", string()), ("linked", boolean())]),

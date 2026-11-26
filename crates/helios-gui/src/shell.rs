@@ -1795,7 +1795,10 @@ impl Shell {
                     // gallery, its Filters inside it.
                     if view == 0 && crate::library_views::is_view(drawn.as_str()) {
                         let mut library = library.borrow_mut();
-                        return views.borrow_mut().draw(ui, app, drawn, &mut library);
+                        let compared = comparison.borrow().photos().to_vec();
+                        return views
+                            .borrow_mut()
+                            .draw(ui, app, drawn, &mut library, &compared);
                     }
                     if (view == 0 || view == 3) && library_focus::in_main_window(&window, ui.ctx())
                     {
@@ -3652,7 +3655,7 @@ impl Shell {
         add(
             CommandSpec::new(
                 crate::library_views::OPEN_COMMAND,
-                "Open another Library view (`place`: last, here or an area): its own filter and cursor, kept with the layout. Answers its id (`view`)",
+                "Open another Library view (`place`: last, here or an area): its own filter and cursor, kept with the layout. Answers its id (`view`). With `strip`: true, the culling strip: one row under Compare, linked to the main view, Space adding or removing its photo from the comparison",
                 "Library",
             ),
             Box::new(|a, _| {

@@ -929,7 +929,7 @@ command-library-view-close =
     .title = Fermer une vue de la bibliothèque (`view` : son id) ; les autres vues gardent leur filtre et leur curseur
 
 command-library-view-open =
-    .title = Ouvrir une autre vue de la bibliothèque (`place` : last, here ou une zone) : son propre filtre et son propre curseur, gardés avec la disposition. Répond son id (`view`)
+    .title = Ouvrir une autre vue de la bibliothèque (`place` : last, here ou une zone) : son propre filtre et son propre curseur, gardés avec la disposition. Répond son id (`view`). Avec `strip` : true, le bandeau de tri : une rangée sous la comparaison, liée à la vue principale, Espace y ajoutant ou en retirant sa photo
 
 command-library-view-link =
     .title = Lier une vue de la bibliothèque à la vue principale, ou la délier (`view` ; `linked` : true ou false, aucun : l'inverse) : liée, elle suit la sélection de la vue principale

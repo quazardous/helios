@@ -345,3 +345,59 @@ fn a_linked_view_follows_the_main_selection_and_an_unlinked_one_does_not() {
         .count();
     assert_eq!(linked_after, 1, "the link is kept with the layout");
 }
+
+/// G8: the culling strip, a Library view in one row under Compare. It
+/// opens linked to the main view, so it shows the main selection; found
+/// by its accesskit name and focused, its arrows move its cursor, and
+/// Space adds the photo under it to the comparison, then takes it out.
+#[test]
+fn the_culling_strip_follows_the_main_view_its_arrows_move_and_space_edits_compare() {
+    use egui::Key;
+    let mut h = harness(None);
+    answer(&mut h, "compare.set", json!({ "images": ["a", "b"] })).unwrap();
+    let out = answer(&mut h, OPEN_COMMAND, json!({ "strip": true })).unwrap();
+    assert_eq!(out["strip"], true);
+    let strip = out["view"].as_str().unwrap().to_string();
+    assert_eq!(payload(&h, &strip)["strip"], true);
+    assert_eq!(payload(&h, &strip)["link"], "main", "linked when it opens");
+
+    // The strip shows the main view's selection.
+    h.state()
+        .library_mut()
+        .with_gallery("main", |l| l.select_ids(&["c".to_string()]));
+    h.run_steps(3);
+    let read = |h: &mut Harness<'static, Shell>| {
+        answer(h, SELECTION_COMMAND, json!({ "view": strip })).unwrap()
+    };
+    assert_eq!(read(&mut h)["cursor"], "c");
+
+    // Focused, an arrow moves its cursor, not the main view's.
+    h.get_by_label("Culling filmstrip").click();
+    h.run_steps(2);
+    assert!(
+        h.get_by_label("Culling filmstrip").is_focused(),
+        "a click gives the strip the keyboard"
+    );
+    assert_eq!(read(&mut h)["cursor"], "c");
+    h.key_press(Key::ArrowRight);
+    h.run_steps(3);
+    assert_eq!(read(&mut h)["cursor"], "d", "the arrow moved its cursor");
+    assert_eq!(view(&h, "main").1.as_deref(), Some("c"), "not the main one");
+
+    // Space adds the photo under the cursor to Compare, then takes it out.
+    let compared = |h: &mut Harness<'static, Shell>| {
+        answer(h, "compare.active", json!({})).unwrap()["images"].clone()
+    };
+    h.key_press(Key::Space);
+    h.run_steps(3);
+    assert_eq!(compared(&mut h), json!(["a", "b", "d"]));
+    h.key_press(Key::Space);
+    h.run_steps(3);
+    assert_eq!(compared(&mut h), json!(["a", "b"]));
+
+    // Its layout is kept with the layout.
+    let saved = h.state().app().handle().layout().to_json();
+    drop(h);
+    let h = harness(Some(Layout::from_json(&saved).unwrap()));
+    assert_eq!(payload(&h, &strip)["strip"], true);
+}

@@ -602,7 +602,7 @@ command-library-view-link =
     .title = Link a Library view to the main one, or unlink it (`view`; `linked`: true or false, none: the other way round): linked, it follows the main view's selection
 
 command-library-view-open =
-    .title = Open another Library view (`place`: last, here or an area): its own filter and cursor, kept with the layout. Answers its id (`view`)
+    .title = Open another Library view (`place`: last, here or an area): its own filter and cursor, kept with the layout. Answers its id (`view`). With `strip`: true, the culling strip: one row under Compare, linked to the main view, Space adding or removing its photo from the comparison
 
 command-library-view-selection =
     .title = Say a Library view's selection and cursor (`view`: its id or main; none: every view), as kept with the layout
