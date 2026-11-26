@@ -840,6 +840,35 @@ pub fn zen_label(app: &egui_pop::api::app::AppHandle) -> String {
     }
 }
 
+/// View ▸ Culling strip's list: one entry, ticked while a culling strip
+/// is open ([`strip_entry`]).
+pub const LIST_STRIP: &str = "helios.cullingStrip";
+
+/// The culling strip's View entry.
+const STRIP_ENTRY: StrKey = StrKey::new("gui-view-culling-strip", "Culling strip");
+
+/// View ▸ Culling strip: opens a culling strip under Compare
+/// (`library.view.open` with `strip`), or closes the one open
+/// (`library.view.close`), ticked while one is.
+pub fn strip_entry(app: &egui_pop::api::app::AppHandle) -> ListItem {
+    use crate::library_views::{CLOSE_COMMAND, OPEN_COMMAND, open_strips};
+    let label = egui_pop::core::strings::tr(&app.egui(), &STRIP_ENTRY);
+    let item = match open_strips(app).into_iter().next() {
+        Some(view) => ListItem::new(
+            &label,
+            CommandId::from_static(CLOSE_COMMAND),
+            json!({ "view": view }),
+        )
+        .checked(true),
+        None => ListItem::new(
+            &label,
+            CommandId::from_static(OPEN_COMMAND),
+            json!({ "strip": true }),
+        ),
+    };
+    item.icon("phosphor:film-strip")
+}
+
 /// Zen's entry naming its panel.
 const ZEN_ON: StrKey = StrKey::new("gui-zen-panel", "Zen: { $panel }");
 /// Zen's entry when it shows the centre whole.
@@ -902,6 +931,9 @@ impl Plugin for WindowMenu {
         ctx.list_provider(LIST_ZEN, |app, _| {
             vec![ListItem::new(&zen_label(app), CMD_ZEN, json!({})).checked(app.zen())]
         });
+        // View ▸ Culling strip, beside the photo's entries.
+        ctx.menu_item(MenuItem::list(MENU_VIEW, "2_photo", 10, LIST_STRIP))?;
+        ctx.list_provider(LIST_STRIP, |app, _| vec![strip_entry(app)]);
         ctx.menu_item(MenuItem::submenu(
             MENU_WINDOW,
             "0_panels",

@@ -641,3 +641,27 @@ fn the_comparison_is_a_list_edited_by_command_menu_and_delete() {
     assert_eq!(compared(&h), ["a", "b"]);
     assert_eq!(gallery(&h), selected, "after compare.set");
 }
+
+/// A fresh profile's Compare layout shows the culling strip under
+/// Compare (found by its accesskit name), linked to the main view, the
+/// Filmstrip a tab beside it.
+#[test]
+fn a_fresh_profiles_compare_shows_the_culling_strip() {
+    let mut h = library("fresh-strip", 1.0);
+    assert!(
+        h.query_by_label("Culling filmstrip").is_none(),
+        "no strip in the library"
+    );
+    run(&mut h, "library.compare", json!({ "images": ["c", "a"] }));
+    h.run();
+    assert_eq!(place(&h), "helios.comparison");
+    assert!(
+        h.query_by_label("Culling filmstrip").is_some(),
+        "the strip under Compare"
+    );
+    let app = h.state().app().handle().clone();
+    let strips = helios_gui::library_views::open_strips(&app);
+    assert_eq!(strips, [helios_gui::library_views::DEFAULT_STRIP]);
+    let id = egui_pop::model::ids::PanelId::new(&strips[0]).unwrap();
+    assert_eq!(app.instance_payload(&id)["link"], "main");
+}

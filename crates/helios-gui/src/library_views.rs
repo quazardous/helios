@@ -183,17 +183,51 @@ pub fn open_command(app: &AppHandle, args: &Value) -> Result<Value, String> {
     }
     let under = OpenPlace::parse("bottom").unwrap_or(OpenPlace::Last);
     let Some(view) = open(app, place_or(args, under)?, OPEN_COMMAND)? else {
-        return Err("the strip could not open now: ask again".into());
+        // Asked while drawing (a menu's entry): the workbench opens the
+        // view next frame, and its first draw makes it the strip.
+        app.egui()
+            .data_mut(|d| d.insert_temp(strip_pending_id(), true));
+        return Ok(json!({ "queued": true, "strip": true }));
     };
     let id = PanelId::new(&view).map_err(|e| e.to_string())?;
+    app.set_instance_payload(&id, strip_state())?;
+    Ok(json!({ "view": view, "strip": true }))
+}
+
+/// Where a strip asked while drawing waits for its view to open.
+fn strip_pending_id() -> egui::Id {
+    egui::Id::unique("helios.library.strip.pending")
+}
+
+/// What a culling strip keeps when it opens: one row, linked to the
+/// main view.
+pub fn strip_state() -> Value {
     let state = ViewState {
         strip: true,
         link: Some(LINKED_TO.to_string()),
         ..ViewState::default()
     };
-    let state = serde_json::to_value(state).map_err(|e| e.to_string())?;
-    app.set_instance_payload(&id, state)?;
-    Ok(json!({ "view": view, "strip": true }))
+    serde_json::to_value(state).unwrap_or(Value::Null)
+}
+
+/// The culling strip the default Compare layout opens under Compare
+/// (`workbench::comparison`): the Results panel's second instance, the
+/// first view after the main explorer's.
+pub const DEFAULT_STRIP: &str = "helios.vault#2";
+
+/// The culling strips open now.
+pub fn open_strips(app: &AppHandle) -> Vec<String> {
+    open_views(app)
+        .into_iter()
+        .filter(|v| {
+            PanelId::new(v).is_ok_and(|id| {
+                app.instance_payload(&id)
+                    .get("strip")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            })
+        })
+        .collect()
 }
 
 /// What [`QUICK_OPEN_COMMAND`] does for the quick collection `quick`
@@ -314,7 +348,20 @@ impl Views {
             self.followed.remove(&k);
             library.forget_gallery(&k);
         }
-        let payload = app.instance_payload(id);
+        let mut payload = app.instance_payload(id);
+        // A strip asked while drawing: the first new view drawn is it.
+        if payload.is_null()
+            && !self.seen.contains_key(key)
+            && ui
+                .ctx()
+                .data_mut(|d| d.remove_temp::<bool>(strip_pending_id()))
+                .unwrap_or(false)
+        {
+            payload = strip_state();
+            if let Err(e) = app.set_instance_payload(id, payload.clone()) {
+                log::warn!(target: "helios", "library view {key}: not made the strip: {e}");
+            }
+        }
         if self.seen.get(key).map(unlinked) != Some(unlinked(&payload)) {
             self.restore(key, &payload, library);
         }
