@@ -79,6 +79,10 @@
 //!   bump moves those pins to their newest green commit, and the release
 //!   guard refuses a release while any of them comes from git (see
 //!   `pins.rs`).
+//! - `hud-bench [COMPOSITE...]`: the egui_hud agent bench's counts per
+//!   workshop: presentation decisions, one-control rules, parameters shown
+//!   with no intervention, files a global style change touches (see
+//!   `hud_bench.rs`, docs/design/egui-hud-agent-bench.md).
 //!
 //! A fragment is a file in `changelog.d/`, written in the same commit as the
 //! change it describes: a first line `kind: <kind>`, an optional line
@@ -96,6 +100,7 @@ mod commits;
 mod delta;
 mod deps_worlds;
 mod gate;
+mod hud_bench;
 mod i18n;
 mod install_dev;
 mod lint;
@@ -774,7 +779,7 @@ fn fail(problems: &[String]) -> ExitCode {
     ExitCode::from(1)
 }
 
-const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--run full|select] [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] [--shadow FILE] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-history report --shadow [--history DIR] [--days N] | ci-broker select [--base REF] [--history DIR] [--days N] [--runs N] [--failed-junit FILE]... [--committed] [--list FILE --summary-md FILE] [--explain TEST | --shadow FILE --run ID --commit SHA --junit FILE] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | engine-diffstat <fixture|all> [--module NAME] [--dump-diff DIR] [--json FILE] [--cpu] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | bench-remote cancel <ext_job_id> | affected [BASE] [--filter | --critical] | i18n extract | i18n check [--new-since REF] | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release]";
+const USAGE: &str = "usage: cargo xtask changelog | release [--date YYYY-MM-DD] | check [--base REF] | promote <SHA> [--run full|select] [--remote NAME] | lint [--fix] [--require-all] | deps-worlds | raw-egui [--check | --update] | bus --check | bus --timings FILE | test-times [--profile P] [--top N] [--from-junit FILE [--summary]] | ci-history ingest --history DIR --run ID --commit SHA --date DATE [--source S] [--shadow FILE] JUNIT... | ci-history rebuild --history DIR | ci-history report [--history DIR] [--top N|all] [--min-runs N] | ci-history report --shadow [--history DIR] [--days N] | ci-broker select [--base REF] [--history DIR] [--days N] [--runs N] [--failed-junit FILE]... [--committed] [--list FILE --summary-md FILE] [--explain TEST | --shadow FILE --run ID --commit SHA --junit FILE] | check-commits [--full] [--first-parent] [BASE..HEAD | BASE] | bench masks [--modules N] [--budget MIB] | engine-diffstat <fixture|all> [--module NAME] [--dump-diff DIR] [--json FILE] [--cpu] | bench-remote <job> [key=value...] [--priority high|normal] [--push] | bench-remote --affected [base=REF] [key=value...] [--push] | bench-remote --chain egui-pop|helios [--release] [key=value...] [--priority high|normal] [--push] | bench-remote queue | bench-remote cancel <ext_job_id> | affected [BASE] [--filter | --critical] | i18n extract | i18n check [--new-since REF] | i18n stamp LOCALE [--all] | install-dev [--branch B | --bundle FILE] | install-dev --home [--branch B] | install-dev [--home] --local | install-dev [--home] --from DIR | install-dev --list | install-dev --uninstall [--home] | ui-index [--check] | snapshots filter | snapshots report [--since REF] [--out DIR] | snapshots apply DIR [--version V] | pin-bump [egui-pop=REV] [egui_hud=REV] [--pr] | pins [--release] | hud-bench [COMPOSITE...]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -936,6 +941,10 @@ fn main() -> ExitCode {
         }),
         ["ui-index", rest @ ..] => ui_index::run(&root, rest).unwrap_or_else(|| {
             eprintln!("usage: cargo xtask {}", ui_index::USAGE);
+            ExitCode::from(2)
+        }),
+        ["hud-bench", rest @ ..] => hud_bench::run(&root, rest).unwrap_or_else(|| {
+            eprintln!("usage: cargo xtask {}", hud_bench::USAGE);
             ExitCode::from(2)
         }),
         ["i18n", rest @ ..] => i18n::run(&root, rest).unwrap_or_else(|| {
