@@ -22,6 +22,9 @@ pub struct Advanced {
     pub(super) editor: RuleEditor,
     /// The search's whole text the tree was last read from or written to.
     text: String,
+    /// The first row takes the keyboard at the next pass (opened by
+    /// Ctrl+Shift+F).
+    pub(super) focus: bool,
 }
 
 impl Advanced {
@@ -30,6 +33,7 @@ impl Advanced {
         let mut rows = Advanced {
             editor: RuleEditor::new("", "", &Rule::group(Match::All, Vec::new())),
             text: String::new(),
+            focus: false,
         };
         rows.read(whole);
         rows

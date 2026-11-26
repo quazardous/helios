@@ -144,6 +144,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.importSource", "phosphor:tray-arrow-down"),
     ("library.importWindow", "phosphor:tray-arrow-down"),
     ("library.importAutomatic.pause", "phosphor:pause"),
+    ("library.filter.advanced", "phosphor:sliders-horizontal"),
     ("library.filter.apply", "phosphor:funnel"),
     ("library.filter.pin", "phosphor:push-pin"),
     ("library.filter.recent", "phosphor:list-bullets"),

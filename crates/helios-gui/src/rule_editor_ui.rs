@@ -187,15 +187,20 @@ pub fn show(
 
 /// The tree's rows drawn in `ui`, without the dialog around them: the
 /// search's Advanced rows (`docs/design/library-search.md`, G5). The same
-/// boxes as the dialog; answers the edit asked, as [`show`] does.
+/// boxes as the dialog; answers the edit asked, as [`show`] does. With
+/// `focus`, the first row's field box takes the keyboard (Ctrl+Shift+F).
 pub fn rows(
     ui: &mut Ui,
     editor: &RuleEditor,
     albums: &[(String, String)],
     words: &Words,
+    focus: bool,
 ) -> Option<Value> {
     let mut asked = None;
     let faults = editor.faults();
+    if focus {
+        ui.data_mut(|d| d.insert_temp(focus_first_id(), true));
+    }
     node(
         ui,
         &editor.tree,
@@ -206,7 +211,15 @@ pub fn rows(
         words,
         &mut asked,
     );
+    // No row to take it (no rule yet): the wish ends with the pass.
+    ui.data_mut(|d| d.remove_temp::<bool>(focus_first_id()));
     asked
+}
+
+/// Where [`rows`] leaves the wish that the first row's field box take
+/// the keyboard, until a row is drawn.
+fn focus_first_id() -> egui::Id {
+    egui::Id::unique("helios.rules.focus-first")
 }
 
 /// How wide the dialog is, in points.
@@ -222,6 +235,7 @@ fn pick<'a, K: PartialEq>(
     name: &str,
     current: &K,
     options: impl IntoIterator<Item = (&'a K, &'a str)>,
+    focus: bool,
 ) -> Option<&'a K> {
     let mut picked = None;
     let r = ui
@@ -234,6 +248,9 @@ fn pick<'a, K: PartialEq>(
         })
         .response;
     Words::name(ui, &r, name);
+    if focus {
+        r.request_focus();
+    }
     picked
 }
 
@@ -256,7 +273,8 @@ fn node(
                     let options = words.matches.iter().map(|(m, w)| (m, w.as_str()));
                     let shown = Words::of(&words.matches, mode);
                     let salt = ("rule-match", path.clone());
-                    if let Some(m) = pick(ui, salt, shown, &words.match_name, mode, options) {
+                    if let Some(m) = pick(ui, salt, shown, &words.match_name, mode, options, false)
+                    {
                         *asked = Some(json!({ "edit": "match", "at": at, "match": m.name() }));
                     }
                     ui.text_role(TextRole::Body, &words.of_rules);
@@ -291,6 +309,9 @@ fn node(
                     .map_or(d.field.as_str(), |(_, w)| w.as_str());
                 let options = words.fields.iter().map(|(f, w)| (f, w.as_str()));
                 let current = d.field.as_str();
+                let focus = ui
+                    .data_mut(|d| d.remove_temp::<bool>(focus_first_id()))
+                    .is_some();
                 if let Some(f) = pick(
                     ui,
                     id("field"),
@@ -298,6 +319,7 @@ fn node(
                     &words.field_name,
                     &current,
                     options,
+                    focus,
                 ) {
                     *asked = Some(json!({ "edit": "field", "at": at, "field": f }));
                 }
@@ -317,8 +339,15 @@ fn node(
                         (o, w)
                     });
                     let current = d.op.as_str();
-                    if let Some(o) = pick(ui, id("op"), op_word, &words.op_name, &current, options)
-                    {
+                    if let Some(o) = pick(
+                        ui,
+                        id("op"),
+                        op_word,
+                        &words.op_name,
+                        &current,
+                        options,
+                        false,
+                    ) {
                         *asked = Some(json!({ "edit": "op", "at": at, "op": o }));
                     }
                     value(ui, kind, d, &at, path, albums, words, asked);
@@ -368,7 +397,7 @@ fn value(
             .find(|(v, _)| *v == d.value)
             .map_or(d.value.as_str(), |(_, w)| w.as_str());
         let options = choices.iter().map(|(v, w)| (v, w.as_str()));
-        pick(ui, salt, shown, &words.value_name, &d.value, options)
+        pick(ui, salt, shown, &words.value_name, &d.value, options, false)
             .map(|v| json!({ "edit": "value", "at": at, "value": v }))
     };
     let mut ask = |a: Option<Value>| {
@@ -388,7 +417,15 @@ fn value(
                 let unit = Unit::parse(&d.unit).unwrap_or(Unit::Days);
                 let options = words.units.iter().map(|(u, w)| (u, w.as_str()));
                 let shown = Words::of(&words.units, &unit);
-                if let Some(u) = pick(ui, id("unit"), shown, &words.unit_name, &unit, options) {
+                if let Some(u) = pick(
+                    ui,
+                    id("unit"),
+                    shown,
+                    &words.unit_name,
+                    &unit,
+                    options,
+                    false,
+                ) {
                     ask(Some(json!({
                         "edit": "value", "at": at, "value": d.value, "unit": u.name(),
                     })));

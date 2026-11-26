@@ -262,6 +262,9 @@ command-library-filter-switch =
 command-library-filter-recent =
     .title = Lister les filtres `pinned` (épinglés) et `recent` (récents, le plus récent d’abord) de la bibliothèque et ses albums dynamiques `smart`, chacun avec sa `query` et son `filter`
 
+command-library-filter-advanced =
+    .title = Ouvrir ou fermer les lignes Avancé sous la recherche de la Bibliothèque (`open` : true ou false, sinon l'inverse), la première ligne prise au clavier ; répond `open` et la `query` de la recherche. Poser les règles avec library.filter.apply : les lignes suivent
+
 command-library-filter-apply =
     .title = Appliquer un filtre à la bibliothèque (`query`, tapée comme dans le champ de recherche, ou `filter` tel que listé) ; il devient le premier filtre récent
 

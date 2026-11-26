@@ -1723,6 +1723,8 @@ gui-library-chip-or = ou
 
 gui-library-chip-range = { $low } et { $high }
 
+gui-library-chip-rules = règles ({ $count })
+
 gui-library-suggest-key = { $label } — { $key }:
 
 gui-library-compare-add = Ajouter à la comparaison

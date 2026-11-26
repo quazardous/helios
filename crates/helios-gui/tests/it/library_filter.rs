@@ -4166,3 +4166,69 @@ fn the_advanced_rows_edit_the_search_both_ways() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// G5 part 2 (`docs/design/library-search.md`, sections 3 and 5): a tree
+/// the chips cannot draw flat is one "rules (n)" chip; Ctrl+Shift+F opens
+/// the Advanced rows, the first row's field focused, and closes them; a
+/// filter an agent sets shows in the rows.
+#[test]
+fn the_advanced_rows_open_by_key_and_follow_agents() {
+    let root = temp("advanced-keys");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let values = |h: &Harness<'static, Shell>| -> Vec<String> {
+        h.query_all_by_label("Value")
+            .map(|n| n.accesskit_node().value().unwrap_or_default())
+            .collect()
+    };
+
+    // An any across keys: one chip that counts its rules.
+    h.get_by_label("Search images").click();
+    h.run();
+    h.input_mut()
+        .events
+        .push(egui::Event::Text("(camera:R5 OR type:jpg) ".into()));
+    h.run();
+    h.run();
+    settle(&mut h, &mut persist, 2.0);
+    h.get_by_label("rules (2)");
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+
+    // Ctrl+Shift+F in the grid: the rows open, the first row's field
+    // takes the keyboard; again, they close and the rules stay.
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.settle();
+    let ctrl_shift = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    h.key_press_modifiers(ctrl_shift, Key::F);
+    h.run();
+    h.run();
+    assert!(h.query_all_by_label("+ Condition").count() > 0, "rows open");
+    let first = h.query_all_by_label("Field").next().expect("a row");
+    assert!(first.is_focused(), "the first row's field focused");
+    // Back in the grid (a row's box keeps the keys while focused).
+    run(&mut h, "helios.vault.focus", json!(null));
+    h.settle();
+    h.key_press_modifiers(ctrl_shift, Key::F);
+    h.run();
+    h.run();
+    assert_eq!(
+        h.query_all_by_label("+ Condition").count(),
+        0,
+        "rows closed"
+    );
+    h.get_by_label("rules (2)");
+
+    // An agent opens the rows and sets the search: the rows follow.
+    run(&mut h, "library.filter.advanced", json!({ "open": true }));
+    run(
+        &mut h,
+        "library.filter.apply",
+        json!({ "query": "camera:\"Z 8\"" }),
+    );
+    settle(&mut h, &mut persist, 3.0);
+    assert_eq!(values(&h), ["Z 8"]);
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
+
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}

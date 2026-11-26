@@ -1206,6 +1206,10 @@ pub const COLLECTION_RULES_COMMAND: &str = "library.collection.rules";
 /// ([`crate::rule_editor::Edit::parse`]), or undoes, redoes, applies,
 /// cancels; answers the editor's state.
 pub const COLLECTION_RULES_EDIT_COMMAND: &str = "library.collection.rules.edit";
+/// Opens or closes the search's Advanced rows (`open`: true or false,
+/// else the other way), the first row focused when opened; answers
+/// whether they are open and the search's text (Ctrl+Shift+F).
+pub const ADVANCED_COMMAND: &str = "library.filter.advanced";
 /// Lists the albums, with how many photos each holds.
 pub const COLLECTION_LIST_COMMAND: &str = "library.collection.list";
 /// B: puts the selected photos (`images`, else the selection) in the
@@ -4483,6 +4487,21 @@ impl Library {
         }
     }
 
+    /// Opens the search's Advanced rows (`open`), the first row focused,
+    /// or closes them, the rules kept ([`ADVANCED_COMMAND`]); `None` the
+    /// other way. Answers whether they are open, and the search's text.
+    pub fn set_advanced(&mut self, open: Option<bool>) -> Value {
+        let open = open.unwrap_or(self.view.advanced.is_none());
+        if !open {
+            self.view.advanced = None;
+        } else if self.view.advanced.is_none() {
+            let mut rows = advanced::Advanced::of(&self.whole_search());
+            rows.focus = true;
+            self.view.advanced = Some(rows);
+        }
+        json!({ "open": open, "query": self.whole_search() })
+    }
+
     /// The Advanced button: opens or closes the search's rows.
     fn advanced_toggle(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
@@ -4518,9 +4537,10 @@ impl Library {
         rows.follow(&whole);
         let ctx = ui.ctx().clone();
         let words = crate::rule_editor_ui::Words::new(&|m| crate::i18n::text(&ctx, m));
+        let focus = std::mem::take(&mut rows.focus);
         let asked = ui
             .push_id(("helios.library.advanced", &self.view_id), |ui| {
-                crate::rule_editor_ui::rows(ui, &rows.editor, &[], &words)
+                crate::rule_editor_ui::rows(ui, &rows.editor, &[], &words, focus)
             })
             .inner;
         let Some(text) = asked.and_then(|args| rows.edit(&args)) else {
@@ -4562,7 +4582,7 @@ impl Library {
             .enumerate()
             .map(|(k, rule)| {
                 let words = helios_vault::rules::parse_text(rule)
-                    .map_or_else(|_| rule.clone(), |r| suggest::chips(&r, &t).join(", "));
+                    .map_or_else(|_| rule.clone(), |r| suggest::chip_words(&r, &t));
                 // Its rule is part of the field's filter: the
                 // `library.filter` step sees the whole search.
                 AppChip::new(k.to_string(), words).term(rule.clone())
