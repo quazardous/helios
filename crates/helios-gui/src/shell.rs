@@ -7041,7 +7041,7 @@ impl Shell {
             .zen_label
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(crate::plugins::zen_label(&app));
+            Some(crate::plugins::zen_label(app));
     }
 
     /// A photo the user opened in a gallery (Enter, a double click):
