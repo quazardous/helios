@@ -185,6 +185,8 @@ pub struct ExtractRun<S: Store> {
     known: BTreeSet<String>,
     hits: u64,
     calls: u64,
+    /// Told the run's counts each time they are said on the bus.
+    on_tally: Option<Box<dyn Fn(Tally) + Send>>,
 }
 
 /// The pre-run check of `nodes` over `images` images.
@@ -248,6 +250,7 @@ impl<S: Store> ExtractRun<S> {
             known: BTreeSet::new(),
             hits: 0,
             calls: 0,
+            on_tally: None,
         };
         run.add(images, now);
         Ok(run)
@@ -339,6 +342,13 @@ impl<S: Store> ExtractRun<S> {
         t
     }
 
+    /// Tells `hook` the run's counts each time they are said on the bus
+    /// (each concluded row, and when the run stops or finishes): the
+    /// runner reports them as its job's progress.
+    pub fn on_tally(&mut self, hook: impl Fn(Tally) + Send + 'static) {
+        self.on_tally = Some(Box::new(hook));
+    }
+
     /// The row of `image` at `node`, for a client or a test.
     pub fn status(&self, image: &str, node: &str) -> Option<Status> {
         self.journal.row(&image_item(image), node).map(|r| r.status)
@@ -354,12 +364,16 @@ impl<S: Store> ExtractRun<S> {
     }
 
     fn publish(&self, bus: &Bus, state: &str) {
+        let tally = self.tally();
         bus.publish_value(
             SOURCE,
             None,
             "helios.extract.run",
-            json!({ "run": self.id, "state": state, "tally": self.tally() }),
+            json!({ "run": self.id, "state": state, "tally": tally }),
         );
+        if let Some(hook) = &self.on_tally {
+            hook(tally);
+        }
     }
 
     /// Works the run's rows, one at a time, node after node: each claimed
@@ -804,5 +818,127 @@ mod tests {
             .filter(|p| p["outcome"] == "failed")
             .count();
         assert_eq!(failed, 2);
+    }
+
+    mod runner {
+        use std::sync::mpsc;
+
+        use helios_core::jobs::Jobs;
+        use helios_vault_sqlite::SqliteStore;
+
+        use super::super::super::extract_runner::{ExtractRunner, ExtractState, ExtractSubmit};
+        use super::*;
+
+        fn runner(
+            bus: &Arc<Bus>,
+            vault: Option<crate::workflow::runs::SharedVault>,
+        ) -> Arc<ExtractRunner> {
+            Arc::new(ExtractRunner::new(
+                bus.clone(),
+                Jobs::new(bus.clone()),
+                vault,
+                "node-test",
+            ))
+        }
+
+        fn ask(ai: Ai, source: Arc<dyn ImageSource + Send + Sync>, n: usize) -> ExtractSubmit {
+            ExtractSubmit {
+                title: None,
+                nodes: vec![node("caption", caption("caption", true))],
+                images: images(n),
+                ai: Arc::new(ai),
+                source,
+            }
+        }
+
+        fn job_event(bus: &Bus, kind: &str) -> Vec<Value> {
+            kinds(bus, kind)
+                .into_iter()
+                .filter(|p| p["id"].as_str().is_some_and(|i| i.starts_with("extract-")))
+                .collect()
+        }
+
+        #[test]
+        fn a_submitted_run_is_worked_as_a_job_and_writes_its_document() {
+            let (ai, runtime) = ai("runner-done");
+            let bus = Arc::new(Bus::new());
+            let path = dir("runner-done").join("runs.sqlite");
+            let vault = Arc::new(helios_vault::Vault::new(SqliteStore::open(&path).unwrap()));
+            let runner = runner(&bus, Some(vault.clone()));
+            let answer = runner.submit(ask(ai, Arc::new(Cards), 3)).unwrap();
+            let id = answer["run"].as_str().unwrap().to_string();
+            assert!(id.starts_with("extract-"), "{answer}");
+            assert_eq!(answer["total"], 3);
+            assert_eq!(answer["already"], false);
+            runner.join(&id);
+
+            let status = runner.status(&id).unwrap();
+            assert_eq!(status["state"], json!(ExtractState::Finished));
+            assert_eq!(status["tally"]["done"], 3);
+            assert_eq!(status["tally"]["failed"], 0);
+            assert_eq!(chats(&runtime), 3);
+
+            // The job, which the node mirrors as a promise.
+            let started = job_event(&bus, "helios.job.started");
+            assert_eq!(started.len(), 1);
+            assert_eq!(started[0]["kind"], "extract");
+            assert_eq!(started[0]["total"], 3);
+            let finished = job_event(&bus, "helios.job.finished");
+            assert_eq!(finished.len(), 1, "{:?}", kinds(&bus, "helios.job.failed"));
+            assert_eq!(finished[0]["result"]["tally"]["done"], 3);
+
+            // The run document, which the export runner leaves alone.
+            let doc = vault.workflow_document("runs", &id).unwrap().unwrap();
+            assert!(crate::workflow::extract_runner::is_extract(&doc));
+            assert_eq!(doc["state"], "finished");
+            assert_eq!(doc["images"], 3);
+            assert_eq!(doc["owner"], "node-test");
+            assert_eq!(doc["nodes"][0]["extractor"], "caption");
+            assert!(doc["finished"].is_u64());
+        }
+
+        /// Sends the test card once the test lets each image go.
+        struct Gated(Mutex<mpsc::Receiver<()>>);
+
+        impl ImageSource for Gated {
+            fn image(&self, image: &str) -> Result<SentImage, String> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .recv()
+                    .map_err(|_| "the test is gone".to_string())?;
+                Cards.image(image)
+            }
+        }
+
+        use std::sync::Mutex;
+
+        #[test]
+        fn cancelling_the_job_stops_the_run_and_keeps_what_concluded() {
+            let (ai, _runtime) = ai("runner-cancel");
+            let bus = Arc::new(Bus::new());
+            let runner = runner(&bus, None);
+            let (go, gate) = mpsc::channel();
+            let answer = runner
+                .submit(ask(ai, Arc::new(Gated(Mutex::new(gate))), 3))
+                .unwrap();
+            let id = answer["run"].as_str().unwrap().to_string();
+            // The same run again, while at work: given back.
+            let (again_ai, _) = super::ai("runner-cancel-again");
+            let again = runner.submit(ask(again_ai, Arc::new(Cards), 3)).unwrap();
+            assert_eq!(again["run"], id.as_str());
+            assert_eq!(again["already"], true);
+
+            runner.cancel(&id).unwrap();
+            go.send(()).unwrap();
+            runner.join(&id);
+
+            let status = runner.status(&id).unwrap();
+            assert_eq!(status["state"], json!(ExtractState::Cancelled));
+            assert_eq!(status["tally"]["done"], 1, "{status}");
+            assert_eq!(status["tally"]["failed"], 2, "{status}");
+            assert_eq!(job_event(&bus, "helios.job.cancelled").len(), 1);
+            assert!(job_event(&bus, "helios.job.finished").is_empty());
+        }
     }
 }
