@@ -786,6 +786,8 @@ gui-library-badge-edited = modifiée
 
 gui-library-badge-no-backup = sans sauvegarde
 
+gui-library-culling-strip = Bandeau de tri
+
 gui-library-not-removed = Les photos n’ont pas été retirées de la bibliothèque : { $error }
 gui-library-not-duplicated = Les photos n’ont pas été dupliquées : { $error }
 gui-library-not-rotated = Les photos n’ont pas été tournées : { $error }

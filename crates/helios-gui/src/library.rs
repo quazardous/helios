@@ -5462,6 +5462,27 @@ impl Library {
 
     /// The Filmstrip panel: one row, the grid's selection.
     pub fn filmstrip(&mut self, ui: &mut Ui) {
+        self.strip_ui(ui, "helios.library.strip", None);
+    }
+
+    /// The gallery `id` in one row (a Library view laid out as a
+    /// filmstrip, the culling strip), named `label` for screen readers:
+    /// the strip's response, once there are photos.
+    pub fn strip_as(&mut self, ui: &mut Ui, id: &str, label: &str) -> Option<egui::Response> {
+        let input = ui
+            .ctx()
+            .input(|i| !i.events.is_empty() || i.pointer.any_down());
+        if input {
+            self.focused = id.to_string();
+        }
+        self.activate(id);
+        let out = self.strip_ui(ui, &format!("helios.library.strip.{id}"), Some(label));
+        self.activate_focused();
+        out
+    }
+
+    /// One row of the gallery in force, its rectangle named `name`.
+    fn strip_ui(&mut self, ui: &mut Ui, name: &str, label: Option<&str>) -> Option<egui::Response> {
         self.receive(ui.ctx());
         if self.entries.is_empty() {
             ui.horizontal_wrapped(|ui| {
@@ -5471,7 +5492,7 @@ impl Library {
                     Message::new("gui-library-none", "No images"),
                 ));
             });
-            return;
+            return None;
         }
         let keymap = grid_keys();
         let height = ui.available_height().clamp(64.0, 200.0);
@@ -5500,15 +5521,19 @@ impl Library {
             if let Some(app) = &self.app {
                 strip = strip.app(app);
             }
+            if let Some(label) = label {
+                strip = strip.label(label);
+            }
             strip.show(ui, &mut self.view.state, &items, &thumbs)
         };
         self.after_pass(ui.ctx());
         carry_out(ui.ctx(), &out.signals, self.shown_quick());
-        crate::name_rect(ui.ctx(), "helios.library.strip", out.response.rect);
+        crate::name_rect(ui.ctx(), name, out.response.rect);
         self.presence_hover(ui, "strip");
         self.photo_menu(ui, out.response.rect);
         self.bind_clipboard(ui.ctx(), out.response.rect);
         self.handle(out.signals);
+        Some(out.response)
     }
 
     /// The Compare panel: the comparison's photos side by side (the

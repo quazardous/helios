@@ -1535,6 +1535,8 @@ gui-library-cull-soft = soft
 
 gui-library-cull-unmeasured = not measured
 
+gui-library-culling-strip = Culling filmstrip
+
 gui-library-delete-rejected = Delete Rejected…
 
 gui-library-drop-add = Add { $count } photos

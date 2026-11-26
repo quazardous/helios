@@ -34,6 +34,14 @@
 //! (`library.quick.add`); from anywhere else they are added. As many
 //! can be open as wanted, each with its own cursor, so sorting between
 //! them ("this one I like, this one less") moves no other view's.
+//!
+//! **The culling strip.** A view may be laid out in one row
+//! ([`OPEN_COMMAND`] with `strip: true`, placed under Compare by
+//! default): a filmstrip of its own, linked to the main view when it
+//! opens (its link toggle unlinks it). The arrows move its cursor, and
+//! Space adds the photo under it to the comparison, or takes it out
+//! when it is compared (`compare.add`, `compare.remove`). Its layout is
+//! kept with the rest of its state.
 
 use std::collections::HashMap;
 
@@ -49,7 +57,9 @@ use serde_json::{Value, json};
 use crate::library::{GalleryOptions, Library, RESULTS_PANEL};
 
 /// Opens a new Library view (`place`: `last`, the default, `here` or an
-/// area's name); answers its id (`view`).
+/// area's name); answers its id (`view`). With `strip: true`, the view
+/// is the culling strip: one row, linked to the main view, under
+/// Compare (`bottom`) unless `place` says otherwise.
 pub const OPEN_COMMAND: &str = "library.view.open";
 
 /// Closes a Library view (`view`: its id, `helios.vault#<n>`); the
@@ -100,6 +110,9 @@ pub struct ViewState {
     /// The view it follows (`main`), when linked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// Laid out in one row: the culling strip.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub strip: bool,
 }
 
 impl ViewState {
@@ -137,10 +150,10 @@ pub fn open(app: &AppHandle, place: OpenPlace, owner: &str) -> Result<Option<Str
     Ok(open_views(app).into_iter().find(|v| !before.contains(v)))
 }
 
-/// The place a command's `place` names (`last` when none).
-fn place_arg(args: &Value) -> Result<OpenPlace, String> {
+/// The place a command's `place` names (`fallback` when none).
+fn place_or(args: &Value, fallback: OpenPlace) -> Result<OpenPlace, String> {
     match args.get("place").filter(|p| !p.is_null()) {
-        None => Ok(OpenPlace::Last),
+        None => Ok(fallback),
         Some(p) => {
             let name = p.as_str().ok_or("`place`: not a place's name")?;
             OpenPlace::parse(name)
@@ -149,12 +162,38 @@ fn place_arg(args: &Value) -> Result<OpenPlace, String> {
     }
 }
 
-/// What [`OPEN_COMMAND`] does: `{ "view": <id> }`.
+/// The place a command's `place` names (`last` when none).
+fn place_arg(args: &Value) -> Result<OpenPlace, String> {
+    place_or(args, OpenPlace::Last)
+}
+
+/// What [`OPEN_COMMAND`] does: `{ "view": <id> }` (and `"strip": true`
+/// for the culling strip).
 pub fn open_command(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    match open(app, place_arg(args)?, OPEN_COMMAND)? {
-        Some(view) => Ok(json!({ "view": view })),
-        None => Ok(json!({ "queued": true })),
+    let strip = match args.get("strip") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(v) => return Err(format!("`strip`: {v} is not true or false")),
+    };
+    if !strip {
+        return match open(app, place_arg(args)?, OPEN_COMMAND)? {
+            Some(view) => Ok(json!({ "view": view })),
+            None => Ok(json!({ "queued": true })),
+        };
     }
+    let under = OpenPlace::parse("bottom").unwrap_or(OpenPlace::Last);
+    let Some(view) = open(app, place_or(args, under)?, OPEN_COMMAND)? else {
+        return Err("the strip could not open now: ask again".into());
+    };
+    let id = PanelId::new(&view).map_err(|e| e.to_string())?;
+    let state = ViewState {
+        strip: true,
+        link: Some(LINKED_TO.to_string()),
+        ..ViewState::default()
+    };
+    let state = serde_json::to_value(state).map_err(|e| e.to_string())?;
+    app.set_instance_payload(&id, state)?;
+    Ok(json!({ "view": view, "strip": true }))
 }
 
 /// What [`QUICK_OPEN_COMMAND`] does for the quick collection `quick`
@@ -221,6 +260,8 @@ pub struct Views {
     pending: HashMap<String, Kept>,
     /// The quick collection each quick-collection panel shows.
     quick: HashMap<String, String>,
+    /// The views laid out in one row (culling strips).
+    strips: std::collections::HashSet<String>,
     /// The tab title last given to each quick-collection panel: its
     /// collection's name, given again only when it changes.
     titled: HashMap<String, String>,
@@ -245,8 +286,16 @@ fn unlinked(payload: &Value) -> Value {
 }
 
 impl Views {
-    /// Draws the Library view `id` in `ui`.
-    pub fn draw(&mut self, ui: &mut Ui, app: &AppHandle, id: &PanelId, library: &mut Library) {
+    /// Draws the Library view `id` in `ui`; `compared`: the photos the
+    /// comparison holds, for a culling strip's Space.
+    pub fn draw(
+        &mut self,
+        ui: &mut Ui,
+        app: &AppHandle,
+        id: &PanelId,
+        library: &mut Library,
+        compared: &[String],
+    ) {
         let key = id.as_str();
         // The views closed since: their galleries go.
         let open = open_views(app);
@@ -260,6 +309,7 @@ impl Views {
             self.seen.remove(&k);
             self.pending.remove(&k);
             self.quick.remove(&k);
+            self.strips.remove(&k);
             self.titled.remove(&k);
             self.followed.remove(&k);
             library.forget_gallery(&k);
@@ -296,6 +346,17 @@ impl Views {
                 }
                 library.show_as(ui, &GalleryOptions::QUICK, key);
                 library.quick_drop_target(ui, &quick, rect);
+            }
+            None if self.strips.contains(key) => {
+                let label = crate::i18n::text(
+                    ui.ctx(),
+                    helios_core::Message::new("gui-library-culling-strip", "Culling filmstrip"),
+                );
+                let strip = library.strip_as(ui, key, &label);
+                if strip.is_some_and(|r| r.has_focus()) {
+                    let cursor = library.with_gallery(key, |lib| lib.cursor());
+                    space_to_compare(ui, cursor, compared);
+                }
             }
             None => library.show_as(ui, &GalleryOptions::VIEW, key),
         }
@@ -369,6 +430,7 @@ impl Views {
         library.forget_gallery(key);
         self.pending.remove(key);
         self.quick.remove(key);
+        self.strips.remove(key);
         let state: ViewState = serde_json::from_value(payload.clone()).unwrap_or_else(|e| {
             if !payload.is_null() {
                 log::warn!(target: "helios", "library view {key}: its kept state is not read: {e}");
@@ -395,12 +457,16 @@ impl Views {
         if let Some(quick) = state.quick {
             self.quick.insert(key.to_string(), quick);
         }
+        if state.strip {
+            self.strips.insert(key.to_string());
+        }
     }
 
     /// What the view `key` keeps now.
     fn state_of(&self, key: &str, library: &mut Library) -> ViewState {
         let pending = self.pending.get(key).cloned();
         let quick = self.quick.get(key).cloned();
+        let strip = self.strips.contains(key);
         library.with_gallery(key, |lib| {
             let results = lib.results();
             let kept = pending.unwrap_or_else(|| Kept::of(lib));
@@ -411,6 +477,7 @@ impl Views {
                 results: (results != ResultsDesc::default()).then_some(results),
                 quick,
                 link: None,
+                strip,
             }
         })
     }
@@ -528,6 +595,29 @@ fn link_toggle(ui: &mut Ui, id: &PanelId, linked: bool) {
     }
 }
 
+/// Space in a culling strip (Ctrl+Space toggles the selection, as in
+/// the grid): the photo under its `cursor` added to the comparison, or
+/// taken out when `compared` holds it, through the Compare commands.
+fn space_to_compare(ui: &Ui, cursor: Option<String>, compared: &[String]) {
+    let space = ui.input(|i| i.key_pressed(egui::Key::Space) && !i.modifiers.command);
+    let Some(photo) = cursor.filter(|_| space) else {
+        return;
+    };
+    let command = if compared.contains(&photo) {
+        crate::comparison::REMOVE_COMMAND
+    } else {
+        crate::comparison::ADD_COMMAND
+    };
+    crate::dialogs::request(
+        ui.ctx(),
+        crate::dialogs::Request::Run(
+            command.into(),
+            json!({ "images": [photo] }),
+            helios_shell::commands::Origin::User,
+        ),
+    );
+}
+
 /// What [`LINK_COMMAND`] does: the link kept in the view's payload.
 pub fn link_command(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let view = args
@@ -629,6 +719,7 @@ mod tests {
             results: None,
             quick: None,
             link: Some(LINKED_TO.into()),
+            strip: true,
         };
         let back: ViewState =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
