@@ -157,8 +157,10 @@ pub fn schema(command: &str) -> Option<Json> {
             &["image"],
             &[
                 ("image", string()),
-                ("from", integer()),
-                ("limit", integer()),
+                // A step's index, and a page of one step at least: a
+                // negative number would read as absent (the newest page).
+                ("from", json!({ "type": "integer", "minimum": 0 })),
+                ("limit", json!({ "type": "integer", "minimum": 1 })),
                 ("edits", boolean()),
             ],
         ),

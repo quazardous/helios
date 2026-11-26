@@ -185,3 +185,204 @@ mod tests {
         assert!(p["steps"].as_array().unwrap().is_empty());
     }
 }
+
+/// `photo.history` through the agent socket, as an agent reads it: the
+/// whole shell, a library of its own in memory reached through its node,
+/// the scenario runner paired at start (the harness of
+/// `agent_preset`'s socket tests, frames stepped under a deadline).
+#[cfg(all(test, unix))]
+mod socket {
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::sync::Arc;
+
+    use egui_pop_agent::{AgentGrantsExt as _, AgentSocket, AgentSocketExt as _, PreIssueExt as _};
+    use helios_core::Bus;
+    use helios_vault::edit_steps::StepKind;
+    use helios_vault::{EditSession, MemoryStore};
+    use serde_json::{Value, json};
+
+    use crate::agent_preset::Preset;
+    use crate::agent_preset::tests::socket::{Client, finish};
+    use crate::agent_preset::tests::{TOKEN, env};
+    use crate::shell::{Shell, headless};
+    use egui_pop_agent::TOKEN_ENV;
+
+    /// A photo with three steps saved, the last one undone: its id, and
+    /// the node's library holding it.
+    fn photo() -> (String, helios_node_core::desktop::Library<MemoryStore>) {
+        let library = helios_node_core::desktop::Library::on_store(
+            MemoryStore::default(),
+            Arc::new(Bus::new()),
+        );
+        let vault = library.vault();
+        let dir = std::env::temp_dir().join(format!("helios-photo-history-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.raw");
+        std::fs::write(&path, b"a photo with a history").unwrap();
+        let image = vault.import_file(&path, 1).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let (mut session, _) = EditSession::open(vault, image).unwrap();
+        for (n, label) in [(1, "exposure"), (2, "contrast"), (3, "crop")] {
+            session
+                .save(vault, json!({ "n": n }), label, "user", n)
+                .unwrap()
+                .expect("a step saved");
+        }
+        // Undone: back to the second step's edit, the crop left to redo.
+        session.mark(StepKind::Undo);
+        session
+            .save(vault, json!({ "n": 2 }), "Undo", "user", 4)
+            .unwrap()
+            .expect("the undo saved");
+        (image.hex(), library)
+    }
+
+    #[test]
+    fn an_agent_reads_a_photo_s_steps_a_page_at_a_time_and_a_wrong_page_is_refused() {
+        let (image, library) = photo();
+        let dir =
+            std::env::temp_dir().join(format!("helios-photo-history-sock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.join("helios.sock");
+        let preset = Preset::Scenario { private: false };
+        let mut builder = Shell::builder(crate::helios_panels(), None);
+        builder.app = builder
+            .app
+            .debug_bridge(egui_pop::core::debug::BridgeMode::On)
+            .agent_grants(preset.grants())
+            .app_id("org.example.HeliosPhotoHistory")
+            .agent_socket(AgentSocket::at(&socket))
+            .pre_issued_pairing(preset.pre_issue(env(&[(TOKEN_ENV, TOKEN)])).unwrap());
+        let mut shell = builder.build();
+        let node = Arc::new(helios_inspect::client::Client::in_process(Arc::new(
+            library.service("photo-history-test"),
+        )));
+        shell.set_photo_history(super::reader_of(node));
+        let mut h = headless::harness(shell, egui::vec2(1024.0, 700.0));
+        h.step();
+
+        let s = socket.clone();
+        let id = image.clone();
+        let client = std::thread::spawn(move || {
+            let mut c = Client::connect(&s);
+            (
+                history(&mut c, json!({ "image": id })),
+                history(
+                    &mut c,
+                    json!({ "image": id, "from": 1, "limit": 1, "edits": true }),
+                ),
+                history(&mut c, json!({ "image": id, "limit": 0 })),
+            )
+        });
+        let ((all, page), (one, one_page), (wrong, _)) = finish(&mut h, client);
+
+        // The whole line, oldest first, the crop undone.
+        assert_eq!(all["result"]["ok"], true, "{all}");
+        let steps: Vec<(u64, &str, bool)> = page["steps"]
+            .as_array()
+            .unwrap_or_else(|| panic!("steps: {all}"))
+            .iter()
+            .map(|s| {
+                (
+                    s["index"].as_u64().unwrap(),
+                    s["label"].as_str().unwrap(),
+                    s["undone"] == true,
+                )
+            })
+            .collect();
+        assert_eq!(
+            steps,
+            [
+                (0, "exposure", false),
+                (1, "contrast", false),
+                (2, "crop", true)
+            ],
+            "{page}"
+        );
+        assert_eq!(
+            (
+                &page["image"],
+                &page["from"],
+                &page["total"],
+                &page["undone"],
+                &page["more"]
+            ),
+            (
+                &json!(image),
+                &json!(0),
+                &json!(3),
+                &json!(1),
+                &json!(false)
+            )
+        );
+        assert!(
+            page["steps"][0].get("edit").is_none(),
+            "no edit unless asked: {page}"
+        );
+
+        // One step from the second, with the edit it reached.
+        assert_eq!(one["result"]["ok"], true, "{one}");
+        let page = one_page;
+        assert_eq!(page["steps"].as_array().map(Vec::len), Some(1), "{page}");
+        assert_eq!(page["steps"][0]["label"], "contrast");
+        assert_eq!(page["steps"][0]["edit"], json!({ "n": 2 }));
+        assert_eq!((&page["from"], &page["more"]), (&json!(1), &json!(true)));
+
+        // A page of no step is refused by the arguments' schema.
+        assert_eq!(wrong["result"]["ok"], false, "{wrong}");
+        let refused: Vec<Value> = h
+            .state()
+            .app()
+            .handle()
+            .events_since(0)
+            .into_iter()
+            .filter(|e| e.name == "command.refused" && e.data["by"] == "pop.command.args")
+            .map(|e| e.data)
+            .collect();
+        assert!(
+            refused.iter().any(|r| r["command"] == super::COMMAND),
+            "{refused:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `commands.run` of `photo.history`, then the page its
+    /// `command.done` carries, as `egui-pop-agent-mcp` reads a queued
+    /// command: the run's response, and the page (null when the run was
+    /// refused).
+    fn history(c: &mut Client, args: Value) -> (Value, Value) {
+        // The newest event now: the command's result comes after it.
+        let mark = c.request(
+            "wait",
+            json!({ "event": "helios.test.mark", "deadline_ms": 0 }),
+        );
+        let mut since = mark["result"]["last"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("the journal's last event: {mark}"));
+        let run = c.run(super::COMMAND, args);
+        if run["result"]["ok"] != true {
+            return (run, Value::Null);
+        }
+        loop {
+            let w = c.request(
+                "wait",
+                json!({
+                    "any": [{ "event": "command.done" }, { "event": "command.failed" }],
+                    "since": since,
+                    "deadline_ms": 15_000,
+                }),
+            );
+            let w = &w["result"];
+            assert_eq!(w["met"], true, "`photo.history` queued, never done: {w}");
+            let event = &w["event"];
+            if event["data"]["command"] == super::COMMAND {
+                assert_eq!(event["name"], "command.done", "{event}");
+                return (run, event["data"]["result"].clone());
+            }
+            // Another command's: wait on, after it.
+            since = event["seq"].as_u64().expect("an event's seq");
+        }
+    }
+}
