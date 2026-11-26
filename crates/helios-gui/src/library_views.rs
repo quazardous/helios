@@ -196,7 +196,7 @@ pub fn open_command(app: &AppHandle, args: &Value) -> Result<Value, String> {
 
 /// Where a strip asked while drawing waits for its view to open.
 fn strip_pending_id() -> egui::Id {
-    egui::Id::new("helios.library.strip.pending")
+    egui::Id::unique("helios.library.strip.pending")
 }
 
 /// What a culling strip keeps when it opens: one row, linked to the
