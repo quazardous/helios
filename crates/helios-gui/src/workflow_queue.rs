@@ -66,6 +66,13 @@ pub const SUBMIT: &str = "helios.workflow.submit";
 pub const PAUSE: &str = "helios.workflow.pause";
 /// Claims a paused run's items again: `workflow.resume`.
 pub const RESUME: &str = "helios.workflow.resume";
+/// Reads a node's queue, a page of its items, as the Queue panel shows
+/// it: read-only, for agents allowed to read only.
+pub const LIST: &str = "helios.workflow.list";
+/// The page [`LIST`] gives when `limit` is left out.
+pub const LIST_PAGE: usize = 100;
+/// The largest page [`LIST`] gives.
+pub const LIST_MAX: usize = 1000;
 
 /// A run's rows changed (`{ run, node, items }`).
 pub const ROWS: &str = "helios.workflow.rows";
@@ -802,9 +809,107 @@ const IMAGE: &str = "image:";
 
 /// Declares the queue verbs ([`CANCEL`], [`RETRY`], [`PRIORITIZE`],
 /// [`PAUSE`], [`RESUME`]): each sends its `workflow.*` request to the
-/// connected node named `node`, through its relay.
+/// connected node named `node`, through its relay; and [`LIST`], which
+/// reads the Queue panel's source.
 pub struct Commands {
     pub relays: Relays,
+    /// The Queue panel, whose source [`LIST`] reads.
+    pub panel: std::rc::Rc<std::cell::RefCell<crate::queue::QueuePanel>>,
+}
+
+/// [`LIST`]'s arguments.
+pub fn list_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "node": { "type": ["string", "null"], "description": "The graph node whose queue is read; the selected one when left out" },
+            "from": { "type": "integer", "minimum": 0, "description": "The first item given, by its index in queue order" },
+            "limit": { "type": "integer", "minimum": 1, "maximum": LIST_MAX, "description": "How many items, 100 when left out" },
+        },
+    })
+}
+
+/// An item's state, as [`LIST`] names it.
+fn state_name(state: ItemState) -> &'static str {
+    match state {
+        ItemState::Waiting => "waiting",
+        ItemState::Running => "running",
+        ItemState::Paused => "paused",
+        ItemState::Cancelling => "cancelling",
+        ItemState::Done => "done",
+        ItemState::Failed => "failed",
+        ItemState::Cancelled => "cancelled",
+    }
+}
+
+/// [`LIST`]'s answer: the summary of `node`'s queue and the page of its
+/// items `args` asks (`from`, `limit`). Without `private`, what names a
+/// file (an item's id and title, its error) is redacted: the states,
+/// counts and places stay.
+pub fn list_answer(
+    node: Option<&str>,
+    queue: Option<&NodeQueue>,
+    args: &Value,
+    private: bool,
+) -> Value {
+    let from = args["from"]
+        .as_u64()
+        .map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX));
+    let limit = args["limit"]
+        .as_u64()
+        .map_or(LIST_PAGE, |n| usize::try_from(n).unwrap_or(LIST_MAX))
+        .clamp(1, LIST_MAX);
+    let empty = NodeQueue::default();
+    let queue = queue.unwrap_or(&empty);
+    let hide = |s: &str| {
+        if private {
+            json!(s)
+        } else {
+            json!(crate::privacy::REDACTED)
+        }
+    };
+    let items: Vec<Value> = queue
+        .items
+        .iter()
+        .enumerate()
+        .skip(from)
+        .take(limit)
+        .map(|(index, item)| {
+            json!({
+                "index": index,
+                "id": hide(&item.id),
+                "title": hide(&item.title),
+                "state": state_name(item.state),
+                "since": item.since,
+                "attempts": item.attempts,
+                "place": match &item.place {
+                    Place::Here => "here".to_string(),
+                    Place::Node(n) => n.clone(),
+                },
+                "error": item.error.as_deref().map_or(Value::Null, hide),
+                "held": item.paused.as_ref().map(|p| p.reason.clone()),
+                "actions": item.actions.iter().map(|a| a.name()).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let s = queue.summary();
+    let next = from.saturating_add(items.len());
+    json!({
+        "node": node,
+        "total": queue.items.len(),
+        "from": from,
+        "items": items,
+        "next": (next < queue.items.len()).then_some(next),
+        "summary": {
+            "waiting": s.waiting,
+            "running": s.running,
+            "done": s.done,
+            "failed": s.failed,
+            "cancelled": s.cancelled,
+            "oldest_wait": s.oldest_wait,
+        },
+        "now": queue.now,
+    })
 }
 
 /// The arguments every verb takes: the node, the run.
@@ -943,6 +1048,27 @@ impl Plugin for Commands {
                     .request(&request)
             },
         )?;
+        let panel = self.panel.clone();
+        ctx.command(
+            CommandSpec::new(
+                CommandId::from_static(LIST),
+                "Reads a node's queue as the Queue panel shows it (`node`: the selected one when left out): its summary, then a page of its items in queue order (`from`, `limit`: 100, at most 1000), each with its state, since when, its attempts, where it runs and what may be asked of it; file names only for agents allowed private data",
+                "Queue",
+            )
+            .schema(list_schema())
+            .read_only()
+            .hidden(),
+            move |call| {
+                let node = call.args["node"].as_str();
+                // Asked while the panel draws (its own click), it is busy.
+                let (node, queue) = panel
+                    .try_borrow_mut()
+                    .map_err(|_| "the Queue panel is busy: ask again".to_string())?
+                    .read(call.app, node);
+                let private = egui_pop_agent::grants::reads_private(call.app, call.origin);
+                Ok(list_answer(node.as_deref(), queue.as_ref(), call.args, private))
+            },
+        )?;
         for (id, about, schema) in verbs {
             let relays = self.relays.clone();
             ctx.command(
@@ -983,6 +1109,55 @@ mod tests {
             [Action::Top, Action::Bottom, Action::Cancel]
         );
         assert_eq!(title_of("path:/photos/a.jpg"), "a.jpg");
+    }
+
+    #[test]
+    fn the_list_gives_a_page_and_hides_file_names_without_private_data() {
+        let item = |n: usize, state| QueueItem {
+            id: format!("n1/r1/path:/photos/{n}.jpg"),
+            title: format!("{n}.jpg"),
+            state,
+            since: 10.0,
+            attempts: 1,
+            place: Place::Node("n1".into()),
+            error: (state == ItemState::Failed).then(|| "cannot read /photos".into()),
+            paused: None,
+            actions: actions_of(state),
+        };
+        let queue = NodeQueue {
+            items: vec![
+                item(0, ItemState::Done),
+                item(1, ItemState::Failed),
+                item(2, ItemState::Waiting),
+            ],
+            now: 20.0,
+        };
+        let page = list_answer(
+            Some("export"),
+            Some(&queue),
+            &json!({ "from": 1, "limit": 1 }),
+            true,
+        );
+        assert_eq!(page["total"], 3);
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert_eq!(page["items"][0]["index"], 1);
+        assert_eq!(page["items"][0]["state"], "failed");
+        assert_eq!(page["items"][0]["title"], "1.jpg");
+        assert_eq!(page["items"][0]["actions"], json!(["retry"]));
+        assert_eq!(page["next"], 2);
+        assert_eq!(page["summary"]["failed"], 1);
+        assert!(
+            egui_pop::core::schema::check(&list_schema(), &json!({ "from": 1, "limit": 1 }))
+                .is_ok()
+        );
+        assert!(egui_pop::core::schema::check(&list_schema(), &json!({ "limit": 0 })).is_err());
+
+        let hidden = list_answer(Some("export"), Some(&queue), &json!({}), false);
+        let text = hidden.to_string();
+        assert!(!text.contains("photos"), "{text}");
+        assert_eq!(hidden["items"][2]["state"], "waiting");
+        assert_eq!(hidden["next"], Value::Null);
+        assert_eq!(list_answer(None, None, &json!({}), true)["total"], 0);
     }
 
     #[test]

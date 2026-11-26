@@ -627,6 +627,9 @@ struct Parts {
     /// The menu of commands open, drawn in its window's pass.
     menus: menus::Menus,
     relays: crate::jobs::Relays,
+    /// The Queue panel, read by `helios.workflow.list` before the focus
+    /// holding it is made.
+    queue_panel: Rc<RefCell<crate::queue::QueuePanel>>,
     /// What checks a restored darkroom's image is still there.
     images: crate::contexts::Images,
     /// The workspace's sub-workspaces, for their place.
@@ -964,6 +967,7 @@ impl Shell {
         let status = crate::jobs::Status::default();
         let menus = menus::Menus::default();
         let relays = crate::jobs::Relays::default();
+        let queue_panel: Rc<RefCell<crate::queue::QueuePanel>> = Rc::default();
         // Helios's values: what widgets and agents edit, and what Edit >
         // Undo walks back through the host.
         let values: Arc<Mutex<helios_values::Store>> = Arc::default();
@@ -1130,6 +1134,7 @@ impl Shell {
             // The workflow queues' verbs, sent to the node running each.
             .plugin(crate::workflow_queue::Commands {
                 relays: relays.clone(),
+                panel: queue_panel.clone(),
             })
             .plugin(egui_pop::editors::JobConsolesPlugin)
             .plugin({
@@ -1214,6 +1219,7 @@ impl Shell {
                 status,
                 menus,
                 relays,
+                queue_panel,
                 images,
                 subworkspaces,
                 agent_state,
@@ -1247,6 +1253,7 @@ impl Shell {
             status,
             menus,
             relays,
+            queue_panel,
             images: _,
             subworkspaces,
             agent_state,
@@ -1288,7 +1295,7 @@ impl Shell {
             system.clone(),
         );
         // The main window, the root viewport: always the first focus.
-        let focus = focus::Focus::new(focus::Seed {
+        let mut focus = focus::Focus::new(focus::Seed {
             window: egui::ViewportId::ROOT,
             contents,
             workspace,
@@ -1298,6 +1305,8 @@ impl Shell {
             controls,
             states: states.clone(),
         });
+        // The panel `helios.workflow.list` reads, declared before it.
+        focus.queue_panel = queue_panel;
         let shell_bus = jobs.bus().clone();
         let stack_review = Rc::new(RefCell::new(crate::stack_review::Review::on(
             app.handle().bus(),

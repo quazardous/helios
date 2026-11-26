@@ -460,6 +460,14 @@ node's name). The summary counts them and gives the oldest wait.
   node (`node`) and the run, and sends the node's `workflow.*` request; the
   rows change when the node's facts say so. A promise item's Cancel is
   `job.cancel`, as in the jobs centre.
+- What the panel shows is read by `helios.workflow.list` (2026-11-26):
+  a node's queue (`node`, the selected one when left out), its summary
+  and a page of its items in queue order (`from`, `limit`: 100, at most
+  1000; `next` says where the next page starts). It is read-only, so an
+  agent allowed only to read follows the queue, while the verbs above
+  need write access (egui-pop's grants refuse them with the reason). An
+  item's id, title and error name files: they are given only to an agent
+  allowed private data, `<private>` otherwise.
 - With `interface.panels.queue_when_empty` off (the user's settings layer
   in the vault), the panel closes while the selected node has nothing
   queued, and opens again once it has work. On, the default, it shows

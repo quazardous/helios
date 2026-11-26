@@ -100,7 +100,7 @@ impl Action {
     }
 
     /// Its name in the panel's named places (`helios.queue.0.retry`).
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Action::Cancel => "cancel",
             Action::Retry => "retry",
@@ -292,6 +292,26 @@ impl QueuePanel {
     /// caller reads it again ([`QueuePanel::update`]).
     pub fn source_due(&mut self, app: &AppHandle) -> bool {
         self.source.due(app)
+    }
+
+    /// The queue of `node` (the followed node when `None`) and the node
+    /// read, for `helios.workflow.list`: the followed node's as last read,
+    /// another's read from the source now. The source keeps acting on the
+    /// followed node's items: it is read again after another's.
+    pub fn read(
+        &mut self,
+        app: &AppHandle,
+        node: Option<&str>,
+    ) -> (Option<String>, Option<NodeQueue>) {
+        let node = node.filter(|n| !n.is_empty()).map(str::to_string);
+        if node.is_none() || node == self.node {
+            return (self.node.clone(), self.queue.clone());
+        }
+        let queue = node.as_deref().and_then(|n| self.source.queue(app, n));
+        if let Some(followed) = self.node.clone() {
+            self.queue = self.source.queue(app, &followed);
+        }
+        (node, queue)
     }
 
     /// Asks for `action` on the item `id`, through the source.

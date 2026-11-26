@@ -256,6 +256,11 @@ mod tests {
                 .host(host)
                 .plugins(DefaultPlugins)
                 .plugin(DeclaresHelios(specs.to_vec()))
+                // The Queue panel's verbs and its read (`helios.workflow.*`).
+                .plugin(crate::workflow_queue::Commands {
+                    relays: crate::jobs::Relays::default(),
+                    panel: std::rc::Rc::default(),
+                })
                 .debug_bridge(egui_pop::core::debug::BridgeMode::On)
                 .agent_grants(preset.grants())
                 .app_id("org.example.HeliosAgentPreset")
@@ -466,6 +471,52 @@ mod tests {
             assert_eq!(overwrite["result"]["ok"], true, "{overwrite}");
             assert_eq!(names(&ran), ["library.export", "library.export"]);
             assert_eq!(ran.lock().unwrap()[1].1["clash"], "overwrite");
+        }
+
+        /// The queue's read is for every agent; its verbs for those who
+        /// may write: an unpaired client (read only) reads the queue and is
+        /// refused a cancel with the reason, the paired runner's cancel
+        /// passes the grants (and fails at the node: none is connected).
+        #[test]
+        fn the_queue_is_read_by_any_agent_and_acted_on_by_a_writer() {
+            use crate::workflow_queue::{CANCEL, LIST};
+            let (mut h, socket, _) = app("queue");
+            let s = socket.clone();
+            let client = std::thread::spawn(move || {
+                let mut c = Client::unpaired(&s);
+                (
+                    c.run(LIST, json!({ "limit": 10 })),
+                    c.run(CANCEL, json!({ "node": "n1", "run": "r1" })),
+                )
+            });
+            let (list, cancel) = finish(&mut h, client);
+            assert_eq!(list["result"]["ok"], true, "{list}");
+            assert!(cancel.get("error").is_some(), "{cancel}");
+            assert!(
+                cancel.to_string().contains("pop.agent.grants"),
+                "the reason names the grants: {cancel}"
+            );
+
+            // A wrong page is refused before the read.
+            let s = socket.clone();
+            let client =
+                std::thread::spawn(move || Client::unpaired(&s).run(LIST, json!({ "limit": 0 })));
+            let wrong = finish(&mut h, client);
+            assert_eq!(wrong["result"]["ok"], false, "{wrong}");
+            assert!(
+                refused_by(&h, "pop.command.args")
+                    .iter()
+                    .any(|r| r["command"] == LIST)
+            );
+
+            // The runner may write: the grants let the cancel through.
+            let s = socket.clone();
+            let client = std::thread::spawn(move || {
+                Client::connect(&s).run(CANCEL, json!({ "node": "n1", "run": "r1" }))
+            });
+            let cancel = finish(&mut h, client);
+            assert!(!cancel.to_string().contains("pop.agent.grants"), "{cancel}");
+            assert!(cancel.to_string().contains("not followed"), "{cancel}");
         }
 
         #[test]
