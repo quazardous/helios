@@ -674,6 +674,9 @@ fn a_held_import_offers_resume_which_lets_it_go_on() {
         vault.promise(&held.id).unwrap().unwrap().state,
         State::Done { .. }
     ));
+    // The panel's queue is read after the drawing: the frame that shows
+    // the import done is the next one.
+    h.run();
     assert!(h.query_by_label("Resume Import 3 photos").is_none());
 }
 
