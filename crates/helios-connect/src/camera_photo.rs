@@ -14,7 +14,7 @@
 //!   host shows the drawing.
 //! - **Credited.** The file's author and licence come from Commons with
 //!   the picture, are kept beside it ([`Credit`]), and the host shows them
-//!   ("Photo: <author>, <licence>, Wikimedia Commons").
+//!   (`Photo: <author>, <licence>, Wikimedia Commons`).
 //! - **A switch.** [`CameraPhotos::set_enabled`]: off, nothing is fetched
 //!   nor shown (drawings only).
 
