@@ -1083,6 +1083,8 @@ gui-promise-resume = Reprendre
 gui-promise-paused-quota = En pause : le service demande d’attendre
 
 gui-promise-paused-sign-in = En pause : le service a refusé la connexion
+gui-promise-paused-asked = En pause
+gui-promise-pause = Mettre en pause
 
 gui-promise-so-far = { $done } jusqu’ici
 
@@ -2249,6 +2251,7 @@ gui-queue-state-failed = Échoué
 gui-queue-state-paused = En pause
 
 gui-queue-paused-quota = Le service demande d’attendre : reprise automatique
+gui-queue-paused-asked = En pause : Reprendre pour continuer
 
 gui-queue-paused-quota-until = Le service demande d’attendre : reprise dans { $time }
 

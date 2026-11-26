@@ -790,3 +790,66 @@ fn the_status_bar_reads_a_held_import_as_paused() {
         )
     });
 }
+
+/// The image map's standing promise pauses through its promise: Pause in
+/// its detail pauses its work and the promise says so (the detail, the
+/// status bar's pause mark); Resume lets it go on.
+#[test]
+fn the_maps_promise_pauses_and_resumes_through_the_activity_focus() {
+    let gate = Arc::new(Gate::default());
+    let (client, promises) = node(&gate);
+    let vault = promises.vault().clone();
+    let paused = Arc::new(Mutex::new(Vec::new()));
+    let map = {
+        let paused = paused.clone();
+        Standing::start_pausable(vault.clone(), "map", "Image map", move |p| {
+            paused.lock().unwrap().push(p);
+        })
+    };
+    let map_id = map.id().unwrap().to_string();
+    let mut h = shell_on(client);
+    open(&mut h, &map_id);
+    until(&mut h, "the map's Pause", |h| {
+        h.query_by_label("Pause").is_some()
+    });
+    assert!(h.query_by_label("Resume").is_none());
+    in_detail(&h, "Pause").click();
+    let (v, id) = (vault.clone(), map_id.clone());
+    until(&mut h, "the map's promise paused, asked", move |_| {
+        v.promise(&id)
+            .unwrap()
+            .and_then(|p| p.paused)
+            .is_some_and(|w| w.wait == Wait::Asked)
+    });
+    assert_eq!(*paused.lock().unwrap(), vec![true]);
+    // Its work saying it waits keeps it paused.
+    map.waiting(0, "Paused");
+    until(&mut h, "Resume and the pause mark", |h| {
+        h.query_by_label("Resume").is_some()
+            && shown(h, helios_gui::activity::PAUSED_MARK).is_some()
+    });
+    assert!(h.query_by_label("Pause").is_none());
+    assert!(shown(&h, helios_gui::activity::MARK).is_none());
+    in_detail(&h, "Resume").click();
+    let (v, id) = (vault.clone(), map_id.clone());
+    until(&mut h, "the map's promise going on", move |_| {
+        v.promise(&id)
+            .unwrap()
+            .is_some_and(|p| p.paused.is_none() && !p.state.is_settled())
+    });
+    assert_eq!(*paused.lock().unwrap(), vec![true, false]);
+    until(&mut h, "Pause again, no pause mark", |h| {
+        h.query_by_label("Pause").is_some() && shown(h, helios_gui::activity::PAUSED_MARK).is_none()
+    });
+    // `activity.pause` does the same for an agent; refused for a task
+    // that cannot pause.
+    h.state_mut()
+        .run("activity.pause", json!({ "id": map_id }), Origin::User)
+        .unwrap();
+    let (v, id) = (vault.clone(), map_id.clone());
+    until(&mut h, "paused by the command", move |_| {
+        v.promise(&id).unwrap().is_some_and(|p| p.paused.is_some())
+    });
+    assert!(promises.pause("promise-none").is_err());
+    drop(map);
+}

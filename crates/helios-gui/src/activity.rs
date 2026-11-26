@@ -50,6 +50,10 @@ pub const RESUME: &str = "activity.resume";
 /// `promises.list`): its job stopped in this process, a connected node's
 /// through its relay, else `promises.cancel` on the node.
 pub const CANCEL: &str = "activity.cancel";
+/// The command that pauses a running promise whose work can pause (`id`:
+/// a promise of `promises.list` saying `pausable`, the image map's):
+/// `promises.pause` on the node; [`RESUME`] lets it go on.
+pub const PAUSE: &str = "activity.pause";
 /// The indicator of the running tasks, for tests and agents.
 pub const MARK: &str = "helios.status.activity";
 /// The pause mark of the held tasks.
@@ -78,6 +82,8 @@ pub enum Ask {
     Cancel,
     /// `promises.retry`.
     Retry,
+    /// `promises.pause`.
+    Pause,
 }
 
 /// A line of a job's log, as followed.
@@ -297,6 +303,7 @@ impl Activity {
         let method = match action {
             Ask::Cancel => "promises.cancel",
             Ask::Retry => "promises.retry",
+            Ask::Pause => "promises.pause",
         };
         let (id, kick) = (id.to_string(), self.kick.clone());
         let asked = std::thread::Builder::new()
@@ -325,7 +332,9 @@ impl Activity {
         let (mut paused, mut running): (Vec<Promise>, Vec<Promise>) = shared
             .promises
             .iter()
-            .filter(|p| runs(p))
+            // A standing work a person paused (the image map) shows as
+            // paused; running, it never counts.
+            .filter(|p| runs(p) || held(p))
             .cloned()
             .partition(held);
         running.reverse();
@@ -389,6 +398,7 @@ pub fn paused_message(paused: &Paused) -> Message {
             "gui-promise-paused-sign-in",
             "Paused: the service refused the sign-in",
         ),
+        Wait::Asked => Message::new("gui-promise-paused-asked", "Paused"),
     }
 }
 

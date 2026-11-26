@@ -73,6 +73,10 @@ pub const IMAGES_KEPT: usize = 500;
 /// relay of the desktop following it.
 pub const RELAYED: &str = "relayed";
 
+/// The key of a promise's request saying a person may pause its work
+/// (`promises.pause`).
+pub const PAUSABLE: &str = "pausable";
+
 /// The key of a standing promise's request.
 pub const STANDING: &str = "standing";
 
@@ -508,6 +512,27 @@ pub struct Standing<S: Store> {
 impl<S: Store> Standing<S> {
     /// A standing promise of `kind` for `label`, running from now on.
     pub fn start(vault: Arc<Vault<S>>, kind: &str, label: &str) -> Self {
+        Self::begin(vault, kind, label, None)
+    }
+
+    /// [`Standing::start`] for work a person may pause: `promises.pause`
+    /// runs `pause(true)`, Resume (`promises.retry`) `pause(false)`; its
+    /// request says `pausable`.
+    pub fn start_pausable(
+        vault: Arc<Vault<S>>,
+        kind: &str,
+        label: &str,
+        pause: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Self {
+        Self::begin(vault, kind, label, Some(Arc::new(pause)))
+    }
+
+    fn begin(
+        vault: Arc<Vault<S>>,
+        kind: &str,
+        label: &str,
+        pause: Option<crate::promises::Pauser>,
+    ) -> Self {
         let earlier = Filter {
             kind: Some(kind.into()),
             ..Filter::default()
@@ -521,7 +546,10 @@ impl<S: Store> Standing<S> {
             }
             let _ = vault.forget_promise(&p.id);
         }
-        let request = json!({ STANDING: true, "cancellable": false, "origin": "node" });
+        let mut request = json!({ STANDING: true, "cancellable": false, "origin": "node" });
+        if pause.is_some() {
+            request[PAUSABLE] = json!(true);
+        }
         let id = vault
             .create_promise(kind, &format!("{kind}-{{id}}"), label, request, now())
             .and_then(|p| {
@@ -531,6 +559,9 @@ impl<S: Store> Standing<S> {
             .map(|p| p.id)
             .map_err(|e| warn(&format!("{kind}: no promise: {e}")))
             .ok();
+        if let (Some(id), Some(pause)) = (&id, pause) {
+            crate::promises::pausable(&vault, id, pause);
+        }
         Self {
             vault,
             id,
@@ -610,6 +641,7 @@ impl<S: Store> Standing<S> {
 impl<S: Store> Drop for Standing<S> {
     fn drop(&mut self) {
         if let Some(id) = self.id.take() {
+            crate::promises::not_pausable(&self.vault, &id);
             if let Err(e) = self
                 .vault
                 .settle_promise(&id, State::Done { result: json!({}) }, now())

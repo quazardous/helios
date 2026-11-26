@@ -2319,6 +2319,10 @@ gui-promise-done = Done
 
 gui-promise-failed = Failed: { $reason }
 
+gui-promise-pause = Pause
+
+gui-promise-paused-asked = Paused
+
 gui-promise-paused-quota = Paused: the service asks to wait
 
 gui-promise-paused-sign-in = Paused: the service refused the sign-in
@@ -2362,6 +2366,8 @@ gui-queue-no-selection = Select a node to see its queue
 gui-queue-oldest-wait = Oldest wait: { $time }
 
 gui-queue-on-node = Node { $name }
+
+gui-queue-paused-asked = Paused: Resume goes on
 
 gui-queue-paused-quota = The service asks to wait: going on by itself
 
