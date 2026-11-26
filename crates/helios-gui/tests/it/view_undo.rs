@@ -274,3 +274,38 @@ fn a_sealed_gesture_across_modules_undoes_as_one_step() {
     assert!(in_network(&h, "sigmoid"), "the workspace's step stays");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn writes_to_one_module_amend_the_open_step_until_commit() {
+    // #5258 R7: darktable's model, separate writes to the same module
+    // amend the open step; Commit seals it.
+    let root = temp("amend-commit");
+    let (mut h, _persist) = window(&root);
+    let ev0 = value(&h, EV);
+    let (other, other0) = other_module(&h);
+    let before = steps(&h, HistoryScope::Image);
+    set(&h, EV, 0.5, None);
+    set(&h, EV, 1.0, None);
+    follow(&mut h);
+    assert_eq!(steps(&h, HistoryScope::Image), before + 1, "amended");
+    // Commit seals it: the next exposure is a step of its own.
+    let sealed = h
+        .state_mut()
+        .run("photo.commit", json!(null), Origin::User)
+        .unwrap();
+    assert_eq!(sealed["sealed"], true);
+    set(&h, EV, 1.5, None);
+    // Another module seals in turn.
+    set(&h, &other, other0 + 0.25, None);
+    set(&h, EV, 2.0, None);
+    follow(&mut h);
+    assert_eq!(steps(&h, HistoryScope::Image), before + 4);
+    focus(&mut h, "helios.viewport");
+    for _ in 0..3 {
+        ctrl_z(&mut h);
+    }
+    assert_eq!(value(&h, EV), Some(1.0), "back to the committed step");
+    ctrl_z(&mut h);
+    assert_eq!(value(&h, EV), ev0, "both amended writes undone at once");
+    let _ = std::fs::remove_dir_all(&root);
+}

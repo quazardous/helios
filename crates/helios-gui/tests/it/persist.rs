@@ -261,9 +261,11 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
             .unwrap()
             .is_none()
     );
-    // One write, one step.
+    // One write, one step, committed (#5258 R7: else the drag of the
+    // same module would amend it).
     set(&shell, 1.0, None);
     persist.frame_settled(&mut shell, 10.0);
+    assert!(shell.values().lock().unwrap().seal());
     // A drag: saved while it goes, every FLUSH_SECONDS, then at its end.
     let drag = shell
         .values()
@@ -370,6 +372,53 @@ fn each_edit_step_is_a_version_and_reopening_loads_the_head() {
     undo(&shell);
     assert!((shown(&shell) - 1.0).abs() < 1e-9, "{}", shown(&shell));
     assert_eq!(shell.values().lock().unwrap().undo_steps().len(), 1);
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn writes_amending_one_step_are_marked_and_rebuilt_as_one() {
+    // #5258 R7: three writes to the exposure are one open step; each is
+    // saved, the second and third marked `amend`, and the history
+    // rebuilt after a restart has the one step.
+    use helios_shell::commands::Origin;
+    use helios_vault::edit_steps::{StepKind, rebuild};
+    let dir = scratch("amend");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    // Two writes between two saves: the first save is a step of its own.
+    set(&shell, 0.5, None);
+    set(&shell, 1.0, None);
+    persist.frame_settled(&mut shell, 10.0);
+    set(&shell, 1.2, None);
+    persist.frame_settled(&mut shell, 11.0);
+    set(&shell, 1.4, None);
+    persist.frame_settled(&mut shell, 12.0);
+    let vault = persist.vault().clone();
+    let head = vault.heads(&id(1)).unwrap()[0].id;
+    let line = vault.history(&head).unwrap();
+    let kinds: Vec<_> = line.iter().map(StepKind::of).collect();
+    assert_eq!(kinds, [StepKind::Do, StepKind::Amend, StepKind::Amend]);
+    let rebuilt = rebuild(&line);
+    assert_eq!(rebuilt.undo().len(), 1, "one step");
+    assert_eq!(rebuilt.undo()[0].before, None, "from the unedited image");
+    drop((shell, persist, vault));
+
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    let (graph, exp) = network();
+    persist
+        .open_image(&mut shell, id(1), graph, exp, "output")
+        .unwrap();
+    assert!((shown(&shell) - 1.4).abs() < 1e-9, "{}", shown(&shell));
+    assert_eq!(shell.values().lock().unwrap().undo_steps().len(), 1);
+    shell.values().lock().unwrap().undo(&Origin::User).unwrap();
+    assert!(shell.values().lock().unwrap().undo_steps().is_empty());
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }

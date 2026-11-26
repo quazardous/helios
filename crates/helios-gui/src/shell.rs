@@ -365,6 +365,8 @@ enum Action {
     /// Read a page of a photo's undo history (`photo.history`'s
     /// arguments).
     PhotoHistory(Value),
+    /// Seal the photo's open step (`photo.commit`).
+    PhotoCommit,
     /// Run an import of the history again (`import.history.again`'s
     /// arguments), as whom.
     ImportAgain(Value, Origin),
@@ -1264,6 +1266,10 @@ impl Shell {
         // newest step of another; with the focus nowhere such, to the one
         // focused last (`crate::history`).
         egui_pop::api::history::set_routing(app.handle(), egui_pop::api::history::Routing::Focus);
+        // #5258 R7: changes to the same module amend the photo's open
+        // step until something seals it (darktable's model); Commit
+        // (`photo.commit`) seals it by hand.
+        lock(&values).set_amend(true);
         // The viewport engine and its render cache: one per process, every
         // window's viewport renders on it.
         let engine = crate::viewport::engine();
@@ -4195,6 +4201,14 @@ impl Shell {
             )
             .read_only(),
             Box::new(|a, _| Ok(Action::PhotoHistory(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                "photo.commit",
+                "Commit the photo's open step: the next change, even to the same module, is a new undo step (changes to the same module amend the open step until then)",
+                "Values",
+            ),
+            Box::new(|_, _| Ok(Action::PhotoCommit)),
         );
         add(
             CommandSpec::new(
@@ -8105,6 +8119,10 @@ impl Shell {
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::ImportHistory(args) => return self.import_history_list(&args),
             Action::PhotoHistory(args) => return self.photo_history(&args),
+            Action::PhotoCommit => {
+                let sealed = lock(&self.core.values).seal();
+                return Ok(json!({ "sealed": sealed }));
+            }
             Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
             Action::Activity(args) => {
                 self.open_activity(&args);

@@ -153,6 +153,7 @@ pub fn schema(command: &str) -> Option<Json> {
             ],
         ),
         "import.history.list" => object(&[], &[("limit", integer())]),
+        "photo.commit" => object(&[], &[]),
         "photo.history" => object(
             &["image"],
             &[
