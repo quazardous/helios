@@ -4474,15 +4474,12 @@ impl Library {
     /// Writes `text` in the search: its key terms as chips, its words
     /// typed. The filter follows at the field's next pass.
     fn write_search(&mut self, text: &str) {
-        match suggest::commit(text) {
-            Some((rules, rest)) => {
-                self.view.rules = rules;
-                self.view.search.set_text(rest);
-            }
-            None => {
-                self.view.rules.clear();
-                self.view.search.set_text(text.trim());
-            }
+        if let Some((rules, rest)) = suggest::commit(text) {
+            self.view.rules = rules;
+            self.view.search.set_text(rest);
+        } else {
+            self.view.rules.clear();
+            self.view.search.set_text(text.trim());
         }
     }
 
