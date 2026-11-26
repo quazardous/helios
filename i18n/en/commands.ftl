@@ -118,6 +118,9 @@ command-helios-compare-detach =
 command-helios-compare-dock =
     .title = Dock Compare back in its area
 
+command-helios-compare-float =
+    .title = Float Compare over the interface (`pos`: [x, y])
+
 command-helios-compare-moveTo =
     .title = Move Compare to an area (`area`)
 
@@ -126,6 +129,9 @@ command-helios-decisions-detach =
 
 command-helios-decisions-dock =
     .title = Dock Decisions back in its area
+
+command-helios-decisions-float =
+    .title = Float Decisions over the interface (`pos`: [x, y])
 
 command-helios-decisions-moveTo =
     .title = Move Decisions to an area (`area`)
@@ -136,6 +142,9 @@ command-helios-duplicates-detach =
 command-helios-duplicates-dock =
     .title = Dock Duplicates back in its area
 
+command-helios-duplicates-float =
+    .title = Float Duplicates over the interface (`pos`: [x, y])
+
 command-helios-duplicates-moveTo =
     .title = Move Duplicates to an area (`area`)
 
@@ -144,6 +153,9 @@ command-helios-filmstrip-detach =
 
 command-helios-filmstrip-dock =
     .title = Dock Filmstrip back in its area
+
+command-helios-filmstrip-float =
+    .title = Float Filmstrip over the interface (`pos`: [x, y])
 
 command-helios-filmstrip-moveTo =
     .title = Move Filmstrip to an area (`area`)
@@ -154,6 +166,9 @@ command-helios-filters-detach =
 command-helios-filters-dock =
     .title = Dock Filters back in its area
 
+command-helios-filters-float =
+    .title = Float Filters over the interface (`pos`: [x, y])
+
 command-helios-filters-moveTo =
     .title = Move Filters to an area (`area`)
 
@@ -163,6 +178,9 @@ command-helios-graph-detach =
 command-helios-graph-dock =
     .title = Dock Graph back in its area
 
+command-helios-graph-float =
+    .title = Float Graph over the interface (`pos`: [x, y])
+
 command-helios-graph-moveTo =
     .title = Move Graph to an area (`area`)
 
@@ -171,6 +189,9 @@ command-helios-log-detach =
 
 command-helios-log-dock =
     .title = Dock Log back in its area
+
+command-helios-log-float =
+    .title = Float Log over the interface (`pos`: [x, y])
 
 command-helios-log-moveTo =
     .title = Move Log to an area (`area`)
@@ -193,6 +214,9 @@ command-helios-modules-detach =
 command-helios-modules-dock =
     .title = Dock Modules back in its area
 
+command-helios-modules-float =
+    .title = Float Modules over the interface (`pos`: [x, y])
+
 command-helios-modules-moveTo =
     .title = Move Modules to an area (`area`)
 
@@ -214,6 +238,9 @@ command-helios-params-detach =
 command-helios-params-dock =
     .title = Dock Parameters back in its area
 
+command-helios-params-float =
+    .title = Float Parameters over the interface (`pos`: [x, y])
+
 command-helios-params-moveTo =
     .title = Move Parameters to an area (`area`)
 
@@ -222,6 +249,9 @@ command-helios-queue-detach =
 
 command-helios-queue-dock =
     .title = Dock Queue back in its area
+
+command-helios-queue-float =
+    .title = Float Queue over the interface (`pos`: [x, y])
 
 command-helios-queue-moveTo =
     .title = Move Queue to an area (`area`)
@@ -253,6 +283,9 @@ command-helios-stacks-detach =
 command-helios-stacks-dock =
     .title = Dock Stacks back in its area
 
+command-helios-stacks-float =
+    .title = Float Stacks over the interface (`pos`: [x, y])
+
 command-helios-stacks-moveTo =
     .title = Move Stacks to an area (`area`)
 
@@ -262,6 +295,9 @@ command-helios-vault-detach =
 command-helios-vault-dock =
     .title = Dock Library back in its area
 
+command-helios-vault-float =
+    .title = Float Library over the interface (`pos`: [x, y])
+
 command-helios-vault-moveTo =
     .title = Move Library to an area (`area`)
 
@@ -270,6 +306,9 @@ command-helios-viewport-detach =
 
 command-helios-viewport-dock =
     .title = Dock Image back in its area
+
+command-helios-viewport-float =
+    .title = Float Image over the interface (`pos`: [x, y])
 
 command-helios-viewport-moveTo =
     .title = Move Image to an area (`area`)
@@ -282,6 +321,9 @@ command-helios-workshops-detach =
 
 command-helios-workshops-dock =
     .title = Dock Workshops back in its area
+
+command-helios-workshops-float =
+    .title = Float Workshops over the interface (`pos`: [x, y])
 
 command-helios-workshops-moveTo =
     .title = Move Workshops to an area (`area`)
