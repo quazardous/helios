@@ -531,3 +531,47 @@ fn zen_with_no_panel_to_choose_falls_back_to_the_centre() {
     h.run_steps(3);
     assert!(!app.zen());
 }
+
+/// Opens the View menu (the last node named "View": an open menu is
+/// drawn last).
+fn open_view_menu(h: &mut Harness<'_, Shell>) {
+    h.query_all_by_label("View")
+        .last()
+        .expect("the View menu")
+        .click();
+    h.run_steps(3);
+}
+
+/// Whether a node's name holds `label` (a menu row may add its key).
+fn shows(h: &Harness<'_, Shell>, label: &str) -> bool {
+    h.query_all_by_label_contains(label).next().is_some()
+}
+
+#[test]
+fn the_zen_entry_names_the_focused_compare() {
+    let mut h = harness();
+    open_compare(&mut h);
+    let app = h.state().app().handle().clone();
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(COMPARE));
+    h.run_steps(3);
+    open_view_menu(&mut h);
+    assert!(shows(&h, "Zen: Compare"), "View names zen's panel");
+    assert!(!shows(&h, "Zen: centre"));
+}
+
+#[test]
+fn the_zen_entry_reads_the_centre_with_nothing_to_choose() {
+    let mut h = harness();
+    open_compare(&mut h);
+    // Ask: no surface a double click reaches, and the keyboard in a
+    // control panel: zen shows the centre.
+    set_strategy(&mut h, "ask");
+    let app = h.state().app().handle().clone();
+    app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
+        "helios.modules",
+    ));
+    h.run_steps(3);
+    open_view_menu(&mut h);
+    assert!(shows(&h, "Zen: centre"), "View says zen shows the centre");
+    assert!(!shows(&h, "Zen: Compare"));
+}

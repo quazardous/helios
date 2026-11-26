@@ -756,25 +756,12 @@ const VIEW_LAYOUT_GROUP: &str = "3_layout";
 fn panel_entries(app: &egui_pop::api::app::AppHandle, controls: bool) -> Vec<ListItem> {
     use egui_pop::api::workbench::panel_menu::{CMD_PANEL_CLOSE, CMD_PANEL_OPEN};
     use egui_pop::model::panels::PanelKind;
-    let ctx = app.egui();
-    let layout = app.layout();
     let mut out: Vec<(String, ListItem)> = app
         .panels()
         .into_iter()
         .filter(|s| !s.bare && (s.kind == PanelKind::Control) == controls)
         .map(|s| {
-            let title = if s.id.is_instance() {
-                match layout.instance(&s.id).and_then(|i| i.title.clone()) {
-                    Some(t) => t,
-                    None => format!(
-                        "{} {}",
-                        egui_pop::core::strings::panel_title(&ctx, s.id.kind().as_str(), &s.title),
-                        s.id.instance_number()
-                    ),
-                }
-            } else {
-                egui_pop::core::strings::panel_title(&ctx, s.id.as_str(), &s.title)
-            };
+            let title = panel_label(app, &s);
             let shown = app.panel_visible(&s.id);
             let item = if shown {
                 ListItem::new(&title, CMD_PANEL_CLOSE, json!({ "panel": s.id }))
@@ -791,6 +778,69 @@ fn panel_entries(app: &egui_pop::api::app::AppHandle, controls: bool) -> Vec<Lis
     out.sort_by_key(|(title, _)| title.to_lowercase());
     out.into_iter().map(|(_, item)| item).collect()
 }
+
+/// A panel's title as menus show it, in the interface's language: an
+/// instance not renamed reads its kind's title and its number
+/// ("Compare 2").
+fn panel_label(
+    app: &egui_pop::api::app::AppHandle,
+    spec: &egui_pop::model::panels::PanelSpec,
+) -> String {
+    let ctx = app.egui();
+    if spec.id.is_instance() {
+        match app
+            .layout()
+            .instance(&spec.id)
+            .and_then(|i| i.title.clone())
+        {
+            Some(t) => t,
+            None => format!(
+                "{} {}",
+                egui_pop::core::strings::panel_title(&ctx, spec.id.kind().as_str(), &spec.title),
+                spec.id.instance_number()
+            ),
+        }
+    } else {
+        egui_pop::core::strings::panel_title(&ctx, spec.id.as_str(), &spec.title)
+    }
+}
+
+/// View ▸ Zen's list: one entry, [`zen_label`].
+pub const LIST_ZEN: &str = "helios.zen";
+
+/// "Zen: Compare": zen mode's menu entry, naming the panel it shows, or
+/// would show now ([`AppHandle::zen_target`], the choice `workbench.zen`
+/// itself makes, so the label and the result cannot disagree); "Zen:
+/// centre" when nothing is chosen (no focused view, no panel Helios
+/// names on `pop.zen.panel`): zen then shows the centre.
+///
+/// [`AppHandle::zen_target`]: egui_pop::api::app::AppHandle::zen_target
+pub fn zen_label(app: &egui_pop::api::app::AppHandle) -> String {
+    let ctx = app.egui();
+    let panel = if app.zen() {
+        app.zen_panel()
+    } else {
+        app.zen_target().filter(|p| {
+            app.focused_panel().as_ref() == Some(p)
+                || app.zen_choice().as_deref() == Some(p.as_str())
+        })
+    };
+    let title = panel.and_then(|p| {
+        app.panels()
+            .into_iter()
+            .find(|s| s.id == p)
+            .map(|s| panel_label(app, &s))
+    });
+    match title {
+        Some(t) => egui_pop::core::strings::tr_args(&ctx, &ZEN_ON, &[("panel", &t)]),
+        None => egui_pop::core::strings::tr(&ctx, &ZEN_CENTRE),
+    }
+}
+
+/// Zen's entry naming its panel.
+const ZEN_ON: StrKey = StrKey::new("gui-zen-panel", "Zen: { $panel }");
+/// Zen's entry when it shows the centre whole.
+const ZEN_CENTRE: StrKey = StrKey::new("gui-zen-centre", "Zen: centre");
 
 /// The switcher's commands, kept out of Helios's menus and palette.
 pub const SWITCHER: [CommandId; 2] = [
@@ -816,6 +866,7 @@ impl Plugin for WindowMenu {
         use egui_pop::api::hooks::Hook;
         use egui_pop::api::layout_controls::TOGGLES;
         use egui_pop::api::windows::{CMD_PICK, MENU_WINDOW};
+        use egui_pop::api::workbench::CMD_ZEN;
         use egui_pop::api::workbench::panel_menu::LIST_NEW_INSTANCES;
         use egui_pop::model::ids::HookId;
         use egui_pop::model::menus::Item;
@@ -830,6 +881,24 @@ impl Plugin for WindowMenu {
                 });
             },
         ))?;
+        // View ▸ Zen names the panel zen will show ("Zen: Compare"): the
+        // entry becomes a list of one, labelled each time the menu opens.
+        ctx.hook(Hook::menu(
+            HookId::from_static("helios.viewMenu.zenNamed"),
+            MENU_VIEW,
+            |items| {
+                for item in items.iter_mut() {
+                    if matches!(&item.item, Item::Command { id, .. } if *id == CMD_ZEN) {
+                        item.item = Item::List {
+                            name: LIST_ZEN.to_string(),
+                        };
+                    }
+                }
+            },
+        ))?;
+        ctx.list_provider(LIST_ZEN, |app, _| {
+            vec![ListItem::new(&zen_label(app), CMD_ZEN, json!({})).checked(app.zen())]
+        });
         ctx.menu_item(MenuItem::submenu(
             MENU_WINDOW,
             "0_panels",
