@@ -209,6 +209,10 @@ pub fn aggregate<S: Store>(
     aggregate_with(vault, set, measure, op, by, Knobs::default())
 }
 
+/// A photo's capture time, exposure time and measure, as read for
+/// [`aggregate_with`].
+type Facts = (Option<f64>, Option<f64>, Option<f64>);
+
 /// [`aggregate`] with the settings of `percentile` and `session`.
 pub fn aggregate_with<S: Store>(
     vault: &Vault<S>,
@@ -245,7 +249,7 @@ pub fn aggregate_with<S: Store>(
         row.get(k).and_then(Value::as_f64).filter(|v| v.is_finite())
     };
     // Per photo: its capture time, its exposure time, its measure.
-    let facts: HashMap<ImageId, (Option<f64>, Option<f64>, Option<f64>)> = ids
+    let facts: HashMap<ImageId, Facts> = ids
         .iter()
         .zip(&rows)
         .map(|(id, row)| {
