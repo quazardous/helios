@@ -494,6 +494,18 @@ pub fn specs() -> Vec<CommandSpec> {
                         "description": "how the set is split (default `all`)" }),
                 false,
             ),
+            (
+                "p",
+                json!({ "type": "number", "minimum": 0, "maximum": 100,
+                        "description": "the percentile `percentile` computes (required for it)" }),
+                false,
+            ),
+            (
+                "gap_minutes",
+                json!({ "type": "number", "minimum": 0,
+                        "description": "`session`: a new session when two consecutive shots are further apart (default 30)" }),
+                false,
+            ),
         ]))
         .read_only(),
         library(
@@ -1197,7 +1209,11 @@ fn aggregate<S: Store>(vault: &Vault<S>, params: &Value) -> Result<Value, String
         None => GroupBy::All,
         Some(b) => GroupBy::parse(b).ok_or_else(|| format!("unknown grouping `{b}`"))?,
     };
-    let answer = agg::aggregate(vault, &set, params["measure"].as_str(), op, by)?;
+    let knobs = agg::Knobs {
+        percentile: params["p"].as_f64(),
+        gap_minutes: params["gap_minutes"].as_f64(),
+    };
+    let answer = agg::aggregate_with(vault, &set, params["measure"].as_str(), op, by, knobs)?;
     Ok(to_json(&answer))
 }
 
