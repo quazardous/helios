@@ -503,7 +503,7 @@ pub fn specs() -> Vec<CommandSpec> {
             (
                 "gap_minutes",
                 json!({ "type": "number", "minimum": 0,
-                        "description": "`session`: a new session when two consecutive shots are further apart (default 30)" }),
+                        "description": "`session`: a new session when a shot starts further than this after the previous shot ended (its capture time plus its exposure time; default 30)" }),
                 false,
             ),
         ]))

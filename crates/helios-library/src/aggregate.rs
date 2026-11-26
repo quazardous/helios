@@ -13,14 +13,15 @@
 //! (`best`, the rule of [`crate::stacks::best_of`]). Nothing is rendered
 //! or measured here: a photo without the field is skipped and listed as
 //! `missing`. Groups may also be shooting sessions (`session`): a new one
-//! starts when the time between two consecutive shots exceeds a gap.
+//! starts when the time from the end of a shot (its capture time plus its
+//! exposure time, when stored) to the next one exceeds a gap.
 //!
 //! A diagram's aggregate node will read the same values later; the node
 //! answers them now as the read-only command `library.aggregate`.
 
 use std::collections::{BTreeMap, HashMap};
 
-use helios_vault::capture::CAPTURED;
+use helios_vault::capture::{CAPTURED, SHUTTER};
 use helios_vault::fields::{self, FieldKind, Query};
 use helios_vault::rules::parse_text;
 use helios_vault::{ImageId, Store, Vault};
@@ -97,9 +98,11 @@ pub enum GroupBy {
     /// Bursts and brackets as `stacks.suggest`'s rules find them (its
     /// default thresholds), each other photo alone.
     Burst,
-    /// Shooting sessions: a new one when the time between two consecutive
-    /// capture times exceeds [`Knobs::gap_minutes`]; a photo without a
-    /// capture time alone.
+    /// Shooting sessions: a new one when the time from the previous
+    /// shot's end (its capture time plus its exposure time, when known)
+    /// to the next capture exceeds [`Knobs::gap_minutes`], so a long
+    /// exposure does not split its session; a photo without a capture
+    /// time alone.
     Session,
 }
 
@@ -206,6 +209,10 @@ pub fn aggregate<S: Store>(
     aggregate_with(vault, set, measure, op, by, Knobs::default())
 }
 
+/// A photo's capture time, exposure time and measure, as read for
+/// [`aggregate_with`].
+type Facts = (Option<f64>, Option<f64>, Option<f64>);
+
 /// [`aggregate`] with the settings of `percentile` and `session`.
 pub fn aggregate_with<S: Store>(
     vault: &Vault<S>,
@@ -236,18 +243,23 @@ pub fn aggregate_with<S: Store>(
         (None, _) => return Err(format!("`{op:?}` needs a measure").to_lowercase()),
     };
     let ids = photos(vault, set)?;
-    let names: Vec<&str> = std::iter::once(CAPTURED).chain(measure).collect();
+    let names: Vec<&str> = [CAPTURED, SHUTTER].into_iter().chain(measure).collect();
     let rows = vault.fields_of(&ids, &names)?;
     let number = |row: &BTreeMap<String, Value>, k: &str| {
         row.get(k).and_then(Value::as_f64).filter(|v| v.is_finite())
     };
-    let facts: HashMap<ImageId, (Option<f64>, Option<f64>)> = ids
+    // Per photo: its capture time, its exposure time, its measure.
+    let facts: HashMap<ImageId, Facts> = ids
         .iter()
         .zip(&rows)
         .map(|(id, row)| {
             (
                 *id,
-                (number(row, CAPTURED), measure.and_then(|m| number(row, m))),
+                (
+                    number(row, CAPTURED),
+                    number(row, SHUTTER).filter(|s| *s >= 0.0),
+                    measure.and_then(|m| number(row, m)),
+                ),
             )
         })
         .collect();
@@ -269,7 +281,11 @@ pub fn aggregate_with<S: Store>(
         }
     }
     let groups = match gap_minutes {
-        Some(gap) => sessions(&ordered, |id| facts[id].0, gap * 60.0),
+        Some(gap) => sessions(
+            &ordered,
+            |id| facts[id].0.map(|t| (t, t + facts[id].1.unwrap_or(0.0))),
+            gap * 60.0,
+        ),
         None => split(vault, &ordered, by, &signals)?,
     };
     let groups = groups
@@ -277,7 +293,7 @@ pub fn aggregate_with<S: Store>(
         .map(|(key, members)| {
             let values: Vec<(ImageId, f64)> = members
                 .iter()
-                .filter_map(|id| facts[id].1.map(|v| (*id, v)))
+                .filter_map(|id| facts[id].2.map(|v| (*id, v)))
                 .collect();
             value_of(key, &members, &values, measure, (op, p), &signals)
         })
@@ -335,18 +351,20 @@ fn split<S: Store>(
 }
 
 /// Splits `ordered` (capture order) into sessions: a new one when the
-/// time to the previous shot exceeds `gap` seconds. Keys `session-<n>`;
-/// a photo without a capture time is alone, keyed by its id.
+/// time from the previous shots' latest end to this shot's start exceeds
+/// `gap` seconds. `time_of` gives a shot's start and end (the start plus
+/// its exposure time). Keys `session-<n>`; a photo without a capture time
+/// is alone, keyed by its id.
 fn sessions(
     ordered: &[ImageId],
-    time_of: impl Fn(&ImageId) -> Option<f64>,
+    time_of: impl Fn(&ImageId) -> Option<(f64, f64)>,
     gap: f64,
 ) -> Vec<(String, Vec<ImageId>)> {
     let mut groups: Vec<(String, Vec<ImageId>)> = Vec::new();
     let mut last: Option<f64> = None;
     let mut n = 0;
     for id in ordered {
-        let Some(t) = time_of(id) else {
+        let Some((t, end)) = time_of(id) else {
             groups.push((id.hex(), vec![*id]));
             continue;
         };
@@ -357,7 +375,7 @@ fn sessions(
                 groups.push((format!("session-{n}"), vec![*id]));
             }
         }
-        last = Some(t);
+        last = Some(last.map_or(end, |prev: f64| prev.max(end)));
     }
     groups
 }
@@ -839,13 +857,44 @@ mod tests {
     }
 
     #[test]
+    fn sessions_measure_the_gap_from_the_previous_shots_end() {
+        let f = fixture("exposure-end");
+        let min = 60.0;
+        // A 40-minute exposure, then a shot 50 minutes after its start:
+        // 10 minutes after its end, within a 30-minute gap.
+        let a = photo(&f, 1, 0.0, Some(1.0));
+        let b = photo(&f, 2, 50.0 * min, Some(3.0));
+        let c = photo(&f, 3, 200.0 * min, Some(5.0));
+        let long = helios_vault::capture::Capture {
+            captured: Some(0.0),
+            shutter: Some(40.0 * min),
+            ..Default::default()
+        };
+        f.vault.set_captures(&[(a, long)], None).unwrap();
+        let set = Set::Images(vec![a, b, c]);
+        let s = aggregate_with(
+            &f.vault,
+            &set,
+            Some("focus"),
+            Op::Mean,
+            GroupBy::Session,
+            knobs(None, None),
+        )
+        .unwrap();
+        assert_eq!(s.groups.len(), 2, "{:?}", s.groups);
+        assert_eq!(s.groups[0].members, [a.hex(), b.hex()]);
+        assert_eq!(s.groups[0].value, Some(2.0));
+        assert_eq!(s.groups[1].members, [c.hex()]);
+    }
+
+    #[test]
     fn sessions_leave_a_photo_without_a_capture_time_alone() {
         let order = [
             ImageId::from_hex(&"1".repeat(64)),
             ImageId::from_hex(&"2".repeat(64)),
         ];
         let order: Vec<ImageId> = order.into_iter().map(Result::unwrap).collect();
-        let groups = sessions(&order, |id| (*id == order[0]).then_some(0.0), 60.0);
+        let groups = sessions(&order, |id| (*id == order[0]).then_some((0.0, 0.0)), 60.0);
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].0, "session-1");
         assert_eq!(groups[1].0, order[1].hex());
