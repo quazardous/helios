@@ -50,6 +50,30 @@ fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Whether `text` holds `pattern` as a path of its own: not the tail of a
+/// longer name (`PanelInstance::new(` is egui-pop's, not wgpu's).
+fn calls(text: &str, pattern: &str) -> bool {
+    text.match_indices(pattern).any(|(at, _)| {
+        !text[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+    })
+}
+
+#[test]
+fn the_guard_matches_whole_names_only() {
+    let new = ["Instance", "::new("].concat();
+    for before in ["", "wgpu::", " ", "(", "&"] {
+        let text = format!("let i = {before}{new}desc);");
+        assert!(calls(&text, &new), "{text}");
+    }
+    for before in ["Panel", "my_", "X"] {
+        let text = format!("let i = {before}{new}x);");
+        assert!(!calls(&text, &new), "{text}");
+    }
+}
+
 #[test]
 fn no_other_source_creates_an_instance_or_opens_a_device() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -82,7 +106,7 @@ fn no_other_source_creates_an_instance_or_opens_a_device() {
         let shown = file.strip_prefix(&root).unwrap_or(file);
         let shown = shown.to_string_lossy().replace('\\', "/");
         for (pattern, allowed) in &rules {
-            if text.contains(pattern.as_str()) && shown != *allowed {
+            if calls(&text, pattern) && shown != *allowed {
                 found.push(format!("{shown}: {pattern}"));
             }
         }
