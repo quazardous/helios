@@ -3153,13 +3153,21 @@ fn next_step(
             crate::edit_marks::Marks::read(store).edited(),
             // An undo or a redo (a jump ends with one): marked so in the
             // version, for the history rebuilt after a restart.
-            store.last_replayed().then(|| {
-                if store.last_committed().starts_with("undo ") {
+            if store.last_replayed() {
+                Some(if store.last_committed().starts_with("undo ") {
                     StepKind::Undo
                 } else {
                     StepKind::Redo
-                }
-            }),
+                })
+            } else {
+                // A change amending the open step (#5258 R7), saved
+                // once already: marked so, the rebuilt history folds it
+                // into that step. Not saved yet, it is a step of its own.
+                store
+                    .amended_since()
+                    .is_some_and(|since| since <= e.committed)
+                    .then_some(StepKind::Amend)
+            },
         )
     };
     let step = if committed == e.committed {

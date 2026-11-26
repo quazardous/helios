@@ -362,12 +362,20 @@ that does not focus a view).
 
 ### Amend and seal
 
-What is built today: a gesture (a drag) or a group (held arrows, the
-wheel, a preset, the masks panel's edits) is one step whatever it
-touches, sealed when it ends; a write outside one is a step of its own.
-The darktable rule, where successive writes to the same module amend
-the open step until something seals it, and an explicit Commit
-(`helios.history.commit`), is slice R7.
+A gesture (a drag) or a group (held arrows, the wheel, a preset, the
+masks panel's edits) is one step whatever it touches. Since R7
+(2026-11-26), on the photo's line, a step that changes one module (its
+values or its bypass) stays open: the next step of the same module and
+the same origin amends it instead of making one, so dragging the
+exposure three times is one Ctrl+Z (`Store::set_amend`, on in the
+desktop). The open step is sealed by a step of another module, a step
+of several modules (sealed at once), a step on another line (the
+workspace's), an undo, a redo or a jump, the photo leaving, and the
+Commit command (`photo.commit`, `Store::seal`). An agent's steps are
+its request's group and never amend a step. Each amend is committed and
+saved; a version saved for one is marked `amend` (`StepKind::Amend`),
+and the history rebuilt after a restart folds it into the step before.
+Sealing when the focus leaves the photo's views is still to do.
 
 ### Out of scope
 
@@ -375,8 +383,8 @@ the open step until something seals it, and an explicit Commit
   history: the `workspace` line, or a workshop's local scope where it
   has one. A photo's history never holds a diagram edit.
 - The library's history stays its own line, never a photo's.
-- Amend and Commit (R7), compare any step with the live edit (R8,
-  credited to darktable PR #23136).
+- Compare any step with the live edit (R8, credited to darktable PR
+  #23136).
 
 ### Reading a photo's history (R6)
 
@@ -400,7 +408,7 @@ until it ends and is saved.
 | R4 | Per-photo stacks kept across switches | done (2026-11-25), session only; the RAM budget in `helios-cache` to do |
 | R5 | Step markers in the versions; undo rebuilt after a restart | done (2026-11-25): markers and the rebuild (`helios_vault::edit_steps`), the rebuilt line loaded into the store on open (#5522) |
 | R6 | `helios.photo.history`, read-only | done (2026-11-26): the read-only command `photo.history` (`helios_gui::shell::photo_history`), any photo's steps from its versions, paged |
-| R7 | Amend and seal (B), Commit | to do |
+| R7 | Amend and seal (B), Commit | done (2026-11-26): same-module steps amend the open step on the photo's line, `photo.commit` seals it, `amend` versions folded in the rebuild; sealing on the focus leaving to do |
 | R8 | Compare any step with the live edit | to do |
 
 ## The plugins' scope

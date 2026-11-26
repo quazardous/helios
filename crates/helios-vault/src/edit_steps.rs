@@ -26,6 +26,9 @@ pub const STEP: &str = "step";
 pub enum StepKind {
     /// A new step: a write, a gesture's end, a group, a jump.
     Do,
+    /// A change to the same module as the step before, still open: it
+    /// amends that step rather than making one (darktable's model).
+    Amend,
     /// One or more steps undone.
     Undo,
     /// One or more steps redone.
@@ -40,6 +43,7 @@ impl StepKind {
     pub fn word(self) -> &'static str {
         match self {
             StepKind::Do => "do",
+            StepKind::Amend => "amend",
             StepKind::Undo => "undo",
             StepKind::Redo => "redo",
             StepKind::Progress => "progress",
@@ -50,6 +54,7 @@ impl StepKind {
     fn parse(word: &str) -> Option<Self> {
         Some(match word {
             "do" => StepKind::Do,
+            "amend" => StepKind::Amend,
             "undo" => StepKind::Undo,
             "redo" => StepKind::Redo,
             "progress" => StepKind::Progress,
@@ -153,6 +158,9 @@ impl Rebuilt<'_> {
 /// replay that reaches no known state (a jump to a replaced line, an
 /// undo of the workspace that moved the image's values) reads as a `do`:
 /// undone, it goes back to where it started. `progress` and `cancel` versions are no step.
+/// An `amend` replaces the state at the cursor: the step it amends now
+/// reaches its edit, from where that step started (a read with no step
+/// below, as after an undo to the unedited image, reads as a `do`).
 pub fn rebuild(line: &[Version]) -> Rebuilt<'_> {
     // The states, `None` the unedited image first.
     fn edit_of(s: Option<&Version>) -> Option<&Value> {
@@ -164,7 +172,13 @@ pub fn rebuild(line: &[Version]) -> Rebuilt<'_> {
         let kind = StepKind::of(version);
         let replay = match kind {
             StepKind::Progress | StepKind::Cancel => continue,
-            StepKind::Do => None,
+            StepKind::Amend if at > 0 => {
+                states.truncate(at + 1);
+                states[at] = Some(version);
+                continue;
+            }
+            // An amend with no step open is a step of its own, as a do.
+            StepKind::Amend | StepKind::Do => None,
             StepKind::Undo => {
                 // An undo walks the steps below only. From the first
                 // step, none with this edit: back to the unedited image,
@@ -337,6 +351,36 @@ mod tests {
         assert_eq!(evs(r.undo()), [1.0, 2.0, 9.0]);
         let l = line(&[(1.0, Some(Do)), (2.0, Some(Do)), (9.0, Some(Undo))]);
         assert_eq!(evs(rebuild(&l).undo()), [1.0, 2.0, 9.0]);
+    }
+
+    #[test]
+    fn an_amend_is_part_of_the_step_before() {
+        let l = line(&[
+            (1.0, Some(Do)),
+            (2.0, Some(Do)),
+            (2.5, Some(Amend)),
+            (3.0, Some(Amend)),
+        ]);
+        let r = rebuild(&l);
+        assert_eq!(evs(r.undo()), [1.0, 3.0]);
+        assert_eq!(
+            r.steps[1].before,
+            Some(&json!({ "ev": 1.0 })),
+            "the amended step starts where it started"
+        );
+        // After an undo, an amend drops the redo as a new step would.
+        let l = line(&[
+            (1.0, Some(Do)),
+            (2.0, Some(Do)),
+            (1.0, Some(Undo)),
+            (1.5, Some(Amend)),
+        ]);
+        let r = rebuild(&l);
+        assert_eq!(evs(r.undo()), [1.5]);
+        assert!(r.redo().is_empty());
+        // With no step below, it reads as one.
+        let l = line(&[(1.0, Some(Amend))]);
+        assert_eq!(evs(rebuild(&l).undo()), [1.0]);
     }
 
     #[test]

@@ -751,6 +751,9 @@ command-param-undo =
 command-param-undoAgent =
     .title = Undo an agent's last changes alone (`agent`, `group`)
 
+command-photo-commit =
+    .title = Commit the photo's open step: the next change, even to the same module, is a new undo step (changes to the same module amend the open step until then)
+
 command-photo-history =
     .title = Read a photo's undo history (`image`: its id), open or not, from its saved versions: its steps oldest first, those undone marked; the newest page unless `from` (a step's index) is given, `limit` steps (50, at most 500); the edit each step reached with `edits: true`
 

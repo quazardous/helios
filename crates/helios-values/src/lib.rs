@@ -53,6 +53,8 @@
 //!   is refused, whoever writes; an undo or a redo still puts back what
 //!   its step changed.
 
+#[cfg(test)]
+mod amend;
 mod commands;
 mod graph;
 mod history_scope;
@@ -652,6 +654,14 @@ pub struct Step {
 }
 
 impl Step {
+    /// The one module (node) it changed, its values or its bypass; none
+    /// when it changed several, or a value of no module.
+    pub fn module(&self) -> Option<&str> {
+        let mut nodes = self.changes.iter().map(|(p, _, _)| node_of(p));
+        let first = nodes.next()??;
+        nodes.all(|n| n == Some(first)).then_some(first)
+    }
+
     /// Whether it changed `path`.
     pub fn touches(&self, path: &str) -> bool {
         self.changes.iter().any(|(p, _, _)| p == path)
@@ -732,6 +742,16 @@ pub struct Store {
     hook: Option<ChangeHook>,
     /// The change being made, heard by the hook when it is whole.
     changing: Option<Changed>,
+    /// Whether a step on the image's line amends the open step of the
+    /// same module ([`Store::set_amend`]).
+    amend: bool,
+    /// The image's step still open to amends, by id: the last one, made
+    /// by one module and not sealed since ([`Store::seal`]).
+    open_step: Option<u64>,
+    /// The last committed step amended the open one.
+    amended: bool,
+    /// The committed count when the open step was made.
+    open_since: u64,
 }
 
 fn clamp(v: f64, range: Option<(f64, f64)>, soft: bool) -> (f64, Clamped) {
@@ -1114,15 +1134,25 @@ impl Store {
         // The step goes on its own scope's line (the workspace's for a
         // graph edit, the image's for the rest).
         let scope = step.history_scope();
-        self.in_history(scope, |s| s.push_on_line(step));
+        let amends = self.amend && scope == HistoryScope::Image;
+        self.in_history(scope, |s| s.push_on_line(step, amends));
     }
 
-    /// Pushes `step` on the line held now.
-    fn push_on_line(&mut self, mut step: Step) {
+    /// Pushes `step` on the line held now. With `amends` (the image's
+    /// line, amends on), a step of one module amends the open step when
+    /// it is that module's and the same origin's, and stays open itself;
+    /// a step of several modules, or of a group, is sealed at once.
+    fn push_on_line(&mut self, mut step: Step, amends: bool) {
+        let module = if amends && step.group.is_none() {
+            step.module().map(String::from)
+        } else {
+            None
+        };
+        let open = self.open_step;
         self.commit(step.label.clone(), &step.origin);
         self.drop_redo();
-        // A group's steps that follow each other are one step.
         match self.undo.last_mut() {
+            // A group's steps that follow each other are one step.
             Some(last)
                 if step.group.is_some()
                     && last.group == step.group
@@ -1130,12 +1160,65 @@ impl Store {
             {
                 last.changes.append(&mut step.changes);
             }
+            // The same module's change amends the open step.
+            Some(last)
+                if module.is_some()
+                    && open == Some(last.id)
+                    && last.origin == step.origin
+                    && last.module() == module.as_deref() =>
+            {
+                last.changes.append(&mut step.changes);
+                self.amended = true;
+                self.open_step = open;
+            }
             _ => {
                 self.next_step += 1;
                 step.id = self.next_step;
+                if module.is_some() {
+                    self.open_step = Some(step.id);
+                    self.open_since = self.committed;
+                }
                 self.undo.push(step);
             }
         }
+    }
+
+    /// Turns amends on or off (off by default): with them on, the
+    /// image's steps follow darktable's rule, where successive changes to
+    /// the same module amend the open step until it is sealed
+    /// ([`Store::seal`]). Another module, a step of several modules, an
+    /// undo, a redo or a jump, the image leaving and any step of another
+    /// line seal it.
+    pub fn set_amend(&mut self, on: bool) {
+        self.amend = on;
+        self.open_step = None;
+    }
+
+    /// Seals the open step (an explicit Commit, the focus leaving the
+    /// photo): the next change, even to the same module, is a step of its
+    /// own. Returns whether a step was open.
+    pub fn seal(&mut self) -> bool {
+        self.open_step.take().is_some()
+    }
+
+    /// The step open to amends, by id, if one is.
+    pub fn open_step(&self) -> Option<u64> {
+        self.open_step
+    }
+
+    /// Whether the last committed step amended the open step rather than
+    /// making one of its own: a host that saves a version per step marks
+    /// it so.
+    pub fn last_amended(&self) -> bool {
+        self.amended
+    }
+
+    /// When the last committed step amended the open one: the committed
+    /// count at which that step was made. A host that saved the edit at
+    /// that count or later marks its next version an amend; one that did
+    /// not saves a step of its own.
+    pub fn amended_since(&self) -> Option<u64> {
+        self.amended.then_some(self.open_since)
     }
 
     /// Opens `origin`'s request (an agent's tool call): until
@@ -1186,6 +1269,9 @@ impl Store {
     }
 
     fn commit(&mut self, label: String, origin: &Origin) {
+        // Any step seals the open one; an amend opens it again.
+        self.open_step = None;
+        self.amended = false;
         self.committed += 1;
         self.history_rev += 1;
         self.history_moved(Some(origin));
@@ -1210,6 +1296,7 @@ impl Store {
     /// image opening keeps those: [`Store::leave_image`]). Values,
     /// gestures and the committed count stay.
     pub fn clear_history(&mut self) {
+        self.open_step = None;
         self.undo.clear();
         self.redo.clear();
         self.replaced.clear();

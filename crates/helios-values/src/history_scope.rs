@@ -197,6 +197,7 @@ impl Store {
     /// stays whole. Values, gestures and
     /// the committed count stay; the preview ends.
     pub fn leave_image(&mut self) {
+        self.open_step = None;
         self.in_history(HistoryScope::Image, |s| {
             s.undo.clear();
             s.redo.clear();

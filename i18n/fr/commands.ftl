@@ -394,6 +394,9 @@ command-param-undo =
 command-param-undoAgent =
     .title = Annuler seules les dernières modifications d’un agent (`agent`, `group`)
 
+command-photo-commit =
+    .title = Valider l’étape ouverte de la photo : la modification suivante, même du même module, est une nouvelle étape d’annulation (jusque-là, les modifications d’un même module complètent l’étape ouverte)
+
 command-photo-history =
     .title = Lire l’historique d’annulation d’une photo (`image` : son id), ouverte ou non, depuis ses versions enregistrées : ses étapes de la plus ancienne à la plus récente, celles annulées marquées ; la page la plus récente sauf si `from` (l’index d’une étape) est donné, `limit` étapes (50, au plus 500) ; la retouche atteinte par chaque étape avec `edits: true`
 
