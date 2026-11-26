@@ -424,6 +424,9 @@ command-library-files-pair =
 command-library-files-unpair =
     .title = Unpair Files: each file of the photos (`images`: ids, else the selection) a photo of its own again, with a copy of the photo's marks and its own versions; Ctrl+Z pairs them again
 
+command-library-filter-advanced =
+    .title = Open or close the search's Advanced rows under the Library search (`open`: true or false, else the other way), the first row focused; answers `open` and the search's `query`. Set the rules with library.filter.apply: the rows follow
+
 command-library-filter-apply =
     .title = Apply a filter to the library (`query`, typed as in the search field, or `filter` as listed); it becomes the first recent filter
 

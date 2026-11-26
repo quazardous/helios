@@ -178,6 +178,16 @@ pub fn defaults() -> Vec<Binding> {
         crate::recent_filters::SWITCH_COMMAND,
         &format!("{} && !textInputFocus", behind_no_picker(&library)),
     );
+    // The search's Advanced rows (`docs/design/library-search.md`,
+    // section 5): also from the search field, where the keys mean nothing.
+    for (scope, when) in [(MAIN, &library), (LIBRARY_WINDOW, &in_library_window)] {
+        bind_in(
+            scope,
+            "Ctrl+Shift+F",
+            crate::library::ADVANCED_COMMAND,
+            &behind_no_picker(when),
+        );
+    }
     // Select none and invert, as darktable's lighttable (Ctrl+A is the
     // grid's own). Not while a text field is typed in.
     for (k, command) in [

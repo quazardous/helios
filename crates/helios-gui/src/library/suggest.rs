@@ -174,6 +174,55 @@ pub fn chips(rule: &Rule, t: &dyn Fn(Message) -> String) -> Vec<String> {
     }
 }
 
+/// Whether a chip can say `rule` in a line of words: a condition, a
+/// `none` of one condition (`not flag is reject`), an `any` of conditions
+/// on one key (`label is red or label is blue`). A nested group, an `any`
+/// across keys or a `none` of several is drawn as one "rules (n)" chip
+/// ([`chip_words`]; `docs/design/library-search.md`, section 3).
+pub fn flat(rule: &Rule) -> bool {
+    match rule {
+        Rule::Condition(_) => true,
+        Rule::Group {
+            mode: Match::None,
+            rules,
+        } => matches!(&rules[..], [Rule::Condition(_)]),
+        Rule::Group {
+            mode: Match::Any,
+            rules,
+        } => {
+            let mut fields = rules.iter().map(|r| match r {
+                Rule::Condition(c) => Some(c.field.name),
+                Rule::Group { .. } => None,
+            });
+            let first = fields.next().flatten();
+            first.is_some() && fields.all(|f| f == first)
+        }
+        Rule::Group {
+            mode: Match::All,
+            rules,
+        } => rules.len() <= 1 && rules.iter().all(flat),
+    }
+}
+
+/// How many conditions `rule` holds, at any depth.
+pub fn conditions(rule: &Rule) -> usize {
+    match rule {
+        Rule::Condition(_) => 1,
+        Rule::Group { rules, .. } => rules.iter().map(conditions).sum(),
+    }
+}
+
+/// A chip's words: the rule in words when it reads flat ([`flat`]),
+/// else "rules (n)", its conditions counted: the Advanced rows show it.
+pub fn chip_words(rule: &Rule, t: &dyn Fn(Message) -> String) -> String {
+    if flat(rule) {
+        chips(rule, t).join(", ")
+    } else {
+        t(Message::new("gui-library-chip-rules", "rules ({ $count })")
+            .with("count", conditions(rule)))
+    }
+}
+
 /// One rule in words.
 fn words(rule: &Rule, t: &dyn Fn(Message) -> String) -> String {
     match rule {
@@ -362,6 +411,35 @@ mod tests {
         assert_eq!(commit("beach sunset "), None);
         assert_eq!(commit("camera:"), None);
         assert_eq!(commit("(camera:R5 "), None);
+    }
+
+    #[test]
+    fn a_tree_the_chips_cannot_draw_flat_is_one_rules_chip_that_round_trips() {
+        let words = |text: &str| -> String {
+            let (rules, _) = commit(text).unwrap();
+            assert_eq!(rules.len(), 1, "{rules:?}");
+            let rule = helios_vault::rules::parse_text(&rules[0]).unwrap();
+            chip_words(&rule, &english)
+        };
+        // Flat: one key's alternatives, a negated term.
+        assert_eq!(
+            words("(label:red OR label:blue)"),
+            "colour label has red or colour label has blue"
+        );
+        assert!(!words("-flag:reject").starts_with("rules"));
+        // Not flat: an any across keys, a none of several, a nested group.
+        assert_eq!(words("(camera:R5 OR rating:>=3)"), "rules (2)");
+        assert_eq!(words("-(camera:R5 OR type:nef)"), "rules (2)");
+        assert_eq!(words("(camera:R5 OR (rating:>=3 type:nef))"), "rules (3)");
+        // Its term reads back as the same tree.
+        let text = "(camera:R5 OR (rating:>=3 type:nef)) sunset";
+        let (rules, rest) = commit(text).unwrap();
+        assert_eq!(rest, "sunset");
+        let whole = format!("{} {rest}", rules.join(" "));
+        assert_eq!(
+            helios_vault::rules::parse_text(&whole).unwrap(),
+            helios_vault::rules::parse_text(text).unwrap()
+        );
     }
 
     #[test]

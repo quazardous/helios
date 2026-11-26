@@ -1511,6 +1511,8 @@ gui-library-chip-or = or
 
 gui-library-chip-range = { $low } and { $high }
 
+gui-library-chip-rules = rules ({ $count })
+
 gui-library-column-flag = Flag
 
 gui-library-column-iso = ISO

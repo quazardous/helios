@@ -4066,6 +4066,10 @@ impl Shell {
                 crate::library::MARKS_PASTE_COMMAND,
                 "Paste the copied marks (`images`: ids, else the selection; `marks`: some of rating, labels, tags, title, all by default; `mode`: merge, the default, adds labels and tags, overwrite makes each mark the copy's)",
             ),
+            (
+                crate::library::ADVANCED_COMMAND,
+                "Open or close the search's Advanced rows under the Library search (`open`: true or false, else the other way), the first row focused; answers `open` and the search's `query`. Set the rules with library.filter.apply: the rows follow",
+            ),
         ] {
             add(
                 CommandSpec::new(id, title, "Library"),
@@ -6232,6 +6236,9 @@ impl Shell {
         };
         let mut lib = self.focus.library.borrow_mut();
         match command {
+            crate::library::ADVANCED_COMMAND => {
+                Ok(lib.set_advanced(args.get("open").and_then(Value::as_bool)))
+            }
             SELECT_NONE_COMMAND => {
                 lib.select_none();
                 Ok(json!({ "selected": 0 }))
