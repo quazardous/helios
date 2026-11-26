@@ -57,7 +57,7 @@ use egui_pop::views::library::compare::{CompareView, Intent, Pane};
 const COMPARE_SURFACE: &str = "helios.compare";
 
 use crate::comparison::Comparison;
-use egui_pop::views::library::filter::{Filter, SearchField};
+use egui_pop::views::library::filter::{AppChip, Filter, SearchEvent, SearchField, Suggestion};
 use egui_pop::views::library::grid;
 use egui_pop::views::library::marks::{ColorLabels, FlagToggle, RatingStars};
 use egui_pop::views::library::tags::TagInputState;
@@ -3326,6 +3326,8 @@ impl Library {
     /// Filters the library: its vault query waits for the host
     /// ([`Library::take_queries`]).
     pub fn set_filter(&mut self, filter: Filter) {
+        // Set by code, the whole text is the field's: no chips of it.
+        self.view.rules.clear();
         self.view.search.set_filter(filter.clone());
         self.filtered(filter);
     }
@@ -4461,15 +4463,76 @@ impl Library {
         let search = crate::i18n::text(&ctx, Message::new("gui-library-search", "Search images"));
         // The field's box holds its icon and its "+" beside the text.
         let width = (ui.available_width() - SEARCH_BESIDE).clamp(80.0, 220.0);
-        // Helios reads the whole text with the vault's grammar.
+        // Helios reads the whole text with the vault's grammar: the key
+        // terms typed in full show as chips (its rules), the words stay
+        // text, and the keys the word typed starts are suggested (G4).
+        let t = |m: Message| crate::i18n::text(&ctx, m);
+        let typed = self.view.search.text().to_string();
+        let offered: Vec<Suggestion> = suggest::key_suggestions(&self.search_keys, &typed)
+            .into_iter()
+            .map(|k| {
+                Suggestion::new(
+                    suggest::key_row(k, &t),
+                    suggest::complete_key(&typed, &k.key),
+                )
+            })
+            .collect();
+        let chips: Vec<AppChip> = self
+            .view
+            .rules
+            .iter()
+            .enumerate()
+            .map(|(k, rule)| {
+                let words = helios_vault::rules::parse_text(rule)
+                    .map_or_else(|_| rule.clone(), |r| suggest::chips(&r, &t).join(", "));
+                // Its rule is part of the field's filter: the
+                // `library.filter` step sees the whole search.
+                AppChip::new(k.to_string(), words).term(rule.clone())
+            })
+            .collect();
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
         let mut field = SearchField::new(LIBRARY)
             .label(search)
             .width(width)
-            .whole_text(true);
+            .whole_text(true)
+            .suggestions(&offered)
+            .chips(&chips);
         if let Some(app) = &self.app {
             field = field.app(app);
         }
-        let asked = field.show(ui, &mut self.view.search).changed;
+        let out = field.show(ui, &mut self.view.search);
+        let mut picked = false;
+        for event in self.view.search.take_events() {
+            match event {
+                // The text is now the suggestion's: its value comes next.
+                SearchEvent::Picked(_) => picked = true,
+                SearchEvent::ChipRemoved(id) => {
+                    if let Ok(k) = id.parse::<usize>()
+                        && k < self.view.rules.len()
+                    {
+                        self.view.rules.remove(k);
+                    }
+                }
+                // Set whole (a command, a hook): its rules are in the
+                // text now.
+                SearchEvent::FilterSet => self.view.rules.clear(),
+                _ => {}
+            }
+        }
+        // A key term typed in full (a space after it, or Enter) becomes a
+        // chip; the words stay in the field.
+        let text = self.view.search.text().to_string();
+        let entered = enter && !picked && (out.response.has_focus() || out.response.lost_focus());
+        if ((text != typed && text.ends_with(char::is_whitespace)) || entered)
+            && let Some((rules, rest)) = suggest::commit(&text)
+        {
+            self.view.rules.extend(rules);
+            self.view.search.set_text(rest);
+        }
+        // The field's filter is the whole search: the chips' rules, then
+        // the words typed. A chip made or removed reaches it at the next
+        // pass.
+        let asked = out.changed;
         let now = ctx.input(|i| i.time);
         if let Some(filter) = asked {
             self.view.typed = Some((filter.clone(), now));

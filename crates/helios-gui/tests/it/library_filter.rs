@@ -3972,3 +3972,116 @@ fn quick_collection_panels_move_copy_and_feed_compare_and_come_back() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The filter the library registry publishes, as the bus's
+/// `library.filter` step left it.
+fn published_filter(h: &Harness<'_, Shell>) -> String {
+    let libraries = h
+        .state()
+        .app()
+        .handle()
+        .service(&egui_pop::views::library::plugin::LIBRARIES)
+        .expect("the library plugin");
+    libraries.describe()["libraries"][helios_gui::library::LIBRARY]["filter"]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The search field's suggestions and chips (`docs/design/library-search.md`,
+/// G4): typing `ca` offers the `camera:` key, Down and Enter take it; a key
+/// term typed in full becomes a chip in words, its rule in the filter;
+/// Escape closes the list first, the chips kept; Backspace twice in the
+/// empty field removes the chip and the rule.
+#[test]
+fn the_search_suggests_keys_and_shows_its_rules_as_chips() {
+    let root = temp("chips");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let type_in = |h: &mut Harness<'static, Shell>, text: &str| {
+        h.input_mut().events.push(egui::Event::Text(text.into()));
+        h.run();
+        h.run();
+    };
+    h.get_by_label("Search images").click();
+    h.run();
+
+    // `ca`: the camera key offered, in a list named "Suggestions".
+    type_in(&mut h, "ca");
+    h.get_by_label("Suggestions");
+    h.get_by_label("Camera — camera:");
+    h.key_press(Key::ArrowDown);
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    assert!(h.query_by_label("Suggestions").is_none(), "taken: closed");
+
+    // Its value and a space: the term is a chip, the rule filters.
+    type_in(&mut h, "R5 ");
+    settle(&mut h, &mut persist, 2.0);
+    h.get_by_label("camera is R5");
+    assert_eq!(h.state().library().filter().text, "camera:R5");
+    assert_eq!(grid(&h), ["c.nef"]);
+
+    // Escape closes the list first, the text and the chip kept.
+    type_in(&mut h, "ca");
+    h.get_by_label("Suggestions");
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(h.query_by_label("Suggestions").is_none());
+    h.get_by_label("camera is R5");
+    assert_eq!(h.state().library().filter().text, "camera:R5 ca");
+    // The bus's `library.filter` saw the whole search, the chip's rule
+    // included, as its registry publishes it.
+    assert_eq!(published_filter(&h), "camera:R5 ca");
+    assert!(
+        h.get_by_label("Search images").is_focused(),
+        "the list closed, the field keeps the keyboard"
+    );
+
+    // Escape again clears the words typed, the field still focused; a
+    // third leaves the field.
+    h.key_press(Key::Escape);
+    h.run();
+    settle(&mut h, &mut persist, 3.0);
+    assert_eq!(h.state().library().filter().text, "camera:R5");
+    assert_eq!(published_filter(&h), "camera:R5");
+    assert!(
+        h.get_by_label("Search images").is_focused(),
+        "cleared, kept"
+    );
+    h.key_press(Key::Escape);
+    h.run();
+    assert!(!h.get_by_label("Search images").is_focused(), "left");
+    h.get_by_label("camera is R5");
+    h.get_by_label("Search images").click();
+    h.run();
+
+    // Backspace in the empty field selects the chip, again removes it
+    // and its rule.
+    h.key_press(Key::Backspace);
+    h.run();
+    h.get_by_label("camera is R5");
+    h.key_press(Key::Backspace);
+    settle(&mut h, &mut persist, 4.0);
+    assert!(h.query_by_label("camera is R5").is_none());
+    assert!(h.state().library().filter().text.is_empty());
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg", "c.nef"]);
+
+    // A chip again, then a filter set by the bus's command: its whole
+    // text is typed, the chips dropped.
+    type_in(&mut h, "camera:R5 ");
+    settle(&mut h, &mut persist, 5.0);
+    h.get_by_label("camera is R5");
+    run(
+        &mut h,
+        "library.filter",
+        json!({ "library": helios_gui::library::LIBRARY, "filter": { "text": "camera:\"Z 8\"" } }),
+    );
+    settle(&mut h, &mut persist, 6.0);
+    assert!(h.query_by_label("camera is R5").is_none());
+    assert_eq!(h.state().library().filter().text, "camera:\"Z 8\"");
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}
