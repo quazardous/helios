@@ -1132,7 +1132,7 @@ mod tests {
             let mirror =
                 helios_node_core::job_promises::JobPromises::start(vault.clone(), bus.subscribe());
             let runner = captions_runner(&bus, &vault);
-            let (ai, runtime) = ai("runner-library");
+            let (ai, runtime) = ai("runner-library-ai");
             let ai = Arc::new(ai);
             let opened = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             {
@@ -1153,7 +1153,8 @@ mod tests {
             // Both photos concluded, each with one model call.
             let status = runner.status(&id).unwrap();
             assert_eq!(status["state"], json!(ExtractState::Finished));
-            assert_eq!(status["tally"]["done"], 2, "{status}");
+            let page = runner.items(&id, None, None, 0, 10).unwrap().unwrap();
+            assert_eq!(status["tally"]["done"], 2, "{status} {page}");
             assert_eq!(status["tally"]["failed"], 0, "{status}");
             assert_eq!(chats(&runtime), 2);
             // Each result kept in the vault's cache, on its photo.
