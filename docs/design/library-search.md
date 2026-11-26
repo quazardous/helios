@@ -621,8 +621,14 @@ Each slice is one PR with its tests; the order matters.
    photo under its cursor; both come back once the photos are read.
    `library.view.selection` (`view`: an id or `main`; none: every view)
    says each view's selection and cursor, the same before and after a
-   restart. Still to come: the main view's selection in the workspace,
-   and links between views (G7/G8).
+   restart. *Part 2 (#5255 S7, 2026-11-25):* the main explorer's
+   selection and cursor are its Results panel's payload (instance 1 of
+   `helios.vault`), kept with the layout the same way. Each other view
+   has a link toggle in its bar (`library.view.link`, `view`, `linked`):
+   linked, it takes the main view's selection and cursor each time they
+   change; unlinked, it keeps its own. The link is kept in its payload.
+   Still to come: the filmstrip as a linked reduced gallery (G8) and
+   links to a view other than the main one.
 3. **G3. One grammar.** `rules::parse_text` and `rules::to_text` in
    `helios-vault`, aliases, `-`, `OR`, ranges, relative dates;
    `presence`, `backup`, `cull` as rule fields; the search text, the

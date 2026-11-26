@@ -7,12 +7,13 @@
 
 use egui::vec2;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable as _;
 use egui_pop::model::ids::PanelId;
 use egui_pop::model::layout::Layout;
 use egui_pop::views::library::filter::Filter;
 use helios_gui::library::Entry;
 use helios_gui::library_views::{
-    CLOSE_COMMAND, OPEN_COMMAND, SELECTION_COMMAND, close_command, open_views,
+    CLOSE_COMMAND, LINK_COMMAND, OPEN_COMMAND, SELECTION_COMMAND, close_command, open_views,
 };
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -237,4 +238,110 @@ fn each_view_s_selection_and_cursor_read_back_the_same_after_a_restart() {
         .is_err(),
         "no such view"
     );
+}
+
+/// S7 part 2: the main view's selection and cursor are kept with the
+/// layout (the main Results panel's payload) and read back the same
+/// after a restart.
+#[test]
+fn the_main_view_s_selection_survives_a_restart() {
+    let mut h = harness(None);
+    h.state().library_mut().with_gallery("main", |l| {
+        l.select_kept(&["b".to_string(), "d".to_string()], Some("d"));
+    });
+    h.run_steps(3);
+    let before = answer(&mut h, SELECTION_COMMAND, json!({ "view": "main" })).unwrap();
+    assert_eq!(
+        before,
+        json!({ "view": "main", "selection": ["b", "d"], "cursor": "d" })
+    );
+    let saved = h.state().app().handle().layout().to_json();
+    drop(h);
+    let mut h = harness(Some(Layout::from_json(&saved).unwrap()));
+    h.run_steps(3);
+    let after = answer(&mut h, SELECTION_COMMAND, json!({ "view": "main" })).unwrap();
+    assert_eq!(
+        after, before,
+        "the main view's selection reads back the same"
+    );
+}
+
+/// S7 part 2 (G7/G8): a view linked to the main one follows its
+/// selection; an unlinked one keeps its own. The toggle is found by its
+/// accesskit name and turns the link on; the link is kept through a
+/// restart.
+#[test]
+fn a_linked_view_follows_the_main_selection_and_an_unlinked_one_does_not() {
+    let mut h = harness(None);
+    for place in ["center", "end_side"] {
+        run(
+            &mut h,
+            OPEN_COMMAND,
+            json!({ "place": place }),
+            Origin::Agent("test".into()),
+        );
+    }
+    let views = open_views(h.state().app().handle());
+    let (linked, own) = (views[0].clone(), views[1].clone());
+    h.state()
+        .library_mut()
+        .with_gallery(&own, |l| l.select_ids(&["a".to_string()]));
+    let out = answer(
+        &mut h,
+        LINK_COMMAND,
+        json!({ "view": linked, "linked": true }),
+    )
+    .unwrap();
+    assert_eq!(out, json!({ "view": linked, "linked": true }));
+    assert_eq!(payload(&h, &linked)["link"], "main");
+
+    h.state().library_mut().with_gallery("main", |l| {
+        l.select_kept(&["c".to_string(), "e".to_string()], Some("e"));
+    });
+    h.run_steps(3);
+    let read = |h: &mut Harness<'static, Shell>, v: &str| {
+        answer(h, SELECTION_COMMAND, json!({ "view": v })).unwrap()
+    };
+    assert_eq!(read(&mut h, &linked)["selection"], json!(["c", "e"]));
+    assert_eq!(read(&mut h, &linked)["cursor"], "e");
+    assert_eq!(
+        read(&mut h, &own)["selection"],
+        json!(["a"]),
+        "unlinked: its own"
+    );
+
+    // Unlinked from its toggle (by its accesskit name), it keeps what it has.
+    let toggles: Vec<_> = h
+        .query_all_by_label("Follow the main view's selection")
+        .collect();
+    assert_eq!(toggles.len(), 2, "one toggle per view");
+    drop(toggles);
+    answer(&mut h, LINK_COMMAND, json!({ "view": linked })).unwrap();
+    assert_eq!(payload(&h, &linked).get("link"), None);
+    h.state()
+        .library_mut()
+        .with_gallery("main", |l| l.select_ids(&["b".to_string()]));
+    h.run_steps(3);
+    assert_eq!(read(&mut h, &linked)["selection"], json!(["c", "e"]));
+
+    // Linked again from the toggle: kept through a restart.
+    h.get_all_by_label("Follow the main view's selection")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    let first_linked = open_views(h.state().app().handle())
+        .into_iter()
+        .filter(|v| payload(&h, v)["link"] == "main")
+        .count();
+    assert_eq!(first_linked, 1, "the toggle linked one view");
+    let saved = h.state().app().handle().layout().to_json();
+    drop(h);
+    let mut h = harness(Some(Layout::from_json(&saved).unwrap()));
+    h.run_steps(3);
+    let linked_after = open_views(h.state().app().handle())
+        .into_iter()
+        .filter(|v| payload(&h, v)["link"] == "main")
+        .count();
+    assert_eq!(linked_after, 1, "the link is kept with the layout");
 }

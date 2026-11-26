@@ -1865,6 +1865,8 @@ gui-library-view = View as
 
 gui-library-view-details = Details
 
+gui-library-view-link = Follow the main view's selection
+
 gui-library-view-list = List
 
 gui-library-view-per-row = Thumbnails, { $count } per row

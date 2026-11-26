@@ -3,7 +3,10 @@
 //! `helios.vault#3`…). Each new one is a Library view of its own, as a
 //! catalogue app's contact sheets are: its own gallery (the gallery id is
 //! the instance's id), its Filters inside it, its own filter and cursor.
-//! Moving in one never moves another; none follows another.
+//! Moving in one never moves another, unless it is linked: a view
+//! linked to the main one ([`LINK_COMMAND`], the link toggle in its bar)
+//! takes the main view's selection and cursor each time they change;
+//! unlinked, it keeps its own.
 //!
 //! The main explorer (`helios.filters` + `helios.vault`, the gallery
 //! `main`) stays as it was.
@@ -12,7 +15,9 @@
 //! terms of it), cursor and how its results show are the instance's
 //! payload ([`ViewState`]), which egui-pop keeps in the layout. The
 //! layout is saved with the workspace (its layout copy) and at quit, so
-//! a restart gives each view back as it was. Closing a view drops it and
+//! a restart gives each view back as it was. The main explorer's
+//! selection and cursor go the same way: the main Results panel's
+//! payload (instance 1 of `helios.vault`). Closing a view drops it and
 //! its payload; the other views keep theirs. A view's state is view
 //! state, never an undo step, and opening or closing one is layout.
 //!
@@ -62,6 +67,15 @@ pub const QUICK_OPEN_COMMAND: &str = "library.quick.open";
 /// What is kept with the layout reads back the same after a restart.
 pub const SELECTION_COMMAND: &str = "library.view.selection";
 
+/// Links a Library view to the main one, or unlinks it (`view`: its id;
+/// `linked`: true or false, none: the other way round): a linked view
+/// follows the main view's selection and cursor, an unlinked one keeps
+/// its own. Kept with the view. Answers `{ "view", "linked" }`.
+pub const LINK_COMMAND: &str = "library.view.link";
+
+/// What a linked view follows: the main view.
+const LINKED_TO: &str = "main";
+
 /// What a Library view keeps: its instance's payload.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -83,6 +97,9 @@ pub struct ViewState {
     /// source, the filter scoped to it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quick: Option<String>,
+    /// The view it follows (`main`), when linked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 impl ViewState {
@@ -207,6 +224,24 @@ pub struct Views {
     /// The tab title last given to each quick-collection panel: its
     /// collection's name, given again only when it changes.
     titled: HashMap<String, String>,
+    /// The main view's selection and cursor last given to each linked
+    /// view: given again only when they change.
+    followed: HashMap<String, Kept>,
+    /// The main view's payload as last read or written.
+    main_seen: Option<Value>,
+    /// The main view's selection and cursor given back before the
+    /// photos are read.
+    main_pending: Option<Kept>,
+}
+
+/// A payload without its link: what restoring a view looks at (a link
+/// turned on or off restores nothing).
+fn unlinked(payload: &Value) -> Value {
+    let mut p = payload.clone();
+    if let Some(o) = p.as_object_mut() {
+        o.remove("link");
+    }
+    p
 }
 
 impl Views {
@@ -226,17 +261,32 @@ impl Views {
             self.pending.remove(&k);
             self.quick.remove(&k);
             self.titled.remove(&k);
+            self.followed.remove(&k);
             library.forget_gallery(&k);
         }
         let payload = app.instance_payload(id);
-        if self.seen.get(key) != Some(&payload) {
+        if self.seen.get(key).map(unlinked) != Some(unlinked(&payload)) {
             self.restore(key, &payload, library);
+        }
+        let linked = payload.get("link").and_then(Value::as_str) == Some(LINKED_TO);
+        if linked {
+            let main = library.with_gallery(crate::library::MAIN_GALLERY, |lib| Kept::of(lib));
+            if self.followed.get(key) != Some(&main) {
+                library.with_gallery(key, |lib| main.apply(lib));
+                self.pending.remove(key);
+                self.followed.insert(key.to_string(), main);
+            }
+        } else {
+            self.followed.remove(key);
         }
         if let Some(kept) = self.pending.get(key).cloned()
             && kept.ready(library)
         {
             library.with_gallery(key, |lib| kept.apply(lib));
             self.pending.remove(key);
+        }
+        if !self.quick.contains_key(key) {
+            link_toggle(ui, id, linked);
         }
         match self.quick.get(key).cloned() {
             Some(quick) => {
@@ -249,7 +299,8 @@ impl Views {
             }
             None => library.show_as(ui, &GalleryOptions::VIEW, key),
         }
-        let now = self.state_of(key, library);
+        let mut now = self.state_of(key, library);
+        now.link = linked.then(|| LINKED_TO.to_string());
         let now = serde_json::to_value(&now).unwrap_or(Value::Null);
         if now != payload
             && let Err(e) = app.set_instance_payload(id, now.clone())
@@ -257,6 +308,44 @@ impl Views {
             log::warn!(target: "helios", "library view {key} not kept: {e}");
         }
         self.seen.insert(key.to_string(), now);
+    }
+
+    /// Keeps the main explorer's selection and cursor as its Results
+    /// panel's payload (`id`: `helios.vault`), with the layout as the
+    /// other views' are, and gives them back once the photos are read.
+    pub fn keep_main(&mut self, app: &AppHandle, id: &PanelId, library: &mut Library) {
+        let main = crate::library::MAIN_GALLERY;
+        let payload = app.instance_payload(id);
+        if self.main_seen.as_ref() != Some(&payload) {
+            let state: ViewState = serde_json::from_value(payload.clone()).unwrap_or_default();
+            self.main_pending =
+                (state.cursor.is_some() || !state.selection.is_empty()).then_some(Kept {
+                    selection: state.selection,
+                    cursor: state.cursor,
+                });
+        }
+        if let Some(kept) = self.main_pending.clone()
+            && kept.ready(library)
+        {
+            library.with_gallery(main, |lib| kept.apply(lib));
+            self.main_pending = None;
+        }
+        let kept = match &self.main_pending {
+            Some(k) => k.clone(),
+            None => library.with_gallery(main, |lib| Kept::of(lib)),
+        };
+        let now = ViewState {
+            selection: kept.selection_kept(),
+            cursor: kept.cursor,
+            ..ViewState::default()
+        };
+        let now = serde_json::to_value(&now).unwrap_or(Value::Null);
+        if now != payload
+            && let Err(e) = app.set_instance_payload(id, now.clone())
+        {
+            log::warn!(target: "helios", "the main Library view's selection not kept: {e}");
+        }
+        self.main_seen = Some(now);
     }
 
     /// Names a quick-collection panel's tab after its collection (not
@@ -321,6 +410,7 @@ impl Views {
                 cursor: kept.cursor,
                 results: (results != ResultsDesc::default()).then_some(results),
                 quick,
+                link: None,
             }
         })
     }
@@ -405,6 +495,77 @@ pub fn selection_command(
     Ok(selection_of(view, &read(library, view)))
 }
 
+/// The link toggle at the top of a Library view: the link icon, muted
+/// unlinked and in the accent linked; named, and said pressed or not,
+/// for screen readers. It runs [`LINK_COMMAND`].
+fn link_toggle(ui: &mut Ui, id: &PanelId, linked: bool) {
+    use egui_pop::core::icon::{IconWidget, Source as IconSource, Tone as IconTone};
+    use helios_core::Message;
+    let name = crate::i18n::text(
+        ui.ctx(),
+        Message::new("gui-library-view-link", "Follow the main view's selection"),
+    );
+    let (icon, tone) = if linked {
+        ("phosphor:link", IconTone::Accent)
+    } else {
+        ("phosphor:link-break", IconTone::Muted)
+    };
+    let response = ui.add(
+        IconWidget::new(IconSource::named(icon, "library bar"))
+            .tone(tone)
+            .label(&name)
+            .selected(linked),
+    );
+    if response.clicked() {
+        crate::dialogs::request(
+            ui.ctx(),
+            crate::dialogs::Request::Run(
+                LINK_COMMAND.into(),
+                json!({ "view": id.as_str(), "linked": !linked }),
+                helios_shell::commands::Origin::User,
+            ),
+        );
+    }
+}
+
+/// What [`LINK_COMMAND`] does: the link kept in the view's payload.
+pub fn link_command(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let view = args
+        .get("view")
+        .and_then(Value::as_str)
+        .ok_or("`view`: a Library view's id")?;
+    if !open_views(app).iter().any(|v| v == view) {
+        return Err(format!(
+            "`view`: no Library view `{view}` is open (`{RESULTS_PANEL}#<n>`)"
+        ));
+    }
+    let id = PanelId::new(view).map_err(|e| format!("`view`: {e}"))?;
+    let mut payload = app.instance_payload(&id);
+    if payload.get("quick").is_some_and(|q| !q.is_null()) {
+        return Err(format!(
+            "`view`: `{view}` shows a quick collection, which follows no other view"
+        ));
+    }
+    let now = payload.get("link").and_then(Value::as_str) == Some(LINKED_TO);
+    let linked = match args.get("linked") {
+        None | Some(Value::Null) => !now,
+        Some(Value::Bool(b)) => *b,
+        Some(v) => return Err(format!("`linked`: {v} is not true or false")),
+    };
+    if !payload.is_object() {
+        payload = json!({});
+    }
+    if let Some(o) = payload.as_object_mut() {
+        if linked {
+            o.insert("link".into(), json!(LINKED_TO));
+        } else {
+            o.remove("link");
+        }
+    }
+    app.set_instance_payload(&id, payload)?;
+    Ok(json!({ "view": view, "linked": linked }))
+}
+
 /// A quick-collection panel's head: the collection's name and how many
 /// photos it holds, or that it was deleted. The name shown, for the tab.
 fn quick_header(ui: &mut Ui, library: &Library, quick: &str) -> Option<String> {
@@ -467,6 +628,7 @@ mod tests {
             selection: vec!["a".into(), "b".into()],
             results: None,
             quick: None,
+            link: Some(LINKED_TO.into()),
         };
         let back: ViewState =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();

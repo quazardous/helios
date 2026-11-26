@@ -1709,6 +1709,7 @@ xmp-reason-unsupported-part = pas encore pris en charge : { $part }
 
 xmp-reason-unsupported-version = version non prise en charge (lit { $known })
 
+gui-library-view-link = Suivre la sélection de la vue principale
 gui-library-auto-advance-tip = Avance automatique : après une note, un drapeau ou un rejet au clavier, passer à la photo suivante
 
 gui-library-chip = { $field } { $op } { $value }

@@ -194,6 +194,7 @@ pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("library.storage", "phosphor:hard-drives"),
     ("library.trash", "phosphor:trash"),
     ("library.view.close", "close"),
+    ("library.view.link", "phosphor:link"),
     ("library.view.open", "phosphor:plus-square"),
     ("library.view.selection", "phosphor:selection"),
     ("library.window", "phosphor:images-square"),
