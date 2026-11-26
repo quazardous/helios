@@ -375,8 +375,20 @@ the open step until something seals it, and an explicit Commit
   history: the `workspace` line, or a workshop's local scope where it
   has one. A photo's history never holds a diagram edit.
 - The library's history stays its own line, never a photo's.
-- `helios.photo.history` (R6), amend and Commit (R7), compare
-  any step with the live edit (R8, credited to darktable PR #23136).
+- Amend and Commit (R7), compare any step with the live edit (R8,
+  credited to darktable PR #23136).
+
+### Reading a photo's history (R6)
+
+`photo.history` (read-only, so any agent client may run it) answers a
+photo's steps by its id, never its path, open or not: those its saved
+versions say (`library.edit.history`), one line oldest first, each with
+its index, version, label, origin and time, and `undone` for those a
+redo makes again. A page holds `limit` steps (50, at most 500), the
+newest unless `from` names the first index; `total`, `undone` and
+`more` say the rest. The edit each step reached comes only with
+`edits: true`. The open photo's step still going (a drag) is not in it
+until it ends and is saved.
 
 ### Slices
 
@@ -387,7 +399,7 @@ the open step until something seals it, and an explicit Commit
 | R3 | Ctrl+Z follows the focused view (egui-pop's `Routing::Focus` and `pop.history.target`, Helios's focus sets) | done (2026-11-21) |
 | R4 | Per-photo stacks kept across switches | done (2026-11-25), session only; the RAM budget in `helios-cache` to do |
 | R5 | Step markers in the versions; undo rebuilt after a restart | done (2026-11-25): markers and the rebuild (`helios_vault::edit_steps`), the rebuilt line loaded into the store on open (#5522) |
-| R6 | `helios.photo.history`, read-only | to do |
+| R6 | `helios.photo.history`, read-only | done (2026-11-26): the read-only command `photo.history` (`helios_gui::shell::photo_history`), any photo's steps from its versions, paged |
 | R7 | Amend and seal (B), Commit | to do |
 | R8 | Compare any step with the live edit | to do |
 

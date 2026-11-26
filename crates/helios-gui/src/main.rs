@@ -2473,6 +2473,9 @@ fn main() -> Result<(), String> {
             // The imports recorded, listed in the window to run again.
             if let Some(p) = &persist {
                 shell.set_import_history(helios_gui::shell::import_history_of(p.node().clone()));
+                shell.set_photo_history(helios_gui::shell::photo_history::reader_of(
+                    p.node().clone(),
+                ));
             }
             if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
                 shell.set_import_thumbnail_cache(cache);

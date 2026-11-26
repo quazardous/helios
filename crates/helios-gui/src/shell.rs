@@ -123,6 +123,7 @@ mod library_keywords;
 mod library_meta;
 mod library_storage;
 mod lifetime;
+pub mod photo_history;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_merge::MergeLibrary as MergeImportLibrary;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};
@@ -361,6 +362,9 @@ enum Action {
     ImportWith(Value, Origin),
     /// List the import history (`import.history.list`'s arguments).
     ImportHistory(Value),
+    /// Read a page of a photo's undo history (`photo.history`'s
+    /// arguments).
+    PhotoHistory(Value),
     /// Run an import of the history again (`import.history.again`'s
     /// arguments), as whom.
     ImportAgain(Value, Origin),
@@ -1324,6 +1328,7 @@ impl Shell {
             init: init_wizard::InitState::default(),
             storage: helios_storage_ui::StoragePage::default(),
             reads: None,
+            photo_history: None,
             import_lines: std::sync::mpsc::channel(),
             import_ends: {
                 let (to, from) = std::sync::mpsc::channel();
@@ -4158,6 +4163,15 @@ impl Shell {
             )
             .read_only(),
             Box::new(|a, _| Ok(Action::ImportHistory(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                photo_history::COMMAND,
+                "Read a photo's undo history (`image`: its id), open or not, from its saved versions: its steps oldest first, those undone marked; the newest page unless `from` (a step's index) is given, `limit` steps (50, at most 500); the edit each step reached with `edits: true`",
+                "Library",
+            )
+            .read_only(),
+            Box::new(|a, _| Ok(Action::PhotoHistory(a.clone()))),
         );
         add(
             CommandSpec::new(
@@ -8065,6 +8079,7 @@ impl Shell {
             Action::ImportFiles(args, origin) => return self.import_files(&args, &origin),
             Action::ImportWith(args, origin) => return self.import_with(&args, &origin),
             Action::ImportHistory(args) => return self.import_history_list(&args),
+            Action::PhotoHistory(args) => return self.photo_history(&args),
             Action::ImportAgain(args, origin) => return self.import_again(&args, &origin),
             Action::Activity(args) => {
                 self.open_activity(&args);

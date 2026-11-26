@@ -748,6 +748,9 @@ command-param-undo =
 command-param-undoAgent =
     .title = Undo an agent's last changes alone (`agent`, `group`)
 
+command-photo-history =
+    .title = Read a photo's undo history (`image`: its id), open or not, from its saved versions: its steps oldest first, those undone marked; the newest page unless `from` (a step's index) is given, `limit` steps (50, at most 500); the edit each step reached with `edits: true`
+
 command-photo-show =
     .title = Show a photo on a display surface (`photo`: its id; `surface`: helios.viewport, helios.compare or another Compare helios.compare#<n>, new for a new Compare, new_window for one in a window of its own, else the double-click strategy chooses; `from`: the panel asking)
 
