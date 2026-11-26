@@ -177,8 +177,8 @@ pub fn rebuild(line: &[Version]) -> Rebuilt<'_> {
                 states[at] = Some(version);
                 continue;
             }
-            StepKind::Amend => None,
-            StepKind::Do => None,
+            // An amend with no step open is a step of its own, as a do.
+            StepKind::Amend | StepKind::Do => None,
             StepKind::Undo => {
                 // An undo walks the steps below only. From the first
                 // step, none with this edit: back to the unedited image,
