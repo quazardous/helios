@@ -195,7 +195,7 @@ fn each_view_s_selection_and_cursor_read_back_the_same_after_a_restart() {
             l.select_kept(
                 &["a".to_string(), "c".to_string(), "e".to_string()],
                 Some("c"),
-            )
+            );
         });
         lib.with_gallery(&second, |l| l.select_ids(&["d".to_string()]));
     }
