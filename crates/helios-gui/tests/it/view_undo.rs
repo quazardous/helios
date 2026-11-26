@@ -289,11 +289,9 @@ fn writes_to_one_module_amend_the_open_step_until_commit() {
     follow(&mut h);
     assert_eq!(steps(&h, HistoryScope::Image), before + 1, "amended");
     // Commit seals it: the next exposure is a step of its own.
-    let sealed = h
-        .state_mut()
-        .run("photo.commit", json!(null), Origin::User)
-        .unwrap();
-    assert_eq!(sealed["sealed"], true);
+    assert!(h.state().values().lock().unwrap().open_step().is_some());
+    run(&mut h, "photo.commit", json!(null));
+    assert_eq!(h.state().values().lock().unwrap().open_step(), None);
     set(&h, EV, 1.5, None);
     // Another module seals in turn.
     set(&h, &other, other0 + 0.25, None);

@@ -1055,6 +1055,8 @@ fn an_agent_reads_a_closed_photos_steps_read_only() {
     let start = shown(&shell);
     set(&shell, start + 1.0, None);
     persist.frame_settled(&mut shell, 10.0);
+    // Committed, so the next write is a step of its own (#5258 R7).
+    shell.values().lock().unwrap().seal();
     set(&shell, start + 2.0, None);
     persist.frame_settled(&mut shell, 11.0);
     shell.values().lock().unwrap().undo(&Origin::User).unwrap();
