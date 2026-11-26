@@ -5,7 +5,7 @@
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::model::ids::PanelId;
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
@@ -123,11 +123,23 @@ fn view_culling_strip_opens_and_closes_the_strip() {
             .collect::<Vec<_>>()
     };
     assert_eq!(ticked(&app), [true], "ticked while open");
+    // Its tab reads the entry's words (not "Library 2").
+    let tab = |h: &Harness<'_, Shell>| {
+        h.query_all_by_role(egui::accesskit::Role::Tab)
+            .any(|n| n.accesskit_node().label().as_deref() == Some("Culling strip"))
+    };
+    assert!(tab(&h), "the strip's tab named \"Culling strip\"");
     click(&mut h, "View");
-    click(&mut h, "Culling strip");
+    // The menu's entry, not the tab of the same name.
+    h.query_all_by_label("Culling strip")
+        .find(|n| n.accesskit_node().role() != egui::accesskit::Role::Tab)
+        .expect("the View entry")
+        .click();
+    h.run_steps(3);
     h.run();
     assert!(open_strips(&app).is_empty(), "the entry closed it");
     assert!(h.query_by_label("Culling filmstrip").is_none());
+    assert!(!tab(&h), "its tab gone");
     assert_eq!(ticked(&app), [false]);
 }
 

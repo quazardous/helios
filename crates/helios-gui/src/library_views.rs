@@ -210,6 +210,12 @@ pub fn strip_state() -> Value {
     serde_json::to_value(state).unwrap_or(Value::Null)
 }
 
+/// The culling strip's tab title, the words of its View menu entry
+/// (View > Culling strip).
+pub fn strip_title() -> helios_core::Message {
+    helios_core::Message::new("gui-view-culling-strip", "Culling strip")
+}
+
 /// The culling strip the default Compare layout opens under Compare
 /// (`workbench::comparison`): the Results panel's second instance, the
 /// first view after the main explorer's.
@@ -399,6 +405,10 @@ impl Views {
                     ui.ctx(),
                     helios_core::Message::new("gui-library-culling-strip", "Culling filmstrip"),
                 );
+                // Its tab named after what it is (not "Library 2"), in
+                // the words of View > Culling strip.
+                let title = crate::i18n::text(ui.ctx(), strip_title());
+                self.retitle(app, id, title);
                 let strip = library.strip_as(ui, key, &label);
                 if strip.is_some_and(|r| r.has_focus()) {
                     let cursor = library.with_gallery(key, |lib| lib.cursor());

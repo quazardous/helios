@@ -7,7 +7,7 @@
 
 use egui::vec2;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use egui_pop::model::ids::PanelId;
 use egui_pop::model::layout::Layout;
 use egui_pop::views::library::filter::Filter;
@@ -361,6 +361,21 @@ fn the_culling_strip_follows_the_main_view_its_arrows_move_and_space_edits_compa
     assert_eq!(payload(&h, &strip)["strip"], true);
     assert_eq!(payload(&h, &strip)["link"], "main", "linked when it opens");
 
+    // Its tab reads "Culling strip" (View > Culling strip's words), not
+    // "Library 2".
+    h.run_steps(2);
+    let tabs = |h: &Harness<'_, Shell>| {
+        h.query_all_by_role(egui::accesskit::Role::Tab)
+            .filter_map(|n| n.accesskit_node().label())
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        tabs(&h).iter().any(|t| t == "Culling strip"),
+        "the strip's tab by its name: {:?}",
+        tabs(&h)
+    );
+    assert!(!tabs(&h).iter().any(|t| t == "Library 2"), "{:?}", tabs(&h));
+
     // The strip shows the main view's selection.
     h.state()
         .library_mut()
@@ -400,4 +415,15 @@ fn the_culling_strip_follows_the_main_view_its_arrows_move_and_space_edits_compa
     drop(h);
     let h = harness(Some(Layout::from_json(&saved).unwrap()));
     assert_eq!(payload(&h, &strip)["strip"], true);
+    // Its title too.
+    assert_eq!(
+        h.state()
+            .app()
+            .handle()
+            .describe_panel(&strip)
+            .unwrap()
+            .title,
+        "Culling strip"
+    );
+    assert!(tabs(&h).iter().any(|t| t == "Culling strip"));
 }
