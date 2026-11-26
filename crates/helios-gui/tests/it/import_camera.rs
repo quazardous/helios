@@ -130,11 +130,7 @@ fn a_card_whose_connector_declares_a_nikon_z_50_shows_its_name_and_drawing() {
     until_shown(&mut h, "Holiday card");
     // Its row names the camera on its line.
     let row = h.get_by_label("Holiday card");
-    let said = row
-        .accesskit_node()
-        .description()
-        .unwrap_or_default()
-        .to_owned();
+    let said = row.accesskit_node().description().unwrap_or_default();
     assert!(said.contains("Nikon Z 50"), "the row says {said:?}");
     // Selected, its detail shows the camera's name and its drawing.
     row.click();
