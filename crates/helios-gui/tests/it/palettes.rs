@@ -105,7 +105,7 @@ fn every_docked_panel_menu_offers_float() {
         .panels()
         .iter()
         .filter(|s| h.state().layout().area_of(&s.id).is_some())
-        .map(|s| (s.id.clone(), s.title.to_string()))
+        .map(|s| (s.id.clone(), s.title.clone()))
         .collect();
     assert!(docked.len() >= 5, "{docked:?}");
     for (panel, title) in docked {
