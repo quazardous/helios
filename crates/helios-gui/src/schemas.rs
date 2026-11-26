@@ -153,7 +153,6 @@ pub fn schema(command: &str) -> Option<Json> {
             ],
         ),
         "import.history.list" => object(&[], &[("limit", integer())]),
-        "photo.commit" => object(&[], &[]),
         "photo.history" => object(
             &["image"],
             &[
@@ -218,7 +217,7 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.quick.add" | "library.quick.remove" => {
             object(&[], &[("id", any()), ("images", images())])
         }
-        "library.quick.list" => object(&[], &[]),
+        "library.quick.list" | "photo.commit" => object(&[], &[]),
         "library.quick.move" => object(
             &["from"],
             &[("from", string()), ("id", any()), ("images", images())],
