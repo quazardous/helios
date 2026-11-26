@@ -37,6 +37,14 @@ its changelog. For Linux on x86_64:
 - `helios-<version>-linux-x86_64.tar.gz`: a folder that runs where it is
   unpacked: `bin/helios-gui` (the window), `bin/helios` (the command line),
   with a desktop entry and icons under `share/`.
+- `helios_<version>_amd64.deb` (Debian, Ubuntu) and
+  `helios-<version>-1.x86_64.rpm` (Fedora, RHEL, Rocky, Alma): the same
+  folder installed in `/opt/helios`, with `helios` and `helios-gui` on the
+  PATH and Helios in the desktop's menu. Install with
+  `sudo apt install ./helios_<version>_amd64.deb` or
+  `sudo dnf install ./helios-<version>-1.x86_64.rpm`, which brings the
+  libraries the window needs; see
+  [docs/releases.md](./docs/releases.md#the-deb-and-the-rpm).
 - `io.github.quazardous.Helios-<version>-x86_64.flatpak`: a Flatpak
   bundle, sandboxed: `flatpak install --user` it, then
   `flatpak run io.github.quazardous.Helios`. It sees the Pictures folder

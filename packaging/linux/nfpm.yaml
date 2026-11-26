@@ -1,0 +1,111 @@
+# The .deb and .rpm packages of Helios, built by nfpm
+# (https://nfpm.goreleaser.com) from the Linux tarball's tree. A template:
+# packaging/linux/packages.sh fills @VERSION@, @TREE@ (the unpacked
+# tarball's folder) and @GLIBC@ (the newest glibc symbol version the
+# programs use), then runs nfpm for each format.
+#
+# Layout: the tarball's folder as it is in /opt/helios (programs in
+# bin/, licences beside them), the two programs a user starts linked from
+# /usr/bin, and the desktop entry, icons and AppStream metainfo in
+# /usr/share where desktops look for them. The package is named helios,
+# conflicts with nothing and installs beside the Flatpak and the AppImage.
+#
+# Dependencies: the programs link only the C library (and libgcc_s); the
+# window's program loads the rest at run time (dlopen): the Vulkan and EGL
+# loaders, Wayland and X11 client libraries, xkbcommon. Each format names
+# them in its own words: Debian packages, RPM sonames (the same on Fedora
+# and RHEL, whatever package provides them). The desktop portal (file
+# dialogs) and a Vulkan driver are recommended, not required: the command
+# line runs without them, the processing then on the CPU. The smoke test
+# (packaging/linux/smoke-package.sh) checks each loaded library is there
+# once the package is installed in a clean container.
+name: helios
+arch: amd64
+platform: linux
+version: "@VERSION@"
+release: "1"
+section: graphics
+priority: optional
+maintainer: "quazardous <https://github.com/quazardous/helios>"
+vendor: quazardous
+homepage: https://github.com/quazardous/helios
+license: GPL-3.0-or-later
+description: |-
+  Edit raw photos with darktable's processing
+  Helios is an image processing framework: photo editing where darktable
+  and vkdt meet. It ships a window (helios-gui) and a command line (helios).
+
+contents:
+  - src: "@TREE@"
+    dst: /opt/helios
+    type: tree
+  - src: /opt/helios/bin/helios
+    dst: /usr/bin/helios
+    type: symlink
+  - src: /opt/helios/bin/helios-gui
+    dst: /usr/bin/helios-gui
+    type: symlink
+  - src: "@TREE@/share/applications/io.github.quazardous.Helios.desktop"
+    dst: /usr/share/applications/io.github.quazardous.Helios.desktop
+  - src: "@TREE@/share/metainfo/io.github.quazardous.Helios.metainfo.xml"
+    dst: /usr/share/metainfo/io.github.quazardous.Helios.metainfo.xml
+  - src: "@TREE@/share/icons/hicolor/scalable/apps/io.github.quazardous.Helios.svg"
+    dst: /usr/share/icons/hicolor/scalable/apps/io.github.quazardous.Helios.svg
+  - src: "@TREE@/share/icons/hicolor/16x16/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/16x16/apps/io.github.quazardous.Helios.png
+  - src: "@TREE@/share/icons/hicolor/24x24/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/24x24/apps/io.github.quazardous.Helios.png
+  - src: "@TREE@/share/icons/hicolor/32x32/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/32x32/apps/io.github.quazardous.Helios.png
+  - src: "@TREE@/share/icons/hicolor/48x48/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/48x48/apps/io.github.quazardous.Helios.png
+  - src: "@TREE@/share/icons/hicolor/64x64/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/64x64/apps/io.github.quazardous.Helios.png
+  - src: "@TREE@/share/icons/hicolor/128x128/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/128x128/apps/io.github.quazardous.Helios.png
+  - src: "@TREE@/share/icons/hicolor/256x256/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/256x256/apps/io.github.quazardous.Helios.png
+  - src: "@TREE@/share/icons/hicolor/512x512/apps/io.github.quazardous.Helios.png"
+    dst: /usr/share/icons/hicolor/512x512/apps/io.github.quazardous.Helios.png
+
+overrides:
+  deb:
+    depends:
+      - "libc6 (>= @GLIBC@)"
+      - libgcc-s1
+      - libvulkan1
+      - libegl1
+      - libwayland-client0
+      - libwayland-egl1
+      - libx11-6
+      - libx11-xcb1
+      - libxcb1
+      - libxcursor1
+      - libxi6
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+    recommends:
+      - xdg-desktop-portal
+      - mesa-vulkan-drivers
+  rpm:
+    depends:
+      - "libc.so.6(GLIBC_@GLIBC@)(64bit)"
+      - "libgcc_s.so.1()(64bit)"
+      - "libvulkan.so.1()(64bit)"
+      - "libEGL.so.1()(64bit)"
+      - "libwayland-client.so.0()(64bit)"
+      - "libwayland-egl.so.1()(64bit)"
+      - "libX11.so.6()(64bit)"
+      - "libX11-xcb.so.1()(64bit)"
+      - "libxcb.so.1()(64bit)"
+      - "libXcursor.so.1()(64bit)"
+      - "libXi.so.6()(64bit)"
+      - "libxkbcommon.so.0()(64bit)"
+      - "libxkbcommon-x11.so.0()(64bit)"
+    recommends:
+      - xdg-desktop-portal
+      - mesa-vulkan-drivers
+
+rpm:
+  group: Applications/Multimedia
+  summary: Edit raw photos with darktable's processing
