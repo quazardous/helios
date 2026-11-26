@@ -183,11 +183,20 @@ pub fn open_command(app: &AppHandle, args: &Value) -> Result<Value, String> {
     }
     let under = OpenPlace::parse("bottom").unwrap_or(OpenPlace::Last);
     let Some(view) = open(app, place_or(args, under)?, OPEN_COMMAND)? else {
-        return Err("the strip could not open now: ask again".into());
+        // Asked while drawing (a menu's entry): the workbench opens the
+        // view next frame, and its first draw makes it the strip.
+        app.egui()
+            .data_mut(|d| d.insert_temp(strip_pending_id(), true));
+        return Ok(json!({ "queued": true, "strip": true }));
     };
     let id = PanelId::new(&view).map_err(|e| e.to_string())?;
     app.set_instance_payload(&id, strip_state())?;
     Ok(json!({ "view": view, "strip": true }))
+}
+
+/// Where a strip asked while drawing waits for its view to open.
+fn strip_pending_id() -> egui::Id {
+    egui::Id::new("helios.library.strip.pending")
 }
 
 /// What a culling strip keeps when it opens: one row, linked to the
@@ -339,7 +348,20 @@ impl Views {
             self.followed.remove(&k);
             library.forget_gallery(&k);
         }
-        let payload = app.instance_payload(id);
+        let mut payload = app.instance_payload(id);
+        // A strip asked while drawing: the first new view drawn is it.
+        if payload.is_null()
+            && !self.seen.contains_key(key)
+            && ui
+                .ctx()
+                .data_mut(|d| d.remove_temp::<bool>(strip_pending_id()))
+                .unwrap_or(false)
+        {
+            payload = strip_state();
+            if let Err(e) = app.set_instance_payload(id, payload.clone()) {
+                log::warn!(target: "helios", "library view {key}: not made the strip: {e}");
+            }
+        }
         if self.seen.get(key).map(unlinked) != Some(unlinked(&payload)) {
             self.restore(key, &payload, library);
         }

@@ -91,7 +91,20 @@ fn view_holds_what_is_shown_and_window_where_things_are() {
 #[test]
 fn view_culling_strip_opens_and_closes_the_strip() {
     use helios_gui::library_views::open_strips;
-    let mut h = shell();
+    let mut shell = Shell::new(helios_panels(), None);
+    // Photos to show: an empty strip says so, unnamed.
+    shell.set_library(
+        ["a", "b", "c"]
+            .iter()
+            .map(|id| helios_gui::library::Entry {
+                id: (*id).to_string(),
+                name: format!("{id}.jpg"),
+                ..helios_gui::library::Entry::default()
+            })
+            .collect(),
+    );
+    let mut h = headless::harness(shell, vec2(1280.0, 800.0));
+    h.run();
     let app = h.state().app().handle().clone();
     assert!(open_strips(&app).is_empty());
     click(&mut h, "View");
