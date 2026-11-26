@@ -186,14 +186,39 @@ pub fn open_command(app: &AppHandle, args: &Value) -> Result<Value, String> {
         return Err("the strip could not open now: ask again".into());
     };
     let id = PanelId::new(&view).map_err(|e| e.to_string())?;
+    app.set_instance_payload(&id, strip_state())?;
+    Ok(json!({ "view": view, "strip": true }))
+}
+
+/// What a culling strip keeps when it opens: one row, linked to the
+/// main view.
+pub fn strip_state() -> Value {
     let state = ViewState {
         strip: true,
         link: Some(LINKED_TO.to_string()),
         ..ViewState::default()
     };
-    let state = serde_json::to_value(state).map_err(|e| e.to_string())?;
-    app.set_instance_payload(&id, state)?;
-    Ok(json!({ "view": view, "strip": true }))
+    serde_json::to_value(state).unwrap_or(Value::Null)
+}
+
+/// The culling strip the default Compare layout opens under Compare
+/// (`workbench::comparison`): the Results panel's second instance, the
+/// first view after the main explorer's.
+pub const DEFAULT_STRIP: &str = "helios.vault#2";
+
+/// The culling strips open now.
+pub fn open_strips(app: &AppHandle) -> Vec<String> {
+    open_views(app)
+        .into_iter()
+        .filter(|v| {
+            PanelId::new(v).is_ok_and(|id| {
+                app.instance_payload(&id)
+                    .get("strip")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            })
+        })
+        .collect()
 }
 
 /// What [`QUICK_OPEN_COMMAND`] does for the quick collection `quick`

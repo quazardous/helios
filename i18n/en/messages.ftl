@@ -3091,6 +3091,8 @@ gui-version-remove-title = Remove version { $number }?
 
 gui-version-remove-verb = Remove Version
 
+gui-view-culling-strip = Culling strip
+
 gui-viewport-no-image = No image
 
 gui-window-frame-error = window frame: { $error }

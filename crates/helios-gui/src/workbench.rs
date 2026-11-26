@@ -293,15 +293,30 @@ pub fn library(specs: &[PanelSpec]) -> Layout {
     )
 }
 
-/// The comparison's layout of these panels (see [`COMPARISON`]).
+/// The comparison's layout of these panels (see [`COMPARISON`]): Compare
+/// in the centre, the culling strip under it (a Library view in one row,
+/// linked to the main view: `library_views::open_command` with `strip`),
+/// the Filmstrip a tab beside it.
 pub fn comparison(specs: &[PanelSpec]) -> Layout {
-    only(
+    let mut layout = only(
         specs,
         &[
             (Area::Center, "helios.compare"),
             (Area::Bottom, "helios.filmstrip"),
         ],
-    )
+    );
+    let strip = PanelId::from_static(crate::library_views::DEFAULT_STRIP);
+    for (area, node) in &mut layout.areas {
+        if let (Area::Bottom, Node::Tabs { panels, active }) = (area, node) {
+            panels.insert(0, strip.clone());
+            *active = 0;
+        }
+    }
+    layout.instances.push(
+        egui_pop::model::layout::PanelInstance::new(strip)
+            .payload(crate::library_views::strip_state()),
+    );
+    layout
 }
 
 /// The workspace's network layout of these panels (see [`NETWORK`]).

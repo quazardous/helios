@@ -85,6 +85,39 @@ fn view_holds_what_is_shown_and_window_where_things_are() {
     egui_pop_test::assert_keymap_clean(h.state().app());
 }
 
+/// View ▸ Culling strip opens the culling strip (a Library view in one
+/// row, found by its accesskit name), ticked while it is open, and
+/// closes it.
+#[test]
+fn view_culling_strip_opens_and_closes_the_strip() {
+    use helios_gui::library_views::open_strips;
+    let mut h = shell();
+    let app = h.state().app().handle().clone();
+    assert!(open_strips(&app).is_empty());
+    click(&mut h, "View");
+    click(&mut h, "Culling strip");
+    h.run();
+    assert_eq!(open_strips(&app).len(), 1, "the entry opened a strip");
+    assert!(
+        h.query_by_label("Culling filmstrip").is_some(),
+        "the strip is shown"
+    );
+    let cx = egui_pop::model::when::WhenContext::default();
+    let ticked = |app: &egui_pop::api::app::AppHandle| {
+        app.list_items("helios.cullingStrip", &cx)
+            .into_iter()
+            .map(|e| e.checked)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ticked(&app), [true], "ticked while open");
+    click(&mut h, "View");
+    click(&mut h, "Culling strip");
+    h.run();
+    assert!(open_strips(&app).is_empty(), "the entry closed it");
+    assert!(h.query_by_label("Culling filmstrip").is_none());
+    assert_eq!(ticked(&app), [false]);
+}
+
 #[test]
 fn the_panels_list_ticks_shown_panels_and_reopens_a_closed_one_in_place() {
     let mut h = shell();
