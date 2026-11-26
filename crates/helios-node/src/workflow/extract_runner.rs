@@ -363,7 +363,7 @@ impl ExtractRunner {
             u.input.clone()
         };
         let mut node = ExtractNode::new(&u.name, def, input);
-        node.after = u.after.clone();
+        node.after.clone_from(&u.after);
         if !u.overrides.is_null() {
             node.overrides = serde_json::from_value::<Overrides>(u.overrides.clone())
                 .map_err(|e| format!("node `{}`: overrides: {e}", u.name))?;
@@ -397,16 +397,15 @@ impl ExtractRunner {
                 }));
             }
         }
-        let (store, rows) = match &self.vault {
-            Some(vault) => (
+        let (store, rows) = if let Some(vault) = &self.vault {
+            (
                 RunStore::Vault(VaultJournal::new(vault.clone(), &id)),
                 RunStore::Vault(VaultJournal::new(vault.clone(), &id)),
-            ),
-            None => {
-                let memory = MemoryStore::default();
-                let shared = memory.share();
-                (RunStore::Memory(memory), RunStore::Memory(shared))
-            }
+            )
+        } else {
+            let memory = MemoryStore::default();
+            let shared = memory.share();
+            (RunStore::Memory(memory), RunStore::Memory(shared))
         };
         let now = now_ms();
         let nodes: Vec<Value> = ask
