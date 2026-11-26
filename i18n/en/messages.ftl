@@ -1435,6 +1435,10 @@ gui-last-quit-cut = The last quit cut short: { $what }
 
 gui-layout-not-saved = The layout was not saved: { $error }
 
+gui-library-advanced = Advanced
+
+gui-library-advanced-tip = The search as rows of rules, each one editable
+
 gui-library-album-add = Add the selected photos
 
 gui-library-album-delete = Delete the album
