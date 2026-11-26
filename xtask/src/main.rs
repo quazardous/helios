@@ -79,7 +79,7 @@
 //!   bump moves those pins to their newest green commit, and the release
 //!   guard refuses a release while any of them comes from git (see
 //!   `pins.rs`).
-//! - `hud-bench [COMPOSITE...]`: the egui_hud agent bench's counts per
+//! - `hud-bench [COMPOSITE...]`: the `egui_hud` agent bench's counts per
 //!   workshop: presentation decisions, one-control rules, parameters shown
 //!   with no intervention, files a global style change touches (see
 //!   `hud_bench.rs`, docs/design/egui-hud-agent-bench.md).

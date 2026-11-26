@@ -1,7 +1,7 @@
-//! `cargo xtask hud-bench [COMPOSITE...]`: the counter of the egui_hud
+//! `cargo xtask hud-bench [COMPOSITE...]`: the counter of the `egui_hud`
 //! agent bench (`docs/design/egui-hud-agent-bench.md`).
 //!
-//! egui_hud's design rule: a feature must reduce what an agent composing a
+//! `egui_hud`'s design rule: a feature must reduce what an agent composing a
 //! workshop has to know. The bench counts, in the files that make a
 //! workshop, the presentation decisions written by hand and the rules that
 //! apply to one control only, by pattern, so the counts are never taken by
@@ -29,7 +29,7 @@ pub const HOST: &[&str] = &[
     "crates/helios-rack/src/tools.rs",
 ];
 
-/// The face ids of egui_hud's face library (`egui_hud::face::library`).
+/// The face ids of `egui_hud`'s face library (`egui_hud::face::library`).
 pub const FACES: &[&str] = &[
     "slider",
     "fader",
@@ -260,7 +260,7 @@ pub struct Workshop {
     pub id: String,
     /// Whether the composite has a `workshop` block (a workshop, not only
     /// a macro).
-    pub is_workshop: bool,
+    pub has_workshop_block: bool,
     pub counts: Counts,
     /// Exposed parameters, and those shown with no intervention.
     pub exposed: usize,
@@ -324,7 +324,7 @@ pub fn workshop(root: &Path, composite: &Path) -> Result<Workshop, String> {
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", composite.display()))?;
     let mut w = Workshop {
         id: v["id"].as_str().unwrap_or("?").to_string(),
-        is_workshop: v.get("workshop").is_some(),
+        has_workshop_block: v.get("workshop").is_some(),
         ..Workshop::default()
     };
     let own = count_json(&v);
@@ -393,7 +393,7 @@ pub fn run(root: &Path, args: &[&str]) -> Option<ExitCode> {
                 println!(
                     "| {} | {} | {} | {} | {} | {} | {} | {} | {}/{} | {} |",
                     w.id,
-                    if w.is_workshop { "yes" } else { "no" },
+                    if w.has_workshop_block { "yes" } else { "no" },
                     k.face,
                     k.slot,
                     k.kit,
