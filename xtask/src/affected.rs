@@ -24,7 +24,8 @@
 //! 6. A pull request's test manifest is narrower than the selection (a few
 //!    suites, not a whole crate): [`GUI_SUITES`] names, for the desktop's
 //!    sources, the suites that draw them, and the selection lists them as
-//!    manifest lines.
+//!    manifest lines; [`UNIT_GUARDS`] adds the unit tests inside a crate
+//!    that walk every command or verb a change can touch.
 //!
 //! The selection prints as JSON on stdout (`base`, `everything`, `reasons`,
 //! `changed`, `crates`, `nextest_filter`, `box_jobs`, `manifest`) and as a
@@ -159,6 +160,49 @@ pub const GUI_SUITES: [(&[&str], &[&str]); 1] = [(
         "shortcuts",
     ],
 )];
+
+/// The guard unit tests inside a crate, and the sources they guard: a
+/// test that walks every registered command or every declared verb, so a
+/// change to any of them can break it. Each is `(path prefixes, crate,
+/// filter)`, listed as `test-crate crate=<crate> test=lib filter=<filter>`.
+///
+/// No manifest named them, and three went red on `next` on 2026-11-25
+/// after green gates: the walk of every command's icon (helios-gui) and
+/// the check that every node verb is declared once and unchanged
+/// (helios-node). Add a line when a red `next` shows a missed guard.
+pub const UNIT_GUARDS: [(&[&str], &str, &str); 2] = [
+    (&["crates/helios-gui/src/"], "helios-gui", "plugins::tests"),
+    (
+        // where the node's verbs are declared ([`helios_node::commands::SETS`]
+        // and the sets its registry adds), the schema helpers they are
+        // built with, and the fixture the guard compares them to
+        &[
+            "crates/helios-node/src/commands.rs",
+            "crates/helios-node/src/workflow/",
+            "crates/helios-node/tests/fixtures/verbs-before-the-move.json",
+            "crates/helios-decision/src/verbs.rs",
+            "crates/helios-cache/src/verbs.rs",
+            "crates/helios-node-core/src/settings.rs",
+            "crates/helios-node-core/src/commands.rs",
+            "crates/helios-node-core/src/library.rs",
+            "crates/helios-node-core/src/cursor.rs",
+            "crates/helios-node-core/src/promises.rs",
+            "crates/helios-node-core/src/calibrate.rs",
+            "crates/helios-command/src/schema.rs",
+        ],
+        "helios-node",
+        "commands::tests",
+    ),
+];
+
+/// The guards of [`UNIT_GUARDS`] that `path` can break, as `(crate,
+/// filter)`.
+pub fn unit_guards(path: &str) -> impl Iterator<Item = (&'static str, &'static str)> {
+    UNIT_GUARDS
+        .iter()
+        .filter(move |(prefixes, _, _)| prefixes.iter().any(|p| path.starts_with(p)))
+        .map(|(_, krate, filter)| (*krate, *filter))
+}
 
 /// The suites of [`GUI_SUITES`] that draw `path`.
 pub fn gui_suites(path: &str) -> impl Iterator<Item = &'static str> {
@@ -384,6 +428,9 @@ pub struct Selection {
     pub data_jobs: BTreeSet<&'static str>,
     /// The desktop's suites that draw what changed ([`GUI_SUITES`]).
     pub suites: BTreeSet<&'static str>,
+    /// The guard unit tests what changed can break ([`UNIT_GUARDS`]), as
+    /// `(crate, filter)`.
+    pub guards: BTreeSet<(&'static str, &'static str)>,
 }
 
 /// Maps changed paths to a selection.
@@ -392,8 +439,10 @@ pub fn select(graph: &Graph, paths: &[String]) -> Selection {
     let mut changed = BTreeSet::new();
     let mut data_jobs = BTreeSet::new();
     let mut suites = BTreeSet::new();
+    let mut guards = BTreeSet::new();
     for path in paths {
         suites.extend(gui_suites(path));
+        guards.extend(unit_guards(path));
         for job in DATA_JOBS {
             if job.paths.iter().any(|p| {
                 if p.ends_with('/') {
@@ -441,6 +490,7 @@ pub fn select(graph: &Graph, paths: &[String]) -> Selection {
         crates,
         data_jobs,
         suites,
+        guards,
     }
 }
 
@@ -501,6 +551,7 @@ impl Selection {
             crates: BTreeSet::new(),
             data_jobs: BTreeSet::new(),
             suites: BTreeSet::new(),
+            guards: BTreeSet::new(),
         };
         match value {
             "all" => {
@@ -523,11 +574,16 @@ impl Selection {
 
     /// The lines a pull request's test manifest must hold for what
     /// changed, as `cargo xtask manifest check` reads them: the suites
-    /// that draw it.
+    /// that draw it, then the guard unit tests it can break.
     pub fn manifest_lines(&self) -> Vec<String> {
         self.suites
             .iter()
             .map(|s| format!("test-crate crate={GUI_CRATE} test={s}"))
+            .chain(
+                self.guards
+                    .iter()
+                    .map(|(c, f)| format!("test-crate crate={c} test=lib filter={f}")),
+            )
             .collect()
     }
 
@@ -577,7 +633,7 @@ impl Selection {
         if !lines.is_empty() {
             let _ = writeln!(
                 out,
-                "  a pull request's manifest lists the suites that draw what changed:"
+                "  a pull request's manifest lists the suites and guards of what changed:"
             );
             for line in lines {
                 let _ = writeln!(out, "  - {line}");
@@ -959,8 +1015,75 @@ mod tests {
             assert!(s.summary("origin/next", 1).contains("test=control_names"));
         }
         let s = select(&graph(), &paths(&["crates/helios-gui/src/masks.rs"]));
-        assert!(s.suites.is_empty(), "a source no line names lists nothing");
+        assert!(s.suites.is_empty(), "a source no line names lists no suite");
+        let s = select(&graph(), &paths(&["docs/next.md"]));
+        assert!(s.manifest_lines().is_empty(), "a doc lists nothing");
         assert!(!s.summary("origin/next", 1).contains("manifest"));
+    }
+
+    #[test]
+    fn a_change_lists_the_guard_unit_tests_it_can_break() {
+        // On 2026-11-25 the walk of every command's icon and the check of
+        // every node verb went red on next: no manifest named them.
+        let icons = "test-crate crate=helios-gui test=lib filter=plugins::tests".to_string();
+        let verbs = "test-crate crate=helios-node test=lib filter=commands::tests".to_string();
+        let s = select(&graph(), &paths(&["crates/helios-gui/src/masks.rs"]));
+        assert_eq!(s.manifest_lines(), vec![icons.clone()]);
+        assert_eq!(s.to_json("origin/next")["manifest"], json!([icons]));
+        assert!(
+            s.summary("origin/next", 1)
+                .contains("filter=plugins::tests")
+        );
+        for path in [
+            "crates/helios-node/src/commands.rs",
+            "crates/helios-node/src/workflow/mod.rs",
+            "crates/helios-decision/src/verbs.rs",
+            "crates/helios-node-core/src/settings.rs",
+            "crates/helios-node/tests/fixtures/verbs-before-the-move.json",
+        ] {
+            let s = select(&graph(), &paths(&[path]));
+            assert_eq!(s.manifest_lines(), vec![verbs.clone()], "{path}");
+        }
+        // suites first, then the guards, each once
+        let s = select(
+            &graph(),
+            &paths(&[
+                "crates/helios-gui/src/library.rs",
+                "crates/helios-gui/src/plugins.rs",
+                "crates/helios-cache/src/verbs.rs",
+            ]),
+        );
+        let lines = s.manifest_lines();
+        assert_eq!(lines[lines.len() - 2..], [icons, verbs]);
+        assert_eq!(lines.len(), s.suites.len() + 2);
+        let s = select(&graph(), &paths(&["crates/helios-node/src/batch.rs"]));
+        assert!(s.manifest_lines().is_empty(), "not a verb source");
+    }
+
+    #[test]
+    fn the_guards_and_their_sources_exist() {
+        let root = crate::root();
+        for (prefixes, krate, filter) in UNIT_GUARDS {
+            let module = filter.strip_suffix("::tests").expect("a module's tests");
+            let file = format!("crates/{krate}/src/{module}.rs");
+            let text =
+                std::fs::read_to_string(root.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+            assert!(text.contains("mod tests {"), "{file}: no tests module");
+            manifest_line_is_valid(krate, filter);
+            for prefix in prefixes {
+                assert!(root.join(prefix).exists(), "no source {prefix}");
+            }
+        }
+    }
+
+    fn manifest_line_is_valid(krate: &str, filter: &str) {
+        let body = format!(
+            "Tests:\n- test-crate crate={krate} test=lib filter={filter}\nCoverage: the guard.\n"
+        );
+        let benchfile = std::fs::read_to_string(crate::root().join("tools/bench/Benchfile"))
+            .expect("the Benchfile");
+        crate::manifest::parse(&body, &benchfile)
+            .unwrap_or_else(|e| panic!("{krate} {filter}: {e:?}"));
     }
 
     #[test]

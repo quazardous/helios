@@ -55,7 +55,11 @@ A pull request is merged only when its tests passed on the box and its
      `control_names`, `library_filter`, `library_gallery` and
      `library_window`). A suite that went red on `next` because a
      manifest missed it gets its line in `GUI_SUITES`
-     (`xtask/src/affected.rs`).
+     (`xtask/src/affected.rs`). The unit tests inside a crate that walk
+     every command or verb are listed too (`UNIT_GUARDS`): a desktop
+     source change lists `test-crate crate=helios-gui test=lib
+     filter=plugins::tests`, a node verb change `test-crate
+     crate=helios-node test=lib filter=commands::tests`.
    - A change with nothing to run says `Tests: none — <why>`.
    - **A change to a screen** (a widget, a colour, a font, a layout, a
      text) regenerates the reference images of every snapshot suite it
@@ -131,14 +135,17 @@ brief ([tester.md](tester.md)), takes them into `next` in order (first
 in, first out):
 
 1. Picks a batch of one to three that do not touch the same files.
-2. Runs `cargo xtask gate <n>…`. First each pull request's own `check`
+2. Runs `cargo xtask gate <n>…`. First a pull request whose `pr-lint`
+   jobs are not all green on GitHub (one failed or still runs) is left out,
+   its jobs named (`catalogue`, `linters`). Then each pull request's own `check`
    (clippy, every lint at once) runs on its own branch, side by side; one
    that fails is left out of the batch with its lints, so it cannot turn
    the batch red. The others are merged on a temporary branch `gate/<n>-…`
    made from `next`, and the union of their manifests runs on the bench
    box on that branch (one build, the jobs side by side; the box runs
    `check` and clippy first).
-3. **Green:** `next` fast-forwards to the tested commit, GitHub marks the
+3. **Green:** `next` fast-forwards to the tested commit (only pull
+   requests whose `pr-lint` was green are in it), GitHub marks the
    pull requests merged, their branches and the temporary one are deleted;
    the tester posts the result on each ticket. Beside the tests the box
    builds the tested commit for the desktop (`build-gui`, red if it fails),
