@@ -190,7 +190,8 @@ mod tests {
 /// whole shell, a library of its own in memory reached through its node,
 /// the scenario runner paired at start (the harness of
 /// `agent_preset`'s socket tests, frames stepped under a deadline).
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod socket {
     use std::os::unix::fs::PermissionsExt as _;
     use std::sync::Arc;
