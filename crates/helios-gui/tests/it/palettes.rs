@@ -1,5 +1,6 @@
 //! Panels as palettes (egui-pop's floating panels): the Masks panel and
-//! the scopes float over the image and dock back in their area.
+//! the scopes float over the image and dock back in their area; any
+//! other panel floats when asked.
 
 use egui::vec2;
 use egui_pop::model::ids::PanelId;
@@ -47,11 +48,29 @@ fn the_masks_panel_and_the_scopes_float_and_dock_back() {
         assert!(layout.floating_of(&id(panel)).is_none(), "{panel}");
         assert_eq!(layout.area_of(&id(panel)), Some(spec.area));
     }
-    // The other panels do not float.
-    let refused = h.state_mut().run("helios.params.float", json!(null), agent);
-    assert!(refused.is_err());
+    // The other panels float too (egui-pop: every panel may float unless
+    // it opts out; a palette only starts floating), and dock back home.
+    let params = id("helios.params");
+    assert_eq!(h.state().layout().area_of(&params), Some(Area::EndSide));
+    h.state_mut()
+        .run(
+            "helios.params.float",
+            json!({ "pos": [200.0, 60.0] }),
+            agent.clone(),
+        )
+        .unwrap();
+    h.run();
+    let layout = h.state().layout();
     assert_eq!(
-        h.state().layout().area_of(&id("helios.params")),
-        Some(Area::EndSide)
+        layout.floating_of(&params).expect("it floats").pos,
+        [200.0, 60.0]
     );
+    assert_eq!(layout.area_of(&params), None);
+    h.state_mut()
+        .run("helios.params.dock", json!(null), agent)
+        .unwrap();
+    h.run();
+    let layout = h.state().layout();
+    assert!(layout.floating_of(&params).is_none());
+    assert_eq!(layout.area_of(&params), Some(Area::EndSide));
 }

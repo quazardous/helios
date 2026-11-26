@@ -364,10 +364,20 @@ fn a_node_lost_for_too_long_has_its_jobs_forgotten() {
             break;
         }
     }
-    // A frame folds the jobs' ends, the next at the latest takes them
-    // out.
-    h.run();
-    h.run();
+    // A frame folds the jobs' ends, a later one takes them out: the
+    // child's end may reach the centre a frame after its batch's, so
+    // frames run until both are gone (or the deadline).
+    let deadline = Instant::now() + LONG;
+    loop {
+        h.run();
+        let centre = app.service(&JOBS).unwrap();
+        let gone =
+            centre.job("node:box/batch-1").is_none() && centre.job("node:box/export-1").is_none();
+        if gone || Instant::now() > deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let centre = app.service(&JOBS).unwrap();
     assert!(centre.job("node:box/batch-1").is_none(), "forgotten");
     assert!(
