@@ -221,7 +221,7 @@ impl Store {
             s.replaced
                 .retain(|Branch { after, steps }| !steps.is_empty() && ids.contains(after));
         });
-        let groups: std::collections::BTreeSet<u64> = self
+        let mut groups: std::collections::BTreeSet<u64> = self
             .undo
             .iter()
             .chain(&self.redo)
@@ -230,13 +230,9 @@ impl Store {
                     .iter()
                     .flat_map(|p| p.undo.iter().chain(&p.redo)),
             )
-            .chain(
-                self.images
-                    .iter()
-                    .flat_map(|(_, p)| p.undo.iter().chain(&p.redo)),
-            )
             .filter_map(|s| s.group)
             .collect();
+        groups.extend(self.images.groups());
         self.named.retain(|_, g| groups.contains(g));
         self.preview.clear();
         self.history_rev += 1;

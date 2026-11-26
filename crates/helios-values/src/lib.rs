@@ -63,7 +63,7 @@ mod preview;
 pub use commands::{register, value_from_json, value_to_json};
 pub use graph::{BYPASS, Keep, Rebound, bind_node, bypass_path, node_path, rebind, sync};
 pub use history_scope::{HistoryScope, PLUGIN_PATHS, WORKSPACE_PATHS};
-pub use image_lines::{PARKED_IMAGES, PARKED_STEPS};
+pub use image_lines::{PARKED_STEPS, step_bytes};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

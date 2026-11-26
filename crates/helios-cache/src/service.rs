@@ -162,6 +162,29 @@ pub const RENDER_STEP: Kind = Kind {
     reason: "",
 };
 
+/// The undo histories parked in RAM: each photo's line kept when another
+/// photo opens, so Ctrl+Z on it undoes its last step when it opens again.
+/// They have a budget of their own ([`HISTORY_BUDGET`]), each line costed
+/// by its estimated bytes, the least recently parked going first. Session
+/// only: a photo whose line went has it rebuilt from its saved versions
+/// when it opens again.
+pub const IMAGE_HISTORY: Kind = Kind {
+    id: "history.image",
+    title: "Undo histories",
+    tiers: &[Tier::Ram],
+    identity: Identity::Content,
+    cost: Cost::Decode,
+    share: Share::Default,
+    persist: false,
+    version: 1,
+    unused: None,
+    scope: ScopeRule::Shared,
+    reason: "",
+};
+
+/// The parked undo histories' RAM budget by default: 64 MiB.
+pub const HISTORY_BUDGET: u64 = 64 << 20;
+
 /// How long an import preview not seen again is kept on disk: 30 days.
 pub const GLANCE_UNUSED: Duration = Duration::from_hours(30 * 24);
 
