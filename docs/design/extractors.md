@@ -173,6 +173,19 @@ Still to come: the node verb, the `Ai` service and a library preview
 and the Queue panel, a run taken over after a restart, input nodes
 resolved to image ids, the alter node, and the batch-endpoint tests.
 
+### Slice 5, the node's engine (2026-11-26)
+
+The node process works `workflow.extract` with the AI service the
+desktop uses (`Ai::open` on the user's AI settings: routes and
+overrides, retries, the pre-run check, the cache), opened the first time
+the verb is asked, and the library's previews
+(`helios_node::workflow::library_source::LibraryPreviews`): a picture is
+sent as its file, a raw as its embedded colour JPEG at least 1024 px long
+when it has one, the version `None` in the cache key. A node with no
+library (`--vault`) refuses the verb and says so; an AI service that
+does not open refuses the request with its reason and is tried again on
+the next. The raw's EXIF orientation is not applied yet.
+
 It builds on [ai-models.md](../ai-models.md) (providers, routing,
 versioned prompts, the call log), [workflow-level.md](../workflow-level.md)
 (runs, journal rows per item and graph node, choices),

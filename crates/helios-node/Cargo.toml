@@ -43,6 +43,9 @@ log = "0.4"
 # The saved import sources' document (`user/import-sources`).
 toml = "1"
 helios-connect.workspace = true
+# MIT OR Apache-2.0 (already in the tree through helios-ai): a raw's
+# embedded preview encoded again as a JPEG for an extract run.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [target.'cfg(unix)'.dependencies]
 # MIT OR Apache-2.0: the node's relayable facts served to the desktop
@@ -66,7 +69,6 @@ required-features = ["stability"]
 helios-calibrate.workspace = true
 helios-colour.workspace = true
 egui-pop-model.workspace = true
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [lints]
 workspace = true

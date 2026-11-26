@@ -234,6 +234,28 @@ fn name_pattern() -> Value {
     json!("{stem}.{ext}")
 }
 
+fn extract_nodes() -> Value {
+    json!({
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "object", "properties": {
+            "name": { "type": "string" },
+            "extractor": { "type": "string", "pattern": "^[^@]+@[0-9]+$" },
+            "after": { "type": "array", "items": { "type": "string" } },
+            "input": { "type": "object" },
+            "overrides": { "type": "object" }
+        }, "required": ["name", "extractor"] }
+    })
+}
+
+fn extract_items() -> Value {
+    json!({
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string", "pattern": "^image:[0-9a-f]{64}$" }
+    })
+}
+
 fn run_items() -> Value {
     json!({
         "type": "array",
@@ -2102,6 +2124,31 @@ pub const TOOLS: &[Tool] = &[
         ],
     },
     Tool {
+        name: "helios_workflow_extract",
+        endpoint: Endpoint::Control,
+        cmd: "workflow.extract",
+        description: "Runs extractors (an AI model reading each photo: captions, keywords) over library photos as an extract run, worked by the node as a job of kind extract with the user's AI settings: one row per photo and extractor node, each concluded once, results kept in the library's cache. Checked before anything runs: an extractor no model serves refuses the run, naming it. The same nodes and photos again while the run is at work give that run back. Answers the run's id, its job, the rows to conclude and already",
+        params: &[
+            optional(
+                "title",
+                optional_string,
+                "The run's title, as the jobs centre shows it",
+            ),
+            Param {
+                name: "nodes",
+                schema: extract_nodes,
+                description: "The extractor nodes: name, extractor as id@version, after (the nodes it waits for), input (the prompt's variables), overrides (route overrides)",
+                default: None,
+            },
+            Param {
+                name: "items",
+                schema: extract_items,
+                description: "Library photos, image: and their content hash",
+                default: None,
+            },
+        ],
+    },
+    Tool {
         name: "helios_workflow_runs",
         endpoint: Endpoint::Control,
         cmd: "workflow.runs",
@@ -3395,6 +3442,10 @@ mod tests {
                     "format" => json!("png"),
                     "path" => json!("/nonexistent/out.png"),
                     "items" if tool.cmd == "workflow.prioritize" => json!(["/nonexistent/a.png"]),
+                    "items" if tool.cmd == "workflow.extract" => {
+                        json!([format!("image:{}", "0".repeat(64))])
+                    }
+                    "nodes" => json!([{ "name": "caption", "extractor": "caption@1" }]),
                     "items" => json!(["/nonexistent/a.png", { "path": "/nonexistent/b.png" }]),
                     "to" => json!("top"),
                     "corners" => json!([[10.0, 10.0], [90.0, 10.0], [90.0, 60.0], [10.0, 60.0]]),
@@ -3513,6 +3564,7 @@ mod tests {
             "decision_decide",
             "decision_reask",
             "workflow.submit",
+            "workflow.extract",
             "workflow.runs",
             "workflow.items",
             "workflow.forget",

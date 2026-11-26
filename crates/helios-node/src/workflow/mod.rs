@@ -30,6 +30,7 @@ use serde_json::{Value, json};
 
 pub mod extract;
 pub mod extract_runner;
+pub mod library_source;
 pub mod lifecycle;
 pub mod runs;
 

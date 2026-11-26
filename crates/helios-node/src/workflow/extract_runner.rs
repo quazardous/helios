@@ -29,9 +29,14 @@
 //!   ([`ExtractRunner::items`]), read from the run's rows, so the Queue
 //!   panel shows them as it shows export runs.
 //!
-//! Not yet: an AI and a library image source opened by the node process
-//! (the verb is refused until the node hands the runner one,
-//! [`ExtractRunner::set_engine`]), a run taken over after a restart.
+//! - **The engine**: the node process hands the runner an opener
+//!   ([`ExtractRunner::set_opener`]): the AI service the desktop uses
+//!   (`Ai::open` on the user's AI settings: its routes and overrides,
+//!   retries, pre-run check and cache) and the library's previews
+//!   ([`super::library_source::LibraryPreviews`]), opened the first time
+//!   the verb is asked. A node with no library refuses the verb, saying so.
+//!
+//! Not yet: a run taken over after a restart.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -233,11 +238,35 @@ pub struct ExtractRunner {
     catalog: Catalog,
     /// The AI and image source the verb's runs are worked with, once the
     /// node hands them over.
-    engine: Mutex<Option<Engine>>,
+    engine: Mutex<Slot>,
 }
 
 /// The AI a run calls, and where it reads its images.
-type Engine = (Arc<Ai>, Arc<dyn ImageSource + Send + Sync>);
+pub type Engine = (Arc<Ai>, Arc<dyn ImageSource + Send + Sync>);
+
+/// Opens the engine the first time the verb is asked (the AI service
+/// starts its threads then, not with every node).
+pub type Opener = Box<dyn Fn() -> Result<Engine, String> + Send>;
+
+/// The runner's engine: none (with the reason), to open, or open.
+enum Slot {
+    None(String),
+    Lazy(Opener),
+    Ready(Engine),
+}
+
+impl Slot {
+    /// The engine, opened now if it was not yet; the reason it cannot be.
+    fn get(&mut self) -> Result<Engine, String> {
+        let engine = match self {
+            Slot::Ready(engine) => return Ok(engine.clone()),
+            Slot::None(reason) => return Err(reason.clone()),
+            Slot::Lazy(open) => open()?,
+        };
+        *self = Slot::Ready(engine.clone());
+        Ok(engine)
+    }
+}
 
 impl ExtractRunner {
     pub fn new(bus: Arc<Bus>, jobs: Jobs, vault: Option<SharedVault>, owner: &str) -> Self {
@@ -248,7 +277,9 @@ impl ExtractRunner {
             owner: owner.into(),
             runs: Mutex::new(BTreeMap::new()),
             catalog: builtin_catalog(),
-            engine: Mutex::new(None),
+            engine: Mutex::new(Slot::None(
+                "this node opens no AI: extract runs cannot be worked here".into(),
+            )),
         }
     }
 
@@ -261,7 +292,20 @@ impl ExtractRunner {
 
     /// Hands the runner the AI and image source the verb's runs use.
     pub fn set_engine(&self, ai: Arc<Ai>, source: Arc<dyn ImageSource + Send + Sync>) {
-        *self.engine.lock().unwrap_or_else(PoisonError::into_inner) = Some((ai, source));
+        *self.engine.lock().unwrap_or_else(PoisonError::into_inner) = Slot::Ready((ai, source));
+    }
+
+    /// Hands the runner what opens its AI and image source the first time
+    /// the verb is asked; an opening that fails refuses that request with
+    /// its reason, and is tried again on the next.
+    pub fn set_opener(&self, open: Opener) {
+        *self.engine.lock().unwrap_or_else(PoisonError::into_inner) = Slot::Lazy(open);
+    }
+
+    /// Says why the verb's runs cannot be worked by this node (no
+    /// library, say).
+    pub fn set_unavailable(&self, reason: &str) {
+        *self.engine.lock().unwrap_or_else(PoisonError::into_inner) = Slot::None(reason.into());
     }
 
     /// `workflow.extract`: each use resolved in the catalogue, the photos
@@ -276,10 +320,8 @@ impl ExtractRunner {
             .engine
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .ok_or_else(|| {
-                Message::plain("this node opens no AI yet: extract runs cannot be worked here")
-            })?;
+            .get()
+            .map_err(Message::plain)?;
         let nodes = uses
             .iter()
             .map(|u| self.node(u))

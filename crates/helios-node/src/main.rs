@@ -94,7 +94,9 @@ use helios_inspect::control::ControlRequest;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
 use helios_node::vault_node::{Options as VaultNodeOptions, VaultNode};
+use helios_node::workflow::extract::ImageSource;
 use helios_node::workflow::extract_runner::ExtractRunner;
+use helios_node::workflow::library_source::LibraryPreviews;
 use helios_node::workflow::runs::{Context as RunsContext, SharedVault, Workflows};
 use helios_resolve::{Report, Resolver, Settings};
 use serde::Serialize;
@@ -2208,6 +2210,8 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
     // Its relayable facts are served to the desktop on its subscribe
     // endpoint (`subscribe` with `relay`).
     let inspector = Inspector::new(bus.clone()).with_relay(relay);
+    // The library the extract runs read their photos from.
+    let library = vault.clone();
     // The runs last in the node's vault, or in `--runs-vault`'s.
     let runs_vault = match &args.runs_vault {
         None => vault,
@@ -2235,14 +2239,27 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         keep_ms: (config.number("system.workflow.keep_days") * 86_400_000.0) as u64,
     }));
     workflows.start(&loaded.graph);
-    // Extract runs: the node opens no AI yet, so `workflow.extract` is
-    // refused until it hands the runner one; listed beside the runs.
+    // Extract runs, listed beside the runs: worked with the AI service the
+    // desktop uses (the user's AI settings), opened the first time
+    // `workflow.extract` is asked, and the library's previews.
     let extracts = Arc::new(ExtractRunner::new(
         bus.clone(),
         jobs.clone(),
         runs_vault,
         inspector.instance(),
     ));
+    match library {
+        Some(library) => extracts.set_opener(Box::new(move || {
+            let ai = helios_ai::Ai::open(helios_ai::store::Paths::default_for_user())
+                .map_err(|e| format!("the AI service: {e}"))?;
+            let source: Arc<dyn ImageSource + Send + Sync> =
+                Arc::new(LibraryPreviews::new(library.clone()));
+            Ok((Arc::new(ai), source))
+        })),
+        None => extracts.set_unavailable(
+            "this node has no library (--vault): extract runs cannot be worked here",
+        ),
+    }
     workflows.attach_extracts(extracts.clone());
     let node = Arc::new(Node {
         bus: bus.clone(),
