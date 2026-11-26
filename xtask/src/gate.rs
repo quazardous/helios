@@ -6,8 +6,11 @@
 //!
 //! 1. Each pull request must target `next` and carry a valid manifest
 //!    (`manifest.rs`); one that does not is left out with its reason.
-//!    Each taken pull request's own `check` (clippy) then runs first on
-//!    its branch, side by side; one that fails is left out with its lints.
+//!    One whose `pr-lint` checks on GitHub are not all green (a job
+//!    failed, or still runs) is left out, its red or pending jobs named
+//!    (`catalogue`, `linters`). Each taken pull request's own `check`
+//!    (clippy) then runs first on its branch, side by side; one that fails
+//!    is left out with its lints.
 //! 2. A temporary branch `gate/<n>` is made from `origin/next` and each
 //!    pull request's branch merged into it (`--no-ff`, "Merge pull request
 //!    #N from …"). A branch that does not merge cleanly is left out.
@@ -111,6 +114,84 @@ pub fn plan(prs: &[Pr], benchfile: &str, branch: &str) -> Plan {
         }
     }
     plan
+}
+
+/// The GitHub workflow whose jobs must all be green before a merge
+/// (docs/next.md, step 5).
+pub const PR_LINT: &str = "pr-lint";
+
+/// What a pull request's `pr-lint` jobs say, from `gh pr checks <n>
+/// --json name,state,workflow,bucket`: `None` when all are green, else why
+/// it waits (its failed jobs, then those still running).
+pub fn pr_lint_verdict(checks: &str) -> Option<String> {
+    let v: serde_json::Value = match serde_json::from_str(checks) {
+        Ok(v) => v,
+        Err(e) => return Some(format!("`{PR_LINT}` checks unreadable: {e}")),
+    };
+    let jobs: Vec<&serde_json::Value> = v
+        .as_array()
+        .map(|a| a.iter().filter(|c| c["workflow"] == PR_LINT).collect())
+        .unwrap_or_default();
+    if jobs.is_empty() {
+        return Some(format!("`{PR_LINT}` has not run yet"));
+    }
+    let named = |buckets: &[&str]| -> Vec<String> {
+        jobs.iter()
+            .filter(|c| buckets.contains(&c["bucket"].as_str().unwrap_or("")))
+            .map(|c| format!("`{}`", c["name"].as_str().unwrap_or("?")))
+            .collect()
+    };
+    let failed = named(&["fail", "cancel"]);
+    let pending = named(&["pending"]);
+    let mut why = Vec::new();
+    if !failed.is_empty() {
+        why.push(format!("`{PR_LINT}` red: {}", failed.join(", ")));
+    }
+    if !pending.is_empty() {
+        why.push(format!("`{PR_LINT}` still running: {}", pending.join(", ")));
+    }
+    (!why.is_empty()).then(|| why.join("; "))
+}
+
+/// Leaves out of `plan` each taken pull request whose `pr-lint` is not
+/// green. `checks` gives a pull request's `gh pr checks` JSON ([`gh_checks`]
+/// outside tests).
+pub fn leave_out_red_pr_lint(plan: &mut Plan, checks: impl Fn(u64) -> Result<String, String>) {
+    for number in plan.take.clone() {
+        let why = match checks(number) {
+            Ok(json) => pr_lint_verdict(&json),
+            Err(e) => Some(format!("`{PR_LINT}` checks not read: {e}")),
+        };
+        if let Some(why) = why {
+            plan.take.retain(|n| *n != number);
+            plan.runs.retain(|r| r.pr != number);
+            plan.left_out.push((number, why));
+        }
+    }
+}
+
+/// A pull request's checks, as `gh pr checks` gives them. gh exits
+/// non-zero while a check fails or runs; its JSON still says which.
+pub fn gh_checks(number: u64) -> Result<String, String> {
+    let out = Command::new("gh")
+        .args([
+            "pr",
+            "checks",
+            &number.to_string(),
+            "--json",
+            "name,state,workflow,bucket",
+        ])
+        .output()
+        .map_err(|e| format!("cannot run gh: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if stdout.starts_with('[') {
+        Ok(stdout)
+    } else {
+        Err(format!(
+            "#{number}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
@@ -235,6 +316,9 @@ fn gate(root: &Path, numbers: &[u64]) -> Result<String, String> {
 
     let prs: Vec<Pr> = numbers.iter().map(|n| pr(*n)).collect::<Result<_, _>>()?;
     let mut plan = plan(&prs, &benchfile, &temp);
+    // A red or pending `pr-lint` (the English catalogue, the linters) is
+    // never merged: leave it out before the box spends a build on it.
+    leave_out_red_pr_lint(&mut plan, gh_checks);
 
     // Each pull request's own `check` (clippy, every lint at once) first,
     // side by side on its own branch: one that fails is left out with its
@@ -542,6 +626,53 @@ mod tests {
             ]
         );
         assert_eq!(p.runs[1].ext_job_id, "gate-1-2");
+    }
+
+    fn checks(catalogue: &str, linters: &str) -> String {
+        format!(
+            r#"[{{"name":"catalogue","state":"X","workflow":"pr-lint","bucket":"{catalogue}"}},
+               {{"name":"linters","state":"X","workflow":"pr-lint","bucket":"{linters}"}},
+               {{"name":"test","state":"SKIPPED","workflow":"ci","bucket":"fail"}}]"#
+        )
+    }
+
+    #[test]
+    fn a_pull_request_with_its_pr_lint_not_green_is_left_out() {
+        // On 2026-11-25 five pull requests merged with `catalogue` red.
+        assert_eq!(pr_lint_verdict(&checks("pass", "pass")), None);
+        assert_eq!(pr_lint_verdict(&checks("pass", "skipping")), None);
+        let red = pr_lint_verdict(&checks("fail", "pass")).unwrap();
+        assert!(
+            red.contains("`catalogue`") && !red.contains("linters"),
+            "{red}"
+        );
+        let pending = pr_lint_verdict(&checks("pass", "pending")).unwrap();
+        assert!(pending.contains("still running: `linters`"), "{pending}");
+        assert!(pr_lint_verdict("[]").unwrap().contains("not run"));
+
+        let body = "Tests:\n- test-crate crate=a test=lib\nCoverage: x.\n";
+        let prs = [
+            pr(1, "next", body),
+            pr(2, "next", body),
+            pr(3, "next", body),
+            pr(4, "next", body),
+        ];
+        let mut p = plan(&prs, BF, "gate/1-4");
+        leave_out_red_pr_lint(&mut p, |n| match n {
+            1 => Ok(checks("pass", "pass")),
+            2 => Ok(checks("fail", "pass")),
+            3 => Ok(checks("pass", "pending")),
+            _ => Err("gh: offline".into()),
+        });
+        assert_eq!(p.take, [1]);
+        assert_eq!(p.runs.iter().map(|r| r.pr).collect::<Vec<_>>(), [1]);
+        let why: Vec<(u64, &str)> = p.left_out.iter().map(|(n, w)| (*n, w.as_str())).collect();
+        assert_eq!(why[0].0, 2);
+        assert!(why[0].1.contains("red: `catalogue`"));
+        assert_eq!(why[1].0, 3);
+        assert!(why[1].1.contains("linters"));
+        assert_eq!(why[2].0, 4);
+        assert!(why[2].1.contains("offline"));
     }
 
     #[test]
