@@ -4506,11 +4506,11 @@ impl Library {
         // chip; the words stay in the field.
         let text = self.view.search.text().to_string();
         let entered = enter && !picked && (out.response.has_focus() || out.response.lost_focus());
-        if (text != typed && text.ends_with(char::is_whitespace)) || entered {
-            if let Some((rules, rest)) = suggest::commit(&text) {
-                self.view.rules.extend(rules);
-                self.view.search.set_text(rest);
-            }
+        if ((text != typed && text.ends_with(char::is_whitespace)) || entered)
+            && let Some((rules, rest)) = suggest::commit(&text)
+        {
+            self.view.rules.extend(rules);
+            self.view.search.set_text(rest);
         }
         // The field's filter is the whole search: the chips' rules, then
         // the words typed. A chip made or removed reaches it at the next
