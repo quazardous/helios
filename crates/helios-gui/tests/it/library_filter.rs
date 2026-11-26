@@ -2546,7 +2546,12 @@ fn the_versions_strip_switches_and_a_removed_copy_comes_back_with_undo() {
     assert!(listed[1].current, "the newest is current: {listed:?}");
     let first = listed[0].version.clone();
 
-    // A click on the first version makes it current.
+    // A click on the first version makes it current. The strip ends the
+    // Filters' scroll: scrolled into view first, as a hand would (the
+    // search's Advanced toggle takes a line of its own in this narrow
+    // panel, and the strip falls under the status bar).
+    h.get_by_label("1 Copy").scroll_to_me();
+    h.run();
     h.get_by_label("1 Copy").click();
     settle(&mut h, &mut persist, 12.0);
     settle(&mut h, &mut persist, 13.0);
