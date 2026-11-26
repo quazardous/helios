@@ -89,6 +89,9 @@ pub(super) struct Core {
     /// The node facts the Settings app's read kernel follows
     /// ([`super::reads`]).
     pub(super) reads: Option<crate::node_events::Listener>,
+    /// Where `photo.history` reads the photos' versions
+    /// ([`super::photo_history`]).
+    pub(super) photo_history: Option<super::photo_history::Reader>,
     /// The lines of the imports the host runs (`import_sink`).
     pub(super) import_lines: (ImportLines, std::sync::mpsc::Receiver<(Value, Value)>),
     /// Where every import's end is said (`import_ends`), and where the

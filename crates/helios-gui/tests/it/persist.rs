@@ -982,3 +982,80 @@ fn a_drag_makes_compare_render_again_once_at_its_end() {
     drop((shell, persist));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `photo.history` (docs/design/undo.md, R6): an agent reads a photo's
+/// steps once it is closed, from its versions, with the read-only grant
+/// every client has: the undone step marked, a page at a time, never by
+/// a path.
+#[test]
+fn an_agent_reads_a_closed_photos_steps_read_only() {
+    use helios_gui::shell::photo_history;
+    use helios_shell::commands::Origin;
+    let dir = scratch("photo-history");
+    let path = vault_file(&dir);
+    let mut shell = Shell::new(helios_panels(), None);
+    let mut persist = Persist::new(SqliteStore::open(&path).unwrap(), Arc::new(Bus::new()));
+    shell.set_photo_history(photo_history::reader_of(persist.node().clone()));
+    let spec = shell
+        .specs()
+        .into_iter()
+        .find(|s| s.id == photo_history::COMMAND)
+        .expect("photo.history is declared");
+    assert!(spec.read_only, "a read-only client may run it");
+    open_exposure(&mut shell, &mut persist, 1);
+    let start = shown(&shell);
+    set(&shell, start + 1.0, None);
+    persist.frame_settled(&mut shell, 10.0);
+    set(&shell, start + 2.0, None);
+    persist.frame_settled(&mut shell, 11.0);
+    shell.values().lock().unwrap().undo(&Origin::User).unwrap();
+    persist.frame_settled(&mut shell, 12.0);
+    // The first photo is closed: the second is open.
+    open_exposure(&mut shell, &mut persist, 2);
+    // The command's handler, as its frame answers it (a run is queued
+    // for the frame; this shell draws none).
+    let read = shell
+        .photo_history(&json!({ "image": id(1).hex() }))
+        .unwrap();
+    let steps: Vec<(String, bool)> = read["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["label"].as_str().unwrap().to_string(),
+                s["undone"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        steps,
+        [(format!("set {EV}"), false), (format!("set {EV}"), true)],
+        "{read}"
+    );
+    assert_eq!(
+        (read["total"].as_u64(), read["undone"].as_u64()),
+        (Some(2), Some(1))
+    );
+    assert!(read["steps"][0].get("edit").is_none());
+    // A page of one, from the first step, with its edit.
+    let first = shell
+        .photo_history(&json!({ "image": id(1).hex(), "from": 0, "limit": 1, "edits": true }))
+        .unwrap();
+    assert_eq!(first["steps"].as_array().unwrap().len(), 1);
+    assert_eq!(first["more"], true);
+    assert!(first["steps"][0]["edit"].is_object(), "{first}");
+    // The open photo, never edited: no step.
+    let none = shell
+        .photo_history(&json!({ "image": id(2).hex() }))
+        .unwrap();
+    assert_eq!(none["total"], 0);
+    // A path is refused: it would say where the photo is.
+    assert!(
+        shell
+            .photo_history(&json!({ "image": "/photos/a.raw" }))
+            .is_err()
+    );
+    drop((shell, persist));
+    let _ = std::fs::remove_dir_all(&dir);
+}
