@@ -169,6 +169,7 @@ fn source(account: &str) -> SourceRef {
         label: format!("Fake: {account}"),
         root: None,
         capacity: None,
+        camera: None,
     }
 }
 

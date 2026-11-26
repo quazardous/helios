@@ -582,6 +582,7 @@ pub fn source(account: &str, label: &str) -> SourceRef {
         label: label.into(),
         root: None,
         capacity: None,
+        camera: None,
     }
 }
 

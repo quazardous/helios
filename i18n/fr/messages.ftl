@@ -2157,6 +2157,8 @@ gui-import-window-listing = Liste en cours… { $count } photos pour l’instant
 
 gui-import-window-last-import = Dernière importation le { $when }
 
+gui-import-camera-picture = Image de l’appareil : { $camera }
+
 gui-import-window-remove-favourite = Retirer des favoris
 
 gui-import-window-forget = Oublier ce dossier

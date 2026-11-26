@@ -96,6 +96,9 @@ pub(super) struct Detail {
     /// Its connector's name, translated: the section's heading.
     pub label: String,
     pub parts: Vec<Part>,
+    /// The camera its connector declares on the source: its name and its
+    /// kind's drawing head the section.
+    pub camera: Option<helios_connect::camera::Camera>,
 }
 
 impl ImportWindow {
@@ -146,11 +149,16 @@ impl ImportWindow {
         {
             parts.push(Part::Params);
         }
+        let camera = match &key {
+            Some(SourceKey::Folder(path)) => self.camera_at(path).cloned(),
+            _ => None,
+        };
         Detail {
             key,
             connector,
             label,
             parts,
+            camera,
         }
     }
 
@@ -183,6 +191,31 @@ impl ImportWindow {
                 |a| a.email().unwrap_or(&a.label).to_owned(),
             );
         download_folder(pattern, &pictures(), &who)
+    }
+
+    /// The camera of `detail`'s source, under its heading: its kind's
+    /// drawing, named for the camera, and its name.
+    pub(super) fn detail_camera_ui(&self, ui: &mut egui::Ui, detail: &Detail) {
+        use egui_pop::core::icon::{Icon, Size, registry};
+        let Some(camera) = &detail.camera else {
+            return;
+        };
+        let name = camera.name();
+        let picture = Message::new("gui-import-camera-picture", "Camera picture: { $camera }")
+            .with("camera", name.clone());
+        let picture = match self.texts.as_ref() {
+            Some(t) => t(picture),
+            None => picture.english,
+        };
+        let icon = camera
+            .kind()
+            .and_then(|k| registry::lookup(&crate::camera_icons::icon(k)))
+            .or_else(|| registry::lookup("phosphor:sd-card"))
+            .unwrap_or(Icon::Folder);
+        ui.horizontal(|ui| {
+            ui.add(icon.size(Size::Panel).label(&picture));
+            ui.strong_text(name);
+        });
     }
 
     /// The connector's own parameters of the source of `detail`: its

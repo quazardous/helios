@@ -309,6 +309,7 @@ impl Connector for Albums {
                     label: name.clone(),
                     root: None,
                     capacity: None,
+                    camera: None,
                 },
                 count: u64::try_from(*count).ok(),
             })

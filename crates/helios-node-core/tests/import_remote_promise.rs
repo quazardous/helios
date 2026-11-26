@@ -181,6 +181,7 @@ fn source() -> SourceRef {
         label: "Fake photos".into(),
         root: None,
         capacity: None,
+        camera: None,
     }
 }
 
@@ -383,6 +384,7 @@ fn album_pick(provider: &helios_connect::fake_albums::AlbumsProvider) -> String 
         label: "Albums".into(),
         root: None,
         capacity: None,
+        camera: None,
     };
     let items = connector
         .list(&source, None, 100, &Cancel::new())

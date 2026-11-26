@@ -410,6 +410,7 @@ mod tests {
             label: "Fake".into(),
             root: None,
             capacity: None,
+            camera: None,
         }
     }
 

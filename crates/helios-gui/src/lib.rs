@@ -16,6 +16,7 @@ pub mod app_quit;
 pub use helios_storage_ui::backup_end;
 pub mod caches;
 pub mod calibrate;
+pub mod camera_icons;
 pub mod caption;
 pub mod catalogue;
 pub mod clipboard;

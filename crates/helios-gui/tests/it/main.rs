@@ -59,6 +59,7 @@ mod image_tools;
 mod import;
 mod import_albums;
 mod import_auto;
+mod import_camera;
 mod import_card_identity;
 mod import_close;
 mod import_end;
