@@ -386,27 +386,23 @@ pub fn selection_command(
     let main = crate::library::MAIN_GALLERY;
     let read =
         |library: &mut Library, gallery: &str| library.with_gallery(gallery, |lib| Kept::of(lib));
-    match args.get("view").filter(|v| !v.is_null()) {
-        Some(view) => {
-            let view = view.as_str().ok_or("`view`: a Library view's id")?;
-            if view == main || view == RESULTS_PANEL {
-                return Ok(selection_of(main, &read(library, main)));
-            }
-            if !open_views(app).iter().any(|v| v == view) {
-                return Err(format!(
-                    "`view`: no Library view `{view}` is open (`main` or `{RESULTS_PANEL}#<n>`)"
-                ));
-            }
-            Ok(selection_of(view, &read(library, view)))
+    let Some(view) = args.get("view").filter(|v| !v.is_null()) else {
+        let mut views = vec![selection_of(main, &read(library, main))];
+        for view in open_views(app) {
+            views.push(selection_of(&view, &read(library, &view)));
         }
-        None => {
-            let mut views = vec![selection_of(main, &read(library, main))];
-            for view in open_views(app) {
-                views.push(selection_of(&view, &read(library, &view)));
-            }
-            Ok(json!({ "views": views }))
-        }
+        return Ok(json!({ "views": views }));
+    };
+    let view = view.as_str().ok_or("`view`: a Library view's id")?;
+    if view == main || view == RESULTS_PANEL {
+        return Ok(selection_of(main, &read(library, main)));
     }
+    if !open_views(app).iter().any(|v| v == view) {
+        return Err(format!(
+            "`view`: no Library view `{view}` is open (`main` or `{RESULTS_PANEL}#<n>`)"
+        ));
+    }
+    Ok(selection_of(view, &read(library, view)))
 }
 
 /// A quick-collection panel's head: the collection's name and how many
