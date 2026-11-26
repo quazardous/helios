@@ -56,6 +56,12 @@ pub const CLOSE_COMMAND: &str = "library.view.close";
 /// its id (`view`).
 pub const QUICK_OPEN_COMMAND: &str = "library.quick.open";
 
+/// Says a Library view's selection and cursor (`view`: its id,
+/// `helios.vault#<n>`, or `main`; none: every view, the main one
+/// first): `{ "view", "selection", "cursor" }`, or `{ "views": [...] }`.
+/// What is kept with the layout reads back the same after a restart.
+pub const SELECTION_COMMAND: &str = "library.view.selection";
+
 /// What a Library view keeps: its instance's payload.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -66,6 +72,10 @@ pub struct ViewState {
     /// The photo under its cursor.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
+    /// The photos selected in it, in order, when more than the one under
+    /// its cursor (a lone cursor is its own selection).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selection: Vec<String>,
     /// How its results show, when not the default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<ResultsDesc>,
@@ -190,8 +200,8 @@ pub struct Views {
     /// Each view's payload as last read or written: one that differs was
     /// set from outside (a restored layout, a reopened view).
     seen: HashMap<String, Value>,
-    /// A cursor given back before the photo under it is read.
-    pending: HashMap<String, String>,
+    /// A selection and cursor given back before the photos are read.
+    pending: HashMap<String, Kept>,
     /// The quick collection each quick-collection panel shows.
     quick: HashMap<String, String>,
     /// The tab title last given to each quick-collection panel: its
@@ -222,10 +232,10 @@ impl Views {
         if self.seen.get(key) != Some(&payload) {
             self.restore(key, &payload, library);
         }
-        if let Some(cursor) = self.pending.get(key).cloned()
-            && library.holds(&cursor)
+        if let Some(kept) = self.pending.get(key).cloned()
+            && kept.ready(library)
         {
-            library.with_gallery(key, |lib| lib.select_ids(std::slice::from_ref(&cursor)));
+            library.with_gallery(key, |lib| kept.apply(lib));
             self.pending.remove(key);
         }
         match self.quick.get(key).cloned() {
@@ -284,8 +294,14 @@ impl Views {
                 lib.set_results(results);
             }
         });
-        if let Some(cursor) = state.cursor {
-            self.pending.insert(key.to_string(), cursor);
+        if state.cursor.is_some() || !state.selection.is_empty() {
+            self.pending.insert(
+                key.to_string(),
+                Kept {
+                    selection: state.selection,
+                    cursor: state.cursor,
+                },
+            );
         }
         if let Some(quick) = state.quick {
             self.quick.insert(key.to_string(), quick);
@@ -298,14 +314,95 @@ impl Views {
         let quick = self.quick.get(key).cloned();
         library.with_gallery(key, |lib| {
             let results = lib.results();
+            let kept = pending.unwrap_or_else(|| Kept::of(lib));
             ViewState {
                 filter: lib.filter().clone(),
-                cursor: pending.or_else(|| lib.cursor()),
+                selection: kept.selection_kept(),
+                cursor: kept.cursor,
                 results: (results != ResultsDesc::default()).then_some(results),
                 quick,
             }
         })
     }
+}
+
+/// A view's selection and cursor, as kept or given back.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Kept {
+    selection: Vec<String>,
+    cursor: Option<String>,
+}
+
+impl Kept {
+    /// The gallery in force's.
+    fn of(lib: &Library) -> Kept {
+        Kept {
+            selection: lib.selection(),
+            cursor: lib.cursor(),
+        }
+    }
+
+    /// The selection as kept: none when it is the lone cursor.
+    fn selection_kept(&self) -> Vec<String> {
+        if self.selection.len() == 1 && self.cursor.as_ref() == self.selection.first() {
+            Vec::new()
+        } else {
+            self.selection.clone()
+        }
+    }
+
+    /// Whether the photos are read: the cursor's, or else the
+    /// selection's first.
+    fn ready(&self, library: &Library) -> bool {
+        self.cursor
+            .as_ref()
+            .or(self.selection.first())
+            .is_some_and(|id| library.holds(id))
+    }
+
+    /// Gives it back to the gallery in force; a lone cursor selects
+    /// itself.
+    fn apply(&self, lib: &mut Library) {
+        if self.selection.is_empty() {
+            lib.select_ids(&self.cursor.iter().cloned().collect::<Vec<_>>());
+        } else {
+            lib.select_kept(&self.selection, self.cursor.as_deref());
+        }
+    }
+}
+
+/// One view's answer to [`SELECTION_COMMAND`].
+fn selection_of(view: &str, kept: &Kept) -> Value {
+    json!({ "view": view, "selection": kept.selection, "cursor": kept.cursor })
+}
+
+/// What [`SELECTION_COMMAND`] does: the selection and cursor of the
+/// view `view` (`main`: the main explorer's), or of every view.
+pub fn selection_command(
+    app: &AppHandle,
+    library: &mut Library,
+    args: &Value,
+) -> Result<Value, String> {
+    let main = crate::library::MAIN_GALLERY;
+    let read =
+        |library: &mut Library, gallery: &str| library.with_gallery(gallery, |lib| Kept::of(lib));
+    let Some(view) = args.get("view").filter(|v| !v.is_null()) else {
+        let mut views = vec![selection_of(main, &read(library, main))];
+        for view in open_views(app) {
+            views.push(selection_of(&view, &read(library, &view)));
+        }
+        return Ok(json!({ "views": views }));
+    };
+    let view = view.as_str().ok_or("`view`: a Library view's id")?;
+    if view == main || view == RESULTS_PANEL {
+        return Ok(selection_of(main, &read(library, main)));
+    }
+    if !open_views(app).iter().any(|v| v == view) {
+        return Err(format!(
+            "`view`: no Library view `{view}` is open (`main` or `{RESULTS_PANEL}#<n>`)"
+        ));
+    }
+    Ok(selection_of(view, &read(library, view)))
 }
 
 /// A quick-collection panel's head: the collection's name and how many
@@ -367,12 +464,32 @@ mod tests {
         let state = ViewState {
             filter: Filter::parse("rating>=3"),
             cursor: Some("b".into()),
+            selection: vec!["a".into(), "b".into()],
             results: None,
             quick: None,
         };
         let back: ViewState =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
         assert_eq!(back, state);
+    }
+
+    #[test]
+    fn a_lone_cursor_is_not_kept_as_a_selection_too() {
+        let lone = Kept {
+            selection: vec!["b".into()],
+            cursor: Some("b".into()),
+        };
+        assert!(lone.selection_kept().is_empty());
+        let several = Kept {
+            selection: vec!["a".into(), "c".into()],
+            cursor: Some("c".into()),
+        };
+        assert_eq!(several.selection_kept(), ["a", "c"]);
+        let elsewhere = Kept {
+            selection: vec!["a".into()],
+            cursor: Some("c".into()),
+        };
+        assert_eq!(elsewhere.selection_kept(), ["a"]);
     }
 
     #[test]

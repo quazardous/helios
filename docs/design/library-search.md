@@ -616,6 +616,13 @@ Each slice is one PR with its tests; the order matters.
    another move (`library.quick.move`, one undo step); Ctrl copies;
    from anywhere else they are added. The panel's tab keeps the Results
    instance's title: egui-pop has no way yet to name an instance.
+   **Selection kept** (#5255 S7, 2026-11-25): a view's payload also
+   keeps its selection (`selection`, in order) when it is more than the
+   photo under its cursor; both come back once the photos are read.
+   `library.view.selection` (`view`: an id or `main`; none: every view)
+   says each view's selection and cursor, the same before and after a
+   restart. Still to come: the main view's selection in the workspace,
+   and links between views (G7/G8).
 3. **G3. One grammar.** `rules::parse_text` and `rules::to_text` in
    `helios-vault`, aliases, `-`, `OR`, ranges, relative dates;
    `presence`, `backup`, `cull` as rule fields; the search text, the

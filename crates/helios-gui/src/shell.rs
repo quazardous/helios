@@ -3665,6 +3665,19 @@ impl Shell {
         );
         add(
             CommandSpec::new(
+                crate::library_views::SELECTION_COMMAND,
+                "Say a Library view's selection and cursor (`view`: its id or main; none: every view), as kept with the layout",
+                "Library",
+            ),
+            Box::new(|a, _| {
+                Ok(Action::LibraryView(
+                    crate::library_views::SELECTION_COMMAND,
+                    a.clone(),
+                ))
+            }),
+        );
+        add(
+            CommandSpec::new(
                 crate::library::FOLDER_COMMAND,
                 "Scope the library to a folder and those below it (`path`, absolute; null: the whole library); kept with the workspace. Without `path`, says the folder",
                 "Library",
@@ -7965,6 +7978,8 @@ impl Shell {
                 let app = self.core.app.handle();
                 return if command == crate::library_views::OPEN_COMMAND {
                     crate::library_views::open_command(app, &args)
+                } else if command == crate::library_views::SELECTION_COMMAND {
+                    crate::library_views::selection_command(app, &mut self.library_mut(), &args)
                 } else {
                     crate::library_views::close_command(app, &args)
                 };

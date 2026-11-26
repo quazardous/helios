@@ -305,6 +305,7 @@ pub fn schema(command: &str) -> Option<Json> {
         "library.select.similar" => object(&[], &[("by", any())]),
         "library.view.open" => object(&[], &[("place", string_or_null())]),
         "library.view.close" => object(&["view"], &[("view", string())]),
+        "library.view.selection" => object(&[], &[("view", string_or_null())]),
         "photo.show" => object(
             &[],
             &[

@@ -11,7 +11,9 @@ use egui_pop::model::ids::PanelId;
 use egui_pop::model::layout::Layout;
 use egui_pop::views::library::filter::Filter;
 use helios_gui::library::Entry;
-use helios_gui::library_views::{CLOSE_COMMAND, OPEN_COMMAND, close_command, open_views};
+use helios_gui::library_views::{
+    CLOSE_COMMAND, OPEN_COMMAND, SELECTION_COMMAND, close_command, open_views,
+};
 use helios_gui::{Shell, headless, helios_panels};
 use helios_shell::commands::Origin;
 use serde_json::{Value, json};
@@ -50,6 +52,25 @@ fn view(h: &Harness<'_, Shell>, id: &str) -> (String, Option<String>) {
     h.state()
         .library_mut()
         .with_gallery(id, |l| (l.filter().text.clone(), l.cursor()))
+}
+
+/// A command's answer: the shell queues it for its frame, then its
+/// history has the result.
+fn answer(h: &mut Harness<'static, Shell>, id: &str, args: Value) -> Result<Value, String> {
+    let out = h.state_mut().run(id, args, Origin::Agent("test".into()));
+    h.run_steps(3);
+    match out {
+        Ok(v) if v == json!({ "queued": true }) => {
+            h.state()
+                .history()
+                .into_iter()
+                .rev()
+                .find(|r| r.id == id)
+                .unwrap_or_else(|| panic!("{id} never ran"))
+                .result
+        }
+        other => other,
+    }
 }
 
 fn payload(h: &Harness<'_, Shell>, id: &str) -> Value {
@@ -148,5 +169,72 @@ fn two_library_views_keep_their_own_filter_and_cursor_through_a_move_a_restart_a
     assert!(
         close_command(&app, &json!({ "view": first })).is_err(),
         "closed already"
+    );
+}
+
+/// S7: each view's selection (several photos) and cursor are kept with
+/// the layout; what `library.view.selection` says before a restart, it
+/// says after it.
+#[test]
+fn each_view_s_selection_and_cursor_read_back_the_same_after_a_restart() {
+    let mut h = harness(None);
+    for place in ["center", "end_side"] {
+        run(
+            &mut h,
+            OPEN_COMMAND,
+            json!({ "place": place }),
+            Origin::Agent("test".into()),
+        );
+    }
+    let views = open_views(h.state().app().handle());
+    let (first, second) = (views[0].clone(), views[1].clone());
+    {
+        let mut lib = h.state().library_mut();
+        // Three photos selected, the cursor on the middle one.
+        lib.with_gallery(&first, |l| {
+            l.select_kept(
+                &["a".to_string(), "c".to_string(), "e".to_string()],
+                Some("c"),
+            );
+        });
+        lib.with_gallery(&second, |l| l.select_ids(&["d".to_string()]));
+    }
+    h.run_steps(3);
+    assert_eq!(payload(&h, &first)["selection"], json!(["a", "c", "e"]));
+    assert_eq!(payload(&h, &first)["cursor"], "c");
+    // A lone cursor is its own selection: not written twice.
+    assert_eq!(payload(&h, &second).get("selection"), None);
+    let before = answer(&mut h, SELECTION_COMMAND, json!({})).unwrap();
+    assert_eq!(
+        before["views"].as_array().map(Vec::len),
+        Some(3),
+        "{before}"
+    );
+    assert_eq!(
+        before["views"][1],
+        json!({ "view": first, "selection": ["a", "c", "e"], "cursor": "c" })
+    );
+    assert_eq!(
+        before["views"][2],
+        json!({ "view": second, "selection": ["d"], "cursor": "d" })
+    );
+    assert_eq!(before["views"][0]["view"], "main");
+
+    let saved = h.state().app().handle().layout().to_json();
+    drop(h);
+    let mut h = harness(Some(Layout::from_json(&saved).unwrap()));
+    h.run_steps(3);
+    let after = answer(&mut h, SELECTION_COMMAND, json!({})).unwrap();
+    assert_eq!(after, before, "the agent's snapshot reads back the same");
+    let one = answer(&mut h, SELECTION_COMMAND, json!({ "view": first })).unwrap();
+    assert_eq!(one, before["views"][1]);
+    assert!(
+        answer(
+            &mut h,
+            SELECTION_COMMAND,
+            json!({ "view": "helios.vault#99" })
+        )
+        .is_err(),
+        "no such view"
     );
 }

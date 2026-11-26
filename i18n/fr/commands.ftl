@@ -928,6 +928,9 @@ command-library-view-close =
 command-library-view-open =
     .title = Ouvrir une autre vue de la bibliothèque (`place` : last, here ou une zone) : son propre filtre et son propre curseur, gardés avec la disposition. Répond son id (`view`)
 
+command-library-view-selection =
+    .title = Dire la sélection et le curseur d'une vue de la bibliothèque (`view` : son id ou main ; aucun : toutes les vues), tels que gardés avec la disposition
+
 command-library-window =
     .title = Bibliothèque
 command-library-keyword =
