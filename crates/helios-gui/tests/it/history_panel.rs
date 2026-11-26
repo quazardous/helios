@@ -131,8 +131,12 @@ fn the_darkroom_docks_the_history_beside_the_modules_and_its_rows_walk_the_edit(
     assert_eq!(layout.area_of(&PANEL_HISTORY), Some(Area::StartSide));
     assert_eq!(layout.area_of(&modules), Some(Area::StartSide));
     assert!(app.panel_visible(&PANEL_HISTORY));
-    // Two edits of the photo.
+    // Two edits of the photo, each its own step: writes to the same
+    // module amend the open step until a Commit seals it (#5258 R7).
     set(&h, 0.3);
+    h.state_mut()
+        .run("photo.commit", json!(null), Origin::User)
+        .unwrap();
     set(&h, 0.7);
     settle(&mut h);
     // They read as edits, not as the values' paths.

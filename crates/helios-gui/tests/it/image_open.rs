@@ -150,6 +150,10 @@ fn a_photo_keeps_its_history_across_a_switch() {
         .unwrap();
     set(&shell, 1.0);
     persist.settle(&mut shell);
+    // Two steps of the same module: a Commit seals the first (#5258 R7).
+    shell
+        .run("photo.commit", serde_json::json!(null), user.clone())
+        .unwrap();
     set(&shell, 1.5);
     let (graph, exp) = network();
     persist
