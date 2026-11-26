@@ -153,8 +153,15 @@ impl ImageMap {
         let listed = vault.clone();
         let watching = watches.clone();
         map.spawn("image map", move |stop| {
-            let standing =
-                Standing::start(vault.clone(), helios_library::map_job::KIND, "Image map");
+            // Pause and Resume on its promise pause its feed: what the
+            // jobs centre's Pause did on the `map-N` job.
+            let pausing = feed.clone();
+            let standing = Standing::start_pausable(
+                vault.clone(),
+                helios_library::map_job::KIND,
+                "Image map",
+                move |paused| pausing.pause(paused),
+            );
             let watch = standing.watch();
             lock(&watching).push(Box::new(move |after| watch.check(after)));
             standing.working(0, "Starting");

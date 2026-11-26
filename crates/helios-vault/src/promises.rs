@@ -99,6 +99,10 @@ pub enum Wait {
     /// The account's sign-in was refused: it goes on after a sign-in, or
     /// when asked to try again.
     SignIn,
+    /// Paused by a person (Pause in the Activity focus, `promises.pause`):
+    /// it goes on when asked to (`promises.retry`, Resume). Its work's
+    /// progress keeps it paused.
+    Asked,
 }
 
 /// Why a running promise's work is held, and until when.
@@ -236,7 +240,8 @@ impl<S: Store> Vault<S> {
     }
 
     /// Its work goes on: `done` of `total`, with `note`. A pending promise
-    /// becomes running. Refused once it is settled.
+    /// becomes running; a held one goes on, unless a person paused it
+    /// ([`Wait::Asked`]). Refused once it is settled.
     pub fn progress_promise(
         &self,
         id: &str,
@@ -254,7 +259,10 @@ impl<S: Store> Vault<S> {
                 total,
                 note: note.map(Into::into),
             };
-            p.paused = None;
+            // Progress lets a held promise go on, not one a person paused.
+            if p.paused.as_ref().is_some_and(|w| w.wait != Wait::Asked) {
+                p.paused = None;
+            }
             Ok(())
         })
     }

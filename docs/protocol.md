@@ -704,6 +704,10 @@ them (they survive a restart), and every client of the node sees them.
   `running`; `paused` goes with its next progress. A quota goes on by
   itself at `until`; a refused sign-in goes on after a sign-in; both go
   on at once on `promises.retry`.
+- **Paused by a person:** a running promise whose request says
+  `pausable: true` (the image map's standing promise) pauses on
+  `promises.pause`: `paused` is `{"wait": "asked", ...}`, kept through its
+  progress, until `promises.retry` lets it go on.
 - **Its owner** is the job its work reports under (`helios.job.*`, the jobs
   centre); `kind` names the work, so a node knows how to run it again.
 
@@ -713,7 +717,8 @@ them (they survive a restart), and every client of the node sees them.
 | `promises.list` | `states`, `owner`, `kind`, `limit` (at most 1,000) | `promises`, newest first, and `total` |
 | `promises.wait` | `id`, `timeout_ms` (at most 600,000) | `promise`, `settled`: answers when it settles or at the timeout, whichever comes first |
 | `promises.cancel` | `id` | `promise`: its work is asked to stop (its job is cancelled too), and settles it `cancelled`; one with no runner on the node is settled `cancelled` at once |
-| `promises.retry` | `id` | `promise`, pending again with one more `attempts`; refused unless it failed `retryable` and this node runs its kind; a held one (`paused`) goes on at once, answered as it is |
+| `promises.retry` | `id` | `promise`, pending again with one more `attempts`; refused unless it failed `retryable` and this node runs its kind; a held one (`paused`) goes on at once, answered as it is; a paused one resumes |
+| `promises.pause` | `id` | `promise`, paused (`wait: "asked"`); refused unless it runs and its work can pause (`pausable`) |
 
 - **One way to wait on anything long.** `promises.wait` answers at the
   timeout with `settled: false`: wait again. It is cancellable

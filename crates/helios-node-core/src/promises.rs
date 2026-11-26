@@ -13,6 +13,8 @@
 //! - `promises.retry` runs a failed promise again when its failure may be
 //!   retried and this node knows its kind; a held one ([`Handle::hold`]:
 //!   a service's quota, a refused sign-in) goes on at once.
+//! - `promises.pause` pauses a running promise whose work can pause
+//!   ([`pausable`]: the image map's) until `promises.retry` resumes it.
 //! - **Held**: a runner whose work waits on something outside it holds
 //!   its promise (`paused` on the running promise, with why and until
 //!   when), then goes on: by itself at that time, when asked to retry, or
@@ -43,6 +45,7 @@ pub const IDS: &[&str] = &[
     "promises.list",
     "promises.cancel",
     "promises.retry",
+    "promises.pause",
     "promises.wait",
 ];
 
@@ -89,6 +92,11 @@ pub fn specs() -> Vec<CommandSpec> {
         spec(
             "promises.retry",
             "Run a failed promise again, or let a held one go on",
+        )
+        .params(object(&[id()])),
+        spec(
+            "promises.pause",
+            "Pause a running promise whose work can pause (`promises.retry` resumes it)",
         )
         .params(object(&[id()])),
         spec("promises.wait", "Wait until a promise is settled")
@@ -147,6 +155,61 @@ impl Hold {
 
 fn held() -> std::sync::MutexGuard<'static, HashMap<HeldKey, (Wait, Arc<Hold>)>> {
     HELD.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// How a running promise's work pauses (`true`) and goes on again.
+pub type Pauser = Arc<dyn Fn(bool) + Send + Sync>;
+
+/// The promises whose work can pause, by vault and id.
+static PAUSERS: LazyLock<Mutex<HashMap<HeldKey, Pauser>>> = LazyLock::new(Mutex::default);
+
+fn pausers() -> std::sync::MutexGuard<'static, HashMap<HeldKey, Pauser>> {
+    PAUSERS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Promise `id` of `vault` can pause, through `pause`: `promises.pause`
+/// runs it with `true`, and `promises.retry` on it paused with `false`.
+/// Until [`not_pausable`].
+pub fn pausable<S: Store>(vault: &Arc<Vault<S>>, id: &str, pause: Pauser) {
+    pausers().insert((vault_key(vault), id.to_string()), pause);
+}
+
+/// Promise `id` of `vault` cannot pause any more (its work ended).
+pub fn not_pausable<S: Store>(vault: &Arc<Vault<S>>, id: &str) {
+    pausers().remove(&(vault_key(vault), id.to_string()));
+}
+
+/// The reason a promise a person paused carries.
+pub const PAUSED_BY_ASK: &str = "Paused";
+
+/// Pauses running promise `id` of `vault` through its work's pauser: its
+/// promise says so ([`Wait::Asked`]) until it is resumed.
+fn pause<S: Store>(vault: &Arc<Vault<S>>, id: &str) -> Result<Promise, String> {
+    let pauser = pausers()
+        .get(&(vault_key(vault), id.to_string()))
+        .cloned()
+        .ok_or_else(|| format!("promise `{id}` cannot pause"))?;
+    let paused = Paused {
+        wait: Wait::Asked,
+        reason: PAUSED_BY_ASK.into(),
+        until: None,
+    };
+    let p = vault.pause_promise(id, Some(paused), now())?;
+    pauser(true);
+    Ok(p)
+}
+
+/// Resumes promise `p` of `vault` if a person paused it; whether it was.
+fn unpause<S: Store>(vault: &Arc<Vault<S>>, p: &Promise) -> Result<bool, String> {
+    if p.paused.as_ref().is_none_or(|w| w.wait != Wait::Asked) {
+        return Ok(false);
+    }
+    let pauser = pausers().get(&(vault_key(vault), p.id.clone())).cloned();
+    vault.pause_promise(&p.id, None, now())?;
+    if let Some(pauser) = pauser {
+        pauser(false);
+    }
+    Ok(true)
 }
 
 /// Lets held promise `id` of `vault` go on now; whether it was held here.
@@ -496,13 +559,25 @@ impl<S: Store + Send + 'static> Promises<S> {
         Ok(p)
     }
 
+    /// Pauses running promise `id` whose work can pause ([`pausable`]):
+    /// held ([`Wait::Asked`]) until [`Promises::retry`].
+    pub fn pause(&self, id: &str) -> Result<Promise, String> {
+        pause(&self.vault, id)
+    }
+
     /// Runs failed promise `id` again, when it may be retried and its kind
-    /// runs here; a held one goes on at once.
+    /// runs here; a held one goes on at once, a paused one resumes.
     pub fn retry(&self, id: &str) -> Result<Promise, String> {
         let p = self
             .vault
             .promise(id)?
             .ok_or_else(|| format!("no promise `{id}`"))?;
+        if unpause(&self.vault, &p)? {
+            return self
+                .vault
+                .promise(id)?
+                .ok_or_else(|| format!("no promise `{id}`"));
+        }
         if p.paused.is_some() && go_on(&self.vault, id) {
             return Ok(p);
         }
@@ -547,6 +622,7 @@ impl<S: Store + Send + 'static> Promises<S> {
             }
             "promises.cancel" => self.cancel(id).map(one).map_err(refused),
             "promises.retry" => self.retry(id).map(one).map_err(refused),
+            "promises.pause" => self.pause(id).map(one).map_err(refused),
             "promises.wait" => {
                 let ms = params["timeout_ms"].as_u64().unwrap_or(0).min(MAX_WAIT_MS);
                 let p = self
@@ -578,6 +654,7 @@ mod tests {
             ),
             ("promises.cancel", json!({ "id": "promise-3" })),
             ("promises.retry", json!({ "id": "promise-3" })),
+            ("promises.pause", json!({ "id": "promise-3" })),
             (
                 "promises.wait",
                 json!({ "id": "promise-3", "timeout_ms": 60_000 }),

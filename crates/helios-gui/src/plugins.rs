@@ -64,6 +64,8 @@ pub struct Declarations {
 /// Helios installs take theirs here too.
 pub const COMMAND_ICONS: &[(&str, &str)] = &[
     ("activity.show", "phosphor:pulse"),
+    ("activity.cancel", "phosphor:x-circle"),
+    ("activity.pause", "phosphor:pause"),
     ("activity.resume", "phosphor:play"),
     ("calibrate.open", "phosphor:eyedropper"),
     ("compare.active", "phosphor:check-circle"),

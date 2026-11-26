@@ -71,6 +71,8 @@ clip-application-x-helios-images-json.title cafd24c4eaef756b
 clip-application-x-helios-mask-json.title 2f3bd09547ac8967
 clip-application-x-helios-nodes-json.title 65bc64e9a42a73d8
 clip-application-x-helios-param-json.title bcd6c3b8b514812b
+command-activity-cancel.title 970ad97b618159cd
+command-activity-pause.title 21ba9a673b76343c
 command-activity-resume.title ef6e0299a9577d1d
 command-activity-show.title 5c53367934640074
 command-calibrate-open.title 55fe1b5697baf66d
@@ -1527,6 +1529,8 @@ gui-promise-cancelling a2953898d2ec73c5
 gui-promise-counts eecffc24673fc1a2
 gui-promise-done 3570446200466199
 gui-promise-failed e758ca0bd743bc76
+gui-promise-pause ad449c6e5bac8b8d
+gui-promise-paused-asked 185e8e85c66523ab
 gui-promise-paused-quota c8cf3a9b74290ce5
 gui-promise-paused-sign-in 0394f30d230fd837
 gui-promise-pending 33295081e7fea1f9
@@ -1549,6 +1553,7 @@ gui-queue-minutes f1ff2535c97df24f
 gui-queue-no-selection ab83fa8ea400cec5
 gui-queue-oldest-wait 2e50f47d961b8c16
 gui-queue-on-node 2459cf2ab530b552
+gui-queue-paused-asked 36f06cf98f4b629d
 gui-queue-paused-quota 2dcd7686e3cbef32
 gui-queue-paused-quota-until 04403999438dcf6e
 gui-queue-paused-sign-in 38367828feab9dcf

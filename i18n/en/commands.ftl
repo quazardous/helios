@@ -1,6 +1,12 @@
 # Generated from Helios's declarations and code by `cargo xtask i18n extract`:
 # do not edit. Translations live in i18n/<locale>/ under the same names.
 
+command-activity-cancel =
+    .title = Cancel a running task (`id`: a promise of `promises.list`)
+
+command-activity-pause =
+    .title = Pause a running task whose work can pause (`id`: a promise of `promises.list`, the image map's; `activity.resume` goes on)
+
 command-activity-resume =
     .title = Resume a held task now (`id`: a promise of `promises.list` held on a service's quota or a refused sign-in)
 

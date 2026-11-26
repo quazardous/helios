@@ -372,6 +372,10 @@ enum Action {
     Activity(Value),
     /// Let a held promise go on now (`activity.resume`'s arguments).
     ActivityResume(Value),
+    /// Cancel a running promise (`activity.cancel`'s arguments).
+    ActivityCancel(Value),
+    /// Pause a running promise (`activity.pause`'s arguments).
+    ActivityPause(Value),
     /// Open the Library focus in its own window (`library.window`).
     LibraryWindow,
     /// Export photos (`library.export`'s arguments), as whom.
@@ -4228,6 +4232,22 @@ impl Shell {
                 "View",
             ),
             Box::new(|a, _| Ok(Action::ActivityResume(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                crate::activity::CANCEL,
+                "Cancel a running task (`id`: a promise of `promises.list`)",
+                "View",
+            ),
+            Box::new(|a, _| Ok(Action::ActivityCancel(a.clone()))),
+        );
+        add(
+            CommandSpec::new(
+                crate::activity::PAUSE,
+                "Pause a running task whose work can pause (`id`: a promise of `promises.list`, the image map's; `activity.resume` goes on)",
+                "View",
+            ),
+            Box::new(|a, _| Ok(Action::ActivityPause(a.clone()))),
         );
         add(
             // The Library in a window of its own, brought to the front
@@ -8120,6 +8140,8 @@ impl Shell {
                 return Ok(Value::Null);
             }
             Action::ActivityResume(args) => return self.resume_activity(&args),
+            Action::ActivityCancel(args) => return self.cancel_activity(&args),
+            Action::ActivityPause(args) => return self.pause_activity(&args),
             Action::LibraryWindow => {
                 self.open_library_window();
                 return Ok(Value::Null);

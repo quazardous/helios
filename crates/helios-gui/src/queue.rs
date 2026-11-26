@@ -599,6 +599,7 @@ fn paused_reason(
             "gui-queue-paused-sign-in",
             "The service refused the sign-in: sign in again to go on",
         ),
+        (Wait::Asked, _) => Message::new("gui-queue-paused-asked", "Paused: Resume goes on"),
     }
 }
 

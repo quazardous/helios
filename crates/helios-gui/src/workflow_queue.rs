@@ -15,30 +15,26 @@
 //!   here, the trash, a backup) shows as its promise
 //!   (`helios_node_core::job_promises`, followed by
 //!   [`crate::activity::Activity`]) at the graph node its job named
-//!   (`node` in `helios.job.started`).
-//! - **Job items.** A job of the desktop's jobs centre that named a graph
-//!   node and has no promise of its own (each export of a batch: the
-//!   promise is the batch's; a desktop without a node) shows as itself,
-//!   as the jobs centre holds it; its Cancel is `job.cancel` too.
+//!   (`node` in `helios.job.started`). Every long job has its promise: a
+//!   job without one (an export inside a batch: the batch's promise
+//!   stands for it) is not an item.
 //! - **The verbs are bus commands.** Retry, Move to the top or the bottom
 //!   and Cancel run [`RETRY`], [`PRIORITIZE`] and [`CANCEL`] ([`PAUSE`]
 //!   and [`RESUME`] beside them), which send `workflow.retry`,
 //!   `workflow.prioritize`, `workflow.cancel`, `workflow.pause` and
 //!   `workflow.resume` to the node that runs the queue: an agent runs the
 //!   same commands, and the rows come back as facts, for the panel and
-//!   the agent alike. A promise item's Cancel is `job.cancel`, as the
-//!   jobs centre's.
+//!   the agent alike. A promise item's Cancel and Resume run
+//!   `activity.cancel` and `activity.resume` with its promise.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use egui_pop::api::host::Seq;
-use egui_pop::api::jobs::JOBS;
 use egui_pop::api::{AppHandle, Ctx, Plugin, PluginError};
 use egui_pop::model::commands::CommandSpec;
 use egui_pop::model::ids::{CommandId, PluginId};
-use egui_pop::model::jobs::{Job, JobState, Request};
 use helios_inspect::control::{ControlRequest, MoveTo, RunItem};
 use helios_vault::promises::{Promise, State};
 use serde_json::{Value, json};
@@ -126,12 +122,8 @@ enum Target {
         run: String,
         item: String,
     },
-    /// A job, through its promise (when it has one: a held promise
-    /// resumes through it).
-    Job {
-        job: String,
-        promise: Option<String>,
-    },
+    /// A long job, through its promise.
+    Promise(String),
 }
 
 /// A node read whole, or why it could not be.
@@ -163,9 +155,6 @@ pub struct WorkflowQueue {
     job_nodes: BTreeMap<String, String>,
     /// The promises as last taken in, to tell a change.
     promises: Vec<(String, u64, &'static str, bool)>,
-    /// The jobs centre's jobs that named a graph node, as last taken in
-    /// (id, state, done), to tell a change.
-    jobs: Vec<(String, JobState, u64)>,
 }
 
 impl std::fmt::Debug for WorkflowQueue {
@@ -489,18 +478,6 @@ impl WorkflowQueue {
         let before = self.job_nodes.len();
         self.follow_jobs(app);
         changed |= self.job_nodes.len() != before;
-        if let Some(centre) = app.service(&JOBS) {
-            let jobs: Vec<_> = centre
-                .all()
-                .iter()
-                .filter(|j| self.job_nodes.contains_key(&j.id))
-                .map(|j| (j.id.clone(), j.state, j.done))
-                .collect();
-            if jobs != self.jobs {
-                self.jobs = jobs;
-                changed = true;
-            }
-        }
         if let Some(followed) = &self.followed {
             let promises: Vec<_> = followed
                 .promises()
@@ -564,55 +541,7 @@ impl WorkflowQueue {
             paused: p.paused.clone(),
             actions,
         };
-        let target = Target::Job {
-            job: job.to_string(),
-            promise: Some(p.id.clone()),
-        };
-        Some((item, target))
-    }
-}
-
-/// A job's item state: started but without any progress yet, a job is
-/// still waiting in its queue.
-fn job_state(job: &Job) -> ItemState {
-    match job.state {
-        JobState::Running
-            if job.step.is_none() && job.done == 0 && job.item.is_none() && job.phase.is_none() =>
-        {
-            ItemState::Waiting
-        }
-        JobState::Running => ItemState::Running,
-        JobState::Paused => ItemState::Paused,
-        JobState::Cancelling => ItemState::Cancelling,
-        JobState::Done => ItemState::Done,
-        JobState::Failed => ItemState::Failed,
-        JobState::Cancelled => ItemState::Cancelled,
-    }
-}
-
-/// A job of the jobs centre as an item, its id the job's; `offset` takes
-/// the centre's clock to the wall clock.
-fn job_item(job: &Job, offset: f64) -> QueueItem {
-    let state = job_state(job);
-    let place = match crate::relay::split_node_job(&job.id) {
-        Some((node, _)) => Place::Node(node.to_string()),
-        None => Place::Here,
-    };
-    let actions = if state.active() && state != ItemState::Cancelling && job.cancellable {
-        vec![Action::Cancel]
-    } else {
-        Vec::new()
-    };
-    QueueItem {
-        id: format!("job:{}", job.id),
-        title: job.title.clone(),
-        state,
-        since: job.ended_at.unwrap_or(job.started_at) + offset,
-        attempts: job.attempts,
-        place,
-        error: job.error.clone(),
-        paused: None,
-        actions,
+        Some((item, Target::Promise(p.id.clone())))
     }
 }
 
@@ -656,39 +585,13 @@ impl QueueSource for WorkflowQueue {
                 });
             }
         }
-        // The jobs a promise stands for.
-        let mut promised = BTreeSet::new();
         if let Some(followed) = &self.followed {
             // Oldest first, as the queue lists its items.
             for p in followed.promises().iter().rev() {
                 if let Some((item, target)) = self.promise_item(p, node) {
-                    if let Target::Job { job, .. } = &target {
-                        promised.insert(job.clone());
-                    }
                     targets.insert(item.id.clone(), target);
                     items.push(item);
                 }
-            }
-        }
-        // The jobs that named the node without a promise of their own.
-        if let Some(centre) = app.service(&JOBS) {
-            // The centre's clock to the wall clock the items are in.
-            let offset = now() - centre.now();
-            for job in centre.all() {
-                if promised.contains(&job.id)
-                    || self.job_nodes.get(&job.id).is_none_or(|n| n != node)
-                {
-                    continue;
-                }
-                let item = job_item(&job, offset);
-                targets.insert(
-                    item.id.clone(),
-                    Target::Job {
-                        job: job.id.clone(),
-                        promise: None,
-                    },
-                );
-                items.push(item);
             }
         }
         self.targets = targets;
@@ -719,19 +622,15 @@ impl QueueSource for WorkflowQueue {
             return;
         };
         match target {
-            Target::Job { job, promise } => match action {
-                Action::Cancel => egui_pop::api::jobs::ask(app, &job, Request::Cancel),
-                // A held promise goes on now, through the node.
-                Action::Resume => {
-                    if let Some(id) = promise {
-                        app.run(
-                            CommandId::from_static(crate::activity::RESUME),
-                            json!({ "id": id }),
-                        );
-                    }
-                }
-                _ => {}
-            },
+            Target::Promise(id) => {
+                let command = match action {
+                    Action::Cancel => crate::activity::CANCEL,
+                    // A held promise goes on now, through the node.
+                    Action::Resume => crate::activity::RESUME,
+                    _ => return,
+                };
+                app.run(CommandId::from_static(command), json!({ "id": id }));
+            }
             Target::Item { node, run, item } => {
                 let base = json!({ "node": node, "run": run, "items": [item] });
                 let (command, args) = match action {
