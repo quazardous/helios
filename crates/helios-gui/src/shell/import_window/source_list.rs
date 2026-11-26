@@ -226,7 +226,26 @@ impl ImportWindow {
             "phosphor:folder"
         };
         let mark = own.then_some("●");
-        self.placed(key, icon, name, line_of(mark, &line), Some(tip), words)
+        // The camera its connector declares: its name leads the line,
+        // its kind's drawing is the icon.
+        let camera = self.camera_at(path);
+        let mut line = line;
+        if let Some(camera) = camera {
+            line.insert(0, camera.name());
+        }
+        let mut placed = self.placed(key, icon, name, line_of(mark, &line), Some(tip), words);
+        if let Some(kind) = camera.and_then(helios_connect::camera::Camera::kind) {
+            placed.item = placed.item.icon(crate::camera_icons::icon(kind));
+        }
+        placed
+    }
+
+    /// The camera a connector declares on the source at `path`.
+    pub(in crate::shell) fn camera_at(
+        &self,
+        path: &Path,
+    ) -> Option<&helios_connect::camera::Camera> {
+        self.cameras.iter().find(|(p, _)| p == path).map(|(_, c)| c)
     }
 
     /// A path source's line by default: its last import, else where it is.
@@ -328,6 +347,10 @@ impl ImportWindow {
         places.extend(self.memory.favourites.iter().cloned());
         self.connectors.set_places(places);
         let sources = self.connectors.sources();
+        self.cameras = sources
+            .iter()
+            .filter_map(|(s, _)| Some((s.root.clone()?, s.camera.clone()?)))
+            .collect();
         let (detected, given): (Vec<_>, Vec<_>) = sources.into_iter().partition(|(_, d)| *d);
         let label_of = |path: &Path| {
             given

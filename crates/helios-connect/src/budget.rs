@@ -386,6 +386,7 @@ mod tests {
             label: String::new(),
             root: None,
             capacity: None,
+            camera: None,
         };
         let l = limits(Some(4), Some(2));
         let a = Budget::of(&source("ann/album-1"), l);

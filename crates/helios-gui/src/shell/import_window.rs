@@ -266,6 +266,10 @@ pub(crate) struct ImportWindow {
     /// The one card list ([`crate::backup_end::CardList`]): whether a
     /// card inserted is safe to format, said on its row.
     pub(super) card_list: crate::backup_end::CardList,
+    /// The cameras the connectors declare on their sources this frame
+    /// (`SourceRef::camera`), by the source's root: its row and its
+    /// detail show the camera's name and drawing.
+    pub(super) cameras: Vec<(std::path::PathBuf, helios_connect::camera::Camera)>,
     /// The imports running and ended during this run (the node's
     /// promises, [`crate::activity::Activity::imports`]): the Import
     /// button waits while one imports the photos it would. Their
@@ -2249,6 +2253,7 @@ impl ImportWindow {
             helios_ui::scroll(ui, "helios.import.choices", Scroll::Region, |ui| {
                 ui.divider();
                 ui.text_role(TextRole::Title, &detail.label);
+                w.detail_camera_ui(ui, &detail);
                 for part in &detail.parts {
                     match part {
                         Part::Account { id, picker: true } => {

@@ -44,6 +44,7 @@ fn service(
         label: "Trip".into(),
         root: None,
         capacity: None,
+        camera: None,
     };
     let items = connector
         .list(&source, None, 100, &Cancel::new())

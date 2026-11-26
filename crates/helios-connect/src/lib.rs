@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod account;
 pub mod budget;
+pub mod camera;
 pub mod card;
 pub mod connect;
 pub mod contract;
@@ -407,6 +408,11 @@ pub struct SourceRef {
     pub root: Option<PathBuf>,
     /// Its size in bytes, when known (a card's capacity).
     pub capacity: Option<u64>,
+    /// The camera its photos come from, when its connector detected it
+    /// (a card's first files, a camera over its cable): the host shows
+    /// its name and a drawing of its kind ([`camera::Camera`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<camera::Camera>,
 }
 
 /// An opaque position in a source's listing, kept by Helios between runs.

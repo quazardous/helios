@@ -660,6 +660,7 @@ mod tests {
             label: "Google Photos (me)".into(),
             root: None,
             capacity: None,
+            camera: None,
         };
         let r = record_remote(&vault, &source, &options, 1000, Ok(&report(2))).unwrap();
         assert_eq!(list(&vault, None).unwrap(), std::slice::from_ref(&r));

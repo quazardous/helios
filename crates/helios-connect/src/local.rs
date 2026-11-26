@@ -201,6 +201,7 @@ pub fn source_at(connector: &str, root: &Path, label: String, capacity: Option<u
         label,
         root: Some(root.to_path_buf()),
         capacity,
+        camera: None,
     }
 }
 

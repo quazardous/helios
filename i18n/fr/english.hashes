@@ -860,6 +860,7 @@ gui-import-browse-not-listed be5aaf1084ed7cf7
 gui-import-browse-picker 9618bf4a01be698e
 gui-import-browse-timeline 70a85f922f59436e
 gui-import-browse-tree c0fedd3381fdcc9b
+gui-import-camera-picture a5202722b8898207
 gui-import-cancelled ef0a315043a78d47
 gui-import-copy 6559bd9463867f74
 gui-import-copy-help 94e74fb4f9cc2bcf

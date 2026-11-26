@@ -945,6 +945,8 @@ impl Shell {
     /// application not built yet ([`ShellBuilder::build`], or
     /// [`ShellBuilder::run_native`] in a window).
     pub fn builder(panels: Vec<PanelSpec>, ui_settings: Option<PathBuf>) -> ShellBuilder {
+        // Helios's own drawings, before the theme rasterises the icons.
+        crate::camera_icons::register();
         // Relative dates in smart albums ("today") count by the local
         // clock, as cameras set to local time write capture times.
         helios_vault::rules::set_local_offset(i64::from(

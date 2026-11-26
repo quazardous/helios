@@ -930,6 +930,7 @@ impl helios_connect::Connector for PickConnector {
                 label: "Picked".into(),
                 root: None,
                 capacity: None,
+                camera: None,
             },
         })
     }

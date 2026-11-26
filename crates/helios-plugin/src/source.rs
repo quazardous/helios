@@ -261,6 +261,7 @@ impl PluginSource {
             label: self.label.en.clone(),
             root: None,
             capacity: None,
+            camera: None,
         }
     }
 

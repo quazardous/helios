@@ -38,6 +38,7 @@ fn source_of(a: &Account) -> SourceRef {
         label: a.label.clone(),
         root: None,
         capacity: None,
+        camera: None,
     }
 }
 
