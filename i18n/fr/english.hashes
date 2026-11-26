@@ -1085,6 +1085,8 @@ gui-jobs-window 2fd04c5910d8237a
 gui-keys-from-template e70109422c5ad48b
 gui-last-quit-cut 34c88b069c1edae1
 gui-layout-not-saved 942738e1ab7b193d
+gui-library-advanced e172dc9a05b5446b
+gui-library-advanced-tip d31826500c1a4bde
 gui-library-album-add 4431f7a66bf4fea9
 gui-library-album-delete 7b2511e3687c6a5c
 gui-library-album-move e9dae4f7cd33493b

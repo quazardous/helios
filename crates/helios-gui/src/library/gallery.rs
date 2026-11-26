@@ -339,6 +339,8 @@ pub struct Gallery {
     /// grammar (`camera:R5`), before the text typed
     /// ([`super::suggest::commit`]).
     pub(super) rules: Vec<String>,
+    /// The search's Advanced rows, when open.
+    pub(super) advanced: Option<super::advanced::Advanced>,
     pub(super) filter: Filter,
     /// What the views show, in order: the filter's matches, a stack's
     /// members right after its top image.
@@ -398,6 +400,7 @@ impl Gallery {
             state: LibraryState::new(id),
             search: SearchState::new(),
             rules: Vec::new(),
+            advanced: None,
             filter: Filter::default(),
             order: Vec::new(),
             matches: None,

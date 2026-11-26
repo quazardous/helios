@@ -185,6 +185,30 @@ pub fn show(
     (asked, rect)
 }
 
+/// The tree's rows drawn in `ui`, without the dialog around them: the
+/// search's Advanced rows (`docs/design/library-search.md`, G5). The same
+/// boxes as the dialog; answers the edit asked, as [`show`] does.
+pub fn rows(
+    ui: &mut Ui,
+    editor: &RuleEditor,
+    albums: &[(String, String)],
+    words: &Words,
+) -> Option<Value> {
+    let mut asked = None;
+    let faults = editor.faults();
+    node(
+        ui,
+        &editor.tree,
+        &mut Vec::new(),
+        0,
+        &faults,
+        albums,
+        words,
+        &mut asked,
+    );
+    asked
+}
+
 /// How wide the dialog is, in points.
 const DIALOG_WIDTH: f32 = 560.0;
 

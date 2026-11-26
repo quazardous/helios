@@ -1965,6 +1965,10 @@ gui-viewport-no-image = Aucune image
 
 gui-library-search = Rechercher des images
 
+gui-library-advanced = Avancé
+
+gui-library-advanced-tip = La recherche en lignes de règles, chacune modifiable
+
 gui-library-sync = Synchroniser le zoom et le déplacement
 
 gui-library-tags = Mots-clés
