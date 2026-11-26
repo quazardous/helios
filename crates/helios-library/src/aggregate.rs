@@ -301,7 +301,8 @@ fn split<S: Store>(
     signals: &HashMap<ImageId, crate::Signals>,
 ) -> Result<Vec<(String, Vec<ImageId>)>, String> {
     match by {
-        GroupBy::All => Ok(vec![("all".into(), ordered.to_vec())]),
+        // `Session` is grouped by `sessions`, which needs the capture times.
+        GroupBy::All | GroupBy::Session => Ok(vec![("all".into(), ordered.to_vec())]),
         GroupBy::Stack => {
             let mut of: HashMap<String, String> = HashMap::new();
             for s in vault.stacks()? {
@@ -311,8 +312,6 @@ fn split<S: Store>(
             }
             Ok(grouped(ordered, |id| of.get(&id.hex()).cloned()))
         }
-        // Grouped by `sessions`, which needs the capture times.
-        GroupBy::Session => Ok(vec![("all".into(), ordered.to_vec())]),
         GroupBy::Burst => {
             let candidates: Vec<Candidate> = ordered
                 .iter()
