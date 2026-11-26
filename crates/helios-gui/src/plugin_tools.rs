@@ -330,6 +330,7 @@ impl PluginTools {
                         handle: h.name().to_owned(),
                         params: params.clone(),
                     }),
+                    path_keys: None,
                 });
             }
         }

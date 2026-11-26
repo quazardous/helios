@@ -903,9 +903,51 @@ pub struct HandleArea {
     /// its first parameter (the one it adjusts), a path's point the
     /// path's points.
     pub path: String,
-    /// What the keyboard edits on it once focused (a case's handle; a
-    /// path's are not keyed yet).
+    /// What the keyboard edits on it once focused, a case's handle.
     pub keys: Option<Keyed>,
+    /// What the keyboard edits on it once focused, a path's handle.
+    pub path_keys: Option<PathKeyed>,
+}
+
+/// A path's handle the keyboard edits (`egui_hud::render::handle_keys`
+/// with its maths here, [`HandleMaths`]): the path's node, the handle
+/// (`corner.n`, `before.n`, `after.n`) and the path's parameters this
+/// frame. A key goes through the `mask.move` command (one undo step, the
+/// shape's lock honoured); Delete on a corner through `mask.point.remove`.
+#[derive(Clone, Debug)]
+pub struct PathKeyed {
+    pub node: String,
+    pub handle: String,
+    pub params: Params,
+}
+
+impl PathKeyed {
+    /// The handle's model for `egui_hud`.
+    pub fn hud(&self) -> Option<HudHandle> {
+        path_handle(&self.handle)
+    }
+
+    /// The path's point this handle belongs to.
+    pub fn point(&self) -> Option<usize> {
+        self.handle.split_once('.')?.1.parse().ok()
+    }
+
+    /// Whether it is a point's corner (not a Bézier handle).
+    pub fn is_corner(&self) -> bool {
+        self.handle.starts_with("corner.")
+    }
+
+    /// Where the handle goes once `writes` (`points.i`, as
+    /// `egui_hud`'s keys give them) are applied to the path's points.
+    pub fn to(&self, writes: &[(String, f64)]) -> Option<[f64; 2]> {
+        let mut list = self.params.get("points")?.as_list()?.to_vec();
+        for (k, v) in writes {
+            let i: usize = k.strip_prefix("points.")?.parse().ok()?;
+            *list.get_mut(i)? = *v;
+        }
+        let params = self.params.clone().with("points", Value::List(list));
+        Some(self.hud()?.position(&ParamsOf(&params)))
+    }
 }
 
 /// A handle the keyboard edits (`egui_hud::render::handle_keys`): its
@@ -972,11 +1014,17 @@ impl Masks {
                     handle: h.name.clone(),
                     params: m.params.clone(),
                 });
+                let path_keys = (case.is_none() && m.module == "mask_path").then(|| PathKeyed {
+                    node: o.id.clone(),
+                    handle: h.name.clone(),
+                    params: m.params.clone(),
+                });
                 out.push(HandleArea {
                     at: k.at,
                     id: format!("mask.handle.{}.{}", o.id, h.name),
                     path: node_path(&o.id, &param),
                     keys,
+                    path_keys,
                 });
             }
         }

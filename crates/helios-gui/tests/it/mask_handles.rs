@@ -565,3 +565,99 @@ fn escape_on_a_focused_handle_cancels_and_lets_the_focus_go() {
     assert_eq!(steps(&h).len(), n, "no undo step");
     no_gesture_left(&h);
 }
+
+// ------------------------------------------------------------ path, keyboard
+
+/// A harness with a four-cornered path added and selected.
+fn with_path() -> Harness<'static, Shell> {
+    let mut h = with("circle");
+    h.state_mut()
+        .run(
+            "mask.add.path",
+            json!({ "corners": [[300, 200], [800, 200], [800, 650], [300, 650]] }),
+            Origin::User,
+        )
+        .unwrap();
+    h.step();
+    h.step();
+    away(&mut h);
+    h
+}
+
+fn points(h: &Harness<'_, Shell>) -> Vec<f64> {
+    let store = h.state().values().lock().unwrap();
+    let e = store.get("node/path/points").expect("the path's points");
+    e.value.as_list().unwrap().to_vec()
+}
+
+#[test]
+fn tab_reaches_a_path_point_an_arrow_moves_it_and_one_undo_puts_it_back() {
+    let mut h = with_path();
+    let corner = "mask.handle.path.corner.0";
+    focus(&mut h, corner);
+    // Tab walks the path's other handles.
+    h.key_press(Key::Tab);
+    h.step();
+    h.step();
+    let focused = egui_pop::core::areas::list(&h.ctx)
+        .into_iter()
+        .filter(|a| a.id.starts_with("mask.handle.path."))
+        .find(|a| handle_node(&h, &a.id).is_focused())
+        .map(|a| a.id);
+    assert!(
+        focused.as_deref().is_some_and(|id| id != corner),
+        "{focused:?}"
+    );
+    focus(&mut h, corner);
+    let p0 = points(&h);
+    let n = steps(&h).len();
+    key(&mut h, Key::ArrowRight);
+    let p1 = points(&h);
+    // The corner and its two Bézier handles move together, right.
+    assert!(
+        p1[0] > p0[0] && (p1[1] - p0[1]).abs() < 1e-9,
+        "{p0:?} -> {p1:?}"
+    );
+    assert!(p1[2] > p0[2] && p1[4] > p0[4], "{p0:?} -> {p1:?}");
+    assert_eq!(p1[6..], p0[6..], "the other points stay");
+    key(&mut h, Key::ArrowDown);
+    let p2 = points(&h);
+    assert!(p2[1] > p1[1], "{p1:?} -> {p2:?}");
+    assert_eq!(steps(&h).len(), n + 2, "one undo step per key");
+    no_gesture_left(&h);
+    undo(&mut h);
+    assert_eq!(points(&h), p1);
+    undo(&mut h);
+    assert_eq!(points(&h), p0, "x and y back with one undo each");
+}
+
+#[test]
+fn escape_on_a_path_point_cancels_and_lets_the_focus_go() {
+    let mut h = with_path();
+    let corner = "mask.handle.path.corner.1";
+    focus(&mut h, corner);
+    let p0 = points(&h);
+    let n = steps(&h).len();
+    key(&mut h, Key::Escape);
+    assert!(
+        !handle_node(&h, corner).is_focused(),
+        "the focus is given up"
+    );
+    assert_eq!(points(&h), p0);
+    assert_eq!(steps(&h).len(), n, "no undo step");
+    no_gesture_left(&h);
+}
+
+#[test]
+fn delete_on_a_focused_path_point_removes_it_as_one_undo_step() {
+    let mut h = with_path();
+    focus(&mut h, "mask.handle.path.corner.2");
+    let p0 = points(&h);
+    let n = steps(&h).len();
+    key(&mut h, Key::Delete);
+    let p1 = points(&h);
+    assert_eq!(p1.len() * 4, p0.len() * 3, "three points left");
+    assert_eq!(steps(&h).len(), n + 1);
+    undo(&mut h);
+    assert_eq!(points(&h), p0);
+}

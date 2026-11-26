@@ -208,6 +208,17 @@ pub fn compare_of(store: &Store) -> Compare {
 }
 
 /// Refuses to edit a locked shape: its handles, its path's points.
+/// What the keyboard asked of a focused handle this frame
+/// ([`Viewport::declare_areas`]).
+enum Asked {
+    /// A case's handle (or a plugin tool's).
+    Tool(crate::masks::Keyed, HandleKeys),
+    /// A path's handle.
+    Path(crate::masks::PathKeyed, HandleKeys),
+    /// Delete on a path's corner: removes its point.
+    Remove(crate::masks::PathKeyed),
+}
+
 fn unlocked(store: &Store, node: &str) -> Result<(), String> {
     if crate::mask_tree::is_locked(store, node) {
         return Err(format!("`{node}` is locked"));
@@ -1195,15 +1206,15 @@ impl Viewport {
     /// hover alone over the overlay's hit target. Tab reaches each
     /// handle; once focused, `egui_hud`'s `handle_keys` reads its keys
     /// (arrows move a point, `+` and `-` step a size or an angle, Escape
-    /// cancels): returned with the handle they ask of, applied by the
-    /// caller.
+    /// cancels, Delete removes a path's point): returned with the handle
+    /// they ask of, applied by the caller.
     fn declare_areas(
         &self,
         ui: &mut Ui,
         response: &egui::Response,
         mapping: Option<&egui_pop::viewport::Mapping>,
         store: &Store,
-    ) -> Vec<(crate::masks::Keyed, HandleKeys)> {
+    ) -> Vec<Asked> {
         let mut asked = Vec::new();
         let image = if crate::masks::tool(store) == "path" {
             AreaSpec::new("viewport.image", AreaKind::Edit)
@@ -1235,13 +1246,26 @@ impl Viewport {
                 spec = spec.value(crate::params::shown_in(&locale, &e.descriptor, &e.value));
             }
             let r = helios_controls::render::declare_handle(ui, at, id, spec);
+            if let Some(k) = h.path_keys {
+                let Some(hud) = k.hud() else { continue };
+                let params = helios_rack::tools::ParamsOf(&k.params);
+                if let Some(keys) = helios_controls::render::handle_keys(ui, &r, &hud, &params) {
+                    asked.push(Asked::Path(k, keys));
+                } else if k.is_corner()
+                    && r.has_focus()
+                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
+                {
+                    asked.push(Asked::Remove(k));
+                }
+                continue;
+            }
             let Some(k) = h.keys else { continue };
             let Some(th) = k.tool.handle(&k.handle) else {
                 continue;
             };
             let params = helios_rack::tools::ParamsOf(&k.params);
             if let Some(keys) = helios_controls::render::handle_keys(ui, &r, &th.handle, &params) {
-                asked.push((k, keys));
+                asked.push(Asked::Tool(k, keys));
             }
         }
         asked
@@ -1342,10 +1366,27 @@ impl Viewport {
         self.readout = out.readout;
         let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
         let asked = self.declare_areas(ui, &out.response, out.mapping.as_ref(), &store);
-        for (k, keys) in asked {
-            match keys {
-                HandleKeys::Change(writes) => k.apply(&writes, &mut store),
-                HandleKeys::Cancel => {
+        for a in asked {
+            match a {
+                Asked::Tool(k, HandleKeys::Change(writes)) => k.apply(&writes, &mut store),
+                Asked::Path(k, HandleKeys::Change(writes)) => {
+                    let Some(to) = k.to(&writes) else { continue };
+                    let move_ = crate::masks::Command::Move {
+                        shape: Some(k.node.clone()),
+                        handle: k.handle.clone(),
+                        to,
+                    };
+                    if let Err(e) = self.mask(move_, Origin::User, &mut store) {
+                        log::debug!("handle keys: {e}");
+                    }
+                }
+                Asked::Remove(k) => {
+                    let remove = crate::masks::Command::PointRemove { point: k.point() };
+                    if let Err(e) = self.mask(remove, Origin::User, &mut store) {
+                        log::debug!("handle keys: {e}");
+                    }
+                }
+                Asked::Tool(_, HandleKeys::Cancel) | Asked::Path(_, HandleKeys::Cancel) => {
                     self.masks.cancel_drag(&mut store);
                     self.plugin_tools.cancel_drag(&mut store);
                 }
