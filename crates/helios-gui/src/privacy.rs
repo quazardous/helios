@@ -33,6 +33,9 @@ pub const PRIVATE: &[&str] = &[
     "gui.snapshot",
     "health.findings",
     "helios.app.reset.plan",
+    // Declared `.private()` by `workflow_queue::Commands` itself; listed
+    // here so the journal loses its `out` folder too.
+    "helios.workflow.submit",
     "init.apply",
     "init.chooseFolder",
     "init.libraryFolder",

@@ -1037,6 +1037,10 @@ impl Plugin for Commands {
                 },
                 "required": ["node", "images", "out", "format"],
             }))
+            // `out` names a folder: an agent withheld private data may
+            // not write files where it could not read them
+            // (`crate::privacy`; declared here, not by `plugins::declared`).
+            .private()
             .hidden(),
             move |call| {
                 let node = call.args["node"].as_str().ok_or("`node` is missing")?;
