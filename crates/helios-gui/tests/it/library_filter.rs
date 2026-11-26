@@ -4085,3 +4085,79 @@ fn the_search_suggests_keys_and_shows_its_rules_as_chips() {
     drop((h, persist));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The search's Advanced rows (`docs/design/library-search.md`, G5): open,
+/// a chip's rule shows as a row; a row's value changed rewrites the
+/// search's text, its chip and the results; a row added is a rule more;
+/// a term typed in the field is a row more; closed, the rules stay.
+#[test]
+fn the_advanced_rows_edit_the_search_both_ways() {
+    let root = temp("advanced");
+    let path = vault_file(&root);
+    let (mut h, mut persist) = window(&root, &path);
+    let type_in = |h: &mut Harness<'static, Shell>, text: &str| {
+        h.input_mut().events.push(egui::Event::Text(text.into()));
+        h.run();
+        h.run();
+    };
+    let values = |h: &Harness<'static, Shell>| -> Vec<String> {
+        h.query_all_by_label("Value")
+            .map(|n| n.accesskit_node().value().unwrap_or_default())
+            .collect()
+    };
+    h.get_by_label("Search images").click();
+    h.run();
+    type_in(&mut h, "camera:R5 ");
+    settle(&mut h, &mut persist, 1.0);
+    h.get_by_label("camera is R5");
+    assert_eq!(grid(&h), ["c.nef"]);
+
+    // Open: the chip's rule is a row.
+    h.get_by_label("Advanced").click();
+    h.run();
+    h.run();
+    assert_eq!(values(&h), ["R5"]);
+
+    // Its value typed anew: the text, the chip and the results follow.
+    h.get_by_label("Value").focus();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+    h.run();
+    h.get_by_label("Value").type_text("Z 8");
+    h.run_steps(3);
+    settle(&mut h, &mut persist, 2.0);
+    assert_eq!(h.state().library().filter().text, "camera:\"Z 8\"");
+    h.get_by_label("camera is Z 8");
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
+    assert_eq!(values(&h), ["Z 8"]);
+
+    // A row added: a rule more (at least one star), the search's text too.
+    h.get_by_label("+ Condition").click();
+    settle(&mut h, &mut persist, 3.0);
+    let text = h.state().library().filter().text.clone();
+    assert!(text.starts_with("camera:\"Z 8\" rating"), "{text}");
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
+    assert_eq!(values(&h).len(), 2);
+
+    // A term typed in the field: a row more.
+    h.get_by_label("Search images").focus();
+    h.run_steps(2);
+    type_in(&mut h, "type:jpg ");
+    settle(&mut h, &mut persist, 4.0);
+    assert_eq!(values(&h).len(), 3, "{:?}", values(&h));
+
+    // Closed: no rows, the rules kept.
+    h.get_by_label("Advanced").click();
+    settle(&mut h, &mut persist, 5.0);
+    assert!(h.query_by_label("+ Condition").is_none());
+    assert!(values(&h).is_empty());
+    let kept = h.state().library().filter().text.clone();
+    assert!(
+        kept.contains("rating") && kept.contains("type:jpg"),
+        "{kept}"
+    );
+    h.get_by_label("camera is Z 8");
+    assert_eq!(grid(&h), ["a.jpg", "b.jpg"]);
+    drop((h, persist));
+    let _ = std::fs::remove_dir_all(&root);
+}

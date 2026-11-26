@@ -78,6 +78,7 @@ use helios_vault::fields::{
 };
 use serde_json::{Value, json};
 
+mod advanced;
 mod batch;
 mod details;
 mod gallery;
@@ -4454,6 +4455,86 @@ impl Library {
         // narrow panel takes the bar on several lines rather than widen
         // its content past its edge (and cut what comes under it).
         ui.horizontal_wrapped(|ui| self.search_field(ui));
+        self.advanced_rows(ui);
+    }
+
+    /// The search's whole text: its chips' rules, then the words typed
+    /// (what the field's filter reads).
+    fn whole_search(&self) -> String {
+        self.view
+            .rules
+            .iter()
+            .map(|r| r.trim())
+            .chain(Some(self.view.search.text().trim()))
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Writes `text` in the search: its key terms as chips, its words
+    /// typed. The filter follows at the field's next pass.
+    fn write_search(&mut self, text: &str) {
+        match suggest::commit(text) {
+            Some((rules, rest)) => {
+                self.view.rules = rules;
+                self.view.search.set_text(rest);
+            }
+            None => {
+                self.view.rules.clear();
+                self.view.search.set_text(text.trim());
+            }
+        }
+    }
+
+    /// The Advanced button: opens or closes the search's rows.
+    fn advanced_toggle(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        let t = |m: Message| crate::i18n::text(&ctx, m);
+        let open = self.view.advanced.is_some();
+        let clicked = widgets::selectable_label(
+            ui,
+            open,
+            t(Message::new("gui-library-advanced", "Advanced")),
+        )
+        .tip(t(Message::new(
+            "gui-library-advanced-tip",
+            "The search as rows of rules, each one editable",
+        )))
+        .clicked();
+        if clicked {
+            self.view.advanced = if open {
+                None
+            } else {
+                Some(advanced::Advanced::of(&self.whole_search()))
+            };
+        }
+    }
+
+    /// The search's Advanced rows under the field, when open: one row per
+    /// rule, kept in step with the field both ways
+    /// ([`advanced::Advanced`]).
+    fn advanced_rows(&mut self, ui: &mut Ui) {
+        let whole = self.whole_search();
+        let Some(rows) = self.view.advanced.as_mut() else {
+            return;
+        };
+        rows.follow(&whole);
+        let ctx = ui.ctx().clone();
+        let words = crate::rule_editor_ui::Words::new(&|m| crate::i18n::text(&ctx, m));
+        let asked = ui
+            .push_id(("helios.library.advanced", &self.view_id), |ui| {
+                crate::rule_editor_ui::rows(ui, &rows.editor, &[], &words)
+            })
+            .inner;
+        let Some(text) = asked.and_then(|args| rows.edit(&args)) else {
+            return;
+        };
+        self.write_search(&text);
+        let whole = self.whole_search();
+        if let Some(rows) = self.view.advanced.as_mut() {
+            rows.written(whole);
+        }
+        ctx.request_repaint();
     }
 
     /// The search field, in the line `ui` lays out, no wider than what is
@@ -4501,6 +4582,7 @@ impl Library {
             field = field.app(app);
         }
         let out = field.show(ui, &mut self.view.search);
+        self.advanced_toggle(ui);
         let mut picked = false;
         for event in self.view.search.take_events() {
             match event {
@@ -5083,6 +5165,9 @@ impl Library {
                 self.facet_lines(ui, true);
             }
         });
+        if options.has_search() {
+            self.advanced_rows(ui);
+        }
     }
 
     /// The gallery's Results: its bar, then the photos as thumbnails or
