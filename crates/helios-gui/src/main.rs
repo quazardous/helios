@@ -2480,6 +2480,15 @@ fn main() -> Result<(), String> {
             if let Some(cache) = THUMB_CACHE.get().cloned().flatten() {
                 shell.set_import_thumbnail_cache(cache);
             }
+            // The cameras' photos from Wikimedia Commons, kept in the user
+            // cache folder, fetched off the interface thread.
+            if let Some(root) = helios_cache::user_cache_dir() {
+                use helios_connect::camera_photo::{CameraPhotos, Commons};
+                shell.set_camera_photos(CameraPhotos::new(
+                    Some(root.join("camera-photos")),
+                    std::sync::Arc::new(Commons::new()),
+                ));
+            }
             // The cards' glances on disk, in the user cache folder: a card
             // plugged in again shows its previews without a read. Its
             // folder is listed off the interface thread.

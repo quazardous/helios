@@ -68,6 +68,17 @@ pub const SETTINGS: &[Setting] = &[
         },
     },
     Setting {
+        key: "import.camera_photos",
+        concern: Concern::User,
+        label: "Camera photos from Wikimedia Commons",
+        about: "A source's camera is shown by a credited photo from Wikimedia Commons, fetched once per model and kept; only the model's name is sent. Off: the drawings only.",
+        kind: Kind::Toggle {
+            default: true,
+            on: "on",
+            off: "off",
+        },
+    },
+    Setting {
         key: "interface.experimental.workshops",
         concern: Concern::User,
         label: "Workshops",

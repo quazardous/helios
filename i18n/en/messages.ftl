@@ -989,6 +989,8 @@ gui-import-browse-timeline = By date
 
 gui-import-browse-tree = Folder tree
 
+gui-import-camera-photo-credit = Photo: { $author }, { $licence }, Wikimedia Commons
+
 gui-import-camera-picture = Camera picture: { $camera }
 
 gui-import-cancelled = The import was cancelled: { $photos } photos imported

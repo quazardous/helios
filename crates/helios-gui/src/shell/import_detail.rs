@@ -34,6 +34,26 @@ use helios_core::Message;
 use helios_core::config::Level;
 
 use super::import_sources::SourceKey;
+
+/// The camera photo's width in the detail zone, in points.
+const PHOTO_WIDTH: f32 = 96.0;
+
+/// The setting turning the cameras' photos from Wikimedia Commons on or
+/// off (`helios_shell::settings`): off, the drawings only.
+pub const CAMERA_PHOTOS_SETTING: &str = "import.camera_photos";
+
+/// Whether the cameras' photos are on, as the Settings app keeps the
+/// setting (on by default).
+pub(super) fn camera_photos_on(app: &egui_pop::api::app::AppHandle) -> bool {
+    let store = app.store();
+    let store = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    store
+        .get(&format!("settings/{CAMERA_PHOTOS_SETTING}"))
+        .and_then(|e| e.value.as_bool())
+        .unwrap_or(true)
+}
 use super::import_window::ImportWindow;
 use super::import_wizard::{contract_ui, own_params, refused_ui};
 
@@ -193,29 +213,89 @@ impl ImportWindow {
         download_folder(pattern, &pictures(), &who)
     }
 
-    /// The camera of `detail`'s source, under its heading: its kind's
-    /// drawing, named for the camera, and its name.
-    pub(super) fn detail_camera_ui(&self, ui: &mut egui::Ui, detail: &Detail) {
+    /// The camera of `detail`'s source, under its heading: its credited
+    /// photo from Wikimedia Commons once one is ready
+    /// ([`helios_connect::camera_photo`]), else its kind's drawing, named
+    /// for the camera; then its name, and the photo's credit.
+    pub(super) fn detail_camera_ui(&mut self, ui: &mut egui::Ui, detail: &Detail) {
         use egui_pop::core::icon::{Icon, Size, registry};
+        use egui_pop::core::tooltip::TooltipExt as _;
         let Some(camera) = &detail.camera else {
             return;
         };
         let name = camera.name();
-        let picture = Message::new("gui-import-camera-picture", "Camera picture: { $camera }")
-            .with("camera", name.clone());
-        let picture = match self.texts.as_ref() {
-            Some(t) => t(picture),
-            None => picture.english,
+        let photo = self
+            .camera_photos
+            .photo(camera)
+            .and_then(|photo| Some((self.camera_texture(ui.ctx(), &photo)?, photo.credit)));
+        let say = |m: Message| match self.texts.as_ref() {
+            Some(t) => t(m),
+            None => m.english,
         };
-        let icon = camera
-            .kind()
-            .and_then(|k| registry::lookup(&crate::camera_icons::icon(k)))
-            .or_else(|| registry::lookup("phosphor:sd-card"))
-            .unwrap_or(Icon::Folder);
+        let picture = say(
+            Message::new("gui-import-camera-picture", "Camera picture: { $camera }")
+                .with("camera", name.clone()),
+        );
+        let credit = photo.as_ref().map(|(_, credit)| {
+            say(Message::new(
+                "gui-import-camera-photo-credit",
+                "Photo: { $author }, { $licence }, Wikimedia Commons",
+            )
+            .with("author", credit.author.clone())
+            .with("licence", credit.licence.clone()))
+        });
         ui.horizontal(|ui| {
-            ui.add(icon.size(Size::Panel).label(&picture));
+            if let (Some((texture, _)), Some(credit)) = (&photo, &credit) {
+                let size = texture.size_vec2();
+                let size = size * (PHOTO_WIDTH / size.x.max(1.0));
+                ui.add(egui::Image::new((texture.id(), size)).alt_text(&picture))
+                    .tip(credit);
+            } else {
+                let icon = camera
+                    .kind()
+                    .and_then(|k| registry::lookup(&crate::camera_icons::icon(k)))
+                    .or_else(|| registry::lookup("phosphor:sd-card"))
+                    .unwrap_or(Icon::Folder);
+                ui.add(icon.size(Size::Panel).label(&picture));
+            }
             ui.strong_text(name);
         });
+        if let Some(credit) = credit {
+            ui.meta(credit);
+        }
+    }
+
+    /// The texture of a camera's photo, made once per Commons file; `None`
+    /// when its picture does not decode (the drawing stays).
+    fn camera_texture(
+        &mut self,
+        ctx: &egui::Context,
+        photo: &helios_connect::camera_photo::Photo,
+    ) -> Option<egui::TextureHandle> {
+        let file = &photo.credit.file;
+        if let Some(texture) = self.camera_textures.get(file) {
+            return Some(texture.clone());
+        }
+        let rgba = match image::load_from_memory(&photo.bytes) {
+            Ok(picture) => picture.to_rgba8(),
+            Err(e) => {
+                log::warn!("camera photo {file}: {e}; its drawing stays");
+                self.camera_photos.forget(file);
+                return None;
+            }
+        };
+        let (w, h) = rgba.dimensions();
+        let picture = egui::ColorImage::from_rgba_unmultiplied(
+            [w as usize, h as usize],
+            rgba.as_flat_samples().as_slice(),
+        );
+        let texture = ctx.load_texture(
+            format!("helios.import.camera-photo.{file}"),
+            picture,
+            egui::TextureOptions::LINEAR,
+        );
+        self.camera_textures.insert(file.clone(), texture.clone());
+        Some(texture)
     }
 
     /// The connector's own parameters of the source of `detail`: its
