@@ -20,8 +20,18 @@
 //! - **Results** go to the vault's extract cache for the run
 //!   (`vault.extract_cache(Some(run))`), or to memory without a vault.
 //!
-//! Not yet: the node verb, the run listed in `workflow.runs` and the
-//! Queue panel, a run taken over after a restart.
+//! - **The verb** `workflow.extract` ([`specs`], [`ExtractRunner::request`])
+//!   takes extractor uses (`id@version` from the runner's catalogue,
+//!   inputs, overrides, after) and library photos (`image:<hash>`).
+//! - **Listing**: the runs are listed by `workflow.runs` beside the export
+//!   runs ([`ExtractRunner::summaries`], with `kind: "extract"` and per
+//!   node counts) and their items by `workflow.items`
+//!   ([`ExtractRunner::items`]), read from the run's rows, so the Queue
+//!   panel shows them as it shows export runs.
+//!
+//! Not yet: an AI and a library image source opened by the node process
+//! (the verb is refused until the node hands the runner one,
+//! [`ExtractRunner::set_engine`]), a run taken over after a restart.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -30,15 +40,21 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use helios_ai::Ai;
+use helios_ai::routing::Overrides;
+use helios_command::schema::{or_null, string};
+use helios_command::{CommandSpec, object};
 use helios_core::Bus;
+use helios_core::Message;
 use helios_core::jobs::{Jobs, Progress, Report, Start};
-use helios_extract::{MemoryCache, ResultCache};
-use helios_journal::MemoryStore;
+use helios_extract::{Catalog, MemoryCache, ResultCache};
+use helios_inspect::control::ExtractUse;
+use helios_journal::{MemoryStore, Row, Status, Store};
 use helios_vault::journal::VaultJournal;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use super::extract::{Ended, ExtractNode, ExtractRun, ImageSource, Tally};
+use super::SUBMIT;
+use super::extract::{Ended, ExtractNode, ExtractRun, ImageSource, Tally, image_item, image_of};
 use super::lifecycle::FORMAT;
 use super::runs::{RunStore, SharedVault};
 
@@ -98,6 +114,49 @@ pub fn run_id(nodes: &[ExtractNode], images: &[String]) -> String {
     format!("{KIND}-{}", &blake3::hash(&bytes).to_hex()[..16])
 }
 
+/// The verb submitting an extract run, declared here (registered by
+/// [`crate::commands::registry`]).
+pub fn specs() -> Vec<CommandSpec> {
+    let node = object(&[
+        ("name", string(), true),
+        (
+            "extractor",
+            json!({ "type": "string", "pattern": "^[^@]+@[0-9]+$",
+                    "description": "the extractor and its version: id@version" }),
+            true,
+        ),
+        (
+            "after",
+            json!({ "type": "array", "items": string() }),
+            false,
+        ),
+        ("input", json!({ "type": "object" }), false),
+        ("overrides", json!({ "type": "object" }), false),
+    ]);
+    let image = json!({ "type": "string", "pattern": "^image:[0-9a-f]{64}$",
+                        "description": "a library photo: image: and its content hash" });
+    vec![
+        CommandSpec::new(
+            "workflow.extract",
+            "Run extractors over library photos",
+            "Workflow",
+        )
+        .params(object(&[
+            ("title", or_null(string()), false),
+            (
+                "nodes",
+                json!({ "type": "array", "items": node, "minItems": 1 }),
+                true,
+            ),
+            (
+                "items",
+                json!({ "type": "array", "items": image, "minItems": 1 }),
+                true,
+            ),
+        ])),
+    ]
+}
+
 /// What the runner keeps of a run.
 struct Held {
     title: String,
@@ -107,6 +166,41 @@ struct Held {
     job: String,
     status: Arc<Mutex<(ExtractState, Tally, Option<u64>)>>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// The run's item ids, in the order they are worked.
+    items: Vec<String>,
+    /// Each node's name and the nodes it waits for.
+    graph: Vec<(String, Vec<String>)>,
+    /// Another handle on the run's rows, read for its listing while its
+    /// thread works it.
+    rows: Mutex<RunStore>,
+}
+
+/// Where an item stands at a node, as `workflow.items` names it.
+fn place(rows: &RunStore, item: &str, node: &str, parents: &[String], now: u64) -> &'static str {
+    match rows.get(item, node) {
+        Some(Row {
+            status: Status::Scheduled,
+            due,
+            ..
+        }) if due.is_none_or(|d| d <= now) => "waiting",
+        Some(r) => r.status.name(),
+        None => {
+            let parent = |p: &String| rows.get(item, p).map(|r| r.status);
+            let statuses: Vec<Option<Status>> = parents.iter().map(parent).collect();
+            if statuses.iter().all(|s| {
+                s.is_some_and(|s| matches!(s, Status::Done | Status::Skipped | Status::Omitted))
+            }) {
+                "waiting"
+            } else if statuses
+                .iter()
+                .any(|s| s.is_some_and(|s| matches!(s, Status::Failed | Status::Cancelled)))
+            {
+                "held"
+            } else {
+                "upstream"
+            }
+        }
+    }
 }
 
 impl Held {
@@ -135,7 +229,15 @@ pub struct ExtractRunner {
     /// The node instance that owns the runs it creates.
     owner: String,
     runs: Mutex<BTreeMap<String, Arc<Held>>>,
+    /// The extractors the verb names.
+    catalog: Catalog,
+    /// The AI and image source the verb's runs are worked with, once the
+    /// node hands them over.
+    engine: Mutex<Option<Engine>>,
 }
+
+/// The AI a run calls, and where it reads its images.
+type Engine = (Arc<Ai>, Arc<dyn ImageSource + Send + Sync>);
 
 impl ExtractRunner {
     pub fn new(bus: Arc<Bus>, jobs: Jobs, vault: Option<SharedVault>, owner: &str) -> Self {
@@ -145,7 +247,86 @@ impl ExtractRunner {
             vault,
             owner: owner.into(),
             runs: Mutex::new(BTreeMap::new()),
+            catalog: builtin_catalog(),
+            engine: Mutex::new(None),
         }
+    }
+
+    /// The extractors the verb may name: the built-ins unless given.
+    #[must_use]
+    pub fn with_catalog(mut self, catalog: Catalog) -> Self {
+        self.catalog = catalog;
+        self
+    }
+
+    /// Hands the runner the AI and image source the verb's runs use.
+    pub fn set_engine(&self, ai: Arc<Ai>, source: Arc<dyn ImageSource + Send + Sync>) {
+        *self.engine.lock().unwrap_or_else(PoisonError::into_inner) = Some((ai, source));
+    }
+
+    /// `workflow.extract`: each use resolved in the catalogue, the photos
+    /// taken as `image:<hash>`, then [`ExtractRunner::submit`].
+    pub fn request(
+        self: &Arc<Self>,
+        title: Option<&str>,
+        uses: &[ExtractUse],
+        items: &[String],
+    ) -> Result<Value, Message> {
+        let (ai, source) = self
+            .engine
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| {
+                Message::plain("this node opens no AI yet: extract runs cannot be worked here")
+            })?;
+        let nodes = uses
+            .iter()
+            .map(|u| self.node(u))
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(Message::plain)?;
+        let images = items
+            .iter()
+            .map(|i| {
+                image_of(i)
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("`{i}` is not a library photo (image:<hash>)"))
+            })
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(Message::plain)?;
+        self.submit(ExtractSubmit {
+            title: title.map(str::to_string),
+            nodes,
+            images,
+            ai,
+            source,
+        })
+        .map_err(Message::plain)
+    }
+
+    fn node(&self, u: &ExtractUse) -> Result<ExtractNode, String> {
+        let (id, version) = u
+            .extractor
+            .split_once('@')
+            .and_then(|(id, v)| Some((id, v.parse::<u32>().ok()?)))
+            .ok_or_else(|| format!("node `{}`: `{}` is not id@version", u.name, u.extractor))?;
+        let def = self
+            .catalog
+            .get(id, version)
+            .ok_or_else(|| format!("node `{}`: no extractor {id}@{version}", u.name))?
+            .clone();
+        let input = if u.input.is_null() {
+            json!({})
+        } else {
+            u.input.clone()
+        };
+        let mut node = ExtractNode::new(&u.name, def, input);
+        node.after = u.after.clone();
+        if !u.overrides.is_null() {
+            node.overrides = serde_json::from_value::<Overrides>(u.overrides.clone())
+                .map_err(|e| format!("node `{}`: overrides: {e}", u.name))?;
+        }
+        Ok(node)
     }
 
     fn write(&self, id: &str, held: &Held) {
@@ -174,9 +355,16 @@ impl ExtractRunner {
                 }));
             }
         }
-        let store = match &self.vault {
-            Some(vault) => RunStore::Vault(VaultJournal::new(vault.clone(), &id)),
-            None => RunStore::Memory(MemoryStore::default()),
+        let (store, rows) = match &self.vault {
+            Some(vault) => (
+                RunStore::Vault(VaultJournal::new(vault.clone(), &id)),
+                RunStore::Vault(VaultJournal::new(vault.clone(), &id)),
+            ),
+            None => {
+                let memory = MemoryStore::default();
+                let shared = memory.share();
+                (RunStore::Memory(memory), RunStore::Memory(shared))
+            }
         };
         let now = now_ms();
         let nodes: Vec<Value> = ask
@@ -184,6 +372,19 @@ impl ExtractRunner {
             .iter()
             .map(|n| json!({ "name": n.name, "after": n.after, "extractor": n.def.id, "version": n.def.version }))
             .collect();
+        let graph: Vec<(String, Vec<String>)> = ask
+            .nodes
+            .iter()
+            .map(|n| {
+                let after = if n.after.is_empty() {
+                    vec![SUBMIT.to_string()]
+                } else {
+                    n.after.clone()
+                };
+                (n.name.clone(), after)
+            })
+            .collect();
+        let items: Vec<String> = ask.images.iter().map(|i| image_item(i)).collect();
         let mut run =
             ExtractRun::submit(&ask.ai, &self.bus, &id, ask.nodes, &ask.images, store, now)?;
         let tally = run.tally();
@@ -224,6 +425,9 @@ impl ExtractRunner {
             job: job.clone(),
             status: status.clone(),
             thread: Mutex::new(None),
+            items,
+            graph,
+            rows: Mutex::new(rows),
         });
         self.write(&id, &held);
         let this = self.clone();
@@ -314,6 +518,140 @@ impl ExtractRunner {
         })
     }
 
+    /// Whether `id` is one of this runner's runs.
+    pub fn has(&self, id: &str) -> bool {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(id)
+    }
+
+    /// The runs for `workflow.runs`, shaped as the export runs' summaries
+    /// (`id`, `title`, `state`, `items`, `job`, `nodes` with per node
+    /// counts by place), with `kind: "extract"`.
+    pub fn summaries(&self) -> Vec<Value> {
+        let now = now_ms();
+        let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        runs.iter()
+            .map(|(id, held)| {
+                let (state, tally, finished) =
+                    *held.status.lock().unwrap_or_else(PoisonError::into_inner);
+                let rows = held.rows.lock().unwrap_or_else(PoisonError::into_inner);
+                let nodes: serde_json::Map<String, Value> = held
+                    .graph
+                    .iter()
+                    .map(|(name, parents)| {
+                        let mut counts: BTreeMap<&str, u64> = Status::ALL
+                            .iter()
+                            .map(|s| (s.name(), 0))
+                            .chain(["waiting", "upstream", "held"].map(|p| (p, 0)))
+                            .collect();
+                        for item in &held.items {
+                            *counts
+                                .entry(place(&rows, item, name, parents, now))
+                                .or_default() += 1;
+                        }
+                        let mut out = json!(counts);
+                        out["asking"] = json!(0);
+                        out["leases_out"] = json!(0);
+                        out["concurrency"] = json!(1);
+                        out["queue"] = json!({ "kind": KIND });
+                        out["parents"] = json!(parents);
+                        (name.clone(), out)
+                    })
+                    .collect();
+                json!({
+                    "id": id,
+                    "kind": KIND,
+                    "title": held.title,
+                    "state": state,
+                    "durable": self.vault.is_some(),
+                    "owner": self.owner,
+                    "created": held.created,
+                    "finished": finished,
+                    "format": FORMAT,
+                    "read_only": false,
+                    "items": held.items.len(),
+                    "job": held.job,
+                    "export": Value::Null,
+                    "extract": { "nodes": held.nodes, "tally": tally },
+                    "nodes": nodes,
+                })
+            })
+            .collect()
+    }
+
+    /// `workflow.items` for an extract run: one page of its items at
+    /// `node` (its last node when not given), shaped as the export runs'
+    /// pages. `None` when `run` is not one of this runner's.
+    pub fn items(
+        &self,
+        run: &str,
+        node: Option<&str>,
+        filter: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Option<Result<Value, Message>> {
+        let now = now_ms();
+        let held = self
+            .runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(run)?
+            .clone();
+        let at = match node {
+            Some(name) => held.graph.iter().find(|(n, _)| n == name),
+            None => held.graph.last(),
+        };
+        let Some((name, parents)) = at else {
+            return Some(Err(Message::new(
+                "workflow-no-node",
+                "run `{ $run }` does not queue at `{ $node }`",
+            )
+            .with("run", run)
+            .with("node", node.unwrap_or_default())));
+        };
+        let rows = held.rows.lock().unwrap_or_else(PoisonError::into_inner);
+        let matching: Vec<(&String, &str)> = held
+            .items
+            .iter()
+            .map(|item| (item, place(&rows, item, name, parents, now)))
+            .filter(|(_, place)| filter.is_none_or(|f| f == *place))
+            .collect();
+        let page: Vec<Value> = matching
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(item, place)| {
+                let row = rows.get(item, name);
+                json!({
+                    "item": item,
+                    "title": image_of(item).map(|h| &h[..h.len().min(12)]),
+                    "path": Value::Null,
+                    "output": Value::Null,
+                    "state": place,
+                    "row": row.as_ref().map(|r| json!({
+                        "item": item,
+                        "status": r.status,
+                        "attempts": r.attempts,
+                        "since": r.since,
+                        "due": r.due,
+                        "error": r.error,
+                    })),
+                    "error": row.and_then(|r| r.error),
+                })
+            })
+            .collect();
+        Some(Ok(json!({
+            "run": run,
+            "node": name,
+            "total": matching.len(),
+            "offset": offset,
+            "items": page,
+            "now": now,
+        })))
+    }
+
     /// Waits for the thread working the run `id` to end (a test, a node
     /// stopping).
     pub fn join(&self, id: &str) {
@@ -336,4 +674,15 @@ impl ExtractRunner {
 /// export runner leaves alone.
 pub fn is_extract(doc: &Value) -> bool {
     doc["kind"] == KIND
+}
+
+/// The built-in extractors, as a catalogue.
+fn builtin_catalog() -> Catalog {
+    let mut catalog = Catalog::default();
+    for def in helios_extract::builtins().extractors {
+        if let Err(e) = catalog.add(def) {
+            log::warn!("{e}");
+        }
+    }
+    catalog
 }

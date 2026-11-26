@@ -129,6 +129,7 @@ pub fn registry() -> &'static Registry {
             .chain(crate::cursor::specs())
             .chain(crate::promises::specs())
             .chain(crate::calibrate::profile_specs())
+            .chain(crate::workflow::extract_runner::specs())
         {
             registry.register(spec).expect("each verb is declared once");
         }
@@ -203,6 +204,14 @@ mod tests {
                 json!({ "title": null, "items": ["/a.png", { "path": "/b.png", "params": {} }],
                         "out": "/out", "format": "jpeg", "quality": null, "name": "{stem}.{ext}",
                         "node": null, "source": "src", "again": true, "concurrency": 2 }),
+            ),
+            (
+                "workflow.extract",
+                json!({ "title": "Captions",
+                        "nodes": [{ "name": "caption", "extractor": "caption@1",
+                                    "after": [], "input": { "language": "English" },
+                                    "overrides": {} }],
+                        "items": [format!("image:{}", "0".repeat(64))] }),
             ),
             ("workflow.runs", json!({})),
             (
@@ -306,6 +315,7 @@ mod tests {
             .chain(crate::cursor::specs())
             .chain(crate::promises::specs())
             .chain(crate::calibrate::profile_specs())
+            .chain(crate::workflow::extract_runner::specs())
             .map(|s| s.id)
             .collect();
         let all = ids.len();
