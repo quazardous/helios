@@ -316,6 +316,38 @@ pub fn listen_zen(bus: &dyn Bus, choice: Arc<Mutex<Option<String>>>) -> Result<(
     .map_err(|e| e.to_string())
 }
 
+/// Helios's listener of egui-pop's `pop.command.label`.
+pub const ZEN_LABEL_LISTENER: &str = "helios.zen.label";
+
+/// Registers [`ZEN_LABEL_LISTENER`] on `bus`: it answers `workbench.zen`'s
+/// title and tooltip with `label`, the [`crate::plugins::zen_label`] the
+/// shell found on its last frame ("Zen: Compare"), so the View menu's
+/// entry and the shortcut's tooltip name the panel zen shows. Other
+/// commands keep their text. One there already is replaced.
+///
+/// # Errors
+/// The bus refused it.
+pub fn listen_zen_label(bus: &dyn Bus, label: Arc<Mutex<Option<String>>>) -> Result<(), String> {
+    use egui_pop::api::bus::CommandLabel;
+    use egui_pop::api::workbench::CMD_ZEN;
+    bus.unlisten(&CommandLabel::ID, ZEN_LABEL_LISTENER);
+    bus.listen::<CommandLabel>(
+        ZEN_LABEL_LISTENER,
+        ListenOpts::new().owner(ZEN_LABEL_LISTENER),
+        move |command, text| {
+            if *command != CMD_ZEN {
+                return Ok(());
+            }
+            let said = label.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            if let Some(l) = said {
+                *text = text.clone().title(l.clone()).tooltip(l);
+            }
+            Ok(())
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// What the photo menu's "Show in ▸" and the target mark read of the
 /// surfaces, set by the shell each frame.
 #[derive(Clone, Debug, Default, PartialEq)]

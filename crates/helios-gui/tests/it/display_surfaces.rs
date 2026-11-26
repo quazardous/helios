@@ -547,31 +547,103 @@ fn shows(h: &Harness<'_, Shell>, label: &str) -> bool {
     h.query_all_by_label_contains(label).next().is_some()
 }
 
+/// The View menu's Zen entry: its AccessKit node, named "Zen: …" (a
+/// menu row may add its key to the name).
+fn zen_entry(h: &Harness<'_, Shell>) -> Vec<String> {
+    h.query_all_by_label_contains("Zen: ")
+        .filter_map(|n| n.accesskit_node().label())
+        .collect()
+}
+
+/// Hovers View ▸ Zen and says the names of the nodes reading `tip`, the
+/// entry's tooltip among them.
+fn zen_tooltip(h: &mut Harness<'_, Shell>, tip: &str) -> usize {
+    open_view_menu(h);
+    let before = h.query_all_by_label_contains(tip).count();
+    h.query_all_by_label_contains("Zen: ")
+        .last()
+        .expect("View ▸ Zen")
+        .hover();
+    h.run_steps(6);
+    let after = h.query_all_by_label_contains(tip).count();
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    after - before
+}
+
+/// The title the zen shortcut's tooltip shows, as toolbars and the
+/// shortcut tooltips read it (`pop.command.label`).
+fn zen_title(h: &Harness<'_, Shell>) -> String {
+    let app = h.state().app().handle().clone();
+    let zen = app.command(&egui_pop::api::workbench::CMD_ZEN).unwrap();
+    assert_eq!(
+        app.command_tooltip(&zen),
+        app.command_title(&zen),
+        "the tooltip names the panel as the entry does"
+    );
+    app.command_menu_title(&zen)
+}
+
 #[test]
-fn the_zen_entry_names_the_focused_compare() {
+fn the_zen_entry_and_tooltip_name_the_focused_compare() {
     let mut h = harness();
     open_compare(&mut h);
     let app = h.state().app().handle().clone();
     app.focus_panel(&egui_pop::model::ids::PanelId::from_static(COMPARE));
     h.run_steps(3);
+    assert_eq!(zen_title(&h), "Zen: Compare");
     open_view_menu(&mut h);
-    assert!(shows(&h, "Zen: Compare"), "View names zen's panel");
+    assert!(
+        shows(&h, "Zen: Compare"),
+        "View names zen's panel: {:?}",
+        zen_entry(&h)
+    );
     assert!(!shows(&h, "Zen: centre"));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(
+        zen_tooltip(&mut h, "Zen: Compare") >= 1,
+        "the entry's tooltip names Compare"
+    );
 }
 
 #[test]
-fn the_zen_entry_reads_the_centre_with_nothing_to_choose() {
+fn the_zen_entry_and_tooltip_name_the_centres_tab_with_nothing_to_choose() {
     let mut h = harness();
     open_compare(&mut h);
     // Ask: no surface a double click reaches, and the keyboard in a
-    // control panel: zen shows the centre.
+    // control panel: zen shows the centre's active tab.
     set_strategy(&mut h, "ask");
     let app = h.state().app().handle().clone();
     app.focus_panel(&egui_pop::model::ids::PanelId::from_static(
         "helios.modules",
     ));
     h.run_steps(3);
+    let centre = app
+        .layout()
+        .active_in(egui_pop::model::panels::Area::Center)
+        .first()
+        .map(|p| p.as_str().to_string())
+        .expect("a tab in the centre");
+    let tab = app
+        .panels()
+        .into_iter()
+        .find(|s| s.id.as_str() == centre)
+        .map(|s| egui_pop::core::strings::panel_title(&app.egui(), s.id.as_str(), &s.title))
+        .expect("the centre's tab is a panel");
+    let label = format!("Zen: {tab}");
+    assert_eq!(zen_title(&h), label);
     open_view_menu(&mut h);
-    assert!(shows(&h, "Zen: centre"), "View says zen shows the centre");
-    assert!(!shows(&h, "Zen: Compare"));
+    assert!(
+        shows(&h, &label),
+        "View names the centre's tab: {:?}",
+        zen_entry(&h)
+    );
+    assert!(!shows(&h, "Zen: centre"), "{:?}", zen_entry(&h));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(
+        zen_tooltip(&mut h, &label) >= 1,
+        "the entry's tooltip names the centre's tab"
+    );
 }

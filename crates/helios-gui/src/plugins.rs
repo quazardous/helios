@@ -808,14 +808,19 @@ fn panel_label(
     }
 }
 
-/// View ▸ Zen's list: one entry, [`zen_label`].
+/// View ▸ Zen's list: one entry, [`zen_label`]. The list stays while
+/// egui-pop names a checkable menu row by its declared title for
+/// assistive technology, not by `pop.command.label`.
 pub const LIST_ZEN: &str = "helios.zen";
 
-/// "Zen: Compare": zen mode's menu entry, naming the panel it shows, or
-/// would show now ([`AppHandle::zen_target`], the choice `workbench.zen`
-/// itself makes, so the label and the result cannot disagree); "Zen:
-/// centre" when nothing is chosen (no focused view, no panel Helios
-/// names on `pop.zen.panel`): zen then shows the centre.
+/// "Zen: Compare": zen mode's title, naming the panel it shows, or would
+/// show now ([`AppHandle::zen_target`], the choice `workbench.zen` itself
+/// makes, so the label and the result cannot disagree): the focused
+/// view, the panel Helios names on `pop.zen.panel`, else the centre's
+/// active tab ("Zen: Library"). "Zen: centre" only with no tab in the
+/// centre. Helios answers it on `pop.command.label`
+/// ([`crate::display_surfaces::listen_zen_label`]), so the View menu's
+/// entry and the shortcut's tooltip read it.
 ///
 /// [`AppHandle::zen_target`]: egui_pop::api::app::AppHandle::zen_target
 pub fn zen_label(app: &egui_pop::api::app::AppHandle) -> String {
@@ -823,11 +828,14 @@ pub fn zen_label(app: &egui_pop::api::app::AppHandle) -> String {
     let panel = if app.zen() {
         app.zen_panel()
     } else {
-        app.zen_target().filter(|p| {
-            app.focused_panel().as_ref() == Some(p)
-                || app.zen_choice().as_deref() == Some(p.as_str())
-        })
-    };
+        app.zen_target()
+    }
+    .or_else(|| {
+        app.layout()
+            .active_in(egui_pop::model::panels::Area::Center)
+            .first()
+            .map(|p| (*p).clone())
+    });
     let title = panel.and_then(|p| {
         app.panels()
             .into_iter()
@@ -871,7 +879,7 @@ pub fn strip_entry(app: &egui_pop::api::app::AppHandle) -> ListItem {
 
 /// Zen's entry naming its panel.
 const ZEN_ON: StrKey = StrKey::new("gui-zen-panel", "Zen: { $panel }");
-/// Zen's entry when it shows the centre whole.
+/// Zen's entry when the centre has no tab to name.
 const ZEN_CENTRE: StrKey = StrKey::new("gui-zen-centre", "Zen: centre");
 
 /// The switcher's commands, kept out of Helios's menus and palette.

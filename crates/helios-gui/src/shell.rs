@@ -1760,6 +1760,14 @@ impl Shell {
         ) {
             log::error!(target: "helios", "{}: {e}", crate::display_surfaces::ZEN_LISTENER);
         }
+        // Zen mode's title and tooltip, naming its panel
+        // (`pop.command.label`).
+        if let Err(e) = crate::display_surfaces::listen_zen_label(
+            &*shell.core.app.handle().bus(),
+            shell.focus.zen_label.clone(),
+        ) {
+            log::error!(target: "helios", "{}: {e}", crate::display_surfaces::ZEN_LABEL_LISTENER);
+        }
         if has(&shell, crate::log_panel::PANEL) {
             let log = shell.core.log.clone();
             shell.set_content(crate::log_panel::PANEL, move |ui| {
@@ -7027,6 +7035,13 @@ impl Shell {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             crate::display_surfaces::zen_choice(&self.focus.surfaces, strategy, &layout, culling);
+        // Zen's title, from that choice (`pop.command.label`).
+        *self
+            .focus
+            .zen_label
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(crate::plugins::zen_label(&app));
     }
 
     /// A photo the user opened in a gallery (Enter, a double click):
