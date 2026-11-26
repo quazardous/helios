@@ -706,6 +706,9 @@ command-import-signOut =
 command-activity-resume =
     .title = Reprendre maintenant une tâche en pause (`id` : une promesse de `promises.list` en pause sur le quota d’un service ou une connexion refusée)
 
+command-activity-cancel =
+    .title = Annuler une tâche en cours (`id` : une promesse de `promises.list`)
+
 command-activity-show =
     .title = Activité… (`id` : la tâche sélectionnée, une promesse de `promises.list`)
 

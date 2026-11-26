@@ -3,7 +3,7 @@
 //! rows at the node, read once and followed on the bus, Retry, Move and
 //! Cancel run as `helios.workflow.*` commands that reach the node's
 //! `workflow.*`. A long job that is not a run shows as its promise, and
-//! its Cancel goes through `job.cancel`. Empty, the panel shows an empty
+//! its Cancel goes through `activity.cancel`. Empty, the panel shows an empty
 //! state, or closes when `interface.panels.queue_when_empty` is off.
 //!
 //! The snapshot (`tests/snapshots/queue-workflow-pop-dark-1x.png`) is
@@ -562,7 +562,7 @@ fn queue_snapshots() {
 // --- Long jobs that are not runs: their promises ------------------------
 
 #[test]
-fn a_job_that_is_not_a_run_shows_as_its_promise_and_cancel_goes_through_the_jobs() {
+fn a_job_that_is_not_a_run_shows_as_its_promise_and_cancel_goes_through_it() {
     let mut h = harness(true);
     let jobs = h.state().jobs();
     let export = jobs.start(
@@ -612,6 +612,37 @@ fn a_job_that_is_not_a_run_shows_as_its_promise_and_cancel_goes_through_the_jobs
     );
     assert!(h.query_by_label("Cancel Export a.png").is_none());
     export.cancelled();
+}
+
+/// Every long job has its promise: a job that named the node without one
+/// (an export inside a batch, the batch's promise standing for it) is no
+/// item of its own; its promise, once there, is.
+#[test]
+fn a_job_without_a_promise_is_no_item() {
+    let mut h = harness(true);
+    let jobs = h.state().jobs();
+    let export = jobs.start(
+        Start::new("export-a", "Export a.png", "export")
+            .total(1)
+            .node("grade"),
+    );
+    select(&mut h, "grade");
+    show_queue(&mut h);
+    h.run_steps(4);
+    assert!(h.state().queue_panel().is_empty(), "{:?}", items(&h));
+    assert!(h.query_by_label("Cancel Export a.png").is_none());
+
+    h.state_mut().show_activity_at(
+        vec![promise("promise-1", "export-a", "Export a.png", running())],
+        1_794_650_000,
+    );
+    h.run_steps(4);
+    assert_eq!(
+        items(&h),
+        [("Export a.png".to_string(), ItemState::Running)]
+    );
+    h.get_by_label("Cancel Export a.png");
+    export.finished();
 }
 
 #[test]

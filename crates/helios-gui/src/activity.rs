@@ -46,6 +46,10 @@ pub const COMMAND: &str = "activity.show";
 /// The command that lets a held promise go on now (`id`: a promise of
 /// `promises.list`): `promises.retry` on the node.
 pub const RESUME: &str = "activity.resume";
+/// The command that cancels a running promise (`id`: a promise of
+/// `promises.list`): its job stopped in this process, a connected node's
+/// through its relay, else `promises.cancel` on the node.
+pub const CANCEL: &str = "activity.cancel";
 /// The indicator of the running tasks, for tests and agents.
 pub const MARK: &str = "helios.status.activity";
 /// The pause mark of the held tasks.
