@@ -312,10 +312,12 @@ pub fn comparison(specs: &[PanelSpec]) -> Layout {
             *active = 0;
         }
     }
-    layout.instances.push(
-        egui_pop::model::layout::PanelInstance::new(strip)
-            .payload(crate::library_views::strip_state()),
-    );
+    // Titled from the start (its first draw puts it in the user's
+    // language), not "Library 2".
+    let mut instance = egui_pop::model::layout::PanelInstance::new(strip)
+        .payload(crate::library_views::strip_state());
+    instance.title = Some(crate::library_views::strip_title().english);
+    layout.instances.push(instance);
     layout
 }
 
