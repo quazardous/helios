@@ -152,6 +152,27 @@ smart album, import session, query, whole library) resolved to image
 ids, reading the embedded preview from the library, the alter node, and
 the tests through the batch endpoint.
 
+### Slice 5, second part: the runner (2026-11-26)
+
+`helios_node::workflow::extract_runner::ExtractRunner` works a submitted
+run on a thread of its own:
+
+- the run's id follows from its nodes and images, so the same
+  submission while the run is at work gives that run back;
+- the run document `workflow/runs/<id>` says `kind: "extract"`, its
+  nodes and extractors, its state, counts and end; the export runner
+  skips these documents;
+- the run is a job of kind `extract`, which the node mirrors as a
+  promise (Activity focus, `promises.list`): progress is the rows
+  concluded of images × nodes, failures counted; it settles with the
+  run's counts. Cancelling the job stops the run after the row at hand
+  and cancels the rows not concluded.
+
+Still to come: the node verb, the `Ai` service and a library preview
+`ImageSource` in the node process, the run listed in `workflow.runs`
+and the Queue panel, a run taken over after a restart, input nodes
+resolved to image ids, the alter node, and the batch-endpoint tests.
+
 It builds on [ai-models.md](../ai-models.md) (providers, routing,
 versioned prompts, the call log), [workflow-level.md](../workflow-level.md)
 (runs, journal rows per item and graph node, choices),

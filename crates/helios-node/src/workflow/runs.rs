@@ -1432,6 +1432,10 @@ impl Workflows {
         let present: BTreeSet<&str> = docs.iter().map(|(id, _)| id.as_str()).collect();
         state.foreign.retain(|id, _| present.contains(id.as_str()));
         for (id, doc) in docs {
+            // An extract run's: its own runner's.
+            if super::extract_runner::is_extract(&doc) {
+                continue;
+            }
             // Only an owner's death changes what can be done with a run
             // listed read-only; another format or network stays so.
             let settled = state
