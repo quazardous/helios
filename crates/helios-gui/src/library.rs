@@ -2365,6 +2365,10 @@ impl LibraryItems<String> for Items<'_> {
         })
     }
 
+    /// Status badges are icons of the icon registry, each named in the
+    /// interface's language (its tooltip, and said after the cell's name);
+    /// the file type and the versions count stay short text, as every
+    /// photo application shows them.
     fn badges(&self, index: usize) -> Vec<Badge> {
         let entry = self.entry(index);
         let path = std::path::Path::new(&entry.name);
@@ -2376,24 +2380,32 @@ impl LibraryItems<String> for Items<'_> {
         match entry.presence {
             helios_vault::Presence::Present => {}
             helios_vault::Presence::Offline => {
-                badges.push(Badge::new(self.words.offline.clone()).tone(BadgeTone::Warning));
+                badges.push(
+                    Badge::icon("phosphor:plugs", &self.words.offline).tone(BadgeTone::Warning),
+                );
             }
             helios_vault::Presence::Missing => {
-                badges.push(Badge::new(self.words.missing.clone()).tone(BadgeTone::Danger));
+                badges.push(
+                    Badge::icon("phosphor:link-break", &self.words.missing).tone(BadgeTone::Danger),
+                );
             }
         }
         // Its file rewritten by another application, not acknowledged.
         if entry.changed_outside.is_some() {
-            badges.push(Badge::new(self.words.changed.clone()).tone(BadgeTone::Info));
+            badges.push(
+                Badge::icon("phosphor:arrows-clockwise", &self.words.changed).tone(BadgeTone::Info),
+            );
         }
         if self.quick.contains(&entry.id) {
-            badges.push(Badge::new(self.words.quick.clone()).tone(BadgeTone::Info));
+            badges.push(Badge::icon("phosphor:lightning", &self.words.quick).tone(BadgeTone::Info));
         }
         // Its edit changed it from the original. TODO: declared through
         // the thumbnail badge contract (`BadgeDecl` over an `edited` fact,
         // docs/design/thumbnail-badges.md, slice 4) once it exists.
         if entry.edited {
-            badges.push(Badge::new(self.words.edited.clone()).tone(BadgeTone::Info));
+            badges.push(
+                Badge::icon("phosphor:pencil-simple", &self.words.edited).tone(BadgeTone::Info),
+            );
         }
         // Its versions (L10, L-C5 B): copies and darktable duplicates,
         // counted, one cell for the photo.
@@ -2403,22 +2415,31 @@ impl LibraryItems<String> for Items<'_> {
         if let Some(mark) = self.backups.and_then(|b| b.get(&entry.id)) {
             let w = self.words;
             badges.push(match mark {
-                BackupMark::Met => Badge::new(w.backed_up.clone()).tone(BadgeTone::Success),
-                BackupMark::Short => Badge::new(w.short.clone()).tone(BadgeTone::Warning),
-                BackupMark::Unverified => Badge::new(w.unverified.clone()).tone(BadgeTone::Info),
-                BackupMark::None => Badge::new(w.no_backup.clone()).tone(BadgeTone::Danger),
+                BackupMark::Met => {
+                    Badge::icon("phosphor:shield-check", &w.backed_up).tone(BadgeTone::Success)
+                }
+                BackupMark::Short => {
+                    Badge::icon("phosphor:shield-warning", &w.short).tone(BadgeTone::Warning)
+                }
+                BackupMark::Unverified => {
+                    Badge::icon("phosphor:seal-question", &w.unverified).tone(BadgeTone::Info)
+                }
+                BackupMark::None => {
+                    Badge::icon("phosphor:shield-slash", &w.no_backup).tone(BadgeTone::Danger)
+                }
             });
         }
         // The culling measures, once measured: soft focus, blown
         // highlights, crushed shadows.
         if entry.focus.is_some_and(cull::soft) {
-            badges.push(Badge::new(self.words.soft.clone()).tone(BadgeTone::Warning));
+            badges
+                .push(Badge::icon("phosphor:drop-half", &self.words.soft).tone(BadgeTone::Warning));
         }
         if entry.clip_white.is_some_and(|w| w > cull::CLIPPED_WHITE) {
-            badges.push(Badge::new(self.words.blown.clone()).tone(BadgeTone::Warning));
+            badges.push(Badge::icon("phosphor:sun", &self.words.blown).tone(BadgeTone::Warning));
         }
         if entry.clip_black.is_some_and(|b| b > cull::CLIPPED_BLACK) {
-            badges.push(Badge::new(self.words.crushed.clone()).tone(BadgeTone::Warning));
+            badges.push(Badge::icon("phosphor:moon", &self.words.crushed).tone(BadgeTone::Warning));
         }
         badges
     }
@@ -3114,7 +3135,11 @@ impl Library {
             quick: &self.quick_set,
             heads: &self.head_counts,
         };
-        items.badges(0).into_iter().map(|b| b.text).collect()
+        items
+            .badges(0)
+            .iter()
+            .map(|b| b.said().to_owned())
+            .collect()
     }
 
     /// Hovering an offline or missing image in a view says why: the
