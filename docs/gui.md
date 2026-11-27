@@ -1497,6 +1497,18 @@ the node's promises as the Activity focus lists them (`idle`, `total`,
 never counted as running). egui-pop's `jobs` collector has the whole
 jobs centre while it is there.
 
+The photos themselves are read by `helios.library.photos` (2026-11-26):
+the photos the views show, in their order with the current filter
+applied, a page at a time (`from`, `limit`: 100, at most 1000; `next`
+says where the next page starts), each with its `id`, `rating`, `flag`,
+`labels`, dates, `edited` and `presence`. It is read-only, so an agent
+allowed only to read follows the library. A photo's `name`, `path`,
+`title`, `description`, `creator`, `copyright` and `tags` name files,
+people and places: they are given only to an agent allowed private
+data, `<private>` otherwise. `helios.workflow.submit` names the folder
+it writes to, so it is private: an agent withheld private data is
+refused it.
+
 ## Parameters
 
 Parameter widgets are generated from value descriptors and bound to the

@@ -171,10 +171,12 @@ mod tests {
     /// frames, as the socket's own tests do.
     #[cfg(unix)]
     mod socket {
+        use std::cell::RefCell;
         use std::io::{BufRead as _, BufReader, Write as _};
         use std::os::unix::fs::PermissionsExt as _;
         use std::os::unix::net::UnixStream;
         use std::path::{Path, PathBuf};
+        use std::rc::Rc;
         use std::sync::{Arc, Mutex};
         use std::time::{Duration, Instant};
 
@@ -260,6 +262,19 @@ mod tests {
                 .plugin(crate::workflow_queue::Commands {
                     relays: crate::jobs::Relays::default(),
                     panel: std::rc::Rc::default(),
+                })
+                // The views' photos (`helios.library.photos`): three.
+                .plugin(crate::agent_state::AgentState {
+                    late: {
+                        let late = crate::agent_state::Late::default();
+                        late.set(
+                            Rc::new(RefCell::new(crate::agent_state::tests::three_photos())),
+                            Rc::default(),
+                            crate::activity::Activity::default().followed(),
+                        );
+                        late
+                    },
+                    values: Arc::default(),
                 })
                 .debug_bridge(egui_pop::core::debug::BridgeMode::On)
                 .agent_grants(preset.grants())
@@ -376,6 +391,32 @@ mod tests {
                 .filter(|e| e.name == "command.refused" && e.data["by"] == by)
                 .map(|e| e.data)
                 .collect()
+        }
+
+        /// The results of `command`'s runs, as the journal's
+        /// `command.done` gives them (a queued call's result is read back
+        /// there), stepping frames until `n` are in.
+        fn done_of(h: &mut Harness<'static, App>, command: &str, n: usize) -> Vec<Json> {
+            let start = Instant::now();
+            loop {
+                let done: Vec<Json> = h
+                    .state()
+                    .handle()
+                    .events_since(0)
+                    .into_iter()
+                    .filter(|e| e.name == "command.done" && e.data["command"] == command)
+                    .map(|e| e.data["result"].clone())
+                    .collect();
+                if done.len() >= n {
+                    return done;
+                }
+                assert!(
+                    start.elapsed() < Duration::from_secs(20),
+                    "{command} did not finish"
+                );
+                h.step();
+                std::thread::sleep(Duration::from_millis(2));
+            }
         }
 
         #[test]
@@ -519,6 +560,102 @@ mod tests {
             assert!(!cancel.to_string().contains("pop.agent.grants"), "{cancel}");
             // Queued: it fails later at the node (none is connected).
             assert_eq!(cancel["result"]["ok"], true, "{cancel}");
+        }
+
+        /// The views' photos are read by any agent, a page at a time, their
+        /// names and paths only by one allowed private data: the runner
+        /// under `scenario` (private data withheld) reads them masked; an
+        /// unpaired client (read only) reads them too.
+        #[test]
+        fn the_photos_are_paged_for_a_reader_with_private_data_masked() {
+            use crate::agent_state::PHOTOS;
+            let (mut h, socket, _) = app("photos");
+            let s = socket.clone();
+            let client = std::thread::spawn(move || {
+                Client::connect(&s).run(PHOTOS, json!({ "from": 1, "limit": 1 }))
+            });
+            let page = finish(&mut h, client);
+            assert_eq!(page["result"]["ok"], true, "{page}");
+            let result = &done_of(&mut h, PHOTOS, 1)[0];
+            assert_eq!(result["total"], 3, "{result}");
+            assert_eq!(result["photos"][0]["id"], "b2", "{result}");
+            assert_eq!(result["photos"][0]["flag"], "pick", "{result}");
+            assert_eq!(result["next"], 2, "{result}");
+            assert_eq!(result["photos"][0]["name"], crate::privacy::REDACTED);
+            assert_eq!(
+                result["photos"][0]["path"],
+                json!(null),
+                "no file: nothing to mask"
+            );
+            let text = result.to_string();
+            assert!(
+                !text.contains("b2.jpg") && !text.contains("Grandma"),
+                "{text}"
+            );
+
+            // A client allowed only to read reads the page as well.
+            let s = socket.clone();
+            let client =
+                std::thread::spawn(move || Client::unpaired(&s).run(PHOTOS, json!({ "limit": 3 })));
+            let page = finish(&mut h, client);
+            assert_eq!(page["result"]["ok"], true, "{page}");
+            let result = &done_of(&mut h, PHOTOS, 2)[1];
+            assert_eq!(
+                result["photos"].as_array().map(Vec::len),
+                Some(3),
+                "{result}"
+            );
+
+            // A wrong page is refused before the read.
+            let s = socket.clone();
+            let client =
+                std::thread::spawn(move || Client::unpaired(&s).run(PHOTOS, json!({ "limit": 0 })));
+            let wrong = finish(&mut h, client);
+            assert_eq!(wrong["result"]["ok"], false, "{wrong}");
+            assert!(
+                refused_by(&h, "pop.command.args")
+                    .iter()
+                    .any(|r| r["command"] == PHOTOS)
+            );
+
+            // An agent allowed private data reads the names.
+            let (mut h, socket, _) = app_with("photos-private", Preset::Scenario { private: true });
+            let client = std::thread::spawn(move || {
+                Client::connect(&socket).run(PHOTOS, json!({ "limit": 2 }))
+            });
+            let page = finish(&mut h, client);
+            assert_eq!(page["result"]["ok"], true, "{page}");
+            let result = &done_of(&mut h, PHOTOS, 1)[0];
+            assert_eq!(result["photos"][1]["name"], "b2.jpg", "{result}");
+            assert_eq!(result["photos"][1]["title"], "Grandma at the lake");
+            assert_eq!(result["next"], 2, "{result}");
+        }
+
+        /// Submitting names a folder written to: an agent withheld private
+        /// data is refused it with the reason, one allowed passes the
+        /// grants (and fails at the node: none is followed).
+        #[test]
+        fn a_submit_names_a_folder_so_it_needs_private_data() {
+            use crate::workflow_queue::SUBMIT;
+            let args = json!({
+                "node": "n1", "images": ["a1"], "out": "/home/someone/out", "format": "jpeg",
+            });
+            let (mut h, socket, _) = app("submit");
+            let a = args.clone();
+            let client = std::thread::spawn(move || Client::connect(&socket).run(SUBMIT, a));
+            let refused = finish(&mut h, client);
+            assert!(refused.get("error").is_some(), "{refused}");
+            assert!(
+                refused.to_string().contains("pop.agent.grants"),
+                "the reason names the grants: {refused}"
+            );
+
+            let (mut h, socket, _) = app_with("submit-private", Preset::Scenario { private: true });
+            let client = std::thread::spawn(move || Client::connect(&socket).run(SUBMIT, args));
+            let submit = finish(&mut h, client);
+            assert!(!submit.to_string().contains("pop.agent.grants"), "{submit}");
+            // Queued: it fails later at the node (none is followed).
+            assert_eq!(submit["result"]["ok"], true, "{submit}");
         }
 
         #[test]

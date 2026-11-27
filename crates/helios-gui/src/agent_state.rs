@@ -18,6 +18,10 @@
 //! - `helios.cache`: the cache service's tiers and kinds
 //!   (`crate::caches::collector`).
 //!
+//! And one read-only command, [`PHOTOS`]: the photos the views show, a
+//! page at a time, for agents allowed only to read; what names a file, a
+//! person or a place only for agents allowed private data.
+//!
 //! The library and the viewport exist once the shell is assembled, after
 //! the collectors are declared: they are handed over through [`Late`].
 
@@ -27,7 +31,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_pop::api::{Ctx, Plugin, PluginError};
 use egui_pop::core::debug::FnCollector;
-use egui_pop::model::ids::PluginId;
+use egui_pop::model::commands::CommandSpec;
+use egui_pop::model::ids::{CommandId, PluginId};
 use serde_json::{Map, Value as Json, json};
 
 use crate::library::Library;
@@ -35,6 +40,14 @@ use crate::viewport::Viewport;
 
 /// The plugin's id.
 pub const PLUGIN: PluginId = PluginId::from_static("helios.agent_state");
+
+/// Reads the photos the views show, in their order, a page at a time:
+/// read-only, for agents allowed to read only.
+pub const PHOTOS: &str = "helios.library.photos";
+/// The page [`PHOTOS`] gives when `limit` is left out.
+pub const PHOTOS_PAGE: usize = 100;
+/// The largest page [`PHOTOS`] gives.
+pub const PHOTOS_MAX: usize = 1000;
 
 /// What the shell hands over once assembled.
 #[derive(Clone, Default)]
@@ -127,6 +140,28 @@ impl Plugin for AgentState {
                 helios_controls::commands::instances(&store, crate::controls::registry())
             }),
         )?;
+        let late = self.late.clone();
+        ctx.command(
+            CommandSpec::new(
+                CommandId::from_static(PHOTOS),
+                "Reads the photos the views show, in their order (the current filter applied): a page of them (`from`, `limit`: 100, at most 1000), each with its id, stars, flag, labels, capture day, whether it is edited and whether its file is at hand; its name, path, title, tags and people only for agents allowed private data",
+                "Library",
+            )
+            .schema(photos_schema())
+            .read_only()
+            .hidden(),
+            move |call| {
+                let library = late
+                    .library()
+                    .ok_or_else(|| "the library is not open yet: ask again".to_string())?;
+                // Asked while the library draws, it is busy.
+                let library = library
+                    .try_borrow()
+                    .map_err(|_| "the library is busy: ask again".to_string())?;
+                let private = egui_pop_agent::grants::reads_private(call.app, call.origin);
+                Ok(photos_answer(&library, call.args, private))
+            },
+        )?;
         ctx.collector(crate::caches::collector())?;
         let late = self.late.clone();
         ctx.collector(
@@ -164,6 +199,83 @@ fn library_snapshot(lib: &Library) -> Json {
     })
 }
 
+/// [`PHOTOS`]'s arguments.
+pub fn photos_schema() -> Json {
+    json!({
+        "type": "object",
+        "properties": {
+            "from": { "type": "integer", "minimum": 0, "description": "The first photo given, by its index in the views' order" },
+            "limit": { "type": "integer", "minimum": 1, "maximum": PHOTOS_MAX, "description": "How many photos, 100 when left out" },
+        },
+    })
+}
+
+/// [`PHOTOS`]'s answer: the page of the photos `lib`'s views show that
+/// `args` asks (`from`, `limit`). Without `private`, what names a file,
+/// a person or a place (its name, path, title, description, creator,
+/// copyright and tags) is [`crate::privacy::REDACTED`]: the id, marks,
+/// dates and states stay.
+pub fn photos_answer(lib: &Library, args: &Json, private: bool) -> Json {
+    let from = args["from"]
+        .as_u64()
+        .map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX));
+    let limit = args["limit"]
+        .as_u64()
+        .map_or(PHOTOS_PAGE, |n| usize::try_from(n).unwrap_or(PHOTOS_MAX))
+        .clamp(1, PHOTOS_MAX);
+    let shown = lib.shown();
+    let hide = |v: Json| {
+        if private || v.is_null() {
+            v
+        } else {
+            json!(crate::privacy::REDACTED)
+        }
+    };
+    let photos: Vec<Json> = shown
+        .iter()
+        .enumerate()
+        .skip(from)
+        .take(limit)
+        .filter_map(|(index, id)| lib.entry(id).map(|e| (index, e)))
+        .map(|(index, e)| {
+            let flag = if e.rejected {
+                "reject"
+            } else if e.picked {
+                "pick"
+            } else {
+                "none"
+            };
+            json!({
+                "index": index,
+                "id": e.id,
+                "rating": e.rating,
+                "flag": flag,
+                "labels": e.labels,
+                "captured": e.captured,
+                "day": e.day,
+                "modified": e.modified,
+                "edited": e.edited,
+                "presence": e.presence,
+                "name": hide(json!(e.name)),
+                "path": hide(json!(lib.file(&e.id))),
+                "title": hide(json!(e.title)),
+                "description": hide(json!(e.description)),
+                "creator": hide(json!(e.creator)),
+                "copyright": hide(json!(e.copyright)),
+                "tags": hide(json!(e.tags)),
+            })
+        })
+        .collect();
+    let next = from.saturating_add(limit);
+    json!({
+        "total": shown.len(),
+        "from": from,
+        "photos": photos,
+        "next": (next < shown.len()).then_some(next),
+        "private": private,
+    })
+}
+
 /// `helios.values`'s snapshot: every `node/` value.
 fn values_snapshot(store: &helios_values::Store) -> Json {
     let map: Map<String, Json> = store
@@ -198,7 +310,7 @@ fn jobs_snapshot(promises: &[helios_vault::promises::Promise]) -> Json {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -251,6 +363,57 @@ mod tests {
         assert_eq!(s["count"], 0);
         assert_eq!(s["selected"], 0);
         assert!(s["current"].is_null());
+    }
+
+    /// A library of three photos, the second picked with a title.
+    pub(crate) fn three_photos() -> Library {
+        let photo = |id: &str| crate::library::Entry {
+            id: id.into(),
+            name: format!("{id}.jpg"),
+            rating: 2,
+            ..crate::library::Entry::default()
+        };
+        let mut b = photo("b2");
+        b.picked = true;
+        b.title = Some("Grandma at the lake".into());
+        b.tags = vec!["family".into()];
+        let mut lib = Library::default();
+        lib.set_entries(vec![photo("a1"), b, photo("c3")]);
+        lib
+    }
+
+    #[test]
+    fn the_photos_are_paged_and_private_data_only_for_who_may_read_it() {
+        let lib = three_photos();
+        let page = photos_answer(&lib, &json!({ "from": 1, "limit": 1 }), true);
+        assert_eq!(page["total"], 3);
+        assert_eq!(page["photos"].as_array().unwrap().len(), 1);
+        assert_eq!(page["photos"][0]["index"], 1);
+        assert_eq!(page["photos"][0]["id"], "b2");
+        assert_eq!(page["photos"][0]["flag"], "pick");
+        assert_eq!(page["photos"][0]["rating"], 2);
+        assert_eq!(page["photos"][0]["name"], "b2.jpg");
+        assert_eq!(page["photos"][0]["title"], "Grandma at the lake");
+        assert_eq!(page["next"], 2);
+        assert!(egui_pop::core::schema::check(&photos_schema(), &json!({ "limit": 5 })).is_ok());
+        assert!(egui_pop::core::schema::check(&photos_schema(), &json!({ "limit": 0 })).is_err());
+        assert!(egui_pop::core::schema::check(&photos_schema(), &json!({ "from": -1 })).is_err());
+
+        let hidden = photos_answer(&lib, &json!({}), false);
+        let text = hidden.to_string();
+        assert!(!text.contains(".jpg"), "{text}");
+        assert!(!text.contains("Grandma"), "{text}");
+        assert!(!text.contains("family"), "{text}");
+        assert_eq!(hidden["photos"][1]["name"], crate::privacy::REDACTED);
+        assert_eq!(hidden["photos"][1]["id"], "b2");
+        assert_eq!(hidden["photos"][1]["flag"], "pick");
+        // Nothing to hide stays empty, not said private.
+        assert!(hidden["photos"][0]["title"].is_null());
+        assert_eq!(hidden["next"], Json::Null);
+        assert_eq!(
+            photos_answer(&Library::default(), &json!({}), false)["total"],
+            0
+        );
     }
 
     #[test]
