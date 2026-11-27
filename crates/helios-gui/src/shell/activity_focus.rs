@@ -239,6 +239,36 @@ pub(super) struct ActivityFocus {
     pub(super) state: Rc<RefCell<Jobs>>,
 }
 
+/// The time zone the focus shows its times in: the machine's, or UTC
+/// while its clock is frozen for pictures, so a picture comes out the same
+/// on every machine whatever its zone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Zone {
+    Local,
+    Utc,
+}
+
+impl Zone {
+    /// Instant `at` (seconds since the epoch) in this zone, as `pattern`
+    /// (`chrono` format); empty when out of range.
+    fn format(self, at: u64, pattern: &str) -> String {
+        match self {
+            Self::Local => in_zone(at, &chrono::Local, pattern),
+            Self::Utc => in_zone(at, &chrono::Utc, pattern),
+        }
+    }
+}
+
+fn in_zone<Tz>(at: u64, zone: &Tz, pattern: &str) -> String
+where
+    Tz: chrono::TimeZone,
+    Tz::Offset: std::fmt::Display,
+{
+    chrono::DateTime::from_timestamp(at.cast_signed(), 0)
+        .map(|t| t.with_timezone(zone).format(pattern).to_string())
+        .unwrap_or_default()
+}
+
 fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -332,6 +362,15 @@ fn state_message(s: &State) -> Message {
 }
 
 impl Jobs {
+    /// The zone times are shown in: UTC while the clock is frozen.
+    fn zone(&self) -> Zone {
+        if self.frozen.is_some() {
+            Zone::Utc
+        } else {
+            Zone::Local
+        }
+    }
+
     /// The rows the list shows, in its order: running first, then the
     /// rest, newest first.
     fn rows(&self) -> Vec<&Promise> {
@@ -631,22 +670,10 @@ impl Jobs {
         if let Some(until) = p.paused.as_ref().and_then(|w| w.until)
             && !p.state.is_settled()
         {
-            let at = chrono::DateTime::from_timestamp(until.cast_signed(), 0)
-                .map(|t| {
-                    t.with_timezone(&chrono::Local)
-                        .format("%H:%M:%S")
-                        .to_string()
-                })
-                .unwrap_or_default();
+            let at = self.zone().format(until, "%H:%M:%S");
             field(Message::new("gui-jobs-goes-on", "Goes on at"), at);
         }
-        let start = chrono::DateTime::from_timestamp(p.created.cast_signed(), 0)
-            .map(|t| {
-                t.with_timezone(&chrono::Local)
-                    .format("%Y-%m-%d %H:%M:%S")
-                    .to_string()
-            })
-            .unwrap_or_default();
+        let start = self.zone().format(p.created, "%Y-%m-%d %H:%M:%S");
         field(Message::new("gui-jobs-started", "Started"), start);
         let end = if p.state.is_settled() {
             p.updated
@@ -745,13 +772,7 @@ impl Jobs {
                 ui.muted("—");
             }
             for line in &self.log {
-                let at = chrono::DateTime::from_timestamp(line.at.cast_signed(), 0)
-                    .map(|t| {
-                        t.with_timezone(&chrono::Local)
-                            .format("%H:%M:%S")
-                            .to_string()
-                    })
-                    .unwrap_or_default();
+                let at = self.zone().format(line.at, "%H:%M:%S");
                 let said = match &line.what {
                     Logged::Note(n) => n.clone(),
                     Logged::State(name, reason) => match (*name, reason) {
@@ -1060,6 +1081,23 @@ impl Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_instant_reads_in_each_zone_and_a_frozen_clock_reads_in_utc() {
+        // 2025-11-14 22:33:20 UTC.
+        let at = 1_763_159_600;
+        let paris = chrono::FixedOffset::east_opt(3600).unwrap();
+        assert_eq!(in_zone(at, &chrono::Utc, "%H:%M:%S"), "22:33:20");
+        assert_eq!(
+            in_zone(at, &paris, "%Y-%m-%d %H:%M:%S"),
+            "2025-11-14 23:33:20"
+        );
+        assert_eq!(Zone::Utc.format(at, "%H:%M:%S"), "22:33:20");
+        let mut jobs = Jobs::default();
+        assert_eq!(jobs.zone(), Zone::Local);
+        jobs.frozen = Some(at);
+        assert_eq!(jobs.zone(), Zone::Utc);
+    }
 
     fn promise(id: &str, state: State) -> Promise {
         Promise {
