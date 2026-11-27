@@ -28,18 +28,51 @@ use serde::{Deserialize, Serialize};
 use crate::camera::Camera;
 
 /// The curated table: a camera's name, as [`Camera::name`] says it, and
-/// the Commons file showing it (without its `File:` prefix).
+/// the Commons file showing it (without its `File:` prefix). Kept sorted
+/// by brand, then model.
+///
+/// # Adding a model
+///
+/// 1. Its name: what [`Camera::name`] gives for its EXIF make and model
+///    (`NIKON CORPORATION` + `NIKON Z 6` is `Nikon Z 6`); the test
+///    `every_curated_model_is_named_as_its_exif_says` checks it.
+/// 2. A file on Wikimedia Commons showing the body alone (front or three
+///    quarters, plain background), under a free licence (CC0, CC BY,
+///    CC BY-SA, public domain): its file page's "Licensing" section says
+///    it, as does the API
+///    (`api.php?action=query&prop=imageinfo&iiprop=extmetadata&titles=File:<name>`,
+///    its `LicenseShortName` and `Artist`). No fair-use or "non-free"
+///    file, and one with an `Artist`: the credit line needs it.
+/// 3. Its name as Commons spells it, `File:` dropped, in this table.
+///
+/// Each file was checked on Commons (exists, licence) on 2026-11-27.
 const COMMONS_FILES: &[(&str, &str)] = &[
-    ("Nikon Z 50", "Nikon Z 50 1.jpg"),
-    ("Nikon D750", "Nikon d750 cap off.jpg"),
+    // Canon
     (
         "Canon EOS 5D Mark IV",
         "Canon EOS 5D Mark IV (Front), 1803241116, ako.jpg",
     ),
-    ("Sony ILCE-7M3", "Sony ILCE-7M3 18.jpg"),
+    ("Canon EOS 6D", "Canon EOS 6D+EF 24-105mm F4L IS USM.jpg"),
+    ("Canon EOS 90D", "Canon EOS 90D.jpg"),
+    ("Canon EOS R5", "Canon EOS R5.jpg"),
+    // Fujifilm
+    ("Fujifilm X-T3", "Fujifilm X-T3 7 sep 2018b.jpg"),
     ("Fujifilm X-T4", "Fujifilm X-T4 29 apr 2020a.jpg"),
     ("Fujifilm X100V", "Fujifilm X100V 9 feb 2020a.jpg"),
+    // Nikon
+    ("Nikon D750", "Nikon d750 cap off.jpg"),
+    ("Nikon D7500", "Nikon D7500 (retouched).jpg"),
+    ("Nikon D850", "Nikon D850 001.jpg"),
+    ("Nikon Z 50", "Nikon Z 50 1.jpg"),
+    ("Nikon Z 6", "Nikon Z 6 7 sep 2018b.jpg"),
+    ("Nikon Z 7", "Nikon Z 7 28 nov 2018a.jpg"),
+    // Panasonic
+    ("Panasonic DC-GH5", "Panasonic.Lumix.DC-GH5.jpg"),
+    // Ricoh
     ("Ricoh GR III", "Ricoh GR III (5).jpg"),
+    // Sony
+    ("Sony ILCE-6400", "Sony ILCE-6400 01.jpg"),
+    ("Sony ILCE-7M3", "Sony ILCE-7M3 18.jpg"),
 ];
 
 /// The Commons file of `camera`'s photo, when the curated table knows
@@ -426,6 +459,44 @@ mod tests {
             Some("Sony ILCE-7M3 18.jpg")
         );
         assert_eq!(commons_file(&Camera::new("Acme", "Box 1")), None);
+    }
+
+    #[test]
+    fn every_curated_model_is_named_as_its_exif_says() {
+        // Make and model as the cameras write them in EXIF.
+        let exif = [
+            ("Canon", "Canon EOS 5D Mark IV"),
+            ("Canon", "Canon EOS 6D"),
+            ("Canon", "Canon EOS 90D"),
+            ("Canon", "Canon EOS R5"),
+            ("FUJIFILM", "X-T3"),
+            ("FUJIFILM", "X-T4"),
+            ("FUJIFILM", "X100V"),
+            ("NIKON CORPORATION", "NIKON D750"),
+            ("NIKON CORPORATION", "NIKON D7500"),
+            ("NIKON CORPORATION", "NIKON D850"),
+            ("NIKON CORPORATION", "NIKON Z 50"),
+            ("NIKON CORPORATION", "NIKON Z 6"),
+            ("NIKON CORPORATION", "NIKON Z 7"),
+            ("Panasonic", "DC-GH5"),
+            ("RICOH IMAGING COMPANY, LTD.", "RICOH GR III"),
+            ("SONY", "ILCE-6400"),
+            ("SONY", "ILCE-7M3"),
+        ];
+        assert_eq!(exif.len(), COMMONS_FILES.len(), "one EXIF pair per row");
+        for (make, model) in exif {
+            let camera = Camera::new(make, model);
+            assert!(
+                commons_file(&camera).is_some(),
+                "{make} {model} is named {:?}, not in the table",
+                camera.name()
+            );
+        }
+        // A row per model, no doubles.
+        let mut names: Vec<_> = COMMONS_FILES.iter().map(|(m, _)| *m).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), COMMONS_FILES.len());
     }
 
     #[test]
