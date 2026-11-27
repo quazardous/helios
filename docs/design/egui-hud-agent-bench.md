@@ -39,7 +39,11 @@ written under `target/hud-bench/<run>/`, never in `templates/`.
 - the handles: egui_hud's handles file format (`egui_hud-handles/1`) as
   `crates/helios-rack/src/plugin.rs` describes it;
 - the composite schema and one example,
-  `templates/composites/helios.lift-midtones@1.helios-composite.json`.
+  `templates/composites/helios.lift-midtones@1.helios-composite.json`;
+- the context every card resolves in: egui_hud's `src/context.rs`
+  (`ContextKeys`, `Density`) and `src/commands.rs` (`controls.context`), at
+  the rev `Cargo.lock` pins, and `Rack::keys` in
+  `crates/helios-rack/src/lib.rs`, the host side sharing that one context.
 
 Nothing else: no shell code, no gallery, no snapshot.
 
@@ -64,12 +68,23 @@ Nothing else: no shell code, no gallery, no snapshot.
 prints, per workshop, the counts below; the run's reply gives the style
 change's files, compared with the counter's `style files`.
 
+The style change's one place (checked 2026-11-27 at the pinned egui_hud
+rev): the context's `density` key (`comfortable`, `compact`, `touch`),
+which scales the base unit of every card. It is a runtime key of the
+shared context, set through `controls.context`, not a field of a
+composite or a module: Helios has no settings file for it. A style change
+done right therefore touches no file the workshop author wrote; the
+composite schema rightly refuses a density field.
+
 ## Counting rules
 
 Each rule is a pattern in `xtask/src/hud_bench.rs`, with a unit test as
 its example. A workshop's files are its composite and the source files of
-each module its nodes name (`modules/<module>/src/*.rs` and `*.json`, the
-`mask_*` modules in `modules/masks`). The host's files (the catalogue, the
+each module its nodes name (`modules/<module>/src/*.rs` and `*.json`; a
+module living in a crate that holds several, such as `mask_*` in
+`modules/masks` or `vkdt_*` in `modules/vkdt`, is found by its name's
+prefix, and its files there are those that declare it, not its
+siblings'). The host's files (the catalogue, the
 rack) are shared by every workshop and counted once, apart. In Rust,
 comments and the `#[cfg(test)]` part are left out.
 
@@ -106,9 +121,10 @@ pinned face or slot ignores the context and must be edited too.
 
 ## Pass and fail
 
-- **Pass**: workshop 3 needs fewer presentation decisions than workshop
-  1, and a global style change touches one place (`style files` is 1 for
-  each workshop, and the run's reply lists one file).
+- **Pass**: workshop 3 needs no more presentation decisions than
+  workshop 1, and 0; and a global style change touches one place, the
+  context (`style files` is 1 for each workshop, and the run's reply
+  names the context and no file the workshop author wrote).
 - **Fail**: rules repeated across modules (the same one-control rule in
   several workshops), or a style change spread over several files. A
   failure is what would justify a new mechanism, not before.

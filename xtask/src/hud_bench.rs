@@ -281,16 +281,41 @@ impl Workshop {
 }
 
 /// The source files of a module named by a composite node, relative to
-/// the root: `modules/<name>/src/*.rs`, the `mask_*` modules in
-/// `modules/masks`.
+/// the root: `modules/<name>/src/*.rs` and `*.json` when that crate
+/// exists. A crate holding several modules is named by their common
+/// prefix (`mask_blur` in `modules/masks`, `vkdt_usm` in `modules/vkdt`);
+/// there the module's files are those whose code holds its name as a
+/// string literal (its declaration), not its siblings', and a prefix
+/// never picks a crate that does not declare the module.
 pub fn module_files(root: &Path, module: &str) -> Vec<PathBuf> {
-    let dir = if module.starts_with("mask_") {
-        "masks"
-    } else {
-        module
+    let modules = root.join("modules");
+    let own = src_files(&modules.join(module));
+    if !own.is_empty() {
+        return own;
+    }
+    let Some((prefix, _)) = module.split_once('_') else {
+        return Vec::new();
     };
-    let src = root.join("modules").join(dir).join("src");
-    let mut files: Vec<PathBuf> = std::fs::read_dir(&src)
+    let literal = format!("\"{module}\"");
+    let declares = |f: &PathBuf| {
+        std::fs::read_to_string(f)
+            .is_ok_and(|t| code_lines(&t).iter().any(|l| l.contains(&literal)))
+    };
+    [prefix.to_string(), format!("{prefix}s")]
+        .iter()
+        .map(|dir| {
+            src_files(&modules.join(dir))
+                .into_iter()
+                .filter(declares)
+                .collect::<Vec<_>>()
+        })
+        .find(|files| !files.is_empty())
+        .unwrap_or_default()
+}
+
+/// A crate's `src/*.rs` and `src/*.json`, sorted; empty when it has none.
+fn src_files(crate_dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(crate_dir.join("src"))
         .into_iter()
         .flatten()
         .flatten()
@@ -499,6 +524,50 @@ mod tests {
         let exposed = v["exposed"].as_array().unwrap();
         assert!(unattended(&exposed[0]));
         assert!(!unattended(&exposed[1]));
+    }
+
+    /// A scratch workspace holding `modules/<dir>/src/lib.rs` files.
+    fn scratch(name: &str, crates: &[(&str, &str)]) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("hud-bench-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (dir, lib) in crates {
+            let src = root.join("modules").join(dir).join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("lib.rs"), lib).unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn a_module_is_found_in_the_crate_that_declares_it() {
+        let root = scratch(
+            "resolve",
+            &[
+                ("exposure", "name: \"exposure\".into(),\n"),
+                ("masks", "name: \"mask_blend\".into(),\n"),
+                ("vkdt", "module(\n    \"vkdt_usm\",\n)\n"),
+            ],
+        );
+        // A sibling module's file in the same crate is not the module's.
+        std::fs::write(
+            root.join("modules/vkdt/src/llap.rs"),
+            "module(\"vkdt_llap\");\nlet face = \"curve\";\n",
+        )
+        .unwrap();
+        let files = |m: &str| -> Vec<String> {
+            module_files(&root, m)
+                .iter()
+                .map(|p| rel(&root, p))
+                .collect()
+        };
+        assert_eq!(files("exposure"), ["modules/exposure/src/lib.rs"]);
+        assert_eq!(files("mask_blend"), ["modules/masks/src/lib.rs"]);
+        assert_eq!(files("vkdt_usm"), ["modules/vkdt/src/lib.rs"]);
+        assert_eq!(files("vkdt_llap"), ["modules/vkdt/src/llap.rs"]);
+        // A prefix alone is not enough: the crate must declare the module.
+        assert!(files("vkdt_nothing").is_empty());
+        assert!(files("unknown").is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
