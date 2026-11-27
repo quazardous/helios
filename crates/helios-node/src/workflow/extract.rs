@@ -940,5 +940,121 @@ mod tests {
             assert_eq!(job_event(&bus, "helios.job.cancelled").len(), 1);
             assert!(job_event(&bus, "helios.job.finished").is_empty());
         }
+
+        #[test]
+        fn the_verb_submits_a_run_listed_with_its_items_beside_the_export_runs() {
+            use helios_inspect::control::ExtractUse;
+
+            use crate::workflow::runs::{Context, Workflows};
+
+            let (ai, runtime) = ai("runner-verb");
+            let bus = Arc::new(Bus::new());
+            let path = dir("runner-verb").join("runs.sqlite");
+            let vault = Arc::new(helios_vault::Vault::new(SqliteStore::open(&path).unwrap()));
+            let mut catalog = helios_extract::Catalog::default();
+            catalog.add(caption("caption", true)).unwrap();
+            let runner = Arc::new(
+                ExtractRunner::new(
+                    bus.clone(),
+                    Jobs::new(bus.clone()),
+                    Some(vault.clone()),
+                    "node-test",
+                )
+                .with_catalog(catalog),
+            );
+            let uses = vec![ExtractUse {
+                name: "caption".into(),
+                extractor: "caption@1".into(),
+                after: Vec::new(),
+                input: json!({ "language": "English", "keywords": 3 }),
+                overrides: Value::Null,
+            }];
+            let items: Vec<String> = images(2).iter().map(|i| image_item(i)).collect();
+
+            // No AI handed to the runner yet: refused, nothing entered.
+            assert!(runner.request(None, &uses, &items).is_err());
+            runner.set_engine(Arc::new(ai), Arc::new(Cards));
+            // An extractor the catalogue does not know, a file item: refused.
+            let mut unknown = uses.clone();
+            unknown[0].extractor = "caption@9".into();
+            assert!(runner.request(None, &unknown, &items).is_err());
+            assert!(
+                runner
+                    .request(None, &uses, &["/a.png".to_string()])
+                    .is_err()
+            );
+            assert!(job_event(&bus, "helios.job.started").is_empty());
+
+            let answer = runner.request(Some("Captions"), &uses, &items).unwrap();
+            let id = answer["run"].as_str().unwrap().to_string();
+            assert!(id.starts_with("extract-"), "{answer}");
+            assert_eq!(answer["total"], 2);
+            runner.join(&id);
+            assert_eq!(chats(&runtime), 2);
+
+            // The job of kind extract, and the run document.
+            let started = job_event(&bus, "helios.job.started");
+            assert_eq!(started.len(), 1);
+            assert_eq!(started[0]["kind"], "extract");
+            assert_eq!(started[0]["id"], answer["job"]);
+            let doc = vault.workflow_document("runs", &id).unwrap().unwrap();
+            assert_eq!(doc["kind"], "extract");
+            assert_eq!(doc["title"], "Captions");
+            assert_eq!(doc["state"], "finished");
+
+            // `workflow.runs` lists it beside the export runs.
+            let workflows = Workflows::new(Context {
+                bus: bus.clone(),
+                engine: Arc::new(helios_core::Engine::new(bus.clone())),
+                scheduler: Arc::new(helios_core::Scheduler::new(bus.clone(), 1)),
+                jobs: Jobs::new(bus.clone()),
+                vault: None,
+                workers: 1,
+                owner: "node-test".into(),
+                keep_ms: 0,
+            });
+            workflows.attach_extracts(runner.clone());
+            let runs = workflows.runs();
+            let listed: Vec<&Value> = runs["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["id"] == id.as_str())
+                .collect();
+            assert_eq!(listed.len(), 1, "{runs}");
+            let run = listed[0];
+            assert_eq!(run["kind"], "extract");
+            assert_eq!(run["title"], "Captions");
+            assert_eq!(run["state"], "finished");
+            assert_eq!(run["items"], 2);
+            assert_eq!(run["job"], answer["job"]);
+            assert_eq!(run["read_only"], false);
+            assert_eq!(run["nodes"]["caption"]["done"], 2, "{run}");
+            assert_eq!(run["nodes"]["caption"]["waiting"], 0, "{run}");
+            assert_eq!(run["nodes"]["caption"]["parents"], json!([SUBMIT]));
+
+            // `workflow.items` pages its items, at its node.
+            let page = workflows.items(&id, None, None, 0, 10).unwrap();
+            assert_eq!(page["node"], "caption");
+            assert_eq!(page["total"], 2);
+            let listed: Vec<&str> = page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| i["item"].as_str().unwrap())
+                .collect();
+            assert_eq!(listed, items.iter().map(String::as_str).collect::<Vec<_>>());
+            assert_eq!(page["items"][0]["state"], "done");
+            assert_eq!(page["items"][0]["row"]["status"], "done");
+            let second = workflows.items(&id, Some("caption"), None, 1, 10).unwrap();
+            assert_eq!(second["items"].as_array().unwrap().len(), 1);
+            assert_eq!(second["items"][0]["item"], items[1].as_str());
+            let waiting = workflows
+                .items(&id, Some("caption"), Some("waiting"), 0, 10)
+                .unwrap();
+            assert_eq!(waiting["total"], 0);
+            assert!(workflows.items(&id, Some("nope"), None, 0, 10).is_err());
+            assert!(workflows.items("extract-none", None, None, 0, 10).is_err());
+        }
     }
 }

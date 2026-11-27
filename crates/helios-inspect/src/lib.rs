@@ -1035,6 +1035,20 @@ pub mod control {
             #[serde(default, skip_serializing_if = "Option::is_none")]
             concurrency: Option<usize>,
         },
+        /// Submits library photos to extractor nodes as an **extract
+        /// run**, worked by the node on a thread of its own as a job of
+        /// kind `extract`: one row per (photo, node), each concluded once.
+        /// The run's id follows from its nodes and photos: submitting them
+        /// again while it is at work gives back that run. Answers
+        /// `{run, job, total, already}`.
+        #[serde(rename = "workflow.extract")]
+        WorkflowExtract {
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            title: Option<String>,
+            nodes: Vec<ExtractUse>,
+            /// Library photos, `image:` and their content hash.
+            items: Vec<String>,
+        },
         /// The runs of the node: id, title, state, counts, durable.
         #[serde(rename = "workflow.runs")]
         WorkflowRuns,
@@ -1252,6 +1266,7 @@ pub mod control {
                 Self::DecisionDecide { .. } => "decision_decide",
                 Self::DecisionReask { .. } => "decision_reask",
                 Self::WorkflowSubmit { .. } => "workflow.submit",
+                Self::WorkflowExtract { .. } => "workflow.extract",
                 Self::WorkflowRuns => "workflow.runs",
                 Self::WorkflowItems { .. } => "workflow.items",
                 Self::WorkflowForget { .. } => "workflow.forget",
@@ -1280,6 +1295,24 @@ pub mod control {
         Top,
         /// After every other item: claimed last.
         Bottom,
+    }
+
+    /// One extractor node of an extract run (`workflow.extract`).
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    pub struct ExtractUse {
+        /// Its name in the run, unique.
+        pub name: String,
+        /// The extractor and its version, `id@version`.
+        pub extractor: String,
+        /// The nodes it waits for; none: it follows the run's root.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub after: Vec<String>,
+        /// The prompt's input variables, the same for every photo.
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        pub input: serde_json::Value,
+        /// Route overrides (`helios_ai::routing::Overrides`).
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        pub overrides: serde_json::Value,
     }
 
     /// One item of a run: an image file (absolute), with parameters

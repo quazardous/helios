@@ -94,6 +94,7 @@ use helios_inspect::control::ControlRequest;
 use helios_inspect::{Inspector, Listen, new_token, serve_inspector, write_token};
 use helios_node::ExportDesc;
 use helios_node::vault_node::{Options as VaultNodeOptions, VaultNode};
+use helios_node::workflow::extract_runner::ExtractRunner;
 use helios_node::workflow::runs::{Context as RunsContext, SharedVault, Workflows};
 use helios_resolve::{Report, Resolver, Settings};
 use serde::Serialize;
@@ -301,6 +302,7 @@ struct Node {
     batches: Mutex<BTreeMap<String, Batch>>,
     /// The runs of the workflow level.
     workflows: Arc<Workflows>,
+    extracts: Arc<ExtractRunner>,
     /// Every decision node with its mode: what a run derives its workflow from.
     decisions: BTreeMap<String, helios_decision::Mode>,
     /// The network's first export: what a run exports unless told.
@@ -841,6 +843,7 @@ mod control {
         "batch_start",
         "batch_end",
         "workflow.submit",
+        "workflow.extract",
         "workflow.runs",
         "workflow.items",
         "workflow.forget",
@@ -1485,6 +1488,11 @@ mod control {
                     },
                 )
             }
+            ControlRequest::WorkflowExtract {
+                title,
+                nodes,
+                items,
+            } => node.extracts.request(title.as_deref(), nodes, items),
             ControlRequest::WorkflowRuns => Ok(node.workflows.runs()),
             ControlRequest::WorkflowItems {
                 run,
@@ -2216,7 +2224,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         engine: engine.clone(),
         scheduler: scheduler.clone(),
         jobs: jobs.clone(),
-        vault: runs_vault,
+        vault: runs_vault.clone(),
         // 0 is one per CPU, as the scheduler counts it.
         workers: if workers == 0 {
             std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
@@ -2227,6 +2235,15 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         keep_ms: (config.number("system.workflow.keep_days") * 86_400_000.0) as u64,
     }));
     workflows.start(&loaded.graph);
+    // Extract runs: the node opens no AI yet, so `workflow.extract` is
+    // refused until it hands the runner one; listed beside the runs.
+    let extracts = Arc::new(ExtractRunner::new(
+        bus.clone(),
+        jobs.clone(),
+        runs_vault,
+        inspector.instance(),
+    ));
+    workflows.attach_extracts(extracts.clone());
     let node = Arc::new(Node {
         bus: bus.clone(),
         engine,
@@ -2246,6 +2263,7 @@ fn serve(args: &Args, stopper: &Stopper) -> ExitCode {
         jobs,
         batches: Mutex::new(BTreeMap::new()),
         workflows: workflows.clone(),
+        extracts,
         decisions: loaded.decisions.clone(),
         first_export: loaded.exports.first().map(|e| e.node.clone()),
         importer,
