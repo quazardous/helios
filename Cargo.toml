@@ -285,23 +285,23 @@ opt-level = 3
 opt-level = 3
 
 [patch.crates-io]
-egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-fit = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
-egui-pop-winit = { git = "https://github.com/quazardous/egui-pop", rev = "3304c422" }
+egui-pop = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-agent = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-api = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-core = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-editors = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-fit = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-hooks = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-i18n = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-imaging = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-model = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-platform = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-test = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-test-macros = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-tokens = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-viewport = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-views = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-wayland = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-win32 = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
+egui-pop-winit = { git = "https://github.com/quazardous/egui-pop", rev = "7a6d2538" }
 egui_hud = { git = "https://github.com/quazardous/egui_hud", rev = "f722bbeb" }
