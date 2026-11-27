@@ -862,6 +862,7 @@ gui-import-browse-not-listed be5aaf1084ed7cf7
 gui-import-browse-picker 9618bf4a01be698e
 gui-import-browse-timeline 70a85f922f59436e
 gui-import-browse-tree c0fedd3381fdcc9b
+gui-import-camera-photo-credit 35740107848e9b99
 gui-import-camera-picture a5202722b8898207
 gui-import-cancelled ef0a315043a78d47
 gui-import-copy 6559bd9463867f74
@@ -2613,6 +2614,8 @@ setting-import-automatic-ask-gb.description f23eba19648975b8
 setting-import-automatic-ask-gb.label 63832bc77169d8dc
 setting-import-automatic-paused.description 04eea34f2bc27769
 setting-import-automatic-paused.label d90bcc5f739bd75e
+setting-import-camera-photos.description f68d7ec4e3ed0c59
+setting-import-camera-photos.label 12d3681d5095b783
 setting-import-show-in-library.description 257e44970cb61d73
 setting-import-show-in-library.label c8ae3bc98cda42e6
 setting-interface-experimental-workshops.description 4d4b5f11aa5f321c

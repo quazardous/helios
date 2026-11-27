@@ -216,6 +216,7 @@ mod tests {
         "import.automatic.ask_files",
         "import.automatic.ask_gb",
         "import.show_in_library",
+        "import.camera_photos",
         "interface.experimental.workshops",
     ];
 

@@ -124,6 +124,7 @@ mod library_meta;
 mod library_storage;
 mod lifetime;
 pub mod photo_history;
+pub use import_detail::CAMERA_PHOTOS_SETTING;
 pub use import_history::{Reader as ImportHistoryReader, reader_of as import_history_of};
 pub use import_merge::MergeLibrary as MergeImportLibrary;
 pub use import_window::{FORGET_FOLDER, FORGET_VOLUME};

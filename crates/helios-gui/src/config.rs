@@ -493,7 +493,13 @@ pub const PLACES: &[(&str, &[&str])] = &[
             "system.map.keepMissing",
         ],
     ),
-    ("library/imports", &[crate::shell::SHOW_IMPORT_SETTING]),
+    (
+        "library/imports",
+        &[
+            crate::shell::SHOW_IMPORT_SETTING,
+            crate::shell::CAMERA_PHOTOS_SETTING,
+        ],
+    ),
     ("library/decisions", &["project.decisions.mode"]),
     ("library/history", &["system.workflow.keep_days"]),
     (

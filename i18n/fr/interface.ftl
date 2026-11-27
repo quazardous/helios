@@ -267,6 +267,10 @@ setting-import-automatic-paused =
     .description = Activé, aucune source n’importe d’elle-même : les cartes branchées et les nouveaux fichiers des dossiers surveillés attendent qu’il soit désactivé.
     .label = Suspendre les imports automatiques
 
+setting-import-camera-photos =
+    .description = L’appareil d’une source est montré par une photo créditée de Wikimedia Commons, récupérée une fois par modèle et gardée ; seul le nom du modèle est envoyé. Désactivé : les dessins seulement.
+    .label = Photos des appareils depuis Wikimedia Commons
+
 category-helios = Helios
 
 setting-import-show-in-library =

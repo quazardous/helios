@@ -270,6 +270,12 @@ pub(crate) struct ImportWindow {
     /// (`SourceRef::camera`), by the source's root: its row and its
     /// detail show the camera's name and drawing.
     pub(super) cameras: Vec<(std::path::PathBuf, helios_connect::camera::Camera)>,
+    /// The cameras' credited photos from Wikimedia Commons
+    /// ([`helios_connect::camera_photo`]), fetched off this thread; the
+    /// drawing stays while none is ready ([`super::import_detail`]).
+    pub(super) camera_photos: helios_connect::camera_photo::CameraPhotos,
+    /// Each camera photo's texture, by its Commons file, made once.
+    pub(super) camera_textures: std::collections::HashMap<String, egui::TextureHandle>,
     /// The imports running and ended during this run (the node's
     /// promises, [`crate::activity::Activity::imports`]): the Import
     /// button waits while one imports the photos it would. Their
@@ -1088,6 +1094,15 @@ impl Shell {
     /// import window lists an offline folder's photos from it.
     pub fn set_import_recorded(&mut self, recorded: Recorded) {
         self.import.get_mut().recorded = Some(recorded);
+    }
+
+    /// Where the cameras' photos from Wikimedia Commons are kept, and
+    /// what fetches them ([`helios_connect::camera_photo`]); without it,
+    /// every camera keeps its drawing.
+    pub fn set_camera_photos(&mut self, photos: helios_connect::camera_photo::CameraPhotos) {
+        let mut w = self.import.get_mut();
+        w.camera_photos = photos;
+        w.camera_textures.clear();
     }
 
     /// The library's thumbnail cache: the import window shows the photos
@@ -2155,6 +2170,14 @@ impl ImportWindow {
             return event;
         }
         let w = self;
+        // The setting, as the Settings app keeps it: off, drawings only.
+        w.camera_photos
+            .set_enabled(super::import_detail::camera_photos_on(app));
+        if w.camera_photos.busy() {
+            // A photo being fetched shows once it is there.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(250));
+        }
         let layout = DialogLayout::new(ui, "helios.import.window").fill(true);
         // The body is the room above the footer, exactly: no scroll area
         // around it, each column scrolls on its own (Sources and Choices

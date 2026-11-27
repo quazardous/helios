@@ -2167,6 +2167,8 @@ gui-import-window-last-import = Dernière importation le { $when }
 
 gui-import-camera-picture = Image de l’appareil : { $camera }
 
+gui-import-camera-photo-credit = Photo : { $author }, { $licence }, Wikimedia Commons
+
 gui-import-window-remove-favourite = Retirer des favoris
 
 gui-import-window-forget = Oublier ce dossier

@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 pub mod account;
 pub mod budget;
 pub mod camera;
+pub mod camera_photo;
 pub mod card;
 pub mod connect;
 pub mod contract;
