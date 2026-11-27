@@ -114,6 +114,10 @@ pub(super) struct Focus {
     /// last frame ([`crate::display_surfaces::zen_choice`]), read by
     /// Helios's listener of `pop.zen.panel`.
     pub(super) zen_choice: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    /// Zen mode's title as the shell found it last frame
+    /// ([`crate::plugins::zen_label`]), read by Helios's listener of
+    /// `pop.command.label`.
+    pub(super) zen_label: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     /// A photo `photo.show` sends to the Image, for the host to open.
     pub(super) show_in_image: Option<String>,
     /// The photo a "Show in" question is about (the `ask` strategy).
@@ -226,6 +230,7 @@ impl Focus {
             opening: None,
             surfaces: crate::display_surfaces::Surfaces::default(),
             zen_choice: std::sync::Arc::default(),
+            zen_label: std::sync::Arc::default(),
             show_in_image: None,
             show_asked: None,
             preview,
